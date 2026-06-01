@@ -3,7 +3,8 @@
     "slug": "localhost",
     "domains": [
       "localhost",
-      "127.0.0.1"
+      "127.0.0.1",
+      "vgrebor"
     ]
   },
   "brand": {
@@ -11,7 +12,7 @@
   },
   "database": {
     "host": "localhost",
-    "name": "tvirtualgaming",
+    "name": "vgrebor",
     "user": "root",
     "password": "",
     "charset": "utf8mb4"

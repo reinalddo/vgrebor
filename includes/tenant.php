@@ -66,7 +66,7 @@ if (!function_exists('tenant_directory_exists')) {
 
 if (!function_exists('tenant_known_local_hosts')) {
     function tenant_known_local_hosts(): array {
-        return ['localhost', '127.0.0.1', 'virtualgaming'];
+        return ['localhost', '127.0.0.1', 'vgrebor'];
     }
 }
 
@@ -126,6 +126,109 @@ if (!function_exists('tenant_load_data_file')) {
         $decoded = json_decode($content, true);
         $cache[$slug] = is_array($decoded) ? $decoded : [];
         return $cache[$slug];
+    }
+}
+
+if (!function_exists('vgrebor_single_tenant_slug')) {
+    function vgrebor_single_tenant_slug(): string {
+        return 'reborxstore';
+    }
+}
+
+if (!function_exists('vgrebor_local_runtime_slug')) {
+    function vgrebor_local_runtime_slug(): string {
+        return 'localhost';
+    }
+}
+
+if (!function_exists('vgrebor_current_environment')) {
+    function vgrebor_current_environment(): string {
+        $configuredEnv = strtolower(trim((string) getenv('VGREBOR_APP_ENV')));
+        if (in_array($configuredEnv, ['local', 'development', 'dev'], true)) {
+            return 'local';
+        }
+
+        if (in_array($configuredEnv, ['production', 'prod'], true)) {
+            return 'production';
+        }
+
+        $host = tenant_normalize_host();
+        if ($host !== '' && in_array($host, tenant_known_local_hosts(), true)) {
+            return 'local';
+        }
+
+        if ($host === '' && PHP_SAPI === 'cli') {
+            $appRoot = str_replace('\\', '/', dirname(__DIR__));
+            if (preg_match('#^[a-z]:/wamp64/www/#i', $appRoot) === 1) {
+                return 'local';
+            }
+        }
+
+        return 'production';
+    }
+}
+
+if (!function_exists('vgrebor_is_local_environment')) {
+    function vgrebor_is_local_environment(): bool {
+        return vgrebor_current_environment() === 'local';
+    }
+}
+
+if (!function_exists('vgrebor_single_tenant_raw_config')) {
+    function vgrebor_single_tenant_raw_config(): array {
+        return tenant_load_data_file(vgrebor_single_tenant_slug());
+    }
+}
+
+if (!function_exists('vgrebor_local_runtime_raw_config')) {
+    function vgrebor_local_runtime_raw_config(): array {
+        return tenant_load_data_file(vgrebor_local_runtime_slug());
+    }
+}
+
+if (!function_exists('vgrebor_managed_upload_slugs')) {
+    function vgrebor_managed_upload_slugs(): array {
+        static $cache = null;
+
+        if ($cache !== null) {
+            return $cache;
+        }
+
+        $cache = [];
+        foreach ([vgrebor_single_tenant_slug(), vgrebor_local_runtime_slug()] as $slug) {
+            $normalizedSlug = tenant_slugify($slug);
+            if ($normalizedSlug !== '') {
+                $cache[] = $normalizedSlug;
+            }
+        }
+
+        $cache = array_values(array_unique($cache));
+        return $cache;
+    }
+}
+
+if (!function_exists('vgrebor_candidate_public_relative_paths')) {
+    function vgrebor_candidate_public_relative_paths(string $path): array {
+        $normalizedPath = trim(str_replace('\\', '/', $path), '/');
+        if ($normalizedPath === '') {
+            return [];
+        }
+
+        $candidates = [$normalizedPath];
+        foreach (vgrebor_managed_upload_slugs() as $slug) {
+            $prefix = 'tenants/' . $slug . '/uploads/';
+            if (!str_starts_with($normalizedPath, $prefix)) {
+                continue;
+            }
+
+            $suffix = ltrim(substr($normalizedPath, strlen($prefix)), '/');
+            foreach (vgrebor_managed_upload_slugs() as $candidateSlug) {
+                $candidates[] = 'tenants/' . $candidateSlug . '/uploads/' . $suffix;
+            }
+            break;
+        }
+
+        return array_values(array_unique(array_filter($candidates, static fn ($candidate) => $candidate !== '')));
     }
 }
 
@@ -195,39 +298,7 @@ if (!function_exists('tenant_candidate_slugs_for_host')) {
 
 if (!function_exists('resolve_tenant_slug')) {
     function resolve_tenant_slug(): string {
-        static $resolvedSlug = null;
-
-        if ($resolvedSlug !== null) {
-            return $resolvedSlug;
-        }
-
-        $requestedTenant = tenant_slugify((string) ($_GET['tenant'] ?? ''));
-        if ($requestedTenant !== '' && tenant_directory_exists($requestedTenant)) {
-            $resolvedSlug = $requestedTenant;
-            return $resolvedSlug;
-        }
-
-        $host = tenant_normalize_host();
-        $index = tenant_host_to_slug_index();
-        if ($host !== '' && isset($index[$host])) {
-            $resolvedSlug = $index[$host];
-            return $resolvedSlug;
-        }
-
-        foreach (tenant_candidate_slugs_for_host($host) as $candidate) {
-            if (tenant_directory_exists($candidate)) {
-                $resolvedSlug = $candidate;
-                return $resolvedSlug;
-            }
-        }
-
-        if (($host === '' || $host === 'localhost' || $host === '127.0.0.1') && tenant_directory_exists('localhost')) {
-            $resolvedSlug = 'localhost';
-            return $resolvedSlug;
-        }
-
-        $resolvedSlug = $host !== '' ? tenant_slugify($host) : 'localhost';
-        return $resolvedSlug;
+        return vgrebor_single_tenant_slug();
     }
 }
 
@@ -235,20 +306,22 @@ if (!function_exists('tenant_config')) {
     function tenant_config(): array {
         static $cache = [];
 
-        $slug = resolve_tenant_slug();
-        if (isset($cache[$slug])) {
-            return $cache[$slug];
+        $environment = vgrebor_current_environment();
+        if (isset($cache[$environment])) {
+            return $cache[$environment];
         }
 
-        $rawConfig = tenant_load_data_file($slug);
-        $database = is_array($rawConfig['database'] ?? null) ? $rawConfig['database'] : [];
-        $tenant = is_array($rawConfig['tenant'] ?? null) ? $rawConfig['tenant'] : [];
-        $brand = is_array($rawConfig['brand'] ?? null) ? $rawConfig['brand'] : [];
+        $slug = vgrebor_single_tenant_slug();
+        $storeRawConfig = vgrebor_single_tenant_raw_config();
+        $localRawConfig = vgrebor_local_runtime_raw_config();
+        $database = vgrebor_is_local_environment()
+            ? (is_array($localRawConfig['database'] ?? null) ? $localRawConfig['database'] : [])
+            : (is_array($storeRawConfig['database'] ?? null) ? $storeRawConfig['database'] : []);
+        $tenant = is_array($storeRawConfig['tenant'] ?? null) ? $storeRawConfig['tenant'] : [];
+        $brand = is_array($storeRawConfig['brand'] ?? null) ? $storeRawConfig['brand'] : [];
 
         $envPrefix = strtoupper(str_replace('-', '_', $slug));
-        $defaultDatabaseName = in_array($slug, ['virtualgaming', 'localhost', 'default'], true)
-            ? 'tvirtualgaming'
-            : 'tvirtualgaming_' . str_replace('-', '_', $slug);
+        $defaultDatabaseName = vgrebor_is_local_environment() ? 'vgrebor' : 'u680460687_reborxstore';
 
         $databaseHost = trim((string) (getenv('TVG_' . $envPrefix . '_DB_HOST') ?: getenv('TVG_DB_HOST') ?: ($database['host'] ?? 'localhost')));
         $databaseName = trim((string) (getenv('TVG_' . $envPrefix . '_DB_NAME') ?: getenv('TVG_DB_NAME') ?: ($database['name'] ?? $defaultDatabaseName)));
@@ -271,14 +344,14 @@ if (!function_exists('tenant_config')) {
             }
         }
 
-        $cache[$slug] = [
+        $cache[$environment] = [
             'tenant' => [
                 'slug' => $slug,
                 'host' => tenant_normalize_host(),
                 'domains' => array_values(array_unique($normalizedDomains)),
             ],
             'brand' => [
-                'name' => trim((string) ($brand['name'] ?? 'TVirtualGaming')),
+                'name' => trim((string) ($brand['name'] ?? 'Reborxstore')),
             ],
             'database' => [
                 'host' => $databaseHost !== '' ? $databaseHost : 'localhost',
@@ -289,7 +362,7 @@ if (!function_exists('tenant_config')) {
             ],
         ];
 
-        return $cache[$slug];
+        return $cache[$environment];
     }
 }
 
@@ -412,19 +485,42 @@ if (!function_exists('tenant_resolve_public_path')) {
             return null;
         }
 
-        return dirname(__DIR__) . DIRECTORY_SEPARATOR . $relativePath;
+        $relativeCandidates = vgrebor_candidate_public_relative_paths(str_replace(DIRECTORY_SEPARATOR, '/', $relativePath));
+        if ($relativeCandidates === []) {
+            $relativeCandidates = [str_replace(DIRECTORY_SEPARATOR, '/', $relativePath)];
+        }
+
+        $fallbackPath = null;
+        foreach ($relativeCandidates as $relativeCandidate) {
+            $absolutePath = dirname(__DIR__) . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativeCandidate);
+            if ($fallbackPath === null) {
+                $fallbackPath = $absolutePath;
+            }
+
+            if (file_exists($absolutePath)) {
+                return $absolutePath;
+            }
+        }
+
+        return $fallbackPath;
     }
 }
 
 if (!function_exists('tenant_is_managed_path')) {
     function tenant_is_managed_path(string $path, ?string $bucket = null): bool {
         $normalizedPath = '/' . ltrim(str_replace('\\', '/', trim($path)), '/');
-        $prefix = tenant_public_prefix() . '/uploads';
-        if ($bucket !== null && trim($bucket) !== '') {
-            $prefix .= '/' . trim(str_replace('\\', '/', $bucket), '/');
+        foreach (vgrebor_managed_upload_slugs() as $slug) {
+            $prefix = '/tenants/' . $slug . '/uploads';
+            if ($bucket !== null && trim($bucket) !== '') {
+                $prefix .= '/' . trim(str_replace('\\', '/', $bucket), '/');
+            }
+
+            if (str_starts_with($normalizedPath, $prefix . '/')) {
+                return true;
+            }
         }
 
-        return str_starts_with($normalizedPath, $prefix . '/');
+        return false;
     }
 }
 
