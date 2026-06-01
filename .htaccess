@@ -1,0 +1,31 @@
+RewriteEngine On
+
+# Allow direct access to real files and folders
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# SEO endpoints
+RewriteRule ^robots\.txt$ robots.php [L,QSA]
+RewriteRule ^sitemap\.xml$ sitemap.php [L,QSA]
+
+# Admin friendly URLs: /admin/seccion -> admin.php?seccion=seccion
+RewriteRule ^admin/([a-zA-Z0-9_-]+)?$ admin.php?seccion=$1 [QSA,L]
+# Redirect /admin to /admin/juegos by default
+RewriteRule ^admin/?$ admin.php?seccion=juegos [QSA,L]
+
+# Friendly game URLs: /juego/123-slug -> game.php?id=123&requested_slug=slug
+RewriteRule ^juego/([0-9]+)(?:-([a-zA-Z0-9-]+))?/?$ game.php?id=$1&requested_slug=$2 [L,QSA]
+
+# Legacy slug URLs
+RewriteRule ^tienda/([a-zA-Z0-9-]+)/?$ game.php?slug=$1 [L,QSA]
+
+# Friendly list URLs
+RewriteRule ^populares/?$ populares.php [L,QSA]
+RewriteRule ^juegos/?$ juegos.php [L,QSA]
+RewriteRule ^buscar/?$ buscar.php [L,QSA]
+RewriteRule ^quiero-unirme/?$ influencer.php [L,QSA]
+RewriteRule ^influencer/?$ influencer.php [L,QSA]
+
+# Logout amigable
+RewriteRule ^logout/?$ logout.php [L,QSA]

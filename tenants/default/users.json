@@ -1,0 +1,18 @@
+[
+    {
+        "id": 1,
+        "email": "admin@localhost",
+        "password_hash": "$2y$10$tUV13FnjtNnwmXLsYbpNU..YJrvilfwDEQOOAporvP9G9lr6HJUe6",
+        "full_name": "Administrador",
+        "phone": "",
+        "rol": "admin"
+    },
+    {
+        "id": "f546f6d50e993488",
+        "full_name": "Reinaldo Matheus",
+        "email": "reinalddo@gmail.com",
+        "phone": "584140779258",
+        "password_hash": "$2y$10$XQhSdhk.ShccxJHhQAYzLeHLQLbEwHU7C/V9JCr90EN79iX3Bisly",
+        "created_at": "2026-02-28T15:45:00+00:00"
+    }
+]

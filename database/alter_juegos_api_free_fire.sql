@@ -1,0 +1,2 @@
+ALTER TABLE juegos
+ADD COLUMN api_free_fire TINYINT(1) NOT NULL DEFAULT 0 AFTER popular;

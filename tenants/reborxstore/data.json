@@ -1,0 +1,19 @@
+{
+  "tenant": {
+    "slug": "reborxstore",
+    "domains": [
+      "reborxstore.com",
+      "www.reborxstore.com"
+    ]
+  },
+  "brand": {
+    "name": "Reborxstore"
+  },
+  "database": {
+    "host": "localhost",
+    "name": "u680460687_reborxstore",
+    "user": "u680460687_reborxstore",
+    "password": "sd+m8KdNc5!",
+    "charset": "utf8mb4"
+  }
+}

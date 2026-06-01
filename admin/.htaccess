@@ -1,0 +1,15 @@
+Options -Indexes
+RewriteEngine On
+# Dashboard amigable
+RewriteRule ^dashboard$ ../admin.php?seccion=dashboard [L,QSA]
+RewriteRule ^usuarios$ ../admin.php?seccion=usuarios [L,QSA]
+RewriteRule ^cupones$ ../admin.php?seccion=cupones [L,QSA]
+RewriteRule ^comprar-funciones-extra$ ../admin.php?seccion=comprar-funciones-extra [L,QSA]
+RewriteRule ^ventana-inicial-juegos$ ../admin.php?seccion=ventana-inicial-juegos [L,QSA]
+RewriteRule ^configuracion$ ../admin.php?seccion=configuracion [L,QSA]
+RewriteRule ^movimientos$ ../admin.php?seccion=movimientos [L,QSA]
+RewriteRule ^movimientos-binance$ ../admin.php?seccion=movimientos-binance [L,QSA]
+RewriteRule ^monedas$ monedas.php [L,QSA]
+RewriteRule ^juegos$ juegos.php [L,QSA]
+RewriteRule ^paquetes/?([0-9]*)$ paquetes.php [L,QSA]
+RewriteRule ^pedidos$ pedidos.php [L,QSA]

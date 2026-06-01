@@ -1,0 +1,272 @@
+[
+  {
+    "key": "mobile_legends_price",
+    "kind": "price",
+    "label": "Mobile Legend precio",
+    "game": "mobile_legends",
+    "template": ".precios5",
+    "sample": ".precios5",
+    "params": []
+  },
+  {
+    "key": "free_fire_price",
+    "kind": "price",
+    "label": "Free Fire precio",
+    "game": "free_fire",
+    "template": ".preciosfree",
+    "sample": ".preciosfree",
+    "params": []
+  },
+  {
+    "key": "honor_of_kings_price",
+    "kind": "price",
+    "label": "Honor of Kings precio",
+    "game": "honor_of_kings",
+    "template": ".precioshonor",
+    "sample": ".precioshonor",
+    "params": []
+  },
+  {
+    "key": "blood_strike_price",
+    "kind": "price",
+    "label": "Blood Strike precio",
+    "game": "blood_strike",
+    "template": ".preciosblood",
+    "sample": ".preciosblood",
+    "params": []
+  },
+  {
+    "key": "wuthering_waves_price",
+    "kind": "price",
+    "label": "Wuthering Waves precio",
+    "game": "wuthering_waves",
+    "template": ".precioswuva",
+    "sample": ".precioswuva",
+    "params": []
+  },
+  {
+    "key": "genshin_price",
+    "kind": "price",
+    "label": "Genshin precio",
+    "game": "genshin",
+    "template": ".preciosgenshi",
+    "sample": ".preciosgenshi",
+    "params": []
+  },
+  {
+    "key": "genshin_usa_price",
+    "kind": "price",
+    "label": "Genshin USA precio",
+    "game": "genshin_usa",
+    "template": ".preciosgenshiusa",
+    "sample": ".preciosgenshiusa",
+    "params": []
+  },
+  {
+    "key": "honkai_price",
+    "kind": "price",
+    "label": "Honkai precio",
+    "game": "honkai",
+    "template": ".precioshonkai",
+    "sample": ".precioshonkai",
+    "params": []
+  },
+  {
+    "key": "zzz_price",
+    "kind": "price",
+    "label": "ZZZ precio",
+    "game": "zzz",
+    "template": ".precioszzz",
+    "sample": ".precioszzz",
+    "params": []
+  },
+  {
+    "key": "marvel_price",
+    "kind": "price",
+    "label": "Marvel precio",
+    "game": "marvel",
+    "template": ".preciosmarvel",
+    "sample": ".preciosmarvel",
+    "params": []
+  },
+  {
+    "key": "arena_breakout_price",
+    "kind": "price",
+    "label": "Arena Breakout precio",
+    "game": "arena_breakout",
+    "template": ".preciosarena",
+    "sample": ".preciosarena",
+    "params": []
+  },
+  {
+    "key": "roblox_price",
+    "kind": "price",
+    "label": "Roblox precio",
+    "game": "roblox",
+    "template": ".preciosroblox",
+    "sample": ".preciosroblox",
+    "params": []
+  },
+  {
+    "key": "delta_price",
+    "kind": "price",
+    "label": "Delta precio",
+    "game": "delta",
+    "template": ".preciosdelta",
+    "sample": ".preciosdelta",
+    "params": []
+  },
+  {
+    "key": "pubg_price",
+    "kind": "price",
+    "label": "PUBG precio",
+    "game": "pubg",
+    "template": ".preciospubg",
+    "sample": ".preciospubg",
+    "params": []
+  },
+  {
+    "key": "mobile_legends_topup",
+    "kind": "topup",
+    "label": "Mobile Legend recarga",
+    "game": "mobile_legends",
+    "template": ".topup {id} {sv} {cantidad}",
+    "sample": ".topup 123456789 1234 10",
+    "params": ["id", "sv", "cantidad"]
+  },
+  {
+    "key": "free_fire_topup",
+    "kind": "topup",
+    "label": "Free Fire recarga",
+    "game": "free_fire",
+    "template": ".freeup {id} {cantidad}",
+    "sample": ".freeup 123456789 100",
+    "params": ["id", "cantidad"]
+  },
+  {
+    "key": "blood_strike_topup",
+    "kind": "topup",
+    "label": "Blood Strike recarga",
+    "game": "blood_strike",
+    "template": ".bloodup {id} {cantidad}",
+    "sample": ".bloodup 123456789 10",
+    "params": ["id", "cantidad"]
+  },
+  {
+    "key": "roblox_topup",
+    "kind": "topup",
+    "label": "Roblox recarga",
+    "game": "roblox",
+    "template": ".roblox {correo} {cantidad}",
+    "sample": ".roblox correo@ejemplo.com 10",
+    "params": ["correo", "cantidad"]
+  },
+  {
+    "key": "wuvaup_topup",
+    "kind": "topup",
+    "label": "Wuthering Waves recarga",
+    "game": "wuthering_waves",
+    "template": ".wuvaup {uid} {sv} {cantidad}",
+    "sample": ".wuvaup 123456789 1001 10",
+    "params": ["uid", "sv", "cantidad"]
+  },
+  {
+    "key": "genshiup_topup",
+    "kind": "topup",
+    "label": "Genshin recarga",
+    "game": "genshin",
+    "template": ".genshiup {uid} {sv} {cantidad}",
+    "sample": ".genshiup 123456789 1001 10",
+    "params": ["uid", "sv", "cantidad"]
+  },
+  {
+    "key": "genshiupusa_topup",
+    "kind": "topup",
+    "label": "Genshin USA recarga",
+    "game": "genshin_usa",
+    "template": ".genshiupusa {uid} {sv} {cantidad}",
+    "sample": ".genshiupusa 123456789 1001 10",
+    "params": ["uid", "sv", "cantidad"]
+  },
+  {
+    "key": "honkaiup_topup",
+    "kind": "topup",
+    "label": "Honkai recarga",
+    "game": "honkai",
+    "template": ".honkaiup {uid} {sv} {cantidad}",
+    "sample": ".honkaiup 123456789 1001 10",
+    "params": ["uid", "sv", "cantidad"]
+  },
+  {
+    "key": "zzzup_topup",
+    "kind": "topup",
+    "label": "ZZZ recarga",
+    "game": "zzz",
+    "template": ".zzzup {uid} {sv} {cantidad}",
+    "sample": ".zzzup 123456789 1001 10",
+    "params": ["uid", "sv", "cantidad"]
+  },
+  {
+    "key": "marvelup_topup",
+    "kind": "topup",
+    "label": "Marvel recarga",
+    "game": "marvel",
+    "template": ".marvelup {id} {cantidad}",
+    "sample": ".marvelup 123456789 10",
+    "params": ["id", "cantidad"]
+  },
+  {
+    "key": "farup_topup",
+    "kind": "topup",
+    "label": "Farlight recarga",
+    "game": "farlight",
+    "template": ".farup {id} {cantidad}",
+    "sample": ".farup 123456789 10",
+    "params": ["id", "cantidad"]
+  },
+  {
+    "key": "chessup_topup",
+    "kind": "topup",
+    "label": "Chess recarga",
+    "game": "chess",
+    "template": ".chessup {uid} {sv} {cantidad}",
+    "sample": ".chessup 123456789 1001 10",
+    "params": ["uid", "sv", "cantidad"]
+  },
+  {
+    "key": "hokup_topup",
+    "kind": "topup",
+    "label": "HOK recarga",
+    "game": "hok",
+    "template": ".hokup {id} {cantidad}",
+    "sample": ".hokup 123456789 10",
+    "params": ["id", "cantidad"]
+  },
+  {
+    "key": "deltaup_topup",
+    "kind": "topup",
+    "label": "Delta recarga",
+    "game": "delta",
+    "template": ".deltaup {id} {cantidad}",
+    "sample": ".deltaup 123456789 10",
+    "params": ["id", "cantidad"]
+  },
+  {
+    "key": "pubgup_topup",
+    "kind": "topup",
+    "label": "PUBG recarga",
+    "game": "pubg",
+    "template": ".pubgup {id} {cantidad}",
+    "sample": ".pubgup 123456789 10",
+    "params": ["id", "cantidad"]
+  },
+  {
+    "key": "binance_check",
+    "kind": "utility",
+    "label": "Verificar depósito Binance",
+    "game": "utility",
+    "template": ".binance",
+    "sample": ".binance",
+    "params": []
+  }
+]
