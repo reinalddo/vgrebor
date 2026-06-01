@@ -9,6 +9,9 @@ RewriteRule ^ - [L]
 RewriteRule ^robots\.txt$ robots.php [L,QSA]
 RewriteRule ^sitemap\.xml$ sitemap.php [L,QSA]
 
+# Admin missions hub
+RewriteRule ^admin/misiones-premios/?$ admin_misiones_premios.php [L,QSA]
+
 # Admin friendly URLs: /admin/seccion -> admin.php?seccion=seccion
 RewriteRule ^admin/([a-zA-Z0-9_-]+)?$ admin.php?seccion=$1 [QSA,L]
 # Redirect /admin to /admin/juegos by default

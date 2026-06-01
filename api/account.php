@@ -194,12 +194,14 @@ if ($action === 'orders') {
 
 if ($action === 'rewards') {
     $config = win_points_config();
+    $dailyMissions = daily_missions_public_payload($mysqli, $authUserId, 60);
     if (!$config['enabled']) {
         account_json_ok([
             'enabled' => false,
             'config' => $config,
             'summary' => win_points_empty_user_summary(),
             'transactions' => [],
+            'daily_missions' => $dailyMissions,
         ]);
     }
 
@@ -208,6 +210,7 @@ if ($action === 'rewards') {
         'config' => $config,
         'summary' => win_points_fetch_user_summary($mysqli, $authUserId),
         'transactions' => win_points_fetch_user_transactions($mysqli, $authUserId, 50),
+        'daily_missions' => $dailyMissions,
     ]);
 }
 

@@ -15,6 +15,8 @@ if (!function_exists('win_points_db')) {
     }
 }
 
+require_once __DIR__ . '/daily_missions.php';
+
 if (!function_exists('win_points_enabled')) {
     function win_points_enabled(): bool {
         return trim((string) store_config_get('win_points', '0')) === '1';
@@ -1164,6 +1166,17 @@ if (!function_exists('win_points_assign_pending_order_redemption')) {
             $updateStmt->close();
 
             $mysqli->commit();
+
+            if ($userId > 0 && function_exists('daily_missions_record_task_completion')) {
+                try {
+                    daily_missions_record_task_completion($mysqli, $userId, 'purchase_any', [
+                        'order_id' => $orderId,
+                        'source' => 'win_points_apply_order_sent',
+                    ]);
+                } catch (Throwable $missionException) {
+                    error_log('daily_missions purchase reward error: ' . $missionException->getMessage());
+                }
+            }
 
             $order['win_points_spent'] = $requiredPoints;
             $order['win_points_redemption_rule_id'] = $ruleId;

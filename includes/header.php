@@ -35,6 +35,18 @@ $authUserName = trim((string) (($authUser['full_name'] ?? $authUser['nombre'] ??
 $authUserEmail = trim((string) ($authUser['email'] ?? ''));
 $authUserPhone = trim((string) ($authUser['telefono'] ?? ''));
 $authUserProfileImage = trim((string) ($authUser['foto_perfil'] ?? ''));
+$headerIsAdminInterface = preg_match('#/admin(?:/|$)#i', (string) ($_SERVER['REQUEST_URI'] ?? '')) === 1
+  || preg_match('#/(admin[^/]*\.php)$#i', (string) ($_SERVER['PHP_SELF'] ?? '')) === 1;
+$dailyMissionsEnabled = function_exists('daily_missions_enabled') ? daily_missions_enabled() : false;
+if (!$headerIsAdminInterface && $dailyMissionsEnabled && $authUser && !empty($authUser['id']) && function_exists('daily_missions_record_task_completion')) {
+  try {
+    daily_missions_record_task_completion(win_points_db(), (int) $authUser['id'], 'login_daily', [
+      'source' => 'header_session',
+    ]);
+  } catch (Throwable $dailyMissionError) {
+    error_log('daily_missions login reward error: ' . $dailyMissionError->getMessage());
+  }
+}
 $authUserProfileImageUrl = '';
 if ($authUserProfileImage !== '') {
   if (preg_match('#^(?:https?:)?//#i', $authUserProfileImage) === 1 || str_starts_with($authUserProfileImage, 'data:')) {
@@ -863,6 +875,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     window.__TVG_BASE_PATH = <?php echo json_encode(app_base_path(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
     window.__TVG_API_PEDIDOS = <?php echo json_encode(app_path('/api/pedidos.php'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
     window.__TVG_API_ACCOUNT = <?php echo json_encode(app_path('/api/account.php'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+    window.__TVG_API_DAILY_MISSIONS = <?php echo json_encode(app_path('/api/daily_missions.php'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
     window.__TVG_SEARCH_ENDPOINT = <?php echo json_encode($searchEndpointUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
     window.__TVG_SEARCH_RESULTS = <?php echo json_encode($searchResultsUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
     document.addEventListener('DOMContentLoaded', function() {
@@ -1591,6 +1604,34 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                     </table>
                   </div>
                   <div id="user-rewards-cards" class="d-grid d-md-none gap-3"></div>
+                </div>
+
+                <div class="mt-4 pt-4 border-top border-info-subtle">
+                  <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-3">
+                    <div>
+                      <h4 class="h6 text-info fw-bold mb-1">Historial de misiones diarias</h4>
+                      <p class="text-secondary small mb-0">Premios, estado, motivo y fecha/hora de cada cofre o tarea resuelta.</p>
+                    </div>
+                  </div>
+
+                  <div id="user-missions-history-empty" class="d-none text-center py-5 text-secondary">Todavia no tienes premios de misiones diarias.</div>
+                  <div id="user-missions-history-list" class="d-none">
+                    <div class="table-responsive d-none d-md-block rounded-4 border border-info-subtle overflow-hidden mb-3" style="background:var(--theme-bg-elevated);">
+                      <table class="table align-middle mb-0" style="--bs-table-bg:transparent;--bs-table-color:var(--theme-text);">
+                        <thead>
+                          <tr>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Premio</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Motivo</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Estado</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Fecha</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Hora</th>
+                          </tr>
+                        </thead>
+                        <tbody id="user-missions-history-table-body"></tbody>
+                      </table>
+                    </div>
+                    <div id="user-missions-history-cards" class="d-grid d-md-none gap-3"></div>
+                  </div>
                 </div>
               </div>
             </div>

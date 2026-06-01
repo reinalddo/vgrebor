@@ -74,6 +74,10 @@ $menuScript = <<<'SCRIPT'
   const userRewardsTransactionsList = document.getElementById("user-rewards-transactions-list");
   const userRewardsTableBody = document.getElementById("user-rewards-table-body");
   const userRewardsCards = document.getElementById("user-rewards-cards");
+  const userMissionsHistoryEmpty = document.getElementById("user-missions-history-empty");
+  const userMissionsHistoryList = document.getElementById("user-missions-history-list");
+  const userMissionsHistoryTableBody = document.getElementById("user-missions-history-table-body");
+  const userMissionsHistoryCards = document.getElementById("user-missions-history-cards");
   const userRewardsModalTitle = document.getElementById("user-rewards-modal-title");
   const userRewardsBalanceValue = document.getElementById("user-rewards-balance-value");
   const userRewardsExpirationValue = document.getElementById("user-rewards-expiration-value");
@@ -233,6 +237,80 @@ $menuScript = <<<'SCRIPT'
     return Number.isFinite(numericValue)
       ? new Intl.NumberFormat("es-VE").format(numericValue)
       : "0";
+  };
+
+  const dailyMissionRewardLabel = (prizeType) => {
+    const labels = {
+      winpoints: "Win Points",
+      coupon: "Cupón",
+      immunity: "Escudo",
+      streaming_ticket: "Ticket de streaming",
+    };
+    return labels[prizeType] || prizeType || "Premio";
+  };
+
+  const dailyMissionRewardStatusLabel = (status) => {
+    const labels = {
+      pending: "Pendiente",
+      granted: "Otorgado",
+      issued: "Emitido",
+      assigned: "Asignado",
+      claimed: "Reclamado",
+      resolved: "Resuelto",
+      failed: "Fallido",
+    };
+    return labels[status] || status || "Pendiente";
+  };
+
+  const formatMissionDateParts = (value) => {
+    const rawValue = String(value || "").trim();
+    if (!rawValue) {
+      return { date: "", time: "" };
+    }
+
+    const [rawDate, rawTime = ""] = rawValue.split(" ");
+    const dateParts = rawDate.split("-");
+    const date = dateParts.length === 3
+      ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`
+      : rawDate;
+    const time = rawTime ? rawTime.slice(0, 5) : "";
+
+    return { date, time };
+  };
+
+  const renderDailyMissionHistoryCard = (entry) => {
+    const dateParts = formatMissionDateParts(entry.created_at || entry.claimed_at || entry.resolved_at || "");
+    const prizeLabel = entry.prize_label || dailyMissionRewardLabel(entry.prize_type);
+    const reason = entry.reason || entry.mission_key || "Premio diario";
+    const status = dailyMissionRewardStatusLabel(entry.reward_status);
+    return `
+      <article class="rounded-4 border border-info-subtle p-3" style="background:rgba(8,15,24,0.78);box-shadow:0 0 16px rgba(34,211,238,0.08);">
+        <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
+          <div>
+            <div class="small text-uppercase text-info" style="letter-spacing:0.14em;">${escapeHtml(dailyMissionRewardLabel(entry.prize_type))}</div>
+            <div class="small text-secondary">${escapeHtml(dateParts.date)}${dateParts.time ? ` · ${escapeHtml(dateParts.time)}` : ""}</div>
+          </div>
+          <span class="badge rounded-pill text-bg-dark border border-info-subtle text-info">${escapeHtml(status)}</span>
+        </div>
+        <div class="text-light fw-semibold mb-1">${escapeHtml(prizeLabel)}</div>
+        <div class="small text-secondary mb-1"><strong class="text-light">Motivo:</strong> ${escapeHtml(reason)}</div>
+        <div class="small text-info">Estado: ${escapeHtml(status)}</div>
+      </article>`;
+  };
+
+  const renderDailyMissionHistoryRow = (entry) => {
+    const dateParts = formatMissionDateParts(entry.created_at || entry.claimed_at || entry.resolved_at || "");
+    const prizeLabel = entry.prize_label || dailyMissionRewardLabel(entry.prize_type);
+    const reason = entry.reason || entry.mission_key || "Premio diario";
+    const status = dailyMissionRewardStatusLabel(entry.reward_status);
+    return `
+      <tr>
+        <td class="bg-transparent border-bottom border-info-subtle text-light fw-semibold">${escapeHtml(prizeLabel)}<div class="small text-secondary fw-normal">${escapeHtml(dailyMissionRewardLabel(entry.prize_type))}</div></td>
+        <td class="bg-transparent border-bottom border-info-subtle text-light">${escapeHtml(reason)}</td>
+        <td class="bg-transparent border-bottom border-info-subtle"><span class="badge rounded-pill text-bg-dark border border-info-subtle text-info">${escapeHtml(status)}</span></td>
+        <td class="bg-transparent border-bottom border-info-subtle text-secondary">${escapeHtml(dateParts.date)}</td>
+        <td class="bg-transparent border-bottom border-info-subtle text-secondary">${escapeHtml(dateParts.time)}</td>
+      </tr>`;
   };
 
   const getInitials = (name, email) => {
@@ -437,7 +515,7 @@ $menuScript = <<<'SCRIPT'
   };
 
   const loadUserRewards = async () => {
-    if (!userRewardsModal || !userRewardsLoading || !userRewardsContent || !userRewardsEmpty || !userRewardsTransactionsList || !userRewardsTableBody || !userRewardsCards) {
+    if (!userRewardsModal || !userRewardsLoading || !userRewardsContent || !userRewardsEmpty || !userRewardsTransactionsList || !userRewardsTableBody || !userRewardsCards || !userMissionsHistoryEmpty || !userMissionsHistoryList || !userMissionsHistoryTableBody || !userMissionsHistoryCards) {
       return;
     }
 
@@ -445,8 +523,10 @@ $menuScript = <<<'SCRIPT'
     hideElement(userRewardsContent);
     hideElement(userRewardsEmpty);
     hideElement(userRewardsTransactionsList);
+    hideElement(userMissionsHistoryList);
+    hideElement(userMissionsHistoryEmpty);
     showElement(userRewardsLoading);
-    userRewardsLoading.textContent = "Cargando saldo y movimientos...";
+    userRewardsLoading.textContent = "Cargando saldo, movimientos y misiones...";
 
     try {
       const response = await fetch((window.__TVG_API_ACCOUNT || __ACCOUNT_API_URL__) + "?action=rewards", {
@@ -462,14 +542,30 @@ $menuScript = <<<'SCRIPT'
       updateRewardsPresentation(data);
       showElement(userRewardsContent);
 
-      if (!data.enabled || !Array.isArray(data.transactions) || data.transactions.length === 0) {
+      const transactions = Array.isArray(data.transactions) ? data.transactions : [];
+      const dailyMissions = data.daily_missions && typeof data.daily_missions === "object" ? data.daily_missions : {};
+      const missionHistory = Array.isArray(dailyMissions.history) ? dailyMissions.history : [];
+      const hasTransactions = transactions.length > 0;
+      const hasMissionHistory = missionHistory.length > 0;
+
+      if (hasTransactions) {
+        userRewardsTableBody.innerHTML = transactions.map(renderRewardTransactionRow).join("");
+        userRewardsCards.innerHTML = transactions.map(renderRewardTransactionCard).join("");
+        showElement(userRewardsTransactionsList);
+      }
+
+      if (hasMissionHistory) {
+        userMissionsHistoryTableBody.innerHTML = missionHistory.map(renderDailyMissionHistoryRow).join("");
+        userMissionsHistoryCards.innerHTML = missionHistory.map(renderDailyMissionHistoryCard).join("");
+        showElement(userMissionsHistoryList);
+      } else {
+        showElement(userMissionsHistoryEmpty);
+      }
+
+      if (!hasTransactions && !hasMissionHistory) {
         showElement(userRewardsEmpty);
         return;
       }
-
-      userRewardsTableBody.innerHTML = data.transactions.map(renderRewardTransactionRow).join("");
-      userRewardsCards.innerHTML = data.transactions.map(renderRewardTransactionCard).join("");
-      showElement(userRewardsTransactionsList);
     } catch (error) {
       hideElement(userRewardsLoading);
       showFeedback(userRewardsFeedback, error.message || "No se pudo cargar el panel de premios.", "danger");
@@ -1187,6 +1283,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   $menuScriptVersioned = str_replace('<script', '<script', $menuScript);
   $menuScriptVersioned = str_replace('</script>', '</script>', $menuScriptVersioned);
   // Si hay scripts externos, agregar ?v=fecha
+  echo '<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>';
   echo $menuScriptVersioned;
   echo $rechargeNotificationsScript;
   ?>
