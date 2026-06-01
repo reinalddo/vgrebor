@@ -215,17 +215,13 @@ if (!function_exists('vgrebor_candidate_public_relative_paths')) {
         }
 
         $candidates = [$normalizedPath];
-        foreach (vgrebor_managed_upload_slugs() as $slug) {
-            $prefix = 'tenants/' . $slug . '/uploads/';
-            if (!str_starts_with($normalizedPath, $prefix)) {
-                continue;
-            }
 
-            $suffix = ltrim(substr($normalizedPath, strlen($prefix)), '/');
-            foreach (vgrebor_managed_upload_slugs() as $candidateSlug) {
-                $candidates[] = 'tenants/' . $candidateSlug . '/uploads/' . $suffix;
-            }
-            break;
+        // Primary candidate is the path as-is; prefer the unified uploads/ layout.
+        // If the path targets uploads/ we keep it; otherwise the caller may
+        // provide other relative paths to be resolved.
+        if (str_starts_with($normalizedPath, 'uploads/')) {
+            // already normalized to the unified uploads layout
+            $candidates = [$normalizedPath];
         }
 
         return array_values(array_unique(array_filter($candidates, static fn ($candidate) => $candidate !== '')));
@@ -374,7 +370,8 @@ if (!function_exists('tenant_database_config')) {
 
 if (!function_exists('tenant_public_prefix')) {
     function tenant_public_prefix(): string {
-        return '/tenants/' . resolve_tenant_slug();
+        // No tenant prefix in single-tenant mode; keep empty for cleaner URLs.
+        return '';
     }
 }
 
@@ -450,8 +447,9 @@ if (!function_exists('app_url')) {
 if (!function_exists('tenant_upload_absolute_dir')) {
     function tenant_upload_absolute_dir(string $bucket): string {
         $bucketName = trim(trim($bucket), '/\\');
-        return tenant_directory_path(resolve_tenant_slug())
-            . DIRECTORY_SEPARATOR . 'uploads'
+        // Store uploads in a unified `uploads/` directory at project root.
+        $uploadsRoot = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads';
+        return $uploadsRoot
             . ($bucketName !== '' ? DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $bucketName) : '');
     }
 }
@@ -459,7 +457,7 @@ if (!function_exists('tenant_upload_absolute_dir')) {
 if (!function_exists('tenant_upload_public_path')) {
     function tenant_upload_public_path(string $bucket, string $fileName, bool $leadingSlash = true): string {
         $bucketName = trim(trim($bucket), '/\\');
-        $relativePath = 'tenants/' . resolve_tenant_slug() . '/uploads';
+        $relativePath = 'uploads';
         if ($bucketName !== '') {
             $relativePath .= '/' . trim(str_replace('\\', '/', $bucketName), '/');
         }
@@ -509,15 +507,13 @@ if (!function_exists('tenant_resolve_public_path')) {
 if (!function_exists('tenant_is_managed_path')) {
     function tenant_is_managed_path(string $path, ?string $bucket = null): bool {
         $normalizedPath = '/' . ltrim(str_replace('\\', '/', trim($path)), '/');
-        foreach (vgrebor_managed_upload_slugs() as $slug) {
-            $prefix = '/tenants/' . $slug . '/uploads';
-            if ($bucket !== null && trim($bucket) !== '') {
-                $prefix .= '/' . trim(str_replace('\\', '/', $bucket), '/');
-            }
-
-            if (str_starts_with($normalizedPath, $prefix . '/')) {
-                return true;
-            }
+        // New unified uploads path
+        $uploadsPrefix = '/uploads';
+        if ($bucket !== null && trim($bucket) !== '') {
+            $uploadsPrefix .= '/' . trim(str_replace('\\', '/', $bucket), '/');
+        }
+        if (str_starts_with($normalizedPath, $uploadsPrefix . '/')) {
+            return true;
         }
 
         return false;
