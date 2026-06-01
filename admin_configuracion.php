@@ -2787,6 +2787,22 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
               <button type="submit" class="neon-btn w-100 py-3 mt-4">Guardar ventana inicial</button>
             </form>
           <?php elseif ($activeTab === 'galeria'): ?>
+            <?php $homeGalleryIntervalSeconds = (int) store_config_get('home_gallery_interval_seconds', '6'); ?>
+            <form method="post" class="mb-4">
+              <input type="hidden" name="config_section" value="galeria">
+              <input type="hidden" name="home_gallery_interval_update" value="1">
+              <div class="row g-2 align-items-center">
+                <div class="col-auto">
+                  <label class="form-label mb-0">Autoplay (segundos)</label>
+                </div>
+                <div class="col-auto">
+                  <input type="number" name="home_gallery_interval_seconds" min="1" max="60" value="<?= htmlspecialchars($homeGalleryIntervalSeconds, ENT_QUOTES, 'UTF-8') ?>" class="form-control" style="width:120px;">
+                </div>
+                <div class="col-auto">
+                  <button type="submit" class="btn btn-outline-info">Guardar intervalo</button>
+                </div>
+              </div>
+            </form>
             <form method="post" enctype="multipart/form-data">
               <input type="hidden" name="config_section" value="galeria">
               <input type="hidden" name="gallery_id" value="<?= $galleryEditItem ? (int) $galleryEditItem['id'] : 0 ?>">

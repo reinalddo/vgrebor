@@ -73,12 +73,36 @@ $galleryItems = home_gallery_all();
 $galleryFeatured = home_gallery_featured();
 
 $banners = [];
+// Helper to normalize legacy tenant upload paths (tenants/{slug}/uploads/...) -> /uploads/...
+$normalize_public_image = static function ($path) {
+  $p = trim((string) $path);
+  if ($p === '') {
+    return '';
+  }
+  if (preg_match('#^https?://#i', $p) === 1) {
+    return $p;
+  }
+  // strip any query string or fragment
+  $urlPath = parse_url($p, PHP_URL_PATH) ?: $p;
+  $mapped = preg_replace('#/tenants/[^/]+/uploads/#', '/uploads/', $urlPath);
+  $mapped = preg_replace('#^tenants/[^/]+/uploads/#', '/uploads/', $mapped);
+  if ($mapped === '') {
+    return '';
+  }
+  // ensure leading slash
+  if ($mapped[0] !== '/') {
+    $mapped = '/' . $mapped;
+  }
+  return $mapped;
+};
+
 foreach ($galleryItems as $item) {
+  $imagePath = $normalize_public_image($item['imagen'] ?? '');
   $banners[] = [
     'label' => $item['titulo'],
     'title' => $item['descripcion1'],
     'subtitle' => $item['descripcion2'],
-    'image' => $item['imagen'],
+    'image' => $imagePath,
     'url' => $item['url'],
     'open_in_new_tab' => !empty($item['abrir_nueva_pestana']),
   ];
@@ -90,7 +114,7 @@ if (!empty($galleryFeatured)) {
     'label' => $galleryFeatured['titulo'],
     'title' => $galleryFeatured['descripcion1'],
     'subtitle' => $galleryFeatured['descripcion2'],
-    'image' => $galleryFeatured['imagen'],
+    'image' => ($normalize_public_image)($galleryFeatured['imagen'] ?? ''),
     'url' => $galleryFeatured['url'],
     'open_in_new_tab' => !empty($galleryFeatured['abrir_nueva_pestana']),
   ];
@@ -606,38 +630,78 @@ $accentMap = [
         }
         .promo-slider-shell {
           position: relative;
+          /* fixed responsive height so side and center share the same baseline */
+          height: clamp(240px, 30vw, 460px);
+          overflow: visible;
         }
         .promo-slider-track {
-          display: flex;
-          gap: 0.75rem;
-          overflow-x: auto;
-          scroll-snap-type: x mandatory;
-          scroll-behavior: smooth;
-          scrollbar-width: none;
-          -ms-overflow-style: none;
-          overscroll-behavior-x: contain;
-          touch-action: pan-x pinch-zoom;
-        }
-        .promo-slider-track::-webkit-scrollbar {
-          display: none;
+          position: relative;
+          width: 100%;
+          height: 100%;
+          overflow: visible;
+          touch-action: pan-y pinch-zoom;
+          user-select: none;
+          -webkit-user-select: none;
+          -ms-user-select: none;
         }
         .promo-slide-card {
-          position: relative;
-          flex-shrink: 0;
-          width: 100%;
-          min-width: 82%;
-          aspect-ratio: 1280 / 500;
+          position: absolute;
+          top: 0;
+          left: 15%;
+          width: 70%;
+          height: 100%;
           overflow: hidden;
-          border-radius: 1.5rem;
-          scroll-snap-align: start;
+          border-radius: 0;
+          display: block;
           background: rgba(8, 15, 24, 0.88);
+          opacity: 0;
+          transition: left 360ms ease, right 360ms ease, width 360ms ease, height 360ms ease, top 360ms ease, opacity 220ms ease;
+          cursor: pointer;
+          pointer-events: none;
+          z-index: 1;
+        }
+
+        /* center slide occupies 70% width and visually stands out */
+        .promo-slide-card.is-center {
+          left: 15%;
+          top: -2.5%;
+          width: 70%;
+          height: 105%;
+          border-radius: 1.5rem;
+          opacity: 1;
+          pointer-events: auto;
+          z-index: 3;
+        }
+        .promo-slide-card.is-prev {
+          left: 0;
+          width: 15%;
+          border-top-left-radius: 1.5rem;
+          border-bottom-left-radius: 1.5rem;
+          opacity: 0.5;
+          pointer-events: auto;
+          z-index: 2;
+        }
+        .promo-slide-card.is-next {
+          left: auto;
+          right: 0;
+          width: 15%;
+          border-top-right-radius: 1.5rem;
+          border-bottom-right-radius: 1.5rem;
+          opacity: 0.5;
+          pointer-events: auto;
+          z-index: 2;
+        }
+        .promo-slide-card.is-hidden {
+          opacity: 0;
+          pointer-events: none;
+          z-index: 0;
         }
         .promo-slide-image,
         .featured-banner-image {
           width: 100%;
           height: 100%;
-          object-fit: contain;
-          object-position: center center;
+          object-fit: cover;
+          object-position: center top;
           display: block;
         }
         .promo-slide-overlay,
@@ -645,6 +709,7 @@ $accentMap = [
           position: absolute;
           inset: 0;
           background: transparent;
+          pointer-events: none;
         }
         .promo-slide-content,
         .featured-banner-content {
@@ -654,6 +719,10 @@ $accentMap = [
           flex-direction: column;
           justify-content: center;
           padding-inline: 1.5rem;
+          transition: opacity 220ms ease;
+        }
+        .promo-slide-card:not(.is-center) .promo-slide-content {
+          opacity: 0;
         }
         .promo-slide-content > p,
         .promo-slide-content > h2,
@@ -710,18 +779,37 @@ $accentMap = [
             margin-left: calc(var(--bs-gutter-x, 1.5rem) * -0.5);
             margin-right: calc(var(--bs-gutter-x, 1.5rem) * -0.5);
           }
-          .promo-slider-track {
-            gap: 0;
+          .promo-slider-shell {
+            height: min(66vw, 420px);
           }
-          .promo-slide-card,
-          .featured-banner-card {
-            min-width: 100%;
-            width: 100%;
-            border-radius: 0;
+          .promo-slide-card {
+            left: 0;
+            width: 100% !important;
+            height: 100% !important;
+            border-radius: 1.2rem;
           }
-          .promo-slide-card,
-          .featured-banner-image {
-            aspect-ratio: 1280 / 500;
+          .promo-slide-card.is-center {
+            left: 0;
+            top: 0;
+            width: 100% !important;
+            height: 100% !important;
+            border-radius: 1.2rem;
+            transform: none;
+          }
+          .promo-slide-card.is-prev {
+            left: -100%;
+            right: auto;
+            border-radius: 1.2rem;
+            opacity: 0;
+          }
+          .promo-slide-card.is-next {
+            left: 100%;
+            right: auto;
+            border-radius: 1.2rem;
+            opacity: 0;
+          }
+          .promo-slide-card.is-hidden {
+            opacity: 0;
           }
           .promo-slide-content,
           .featured-banner-content {
@@ -823,16 +911,27 @@ $accentMap = [
       <?php if (!empty($banners)): ?>
         <section class="mt-4 promo-section-mobile" style="animation: fadeUp 650ms ease-out both;">
           <div class="promo-slider-shell">
-            <div id="promo-slider" class="promo-slider-track">
-              <?php foreach ($banners as $banner): ?>
+            <div id="promo-slider" class="promo-slider-track" tabindex="0">
+              <?php $bannerCount = count($banners); ?>
+              <?php foreach ($banners as $index => $banner): ?>
                 <?php
                   $accent = $banner["accent"] ?? "cyan";
                   $labelClass = $accentMap[$accent]["label"] ?? $accentMap["cyan"]["label"];
                   $gradientClass = $accentMap[$accent]["gradient"] ?? $accentMap["cyan"]["gradient"];
                   $bannerUrl = trim((string) ($banner['url'] ?? ''));
                   $bannerTarget = !empty($banner['open_in_new_tab']) ? '_blank' : '_self';
+                  $bannerClass = 'promo-slide-card text-decoration-none';
+                  if ($index === 0) {
+                    $bannerClass .= ' is-center';
+                  } elseif ($bannerCount > 1 && $index === 1) {
+                    $bannerClass .= ' is-next';
+                  } elseif ($bannerCount > 2 && $index === $bannerCount - 1) {
+                    $bannerClass .= ' is-prev';
+                  } else {
+                    $bannerClass .= ' is-hidden';
+                  }
                 ?>
-                <<?= $bannerUrl !== '' ? 'a' : 'article' ?> class="promo-slide-card text-decoration-none"<?= $bannerUrl !== '' ? ' href="' . htmlspecialchars($bannerUrl, ENT_QUOTES, 'UTF-8') . '" target="' . htmlspecialchars($bannerTarget, ENT_QUOTES, 'UTF-8') . '"' . ($bannerTarget === '_blank' ? ' rel="noopener noreferrer"' : '') : '' ?>>
+                <<?= $bannerUrl !== '' ? 'a' : 'article' ?> class="<?= htmlspecialchars($bannerClass, ENT_QUOTES, 'UTF-8') ?>"<?= $bannerUrl !== '' ? ' href="' . htmlspecialchars($bannerUrl, ENT_QUOTES, 'UTF-8') . '" target="' . htmlspecialchars($bannerTarget, ENT_QUOTES, 'UTF-8') . '"' . ($bannerTarget === '_blank' ? ' rel="noopener noreferrer"' : '') : '' ?>>
                   <img src="<?php echo htmlspecialchars($banner["image"], ENT_QUOTES, "UTF-8"); ?>" alt="<?php echo htmlspecialchars($banner["title"], ENT_QUOTES, "UTF-8"); ?>" class="promo-slide-image" />
                   <div class="promo-slide-overlay"></div>
                   <div class="promo-slide-content">
@@ -855,19 +954,6 @@ $accentMap = [
                 <button type="button" class="promo-dot<?php echo $isActive ? ' is-active' : ''; ?>" data-index="<?php echo $index; ?>" aria-label="Banner <?php echo $index + 1; ?>" aria-current="<?php echo $isActive ? 'true' : 'false'; ?>"></button>
               <?php endforeach; ?>
             </div>
-            <div class="position-absolute top-0 start-0 end-0 h-100 d-none d-md-flex align-items-center justify-content-between" style="pointer-events:none;">
-              <button type="button" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center" style="width:40px;height:40px;pointer-events:auto;background:rgba(34,211,238,0.15);border:2px solid #22d3ee;color:#22d3ee;position:relative;z-index:2;" data-action="prev" aria-label="Anterior">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-chevron-left" viewBox="0 0 16 16">
-                  <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
-                </svg>
-              </button>
-              <button type="button" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center" style="width:40px;height:40px;pointer-events:auto;background:rgba(34,211,238,0.15);border:2px solid #22d3ee;color:#22d3ee;position:relative;z-index:2;" data-action="next" aria-label="Siguiente">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-chevron-right" viewBox="0 0 16 16">
-                  <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
-                </svg>
-              </button>
-            </div>
-            <p class="mt-2 small text-secondary">Desliza para ver más promociones</p>
           </div>
         </section>
       <?php endif; ?>
@@ -1167,170 +1253,293 @@ SCRIPT,
   <<<'SCRIPT'
 <script>
   (() => {
-  const slider = document.getElementById("promo-slider");
-  if (!slider) {
-    return;
-  }
-  const dots = Array.from(document.querySelectorAll("#promo-dots [data-index]"));
-  const slides = Array.from(slider.children);
-  if (!slides.length) {
-    return;
-  }
-
-  let currentIndex = 0;
-  let scrollTimeout;
-  let autoplayId;
-  let isPaused = false;
-  let touchStartX = null;
-  let lastTouchX = null;
-
-  const normalizeIndex = (index) => {
-    const total = slides.length;
-    return total ? ((index % total) + total) % total : 0;
-  };
-
-  const setActiveDot = (index) => {
-    currentIndex = normalizeIndex(index);
-    dots.forEach((dot, idx) => {
-      const isActive = idx === currentIndex;
-      dot.classList.toggle("is-active", isActive);
-      dot.setAttribute("aria-current", isActive ? "true" : "false");
-    });
-  };
-
-  const getClosestIndex = () => {
-    let closestIndex = 0;
-    let closestDistance = Infinity;
-
-    slides.forEach((slide, index) => {
-      const distance = Math.abs(slider.scrollLeft - slide.offsetLeft);
-      if (distance < closestDistance) {
-        closestDistance = distance;
-        closestIndex = index;
-      }
-    });
-
-    return closestIndex;
-  };
-
-  const scrollToIndex = (index, behavior = "smooth") => {
-    const targetIndex = normalizeIndex(index);
-    const target = slides[targetIndex];
-    if (target) {
-      slider.scrollTo({ left: target.offsetLeft, behavior });
-      setActiveDot(targetIndex);
+    const slider = document.getElementById("promo-slider");
+    if (!slider) {
+      return;
     }
-  };
 
-  slider.addEventListener("scroll", () => {
-    window.clearTimeout(scrollTimeout);
-    scrollTimeout = window.setTimeout(() => {
-      setActiveDot(getClosestIndex());
-    }, 70);
-  });
+    const slides = Array.from(slider.querySelectorAll(".promo-slide-card"));
+    const dots = Array.from(document.querySelectorAll("#promo-dots [data-index]"));
+    if (!slides.length) {
+      return;
+    }
 
-  dots.forEach((dot) => {
-    dot.addEventListener("click", () => {
-      scrollToIndex(Number(dot.dataset.index));
-    });
-  });
+    const mobileQuery = window.matchMedia("(max-width: 767.98px)");
 
-  document.querySelectorAll("[data-action]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const nextIndex = button.dataset.action === "next" ? currentIndex + 1 : currentIndex - 1;
-      scrollToIndex(nextIndex);
-    });
-  });
+    let currentIndex = 0;
+    let autoplayId = 0;
+    let isPaused = false;
+    let renderFrame = 0;
+    let touchStartX = null;
+    let touchStartY = null;
+    let touchMoved = false;
+    let suppressClickUntil = 0;
 
-  const startAutoplay = () => {
-    if (autoplayId || slides.length <= 1) return;
-    autoplayId = window.setInterval(() => {
-      if (isPaused) return;
-      scrollToIndex(currentIndex + 1);
-    }, 4500);
-  };
+    const normalizeIndex = (index) => {
+      const total = slides.length;
+      return total ? ((index % total) + total) % total : 0;
+    };
 
-  slider.addEventListener("mouseenter", () => {
-    isPaused = true;
-  });
+    const getSignedOffset = (index) => {
+      const total = slides.length;
+      if (!total) {
+        return 0;
+      }
 
-  slider.addEventListener("mouseleave", () => {
-    isPaused = false;
-  });
+      let offset = index - currentIndex;
+      const half = total / 2;
+      if (offset > half) {
+        offset -= total;
+      } else if (offset < -half) {
+        offset += total;
+      }
 
-  slider.addEventListener("touchstart", (event) => {
-    isPaused = true;
-    touchStartX = event.changedTouches[0]?.clientX ?? null;
-    lastTouchX = touchStartX;
-  }, { passive: true });
+      return offset;
+    };
 
-  slider.addEventListener("touchmove", (event) => {
-    lastTouchX = event.changedTouches[0]?.clientX ?? lastTouchX;
-  }, { passive: true });
+    const syncDots = () => {
+      dots.forEach((dot, idx) => {
+        const isActive = idx === currentIndex;
+        dot.classList.toggle("is-active", isActive);
+        dot.setAttribute("aria-current", isActive ? "true" : "false");
+      });
+    };
 
-  slider.addEventListener("touchend", () => {
-    isPaused = false;
-    if (touchStartX !== null && lastTouchX !== null) {
-      const deltaX = touchStartX - lastTouchX;
-      if (Math.abs(deltaX) >= 40) {
-        if (currentIndex === slides.length - 1 && deltaX > 0) {
-          scrollToIndex(0);
-        } else if (currentIndex === 0 && deltaX < 0) {
-          scrollToIndex(slides.length - 1);
+    const applySlideState = () => {
+      const isMobile = mobileQuery.matches;
+
+      slides.forEach((slide, index) => {
+        const offset = getSignedOffset(index);
+        slide.classList.remove("is-prev", "is-center", "is-next", "is-hidden");
+        slide.style.left = "";
+        slide.style.right = "";
+        slide.style.top = "";
+        slide.style.width = isMobile ? "100%" : "15%";
+        slide.style.height = isMobile ? "100%" : "100%";
+        slide.style.opacity = "0";
+        slide.style.pointerEvents = "none";
+        slide.style.zIndex = "0";
+
+        if (isMobile) {
+          if (offset === 0) {
+            slide.classList.add("is-center");
+            slide.style.left = "0";
+            slide.style.opacity = "1";
+            slide.style.pointerEvents = "auto";
+            slide.style.zIndex = "3";
+          } else if (offset === -1) {
+            slide.classList.add("is-prev");
+            slide.style.left = "-100%";
+            slide.style.opacity = "0";
+          } else if (offset === 1) {
+            slide.classList.add("is-next");
+            slide.style.left = "100%";
+            slide.style.opacity = "0";
+          } else {
+            slide.classList.add("is-hidden");
+            slide.style.left = offset < 0 ? "-200%" : "200%";
+          }
+        } else {
+          if (offset === 0) {
+            slide.classList.add("is-center");
+            slide.style.left = "15%";
+            slide.style.top = "-2.5%";
+            slide.style.width = "70%";
+            slide.style.height = "105%";
+            slide.style.opacity = "1";
+            slide.style.pointerEvents = "auto";
+            slide.style.zIndex = "3";
+          } else if (offset === -1) {
+            slide.classList.add("is-prev");
+            slide.style.left = "0";
+            slide.style.width = "15%";
+            slide.style.opacity = "0.5";
+            slide.style.pointerEvents = "auto";
+            slide.style.zIndex = "2";
+          } else if (offset === 1) {
+            slide.classList.add("is-next");
+            slide.style.left = "85%";
+            slide.style.width = "15%";
+            slide.style.opacity = "0.5";
+            slide.style.pointerEvents = "auto";
+            slide.style.zIndex = "2";
+          } else {
+            slide.classList.add("is-hidden");
+            slide.style.left = offset < 0 ? "-20%" : "120%";
+          }
         }
+
+        const content = slide.querySelector(".promo-slide-content");
+        if (content) {
+          content.style.opacity = offset === 0 ? "1" : "0";
+        }
+
+        slide.setAttribute("aria-hidden", offset === 0 ? "false" : "true");
+        slide.tabIndex = offset === 0 ? 0 : -1;
+      });
+
+      syncDots();
+    };
+
+    const render = () => {
+      window.cancelAnimationFrame(renderFrame);
+      renderFrame = window.requestAnimationFrame(applySlideState);
+    };
+
+    const stopAutoplay = () => {
+      if (autoplayId) {
+        window.clearInterval(autoplayId);
+        autoplayId = 0;
       }
-    }
-    touchStartX = null;
-    lastTouchX = null;
-  });
+    };
 
-  slider.addEventListener("touchcancel", () => {
-    isPaused = false;
-    touchStartX = null;
-    lastTouchX = null;
-  });
-
-  slider.addEventListener("focusin", () => {
-    isPaused = true;
-  });
-
-  slider.addEventListener("focusout", () => {
-    isPaused = false;
-  });
-
-  const observer = new IntersectionObserver((entries) => {
-    let bestIndex = null;
-    let bestRatio = 0;
-
-    entries.forEach((entry) => {
-      if (!entry.isIntersecting) {
+    const restartAutoplay = () => {
+      stopAutoplay();
+      if (slides.length <= 1) {
         return;
       }
-      const index = slides.indexOf(entry.target);
-      if (index !== -1 && entry.intersectionRatio > bestRatio) {
-        bestRatio = entry.intersectionRatio;
-        bestIndex = index;
+
+      const intervalMs = Number.parseInt(window._vgHomeGalleryIntervalMs || "4500", 10) || 4500;
+      autoplayId = window.setInterval(() => {
+        if (isPaused) {
+          return;
+        }
+
+        setCurrentIndex(currentIndex + 1, { restart: false });
+      }, intervalMs);
+    };
+
+    const setCurrentIndex = (index, options = {}) => {
+      currentIndex = normalizeIndex(index);
+      render();
+
+      if (options.restart !== false) {
+        restartAutoplay();
+      }
+    };
+
+    const goToDirection = (direction) => {
+      setCurrentIndex(currentIndex + direction);
+    };
+
+    const handleSlideClick = (event) => {
+      const slide = event.target.closest(".promo-slide-card");
+      if (!slide) {
+        return;
+      }
+
+      if (Date.now() < suppressClickUntil) {
+        event.preventDefault();
+        return;
+      }
+
+      const slideIndex = slides.indexOf(slide);
+      if (slideIndex === -1) {
+        return;
+      }
+
+      if (slideIndex !== currentIndex) {
+        event.preventDefault();
+        setCurrentIndex(slideIndex);
+      }
+    };
+
+    slider.addEventListener("click", handleSlideClick);
+
+    slider.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goToDirection(-1);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goToDirection(1);
       }
     });
 
-    if (bestIndex !== null) {
-      setActiveDot(bestIndex);
+    slider.addEventListener("mouseenter", () => {
+      isPaused = true;
+    });
+
+    slider.addEventListener("mouseleave", () => {
+      isPaused = false;
+    });
+
+    slider.addEventListener("touchstart", (event) => {
+      const touch = event.changedTouches[0];
+      if (!touch) {
+        return;
+      }
+
+      isPaused = true;
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      touchMoved = false;
+    }, { passive: true });
+
+    slider.addEventListener("touchmove", (event) => {
+      const touch = event.changedTouches[0];
+      if (!touch || touchStartX === null || touchStartY === null) {
+        return;
+      }
+
+      const deltaX = touch.clientX - touchStartX;
+      const deltaY = touch.clientY - touchStartY;
+      if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
+        touchMoved = true;
+      }
+    }, { passive: true });
+
+    slider.addEventListener("touchend", (event) => {
+      isPaused = false;
+
+      if (touchStartX !== null && touchMoved) {
+        const touch = event.changedTouches[0];
+        const endX = touch ? touch.clientX : touchStartX;
+        const deltaX = touchStartX - endX;
+
+        if (Math.abs(deltaX) >= 40) {
+          suppressClickUntil = Date.now() + 300;
+          goToDirection(deltaX > 0 ? 1 : -1);
+        }
+      }
+
+      touchStartX = null;
+      touchStartY = null;
+      touchMoved = false;
+    });
+
+    slider.addEventListener("touchcancel", () => {
+      isPaused = false;
+      touchStartX = null;
+      touchStartY = null;
+      touchMoved = false;
+    });
+
+    slider.addEventListener("focusin", () => {
+      isPaused = true;
+    });
+
+    slider.addEventListener("focusout", () => {
+      isPaused = false;
+    });
+
+    if (mobileQuery.addEventListener) {
+      mobileQuery.addEventListener("change", render);
+    } else if (mobileQuery.addListener) {
+      mobileQuery.addListener(render);
     }
-  }, {
-    root: slider,
-    threshold: [0.55, 0.75, 0.95]
-  });
 
-  slides.forEach((slide) => observer.observe(slide));
+    window.addEventListener("resize", render, { passive: true });
+    window.addEventListener("orientationchange", render);
 
-  if (dots.length) {
-    setActiveDot(0);
-  }
-  scrollToIndex(0, "auto");
-  startAutoplay();
+    setCurrentIndex(0, { restart: false });
+    restartAutoplay();
   })();
 </script>
 SCRIPT
 ];
+$homeGalleryIntervalSeconds = max(1, min(60, (int) store_config_get('home_gallery_interval_seconds', '6')));
+$homeGalleryIntervalMs = $homeGalleryIntervalSeconds * 1000;
+array_unshift($pageScripts, '<script>window._vgHomeGalleryIntervalMs = ' . $homeGalleryIntervalMs . ';</script>');
 include __DIR__ . "/includes/footer.php";
 ?>

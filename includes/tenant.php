@@ -224,6 +224,13 @@ if (!function_exists('vgrebor_candidate_public_relative_paths')) {
             $candidates = [$normalizedPath];
         }
 
+            // If the path looks like an old tenant-managed path (tenants/{slug}/uploads/...)
+            // offer a normalized candidate that maps to the unified `uploads/` layout.
+            if (preg_match('#(^|/)tenants/[^/]+/uploads/(.+)$#', $normalizedPath, $m) === 1) {
+                $mapped = 'uploads/' . $m[2];
+                array_unshift($candidates, $mapped);
+            }
+
         return array_values(array_unique(array_filter($candidates, static fn ($candidate) => $candidate !== '')));
     }
 }
@@ -425,6 +432,11 @@ if (!function_exists('app_path')) {
         $normalizedPath = '/' . ltrim($path, '/');
         if ($normalizedPath === '/index.php') {
             $normalizedPath = '/';
+        }
+
+        // Normalize legacy tenant upload public paths to unified `/uploads/...`.
+        if (preg_match('#/tenants/[^/]+/uploads/#', $normalizedPath) === 1) {
+            $normalizedPath = preg_replace('#/tenants/[^/]+/uploads/#', '/uploads/', $normalizedPath);
         }
 
         if ($basePath === '') {

@@ -3189,6 +3189,22 @@ switch ($seccion) {
                 admin_set_flash('success', 'Configuración de la ventana inicial actualizada.');
             }
 
+            if ($activeTab === 'galeria' && isset($_POST['home_gallery_interval_update'])) {
+                $seconds = isset($_POST['home_gallery_interval_seconds']) ? intval($_POST['home_gallery_interval_seconds']) : 6;
+                if ($seconds < 1) {
+                    $seconds = 1;
+                } elseif ($seconds > 60) {
+                    $seconds = 60;
+                }
+                if (store_config_upsert('home_gallery_interval_seconds', (string) $seconds, 'Autoplay interval for main gallery (seconds)')) {
+                    admin_set_flash('success', 'Intervalo del autoplay actualizado.');
+                } else {
+                    admin_set_flash('error', 'No se pudo guardar el intervalo del autoplay.');
+                }
+                define('ADMIN_CONFIG_POST_HANDLED', true);
+                admin_redirect('configuracion', ['tab' => 'galeria']);
+            }
+
             if ($activeTab === 'galeria') {
                 $galleryId = isset($_POST['gallery_id']) ? intval($_POST['gallery_id']) : 0;
                 $existingItem = $galleryId > 0 ? home_gallery_find($galleryId) : null;
