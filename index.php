@@ -2162,6 +2162,10 @@ $dailyMissionsScriptPayload = [
               <div class="daily-mission-modal-band is-bottom"></div>
               <div class="daily-mission-modal-base"></div>
               <div class="daily-mission-modal-lock"></div>
+              <div class="daily-mission-modal-sorpresa sorpresa">
+                <div class="icono-s" id="daily-mission-modal-icono">🎁</div>
+                <div class="texto-s" id="daily-mission-modal-texto">¡Sorpresa!</div>
+              </div>
             </div>
           </div>
           <div class="daily-mission-modal-body px-3 pb-3">
@@ -2176,6 +2180,26 @@ $dailyMissionsScriptPayload = [
           </div>
         </div>
       </div>
+      <style>
+        /* Modal surprise override (scoped) */
+        #daily-mission-modal .daily-mission-modal-sorpresa {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%) rotateY(35deg) rotateX(15deg) scale(0);
+          text-align: center;
+          opacity: 0;
+          pointer-events: none;
+          transition: all 0.7s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+          z-index: 10;
+        }
+        #daily-mission-modal .daily-mission-chest-3d.is-open .daily-mission-modal-sorpresa {
+          transform: translate(-50%, -200px) rotateY(35deg) rotateX(15deg) scale(1);
+          opacity: 1;
+        }
+        #daily-mission-modal .daily-mission-modal-sorpresa .icono-s { font-size: 56px; filter: drop-shadow(0 0 18px rgba(255,215,0,0.8)); margin-bottom: 8px; }
+        #daily-mission-modal .daily-mission-modal-sorpresa .texto-s { background: #f39c12; padding: 8px 14px; border-radius: 6px; font-weight: 700; color: #fff; border: 2px solid rgba(255,255,255,0.9); }
+      </style>
 
       <section class="mt-5">
         <div class="d-flex align-items-center justify-content-between">
@@ -2922,6 +2946,9 @@ SCRIPT,
           modalChest.classList.remove('is-spinning');
           modalChest.classList.remove('is-open');
           modalChest.querySelectorAll('.daily-mission-modal-spark').forEach(s => s.remove());
+          modalChest.classList.remove('cofre');
+          modalChest.classList.remove('girando');
+          modalChest.classList.remove('abierto');
         }
       } catch (e) {}
       try {
@@ -2929,6 +2956,9 @@ SCRIPT,
           missionChest3d.classList.remove('is-spinning');
           missionChest3d.classList.remove('is-open');
           missionChest3d.querySelectorAll('.daily-mission-modal-spark').forEach(s => s.remove());
+          missionChest3d.classList.remove('cofre');
+          missionChest3d.classList.remove('girando');
+          missionChest3d.classList.remove('abierto');
         }
       } catch (e) {}
     };
@@ -2974,10 +3004,29 @@ SCRIPT,
       missionModal.classList.remove("is-hidden");
       missionModal.setAttribute("aria-hidden", "false");
 
+      // Set the animated surprise content inside the modal chest (icon + label)
+      try {
+        const modalIcon = document.getElementById('daily-mission-modal-icono');
+        const modalText = document.getElementById('daily-mission-modal-texto');
+        const prizeIconMap = {
+          winpoints: '💰',
+          coupon: '🏷️',
+          immunity: '🛡️',
+          streaming_ticket: '🎟️'
+        };
+        if (modalIcon) modalIcon.textContent = (prize && prize.icon) ? prize.icon : (prizeIconMap[prizeType] || '🎁');
+        if (modalText) modalText.textContent = prizeLabel;
+      } catch (e) {}
+
       // Spin the chest inside the modal (activeChest) and then open it + show sparks
       if (activeChest) {
+        // mark as cofre for modal-scoped styles and start spin
+        try { activeChest.classList.add('cofre'); } catch (e) {}
         activeChest.classList.remove('is-open');
         activeChest.classList.add('is-spinning');
+        // also add legacy class names used by the original asset CSS
+        activeChest.classList.add('girando');
+        activeChest.classList.remove('abierto');
       }
       const spinDuration = 1800; // ms (matches CSS animation)
       window.setTimeout(() => {
@@ -2986,6 +3035,9 @@ SCRIPT,
         if (activeChest) {
           activeChest.classList.remove('is-spinning');
           activeChest.classList.add('is-open');
+          // mirror legacy classes used in the source HTML/CSS
+          activeChest.classList.remove('girando');
+          activeChest.classList.add('abierto');
         }
       }, spinDuration);
     };
