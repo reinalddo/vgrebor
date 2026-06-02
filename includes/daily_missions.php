@@ -52,7 +52,7 @@ if (!function_exists('daily_missions_default_tasks')) {
         return [
             [
                 'mission_key' => 'login_daily',
-                'title' => 'Inicia sesion hoy',
+                'title' => 'Iniciar Sesión',
                 'description' => 'Entra a la tienda y reclama tu bono de conexion diaria.',
                 'task_type' => 'login',
                 'action_label' => 'Entrar',

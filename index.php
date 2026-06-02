@@ -1303,6 +1303,34 @@ $dailyMissionsScriptPayload = [
           justify-items: center;
           gap: 1rem;
         }
+        /* Cofre giratorio: animación adaptada del cofre proporcionado */
+        @keyframes girarExplosion {
+          0%   { transform: rotateX(-15deg) rotateY(-35deg) scale(1); }
+          40%  { transform: rotateX(-20deg) rotateY(325deg) scale(1.05); }
+          75%  { transform: rotateX(-10deg) rotateY(1045deg) scale(1.15); }
+          90%  { transform: rotateX(-18deg) rotateY(1225deg) scale(1.2) translate(3px, -3px); }
+          100% { transform: rotateX(-15deg) rotateY(1405deg) scale(1.25) translate(-3px, 3px); }
+        }
+        .daily-mission-chest-3d.is-spinning {
+          animation: girarExplosion 1.8s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards;
+          transform-style: preserve-3d;
+        }
+        /* Abrir tapa al finalizar */
+        .daily-mission-chest-3d.is-open .daily-mission-modal-lid {
+          transform: rotateX(120deg);
+          transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        /* Chispas / explosión visual */
+        .daily-mission-modal-spark {
+          position: absolute;
+          top: 50px; left: 100px;
+          font-size: 24px; opacity: 0; pointer-events: none; z-index: 15;
+          transition: opacity 0.2s ease;
+        }
+        @keyframes estallar {
+          0% { transform: rotateY(35deg) translate3d(0,0,0) scale(0); opacity: 1; filter: brightness(2); }
+          100% { transform: rotateY(35deg) translate3d(var(--x), var(--y), 150px) scale(1) rotate(180deg); opacity: 0; }
+        }
         @keyframes daily-mission-chest-pulse {
           0%, 100% { transform: scale(1); }
           50% { transform: scale(1.02); }
@@ -2078,7 +2106,11 @@ $dailyMissionsScriptPayload = [
                             <div class="daily-mission-task-main">
                               <div class="daily-mission-task-line">
                                 <span class="daily-mission-task-icon"><i class="fa-solid <?php echo htmlspecialchars($taskIconClass, ENT_QUOTES, 'UTF-8'); ?>" aria-hidden="true"></i></span>
-                                <a href="<?php echo htmlspecialchars((string) $taskHref, ENT_QUOTES, 'UTF-8'); ?>" class="daily-mission-mini-action daily-mission-task-link<?php echo $taskCompleted ? ' is-primary' : ''; ?>" data-task-key="<?php echo htmlspecialchars((string) ($task['mission_key'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-task-timer="<?php echo $taskTimerValue; ?>" data-target-url="<?php echo htmlspecialchars((string) $taskHref, ENT_QUOTES, 'UTF-8'); ?>" data-bs-toggle="tooltip" data-bs-placement="top" title="<?php echo htmlspecialchars((string) $taskDescription, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $taskDisabled ? ' aria-disabled="true" tabindex="-1"' : ''; ?><?php echo $taskTargetAttr !== '' ? ' target="' . htmlspecialchars((string) $taskTargetAttr, ENT_QUOTES, 'UTF-8') . '"' : ''; ?><?php echo $taskRelAttr !== '' ? ' rel="' . htmlspecialchars((string) $taskRelAttr, ENT_QUOTES, 'UTF-8') . '"' : ''; ?>><?php echo htmlspecialchars((string) ($task['title'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></a>
+                                <?php if ($taskType === 'share'): ?>
+                                  <span class="daily-mission-task-text<?php echo $taskCompleted ? ' is-primary' : ''; ?>" aria-hidden="false"><?php echo htmlspecialchars((string) ($task['title'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+                                <?php else: ?>
+                                  <a href="<?php echo htmlspecialchars((string) $taskHref, ENT_QUOTES, 'UTF-8'); ?>" class="daily-mission-mini-action daily-mission-task-link<?php echo $taskCompleted ? ' is-primary' : ''; ?>" data-task-key="<?php echo htmlspecialchars((string) ($task['mission_key'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-task-timer="<?php echo $taskTimerValue; ?>" data-target-url="<?php echo htmlspecialchars((string) $taskHref, ENT_QUOTES, 'UTF-8'); ?>" data-bs-toggle="tooltip" data-bs-placement="top" title="<?php echo htmlspecialchars((string) $taskDescription, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $taskDisabled ? ' aria-disabled="true" tabindex="-1"' : ''; ?><?php echo $taskTargetAttr !== '' ? ' target="' . htmlspecialchars((string) $taskTargetAttr, ENT_QUOTES, 'UTF-8') . '"' : ''; ?><?php echo $taskRelAttr !== '' ? ' rel="' . htmlspecialchars((string) $taskRelAttr, ENT_QUOTES, 'UTF-8') . '"' : ''; ?>><?php echo htmlspecialchars((string) ($task['title'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></a>
+                                <?php endif; ?>
                                 <?php if ($taskType === 'share'): ?>
                                   <div class="daily-mission-social-icons">
                                     <?php foreach ($dailyMissionsSocialTargets as $socialKey => $socialTarget): ?>
@@ -2123,13 +2155,23 @@ $dailyMissionsScriptPayload = [
             </button>
           </div>
           <div class="daily-mission-modal-stage" id="daily-mission-modal-stage" data-level="<?php echo htmlspecialchars($dailyMissionsLevelKey, ENT_QUOTES, 'UTF-8'); ?>">
-            <div class="daily-mission-chest-3d" id="daily-mission-chest-3d">
+            <div class="daily-mission-chest-3d">
               <div class="daily-mission-modal-sparks"></div>
               <div class="daily-mission-modal-lid"></div>
               <div class="daily-mission-modal-band is-top"></div>
               <div class="daily-mission-modal-band is-bottom"></div>
               <div class="daily-mission-modal-base"></div>
               <div class="daily-mission-modal-lock"></div>
+            </div>
+          </div>
+          <div class="daily-mission-modal-body px-3 pb-3">
+            <div class="daily-mission-modal-prize text-center">
+              <div class="small text-uppercase text-secondary mb-1" id="daily-mission-modal-prize-type"></div>
+              <h4 class="mb-1" id="daily-mission-modal-prize-label"></h4>
+              <p class="small text-secondary mb-0" id="daily-mission-modal-prize-desc"></p>
+            </div>
+            <div class="daily-mission-modal-actions text-center mt-3">
+              <button type="button" id="daily-mission-modal-continue" class="btn btn-outline-info">Continuar</button>
             </div>
           </div>
         </div>
@@ -2252,6 +2294,35 @@ $pageScripts = [
       }
       if (videoFrame.src !== "about:blank") {
         videoFrame.src = "about:blank";
+      }
+    };
+
+    const createMissionSparks = (container) => {
+      const target = container || (missionModalStage && missionModalStage.querySelector('.daily-mission-chest-3d')) || missionChest3d;
+      if (!target) return;
+      // remove previous sparks
+      target.querySelectorAll('.daily-mission-modal-spark').forEach(s => s.remove());
+
+      const emojis = ['💥', '🔥', '✨', '⚡', '🌟'];
+      const count = 36;
+      for (let i = 0; i < count; i++) {
+        const el = document.createElement('div');
+        el.className = 'daily-mission-modal-spark';
+        el.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+
+        const ang = Math.random() * Math.PI * 2;
+        const dist = Math.random() * 300 + 80;
+        const x = (Math.cos(ang) * dist) + 'px';
+        const y = (Math.sin(ang) * dist - 100) + 'px';
+
+        el.style.setProperty('--x', x);
+        el.style.setProperty('--y', y);
+        el.style.left = '50%';
+        el.style.top = '50%';
+        el.style.transform = 'translate(-50%, -50%)';
+        el.style.animation = 'estallar 1.2s cubic-bezier(0.1, 0.8, 0.3, 1) forwards';
+
+        target.appendChild(el);
       }
     };
 
@@ -2844,14 +2915,26 @@ SCRIPT,
 
       missionModal.classList.add("is-hidden");
       missionModal.setAttribute("aria-hidden", "true");
-      if (missionChest3d) {
-        missionChest3d.classList.remove("is-spinning");
-        missionChest3d.classList.remove("is-open");
-      }
+      // Remove spinning/open classes and sparks from both modal chest and page chest
+      try {
+        const modalChest = missionModalStage ? missionModalStage.querySelector('.daily-mission-chest-3d') : null;
+        if (modalChest) {
+          modalChest.classList.remove('is-spinning');
+          modalChest.classList.remove('is-open');
+          modalChest.querySelectorAll('.daily-mission-modal-spark').forEach(s => s.remove());
+        }
+      } catch (e) {}
+      try {
+        if (missionChest3d) {
+          missionChest3d.classList.remove('is-spinning');
+          missionChest3d.classList.remove('is-open');
+          missionChest3d.querySelectorAll('.daily-mission-modal-spark').forEach(s => s.remove());
+        }
+      } catch (e) {}
     };
 
     const showMissionModal = (result, payload) => {
-      if (!missionModal || !missionModalStage || !missionChest3d) {
+      if (!missionModal || !missionModalStage) {
         return;
       }
 
@@ -2882,17 +2965,29 @@ SCRIPT,
       setText(missionModalPrizeDesc, prizeDescription);
 
       missionModalStage.dataset.level = levelKey;
-      missionChest3d.classList.remove("is-open");
-      missionChest3d.classList.add("is-spinning");
+      // Prefer the chest inside the modal when showing the modal (avoid duplicate-id issues)
+      const modalChest = missionModalStage ? missionModalStage.querySelector('.daily-mission-chest-3d') : null;
+      const activeChest = modalChest || missionChest3d;
+      if (activeChest) activeChest.dataset.level = levelKey;
+      if (missionChest3d && missionChest3d !== activeChest) missionChest3d.classList.remove('is-open');
+
       missionModal.classList.remove("is-hidden");
       missionModal.setAttribute("aria-hidden", "false");
 
+      // Spin the chest inside the modal (activeChest) and then open it + show sparks
+      if (activeChest) {
+        activeChest.classList.remove('is-open');
+        activeChest.classList.add('is-spinning');
+      }
+      const spinDuration = 1800; // ms (matches CSS animation)
       window.setTimeout(() => {
-        missionChest3d.classList.add("is-open");
-      }, 220);
-      window.setTimeout(() => {
-        missionChest3d.classList.remove("is-spinning");
-      }, 1350);
+        // Create sparks and open the chest (inside modal when possible)
+        try { createMissionSparks(activeChest); } catch (e) {}
+        if (activeChest) {
+          activeChest.classList.remove('is-spinning');
+          activeChest.classList.add('is-open');
+        }
+      }, spinDuration);
     };
 
     const syncTaskCard = (card, task) => {
@@ -2939,7 +3034,7 @@ SCRIPT,
       if (taskType === "login") {
         const loginAction = card.querySelector(".daily-mission-mini-action");
         if (loginAction) {
-          loginAction.textContent = completed ? "Bono reclamado" : "Se activa al iniciar sesión";
+          loginAction.textContent = completed ? "Iniciar Sesión" : "Se activa al iniciar sesión";
         }
       }
     };
@@ -2978,6 +3073,14 @@ SCRIPT,
       missionShell.dataset.streak = String(currentStreak);
       missionShell.dataset.immunity = String(immunityBalance);
 
+      if (missionChest3d) missionChest3d.dataset.level = levelKey;
+      if (missionChestShell) missionChestShell.dataset.level = levelKey;
+      // Also update modal chest level if present
+      try {
+        const modalChest = missionModalStage ? missionModalStage.querySelector('.daily-mission-chest-3d') : null;
+        if (modalChest) modalChest.dataset.level = levelKey;
+      } catch (e) {}
+
       if (missionProgressBar) {
         missionProgressBar.style.width = progressPercent + "%";
         missionProgressBar.setAttribute("aria-valuenow", String(progressPercent));
@@ -3012,6 +3115,7 @@ SCRIPT,
     };
 
     const requestMissionUpdate = async (action, body) => {
+      console.log('[daily_missions] request:', action, body || {});
       const response = await fetch(missionApiUrl, {
         method: "POST",
         credentials: "same-origin",
@@ -3023,6 +3127,7 @@ SCRIPT,
       });
 
       const data = await response.json().catch(() => ({}));
+      console.log('[daily_missions] response for', action, response.status, data);
       if (!response.ok || !data.ok) {
         throw new Error(data.message || "No se pudo actualizar la misión.");
       }
@@ -3101,6 +3206,7 @@ SCRIPT,
     const refreshMissionStatus = () => {
       requestMissionUpdate("status", {})
         .then((data) => {
+          console.log('[daily_missions] status payload:', data.payload || {});
           applyMissionPayload(data.payload || {});
         })
         .catch(() => {
@@ -3131,25 +3237,36 @@ SCRIPT,
 
       if (actionElement.hasAttribute("data-daily-mission-chest")) {
         event.preventDefault();
-        if (!missionChestShell || missionChestShell.disabled || missionShell.dataset.canOpenChest !== "1") {
+        const clickedChest = actionElement.closest('[data-daily-mission-chest]') || missionChestShell;
+        console.log('[daily_missions] chest click; clickedChest, missionShell datasets:', clickedChest ? clickedChest.dataset : null, missionShell ? missionShell.dataset : null);
+        if (!clickedChest || clickedChest.disabled || missionShell.dataset.canOpenChest !== "1") {
+          console.log('[daily_missions] abort open: clickedChest?', !!clickedChest, 'disabled?', clickedChest ? clickedChest.disabled : 'n/a', 'canOpenChest?', missionShell.dataset.canOpenChest);
           return;
         }
 
-        missionChestShell.classList.add("is-spinning");
-        missionChestShell.disabled = true;
+        clickedChest.classList.add("is-spinning");
+        clickedChest.disabled = true;
+        clickedChest.setAttribute('aria-disabled', 'true');
 
         requestMissionUpdate("open_chest", {})
           .then((data) => {
+            console.log('[daily_missions] open_chest result:', data);
             applyMissionPayload(data.payload || {});
             showMissionModal(data.result || {}, data.payload || {});
           })
           .catch((error) => {
+            console.warn('[daily_missions] open_chest error:', error && error.message ? error.message : error);
             setText(missionStateDescription, error.message || "No se pudo abrir el cofre.");
           })
           .finally(() => {
             window.setTimeout(() => {
-              missionChestShell.classList.remove("is-spinning");
-              missionChestShell.disabled = missionShell.dataset.canOpenChest !== "1";
+              clickedChest.classList.remove("is-spinning");
+              clickedChest.disabled = missionShell.dataset.canOpenChest !== "1";
+              if (clickedChest.disabled) {
+                clickedChest.setAttribute('aria-disabled', 'true');
+              } else {
+                clickedChest.removeAttribute('aria-disabled');
+              }
             }, 1250);
           });
         return;
