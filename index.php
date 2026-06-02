@@ -1324,6 +1324,461 @@ $dailyMissionsScriptPayload = [
         }
       </style>
 
+      <style>
+        #daily-missions-shell {
+          --daily-chest-front-light: #9aa0a8;
+          --daily-chest-front-dark: #5a606a;
+          --daily-chest-top-light: #c1c6cf;
+          --daily-chest-top-dark: #7f8792;
+          --daily-chest-outline: #d7dce4;
+        }
+        #daily-missions-shell .daily-mission-panel {
+          overflow: hidden;
+          border-radius: 1.55rem;
+          border: 1px solid rgba(34, 211, 238, 0.18);
+          background:
+            radial-gradient(circle at top, rgba(34, 211, 238, 0.08), transparent 34%),
+            linear-gradient(180deg, rgba(7, 12, 20, 0.98), rgba(4, 8, 14, 0.99));
+          box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28), 0 0 24px rgba(34, 211, 238, 0.06);
+        }
+        #daily-missions-shell .daily-mission-toggle {
+          gap: 1rem;
+          align-items: flex-start;
+          padding: 1rem 1.1rem;
+          border: 0;
+          background: linear-gradient(180deg, rgba(8, 15, 24, 0.96), rgba(4, 9, 16, 0.98));
+          color: #fff;
+          box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.12);
+        }
+        #daily-missions-shell .daily-mission-toggle::after {
+          margin-top: 0.25rem;
+          filter: invert(1) brightness(1.5);
+          opacity: 0.8;
+          flex-shrink: 0;
+        }
+        #daily-missions-shell .daily-mission-header-copy {
+          flex: 1 1 auto;
+          min-width: 0;
+          display: grid;
+          gap: 0.25rem;
+        }
+        #daily-missions-shell .daily-mission-header-eyebrow {
+          color: var(--daily-accent, #22d3ee);
+          font-size: 0.78rem;
+          font-weight: 800;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+        }
+        #daily-missions-shell .daily-mission-header-title {
+          font-family: 'Oxanium', sans-serif;
+          font-size: clamp(1.12rem, 2.1vw, 1.8rem);
+          line-height: 1.08;
+          color: #fff;
+        }
+        #daily-missions-shell .daily-mission-header-subtitle {
+          color: #cbd5e1;
+          font-size: 0.94rem;
+        }
+        #daily-missions-shell .daily-mission-pill {
+          flex: 0 0 auto;
+          min-width: 126px;
+          padding: 0.72rem 0.9rem;
+          border-radius: 1rem;
+          border: 1px solid rgba(34, 211, 238, 0.18);
+          background: rgba(12, 18, 28, 0.9);
+          color: #d9fbff;
+          display: grid;
+          gap: 0.12rem;
+        }
+        #daily-missions-shell .daily-mission-pill small {
+          font-size: 0.68rem;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: #94a3b8;
+        }
+        #daily-missions-shell .daily-mission-pill strong {
+          font-size: 0.92rem;
+        }
+        #daily-missions-shell .daily-mission-body {
+          padding: 1.1rem;
+          display: grid;
+          gap: 1rem;
+        }
+        #daily-missions-shell .daily-mission-layout {
+          display: grid;
+          grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+          gap: 1rem;
+          align-items: stretch;
+        }
+        @media (max-width: 991.98px) {
+          #daily-missions-shell .daily-mission-layout {
+            grid-template-columns: 1fr;
+          }
+        }
+        #daily-missions-shell .daily-mission-column {
+          min-width: 0;
+        }
+        #daily-missions-shell .daily-mission-chest-column {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        #daily-missions-shell .daily-mission-chest-stage {
+          width: 100%;
+          min-height: 26rem;
+          padding: 1rem;
+          border-radius: 1.35rem;
+          border: 1px solid rgba(34, 211, 238, 0.12);
+          background: radial-gradient(circle at center top, rgba(34, 211, 238, 0.06), transparent 42%), linear-gradient(180deg, rgba(3, 8, 15, 0.88), rgba(6, 10, 18, 0.98));
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 1rem;
+        }
+        #daily-missions-shell .daily-mission-chest-shell,
+        #daily-missions-shell .daily-mission-chest-3d {
+          position: relative;
+          width: min(100%, 270px);
+          aspect-ratio: 1.12 / 1;
+          border: 0;
+          padding: 0;
+          background: transparent;
+          display: block;
+          margin: 0 auto;
+          transform: none;
+          transition: none;
+        }
+        #daily-missions-shell .daily-mission-chest-shell {
+          cursor: pointer;
+          touch-action: manipulation;
+        }
+        #daily-missions-shell .daily-mission-chest-shell:disabled {
+          cursor: default;
+        }
+        #daily-missions-shell .daily-mission-chest-shell::before,
+        #daily-missions-shell .daily-mission-chest-3d::before {
+          content: '';
+          position: absolute;
+          inset: auto 14% 6% 14%;
+          height: 10%;
+          background: radial-gradient(circle, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.18) 42%, transparent 78%);
+          filter: blur(14px);
+          opacity: 0.7;
+          transform: translateY(30%);
+          pointer-events: none;
+        }
+        .daily-mission-modal-sparks,
+        .daily-mission-modal-lid,
+        .daily-mission-modal-band,
+        .daily-mission-modal-base,
+        .daily-mission-modal-lock {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+        }
+        .daily-mission-modal-sparks {
+          inset: 0;
+          border-radius: inherit;
+          background:
+            radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.42), transparent 26%),
+            radial-gradient(circle at 18% 24%, rgba(34, 211, 238, 0.34), transparent 18%),
+            radial-gradient(circle at 82% 24%, rgba(250, 204, 21, 0.34), transparent 18%);
+          opacity: 0;
+          transition: opacity 0.2s ease;
+          mix-blend-mode: screen;
+          z-index: 4;
+        }
+        #daily-missions-shell .daily-mission-chest-shell.is-open .daily-mission-modal-sparks,
+        #daily-missions-shell .daily-mission-chest-3d.is-open .daily-mission-modal-sparks,
+        #daily-mission-modal .daily-mission-chest-3d.is-open .daily-mission-modal-sparks {
+          opacity: 1;
+        }
+        .daily-mission-modal-base {
+          left: 15%;
+          right: 15%;
+          bottom: 14%;
+          height: 37%;
+          border-radius: 0 0 1.05rem 1.05rem;
+          border: 2px solid var(--daily-chest-outline, #d7b200);
+          background: linear-gradient(180deg, var(--daily-chest-front-light), var(--daily-chest-front-dark));
+          box-shadow:
+            inset 0 -16px 24px rgba(0, 0, 0, 0.28),
+            inset 0 8px 16px rgba(255, 255, 255, 0.08),
+            0 18px 30px rgba(0, 0, 0, 0.22);
+          z-index: 1;
+        }
+        .daily-mission-modal-lid {
+          left: 13%;
+          right: 13%;
+          top: 11%;
+          height: 33%;
+          border-radius: 2rem 2rem 0.9rem 0.9rem;
+          border: 2px solid var(--daily-chest-outline, #d7b200);
+          background: linear-gradient(180deg, var(--daily-chest-top-light), var(--daily-chest-top-dark));
+          box-shadow:
+            inset 0 8px 18px rgba(255, 255, 255, 0.08),
+            inset 0 -10px 18px rgba(0, 0, 0, 0.18),
+            0 12px 24px rgba(0, 0, 0, 0.18);
+          z-index: 2;
+        }
+        .daily-mission-modal-band.is-top {
+          left: 14%;
+          right: 14%;
+          top: 42%;
+          height: 10%;
+          border-radius: 999px;
+          background: linear-gradient(90deg, var(--daily-chest-outline), #fff4b8 30%, var(--daily-chest-outline) 70%);
+          box-shadow: 0 0 18px rgba(250, 204, 21, 0.16);
+          z-index: 3;
+        }
+        .daily-mission-modal-band.is-bottom {
+          left: 18%;
+          right: 18%;
+          bottom: 18%;
+          height: 8%;
+          border-radius: 999px;
+          background: linear-gradient(180deg, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.28));
+          z-index: 3;
+        }
+        .daily-mission-modal-lock {
+          left: 50%;
+          top: 48%;
+          width: 18%;
+          aspect-ratio: 1;
+          transform: translate(-50%, -50%);
+          border-radius: 0.45rem;
+          border: 2px solid var(--daily-chest-outline, #d7b200);
+          background: linear-gradient(180deg, #ffd84d, #d88d12);
+          box-shadow: inset 0 -4px 8px rgba(0, 0, 0, 0.2), 0 0 12px rgba(255, 214, 72, 0.25);
+          z-index: 4;
+        }
+        .daily-mission-modal-lock::after {
+          content: '';
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          width: 28%;
+          height: 36%;
+          border-radius: 999px 999px 0 0;
+          border: 2px solid rgba(110, 67, 0, 0.9);
+          border-bottom: 0;
+          transform: translate(-50%, -72%);
+          background: transparent;
+        }
+        #daily-missions-shell .daily-mission-chest-shell:not(.is-open),
+        #daily-missions-shell .daily-mission-chest-3d:not(.is-open),
+        #daily-mission-modal .daily-mission-chest-3d:not(.is-open) {
+          --daily-chest-front-light: #9096a0;
+          --daily-chest-front-dark: #535a65;
+          --daily-chest-top-light: #b8bec8;
+          --daily-chest-top-dark: #787f89;
+          --daily-chest-outline: #d7dce4;
+          filter: saturate(0.1) grayscale(1) brightness(0.9);
+        }
+        #daily-missions-shell .daily-mission-chest-shell.is-open,
+        #daily-missions-shell .daily-mission-chest-3d.is-open,
+        #daily-mission-modal .daily-mission-chest-3d.is-open {
+          filter: none;
+        }
+        #daily-missions-shell .daily-mission-chest-shell[data-level="basic"].is-open,
+        #daily-missions-shell .daily-mission-chest-3d[data-level="basic"].is-open,
+        #daily-mission-modal .daily-mission-chest-3d[data-level="basic"].is-open {
+          --daily-chest-front-light: #ac6831;
+          --daily-chest-front-dark: #6b3f1c;
+          --daily-chest-top-light: #cb8348;
+          --daily-chest-top-dark: #8a552c;
+          --daily-chest-outline: #f5c518;
+        }
+        #daily-missions-shell .daily-mission-chest-shell[data-level="intermediate"].is-open,
+        #daily-missions-shell .daily-mission-chest-3d[data-level="intermediate"].is-open,
+        #daily-mission-modal .daily-mission-chest-3d[data-level="intermediate"].is-open {
+          --daily-chest-front-light: #4a86eb;
+          --daily-chest-front-dark: #2454aa;
+          --daily-chest-top-light: #6aa2f2;
+          --daily-chest-top-dark: #3566c1;
+          --daily-chest-outline: #f5c518;
+        }
+        #daily-missions-shell .daily-mission-chest-shell[data-level="legendary"].is-open,
+        #daily-missions-shell .daily-mission-chest-3d[data-level="legendary"].is-open,
+        #daily-mission-modal .daily-mission-chest-3d[data-level="legendary"].is-open {
+          --daily-chest-front-light: #8f45d8;
+          --daily-chest-front-dark: #5e24a6;
+          --daily-chest-top-light: #ab69e8;
+          --daily-chest-top-dark: #752ec5;
+          --daily-chest-outline: #f5c518;
+        }
+        #daily-missions-shell .daily-mission-chest-copy {
+          display: grid;
+          gap: 0.25rem;
+          text-align: center;
+          max-width: 24rem;
+        }
+        #daily-missions-shell .daily-mission-chest-copy strong {
+          font-family: 'Oxanium', sans-serif;
+          font-size: 1.08rem;
+          color: #fff;
+        }
+        #daily-missions-shell .daily-mission-chest-copy span {
+          color: #cbd5e1;
+          font-size: 0.92rem;
+          line-height: 1.45;
+        }
+        #daily-missions-shell .daily-mission-tasks-column {
+          display: grid;
+          gap: 1rem;
+        }
+        #daily-missions-shell .daily-mission-task-head {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 1rem;
+          flex-wrap: wrap;
+        }
+        #daily-missions-shell .daily-mission-task-head h3 {
+          margin: 0;
+          font-family: 'Oxanium', sans-serif;
+          font-size: 1.15rem;
+          color: #fff;
+        }
+        #daily-missions-shell .daily-mission-task-list {
+          display: grid;
+          gap: 0.75rem;
+          margin: 0;
+          padding: 0;
+          list-style: none;
+        }
+        #daily-missions-shell .daily-mission-task-card {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.9rem;
+          padding: 0.95rem 1rem;
+          border-radius: 1rem;
+          border: 1px solid rgba(34, 211, 238, 0.16);
+          background: linear-gradient(180deg, rgba(9, 14, 22, 0.92), rgba(4, 8, 14, 0.98));
+          box-shadow: 0 12px 26px rgba(0, 0, 0, 0.22);
+        }
+        #daily-missions-shell .daily-mission-task-card[data-completed="1"] {
+          border-color: rgba(34, 197, 94, 0.28);
+          box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.08), 0 10px 26px rgba(0, 0, 0, 0.2);
+          opacity: 0.95;
+        }
+        #daily-missions-shell .daily-mission-task-number {
+          width: 2.15rem;
+          height: 2.15rem;
+          flex: 0 0 auto;
+          border-radius: 999px;
+          display: grid;
+          place-items: center;
+          background: rgba(34, 211, 238, 0.12);
+          color: var(--daily-accent, #22d3ee);
+          font-family: 'Oxanium', sans-serif;
+          font-weight: 700;
+        }
+        #daily-missions-shell .daily-mission-task-main {
+          min-width: 0;
+          flex: 1 1 auto;
+          display: grid;
+          gap: 0.6rem;
+        }
+        #daily-missions-shell .daily-mission-task-line {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+        #daily-missions-shell .daily-mission-task-icon {
+          width: 1.85rem;
+          height: 1.85rem;
+          border-radius: 999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(34, 211, 238, 0.1);
+          color: var(--daily-accent, #22d3ee);
+          flex: 0 0 auto;
+        }
+        #daily-missions-shell .daily-mission-task-link.daily-mission-mini-action {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.45rem;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          color: #f8fafc;
+          text-decoration: none;
+          font-family: 'Space Grotesk', sans-serif;
+          font-weight: 700;
+          line-height: 1.2;
+        }
+        #daily-missions-shell .daily-mission-task-link.daily-mission-mini-action:hover {
+          text-decoration: underline;
+          color: #fff;
+        }
+        #daily-missions-shell .daily-mission-task-link.daily-mission-mini-action.is-disabled {
+          opacity: 0.55;
+          pointer-events: none;
+        }
+        #daily-missions-shell .daily-mission-social-icons {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.45rem;
+          margin-left: auto;
+        }
+        #daily-missions-shell .daily-mission-social-icon.daily-mission-mini-action {
+          width: 2.05rem;
+          height: 2.05rem;
+          padding: 0;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          border: 1px solid rgba(34, 211, 238, 0.26);
+          background: rgba(34, 211, 238, 0.08);
+          color: #9ff7ff;
+          text-decoration: none;
+          transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+        }
+        #daily-missions-shell .daily-mission-social-icon.daily-mission-mini-action i {
+          font-size: 0.92rem;
+        }
+        #daily-missions-shell .daily-mission-social-icon.daily-mission-mini-action:hover {
+          transform: translateY(-1px);
+          background: rgba(34, 211, 238, 0.18);
+          color: #fff;
+        }
+        #daily-missions-shell .daily-mission-progress-shell {
+          width: 100%;
+          padding-top: 0.25rem;
+        }
+        #daily-missions-shell .daily-mission-progress {
+          height: 0.92rem;
+          border-radius: 999px;
+          background: rgba(15, 23, 42, 0.9);
+          border: 1px solid rgba(34, 211, 238, 0.12);
+          overflow: hidden;
+        }
+        #daily-missions-shell .daily-mission-progress .progress-bar {
+          background: linear-gradient(90deg, var(--daily-accent, #22d3ee), rgba(255, 255, 255, 0.95), var(--daily-accent, #22d3ee));
+          box-shadow: 0 0 18px var(--daily-glow, rgba(34, 211, 238, 0.28));
+        }
+        @media (max-width: 575.98px) {
+          #daily-missions-shell .daily-mission-body {
+            padding: 0.9rem;
+          }
+          #daily-missions-shell .daily-mission-chest-stage {
+            min-height: 22rem;
+            padding: 0.85rem;
+          }
+          #daily-missions-shell .daily-mission-task-card {
+            padding: 0.9rem;
+          }
+          #daily-missions-shell .daily-mission-social-icons {
+            margin-left: 0;
+          }
+        }
+      </style>
+
       <?php if ($startupPopupShouldRender): ?>
         <div id="startup-popup" class="startup-popup-shell is-hidden" data-frequency="<?= htmlspecialchars($startupPopupFrequency, ENT_QUOTES, 'UTF-8') ?>" data-should-open="<?= $startupPopupShouldOpen ? '1' : '0' ?>" data-mode="<?= htmlspecialchars($startupPopupMode, ENT_QUOTES, 'UTF-8') ?>" data-close-delay="<?= $startupPopupMode === 'gallery' ? '2000' : '0' ?>" aria-hidden="true">
           <?php if ($startupPopupMode === 'video'): ?>
@@ -1466,7 +1921,9 @@ $dailyMissionsScriptPayload = [
 
       <?php if ($dailyMissionsUserId > 0): ?>
         <?php
-          $dailyMissionExploreTarget = $dailyMissionsExploreTargets[0] ?? app_path('/juegos');
+            $dailyMissionExploreTarget = $dailyMissionsExploreTargets[0] ?? app_path('/juegos');
+            $dailyMissionSocialTargets = array_values($dailyMissionsSocialTargets);
+            $dailyMissionPrimaryShareTarget = (string) ($dailyMissionSocialTargets[0]['url'] ?? $dailyMissionExploreTarget);
           $dailyMissionShareTargetsJson = json_encode($dailyMissionsSocialTargets, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
           $dailyMissionTaskCount = max(1, count($dailyMissionsTasks));
           $dailyMissionCompletedCount = max(0, (int) ($dailyMissionsDay['completed_tasks_count'] ?? 0));
@@ -1502,7 +1959,6 @@ $dailyMissionsScriptPayload = [
                   <div class="daily-mission-header-copy">
                     <span class="daily-mission-header-eyebrow"><?php echo htmlspecialchars((string) ($dailyMissionsSettings['title'] ?? 'Mision diaria'), ENT_QUOTES, 'UTF-8'); ?></span>
                     <h3 class="daily-mission-header-title mb-0"><?php echo htmlspecialchars((string) ($dailyMissionsSettings['subtitle'] ?? 'Completa las tareas, abre el cofre y gana Win Points.'), ENT_QUOTES, 'UTF-8'); ?></h3>
-                    <span class="daily-mission-header-subtitle"><?php echo htmlspecialchars($dailyMissionRewardLabel, ENT_QUOTES, 'UTF-8'); ?></span>
                   </div>
                   <span class="daily-mission-pill text-end">
                     <small>Progreso</small>
@@ -1519,7 +1975,7 @@ $dailyMissionsScriptPayload = [
                       <div class="text-secondary small"><?php echo htmlspecialchars($dailyMissionRemainingLabel, ENT_QUOTES, 'UTF-8'); ?> | Inmunidad: <span id="daily-mission-immunity-text" class="text-warning"><?php echo number_format($dailyMissionImmunity); ?></span></div>
                     </div>
                     <div class="d-flex align-items-center gap-2 flex-wrap">
-                      <span class="badge rounded-pill text-bg-dark border border-info-subtle text-info px-3 py-2">Nivel <?php echo htmlspecialchars($dailyMissionsPalette['label'] ?? 'Basico', ENT_QUOTES, 'UTF-8'); ?></span>
+                      <span class="badge rounded-pill text-bg-dark border border-info-subtle text-info px-3 py-2">Nivel <span id="daily-mission-summary-level"><?php echo htmlspecialchars((string) ($dailyMissionsPalette['label'] ?? 'Basico'), ENT_QUOTES, 'UTF-8'); ?></span></span>
                       <span class="badge rounded-pill text-bg-dark border border-success-subtle text-success px-3 py-2" id="daily-mission-completed-badge"><?php echo htmlspecialchars($dailyMissionCompletedCount . '/' . $dailyMissionTaskCount, ENT_QUOTES, 'UTF-8'); ?></span>
                     </div>
                   </div>
@@ -1538,94 +1994,117 @@ $dailyMissionsScriptPayload = [
                       <strong id="daily-mission-summary-streak"><?php echo number_format($dailyMissionStreak); ?></strong>
                     </div>
                     <div class="daily-mission-summary-card">
-                      <small>Chest bonus</small>
-                      <strong id="daily-mission-summary-level"><?php echo htmlspecialchars($dailyMissionsPalette['label'] ?? 'Basico', ENT_QUOTES, 'UTF-8'); ?></strong>
+                      <small>Nivel del cofre</small>
+                      <strong id="daily-mission-summary-level"><?php echo htmlspecialchars((string) ($dailyMissionsPalette['label'] ?? 'Basico'), ENT_QUOTES, 'UTF-8'); ?></strong>
                     </div>
                   </div>
 
-                  <div class="daily-mission-chest-stage">
-                    <div class="daily-mission-chest-card">
-                      <button type="button" class="daily-mission-chest-shell<?php echo $dailyMissionsCanOpenChest ? ' is-open' : ''; ?>" id="daily-mission-chest-shell" data-daily-mission-chest<?php echo $dailyMissionsCanOpenChest ? '' : ' disabled'; ?> aria-label="Abrir cofre diario" <?php echo $dailyMissionsCanOpenChest ? '' : 'disabled'; ?>>
-                        <div class="daily-mission-modal-sparks"></div>
-                        <div class="daily-mission-modal-lid"></div>
-                        <div class="daily-mission-modal-band is-top"></div>
-                        <div class="daily-mission-modal-band is-bottom"></div>
-                        <div class="daily-mission-modal-base"></div>
-                        <div class="daily-mission-modal-lock"></div>
-                      </button>
-                    </div>
-                    <div class="daily-mission-prize-copy align-self-center text-md-start">
-                      <small>Estado actual</small>
-                      <strong id="daily-mission-state-title"><?php echo htmlspecialchars($dailyMissionRewardLabel, ENT_QUOTES, 'UTF-8'); ?></strong>
-                      <span id="daily-mission-state-description">El cofre se abre cuando todas las tareas del dia estan completas.</span>
-                      <div class="progress daily-mission-progress mt-2">
-                        <div id="daily-mission-progress-bar" class="progress-bar" role="progressbar" style="width: <?php echo (int) $dailyMissionsProgressPercent; ?>%;" aria-valuenow="<?php echo (int) $dailyMissionsProgressPercent; ?>" aria-valuemin="0" aria-valuemax="100"></div>
+                  <div class="daily-mission-layout">
+                    <div class="daily-mission-column daily-mission-chest-column">
+                      <div class="daily-mission-chest-stage">
+                        <button type="button" class="daily-mission-chest-shell<?php echo $dailyMissionsCanOpenChest ? ' is-open' : ''; ?>" id="daily-mission-chest-shell" data-daily-mission-chest data-level="<?php echo htmlspecialchars($dailyMissionsLevelKey, ENT_QUOTES, 'UTF-8'); ?>" aria-label="Abrir cofre diario"<?php echo $dailyMissionsCanOpenChest ? '' : ' disabled'; ?>>
+                          <div class="daily-mission-chest-3d<?php echo $dailyMissionsCanOpenChest ? ' is-open' : ''; ?>" id="daily-mission-chest-3d" data-level="<?php echo htmlspecialchars($dailyMissionsLevelKey, ENT_QUOTES, 'UTF-8'); ?>">
+                            <div class="daily-mission-modal-sparks"></div>
+                            <div class="daily-mission-modal-lid"></div>
+                            <div class="daily-mission-modal-band is-top"></div>
+                            <div class="daily-mission-modal-band is-bottom"></div>
+                            <div class="daily-mission-modal-base"></div>
+                            <div class="daily-mission-modal-lock"></div>
+                          </div>
+                        </button>
+                        <div class="daily-mission-chest-copy text-center">
+                          <small id="daily-mission-chest-label"><?php echo htmlspecialchars($dailyMissionRewardLabel, ENT_QUOTES, 'UTF-8'); ?></small>
+                          <strong id="daily-mission-chest-title"><?php echo htmlspecialchars((string) ($dailyMissionsPalette['label'] ?? 'Basico'), ENT_QUOTES, 'UTF-8'); ?></strong>
+                          <span id="daily-mission-chest-subtitle"><?php echo htmlspecialchars($dailyMissionsCanOpenChest ? 'Pulsa el cofre para reclamar el premio de hoy.' : 'Completa las tareas para desbloquearlo.', ENT_QUOTES, 'UTF-8'); ?></span>
+                          <div class="small text-secondary mt-1" id="daily-mission-state-title"><?php echo htmlspecialchars($dailyMissionRewardLabel, ENT_QUOTES, 'UTF-8'); ?></div>
+                          <div class="small text-secondary" id="daily-mission-state-description"><?php echo htmlspecialchars($dailyMissionsCanOpenChest ? 'El cofre está listo para abrirse.' : 'El cofre se abre cuando todas las tareas del día están completas.', ENT_QUOTES, 'UTF-8'); ?></div>
+                        </div>
                       </div>
+                    </div>
+
+                    <div class="daily-mission-column daily-mission-tasks-column">
+                      <div class="daily-mission-task-head">
+                        <div>
+                          <div class="small text-uppercase" style="letter-spacing:0.24em;">Lista de tareas</div>
+                          <h3 class="mb-0">Completa las tareas del día</h3>
+                        </div>
+                        <div class="text-secondary small">Solo el título se muestra en pantalla.</div>
+                      </div>
+                      <ul class="daily-mission-task-list" id="daily-mission-task-grid">
+                        <?php foreach ($dailyMissionsTasks as $taskIndex => $task): ?>
+                          <?php
+                            $taskType = (string) ($task['task_type'] ?? '');
+                            $taskCompleted = !empty($task['completed_today']);
+                            $taskDisabled = empty($task['active']);
+                            $taskDescription = trim((string) ($task['description'] ?? ''));
+                            $taskHref = app_path('/juegos');
+                            $taskTargetAttr = '';
+                            $taskRelAttr = '';
+                            $taskIconClass = 'fa-circle';
+                            $taskTimerValue = 0;
+                            switch ($taskType) {
+                              case 'login':
+                                $taskHref = app_path('/login.php');
+                                $taskIconClass = 'fa-right-to-bracket';
+                                break;
+                              case 'explore':
+                                $taskHref = $dailyMissionExploreTarget !== '' ? $dailyMissionExploreTarget : app_path('/juegos');
+                                $taskTargetAttr = '_blank';
+                                $taskRelAttr = 'noopener noreferrer';
+                                $taskIconClass = 'fa-gamepad';
+                                $taskTimerValue = (int) ($dailyMissionsSettings['explore_timer_seconds'] ?? 7);
+                                break;
+                              case 'share':
+                                $taskHref = $dailyMissionPrimaryShareTarget !== '' ? $dailyMissionPrimaryShareTarget : app_path('/juegos');
+                                $taskTargetAttr = '_blank';
+                                $taskRelAttr = 'noopener noreferrer';
+                                $taskIconClass = 'fa-share-nodes';
+                                $taskTimerValue = (int) ($dailyMissionsSettings['share_timer_seconds'] ?? 15);
+                                break;
+                              case 'purchase':
+                                $taskHref = app_path('/juegos');
+                                $taskIconClass = 'fa-cart-shopping';
+                                break;
+                            }
+                            $taskShareTargets = $taskType === 'share' ? $dailyMissionShareTargetsJson : '';
+                            $taskIconMap = [
+                              'facebook' => 'fa-brands fa-facebook-f',
+                              'instagram' => 'fa-brands fa-instagram',
+                              'tiktok' => 'fa-brands fa-tiktok',
+                            ];
+                          ?>
+                          <li class="daily-mission-task-card<?php echo $taskCompleted ? ' is-done' : ''; ?><?php echo $taskDisabled ? ' is-disabled' : ''; ?>" data-mission-key="<?php echo htmlspecialchars((string) ($task['mission_key'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-mission-type="<?php echo htmlspecialchars($taskType, ENT_QUOTES, 'UTF-8'); ?>" data-mission-timer="<?php echo $taskTimerValue; ?>" data-target-url="<?php echo htmlspecialchars((string) $taskHref, ENT_QUOTES, 'UTF-8'); ?>" data-share-targets="<?php echo htmlspecialchars((string) $taskShareTargets, ENT_QUOTES, 'UTF-8'); ?>" data-completed="<?php echo $taskCompleted ? '1' : '0'; ?>" data-disabled="<?php echo $taskDisabled ? '1' : '0'; ?>">
+                            <div class="daily-mission-task-number"><?php echo str_pad((string) ($taskIndex + 1), 2, '0', STR_PAD_LEFT); ?></div>
+                            <div class="daily-mission-task-main">
+                              <div class="daily-mission-task-line">
+                                <span class="daily-mission-task-icon"><i class="fa-solid <?php echo htmlspecialchars($taskIconClass, ENT_QUOTES, 'UTF-8'); ?>" aria-hidden="true"></i></span>
+                                <a href="<?php echo htmlspecialchars((string) $taskHref, ENT_QUOTES, 'UTF-8'); ?>" class="daily-mission-mini-action daily-mission-task-link<?php echo $taskCompleted ? ' is-primary' : ''; ?>" data-task-key="<?php echo htmlspecialchars((string) ($task['mission_key'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-task-timer="<?php echo $taskTimerValue; ?>" data-target-url="<?php echo htmlspecialchars((string) $taskHref, ENT_QUOTES, 'UTF-8'); ?>" data-bs-toggle="tooltip" data-bs-placement="top" title="<?php echo htmlspecialchars((string) $taskDescription, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $taskDisabled ? ' aria-disabled="true" tabindex="-1"' : ''; ?><?php echo $taskTargetAttr !== '' ? ' target="' . htmlspecialchars((string) $taskTargetAttr, ENT_QUOTES, 'UTF-8') . '"' : ''; ?><?php echo $taskRelAttr !== '' ? ' rel="' . htmlspecialchars((string) $taskRelAttr, ENT_QUOTES, 'UTF-8') . '"' : ''; ?>><?php echo htmlspecialchars((string) ($task['title'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></a>
+                                <?php if ($taskType === 'share'): ?>
+                                  <div class="daily-mission-social-icons">
+                                    <?php foreach ($dailyMissionsSocialTargets as $socialKey => $socialTarget): ?>
+                                      <?php $socialIconClass = $taskIconMap[$socialKey] ?? 'fa-circle'; ?>
+                                      <a href="<?php echo htmlspecialchars((string) ($socialTarget['url'] ?? $taskHref), ENT_QUOTES, 'UTF-8'); ?>" class="daily-mission-mini-action daily-mission-social-icon" data-daily-mission-social="<?php echo htmlspecialchars((string) $socialKey, ENT_QUOTES, 'UTF-8'); ?>" data-target-url="<?php echo htmlspecialchars((string) ($socialTarget['url'] ?? $taskHref), ENT_QUOTES, 'UTF-8'); ?>" data-task-key="<?php echo htmlspecialchars((string) ($task['mission_key'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-task-timer="<?php echo (int) ($dailyMissionsSettings['share_timer_seconds'] ?? 15); ?>" data-bs-toggle="tooltip" data-bs-placement="top" title="<?php echo htmlspecialchars((string) ($socialTarget['label'] ?? ucfirst($socialKey)), ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer"<?php echo $taskDisabled ? ' aria-disabled="true" tabindex="-1"' : ''; ?>>
+                                        <i class="<?php echo htmlspecialchars($socialIconClass, ENT_QUOTES, 'UTF-8'); ?>" aria-hidden="true"></i>
+                                        <span class="visually-hidden"><?php echo htmlspecialchars((string) ($socialTarget['label'] ?? ucfirst($socialKey)), ENT_QUOTES, 'UTF-8'); ?></span>
+                                      </a>
+                                    <?php endforeach; ?>
+                                  </div>
+                                <?php endif; ?>
+                              </div>
+                            </div>
+                          </li>
+                        <?php endforeach; ?>
+                      </ul>
                     </div>
                   </div>
 
-                  <div class="daily-mission-task-grid" id="daily-mission-task-grid">
-                    <?php foreach ($dailyMissionsTasks as $taskIndex => $task): ?>
-                      <?php
-                        $taskType = (string) ($task['task_type'] ?? '');
-                        $taskCompleted = !empty($task['completed_today']);
-                        $taskDisabled = empty($task['active']);
-                        $taskPoints = max(0, (int) ($task['base_points'] ?? 0));
-                        $taskTimer = max(0, (int) ($task['timer_seconds'] ?? 0));
-                        $taskActionLabel = trim((string) ($task['action_label'] ?? 'Realizar'));
-                        $taskActionUrl = trim((string) ($task['action_url'] ?? ''));
-                        if ($taskType === 'explore' && $dailyMissionExploreTarget !== '') {
-                          $taskActionUrl = $dailyMissionExploreTarget;
-                        } elseif ($taskType === 'share') {
-                          $taskActionUrl = '#';
-                        } elseif ($taskType === 'purchase' && $taskActionUrl === '') {
-                          $taskActionUrl = app_path('/juegos');
-                        }
-                        $taskBadgeText = daily_missions_task_type_label($taskType);
-                        $taskShareTargets = $taskType === 'share' ? $dailyMissionShareTargetsJson : '';
-                      ?>
-                      <div class="daily-mission-task-card<?php echo $taskCompleted ? ' is-done' : ''; ?><?php echo $taskDisabled ? ' is-disabled' : ''; ?>" data-mission-key="<?php echo htmlspecialchars((string) ($task['mission_key'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-mission-type="<?php echo htmlspecialchars($taskType, ENT_QUOTES, 'UTF-8'); ?>" data-mission-timer="<?php echo $taskTimer; ?>" data-target-url="<?php echo htmlspecialchars($taskActionUrl, ENT_QUOTES, 'UTF-8'); ?>" data-share-targets="<?php echo htmlspecialchars($taskShareTargets, ENT_QUOTES, 'UTF-8'); ?>" data-completed="<?php echo $taskCompleted ? '1' : '0'; ?>" data-disabled="<?php echo $taskDisabled ? '1' : '0'; ?>">
-                        <div class="daily-mission-task-kicker">
-                          <div class="daily-mission-task-number"><?php echo str_pad((string) ($taskIndex + 1), 2, '0', STR_PAD_LEFT); ?></div>
-                          <span class="daily-mission-task-state<?php echo $taskCompleted ? ' is-done' : ''; ?>"><?php echo $taskCompleted ? 'Completada' : ($taskDisabled ? 'Inactiva' : 'Activa'); ?></span>
-                        </div>
-                        <h3 class="daily-mission-task-title"><?php echo htmlspecialchars((string) ($task['title'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></h3>
-                        <p class="daily-mission-task-description mb-0"><?php echo htmlspecialchars((string) ($task['description'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></p>
-                        <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
-                          <span class="badge rounded-pill text-bg-dark border border-info-subtle text-info">+<?php echo number_format($taskPoints); ?> WP</span>
-                          <span class="text-secondary small text-uppercase" style="letter-spacing:0.18em;"><?php echo htmlspecialchars($taskBadgeText, ENT_QUOTES, 'UTF-8'); ?></span>
-                        </div>
-                        <div class="daily-mission-task-actions">
-                          <?php if ($taskType === 'share'): ?>
-                            <?php foreach ($dailyMissionsSocialTargets as $socialKey => $socialTarget): ?>
-                              <button type="button" class="daily-mission-mini-action<?php echo $taskCompleted ? ' is-primary' : ''; ?>" data-daily-mission-social="<?php echo htmlspecialchars($socialKey, ENT_QUOTES, 'UTF-8'); ?>" data-target-url="<?php echo htmlspecialchars((string) ($socialTarget['url'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-task-key="<?php echo htmlspecialchars((string) ($task['mission_key'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-task-timer="<?php echo (int) ($taskTimer > 0 ? $taskTimer : (int) ($dailyMissionsSettings['share_timer_seconds'] ?? 15)); ?>"<?php echo $taskCompleted || $taskDisabled || empty($socialTarget['url']) ? ' disabled' : ''; ?>>
-                                <?php echo htmlspecialchars((string) ($socialTarget['label'] ?? ucfirst($socialKey)), ENT_QUOTES, 'UTF-8'); ?>
-                              </button>
-                            <?php endforeach; ?>
-                          <?php elseif ($taskType === 'login'): ?>
-                            <span class="daily-mission-mini-action is-primary<?php echo $taskCompleted ? '' : ' opacity-75'; ?>" aria-disabled="true"><?php echo $taskCompleted ? 'Bono reclamado' : 'Se activa al iniciar sesion'; ?></span>
-                          <?php else: ?>
-                            <a href="<?php echo htmlspecialchars($taskActionUrl !== '' ? $taskActionUrl : app_path('/juegos'), ENT_QUOTES, 'UTF-8'); ?>" class="daily-mission-mini-action<?php echo $taskCompleted ? ' is-primary' : ''; ?>" data-task-key="<?php echo htmlspecialchars((string) ($task['mission_key'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-task-timer="<?php echo $taskTimer; ?>"<?php echo $taskDisabled ? ' aria-disabled="true" tabindex="-1"' : ''; ?>><?php echo htmlspecialchars($taskActionLabel !== '' ? $taskActionLabel : 'Abrir', ENT_QUOTES, 'UTF-8'); ?></a>
-                          <?php endif; ?>
-                        </div>
-                      </div>
-                    <?php endforeach; ?>
+                  <div class="daily-mission-progress-shell">
+                    <div class="progress daily-mission-progress">
+                      <div id="daily-mission-progress-bar" class="progress-bar" role="progressbar" style="width: <?php echo (int) $dailyMissionsProgressPercent; ?>%;" aria-valuenow="<?php echo (int) $dailyMissionsProgressPercent; ?>" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
-        </section>
-      <?php else: ?>
-        <section class="mt-5">
-          <div class="rounded-4 border border-info-subtle p-4" style="background:linear-gradient(180deg, rgba(8,14,24,0.96), rgba(5,9,16,0.98));box-shadow:0 16px 40px rgba(0,0,0,0.32);">
-            <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
-              <div>
-                <div class="small text-uppercase text-info" style="letter-spacing:0.28em;">Mision diaria</div>
-                <h2 class="h4 mb-1 text-white">Activa tus misiones diarias iniciando sesión</h2>
-                <p class="text-secondary mb-0">Inicia sesión para ver las tareas, ganar Win Points y abrir el cofre.</p>
-              </div>
-              <a href="<?php echo htmlspecialchars(app_path('/login.php'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-info fw-bold px-4 rounded-pill">Iniciar sesión</a>
             </div>
           </div>
         </section>
@@ -2070,6 +2549,11 @@ SCRIPT,
         const content = slide.querySelector(".promo-slide-content");
         if (content) {
           content.style.opacity = offset === 0 ? "1" : "0";
+        }
+
+        const activeElement = document.activeElement;
+        if (offset !== 0 && activeElement && typeof activeElement.blur === "function" && slide.contains(activeElement)) {
+          activeElement.blur();
         }
 
         slide.setAttribute("aria-hidden", offset === 0 ? "false" : "true");

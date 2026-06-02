@@ -131,6 +131,8 @@ $loggedUserId = 0;
 $loggedUserEmail = '';
 $loggedUserLastPurchaseIdentifier = '';
 $loggedUserLastPurchasePhone = '';
+$loggedUserRole = '';
+$canSimulateDailyMissionPurchase = false;
 $paymentDifferenceEnabled = false;
 $activePaymentDifferenceCredit = null;
 tenant_start_session();
@@ -140,6 +142,8 @@ if (!empty($_SESSION['auth_user']['id'])) {
 if (!empty($_SESSION['auth_user']['email'])) {
   $loggedUserEmail = (string) $_SESSION['auth_user']['email'];
 }
+$loggedUserRole = strtolower(trim((string) ($_SESSION['auth_user']['rol'] ?? '')));
+$canSimulateDailyMissionPurchase = in_array($loggedUserRole, ['admin', 'root'], true);
 $paymentDifferenceEnabled = payment_difference_feature_enabled();
 $activePaymentDifferenceCredit = $paymentDifferenceEnabled ? payment_difference_get_credit() : null;
 payment_methods_ensure_table();
@@ -905,6 +909,12 @@ include __DIR__ . "/includes/header.php";
           </div>
         </div>
         <button type="button" id="payment-submit-btn" class="btn btn-info w-100 fw-bold text-uppercase py-3 payment-submit-btn-theme<?= $paymentWindowConfigEnabled ? ' payment-window-theme-enabled' : '' ?>">Confirmar / Recargar</button>
+        <?php if ($canSimulateDailyMissionPurchase): ?>
+        <button type="button" id="daily-mission-simulate-purchase-btn" class="btn btn-warning w-100 fw-bold text-uppercase py-3 mt-3">
+          <i class="fa-solid fa-vial-circle-check me-2" aria-hidden="true"></i>Simular compra
+        </button>
+        <div class="small text-warning text-center mt-2">Solo completa la tarea diaria de compra.</div>
+        <?php endif; ?>
         <button type="button" id="payment-cancel-order-btn" class="btn btn-danger w-100 fw-bold text-uppercase py-3 mt-3 payment-cancel-btn-theme<?= $paymentWindowConfigEnabled ? ' payment-window-theme-enabled' : '' ?>">Cancelar Orden</button>
       </div>
     </div>
@@ -4488,6 +4498,7 @@ include __DIR__ . "/includes/header.php";
   const paymentDifferenceFeatureEnabled = <?= $paymentDifferenceEnabled ? 'true' : 'false' ?>;
   const gameEntryWindowEnabled = <?= !empty($gameEntryWindowPayload['enabled']) ? 'true' : 'false' ?>;
   const currentGameName = <?= json_encode((string) ($game['nombre'] ?? ''), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+  const dailyMissionSimulatePurchaseButton = document.getElementById('daily-mission-simulate-purchase-btn');
   const paymentSuccessContent = {
     title: <?php echo json_encode($paymentSuccessTitle, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>,
     extraMessage: <?php echo json_encode($paymentSuccessExtraMessage, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>
@@ -10249,6 +10260,36 @@ include __DIR__ . "/includes/header.php";
                     if (activePaymentOrder && activePaymentOrder.expiresAtMs <= Date.now()) {
                       expireActiveOrder();
                     }
+                  });
+                });
+              }
+
+              if (dailyMissionSimulatePurchaseButton) {
+                dailyMissionSimulatePurchaseButton.addEventListener('click', function() {
+                  const originalContent = dailyMissionSimulatePurchaseButton.innerHTML;
+                  dailyMissionSimulatePurchaseButton.disabled = true;
+                  dailyMissionSimulatePurchaseButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Simulando...';
+
+                  fetch(buildAppUrl('/api/daily_missions.php'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'action=complete_task&mission_key=purchase_any'
+                  })
+                  .then(async (response) => {
+                    const data = await parseApiJsonResponse(response, 'No se pudo simular la compra en este momento.');
+                    if (!response.ok || !data.ok) {
+                      throw new Error((data && data.message) ? data.message : 'No se pudo simular la compra.');
+                    }
+
+                    const result = data && data.result ? data.result : null;
+                    showToast(result && result.already_completed ? 'La tarea diaria de compra ya estaba completada.' : 'Compra simulada: tarea diaria completada.', 'success');
+                  })
+                  .catch((error) => {
+                    showToast(normalizeApiRequestErrorMessage(error, 'No se pudo simular la compra en este momento.'), 'error');
+                  })
+                  .finally(() => {
+                    dailyMissionSimulatePurchaseButton.disabled = false;
+                    dailyMissionSimulatePurchaseButton.innerHTML = originalContent;
                   });
                 });
               }
