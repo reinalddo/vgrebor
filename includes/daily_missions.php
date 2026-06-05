@@ -585,6 +585,8 @@ if (!function_exists('daily_missions_normalize_task_row')) {
             'accent_color' => trim((string) ($row['accent_color'] ?? '')),
             'icon_label' => trim((string) ($row['icon_label'] ?? '')),
             'reward_reason' => trim((string) ($row['reward_reason'] ?? '')),
+            'day20_multiplier' => isset($row['day20_multiplier']) && $row['day20_multiplier'] !== null ? (float) $row['day20_multiplier'] : null,
+            'month_end_multiplier' => isset($row['month_end_multiplier']) && $row['month_end_multiplier'] !== null ? (float) $row['month_end_multiplier'] : null,
             'created_at' => trim((string) ($row['created_at'] ?? '')),
             'updated_at' => trim((string) ($row['updated_at'] ?? '')),
         ];
@@ -735,6 +737,18 @@ if (!function_exists('daily_missions_ensure_schema')) {
                 INDEX idx_win_points_daily_mission_tasks_active (active, sort_order)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         );
+
+        // ADD COLUMN IF NOT EXISTS no está disponible en MySQL 5.x — verificar via INFORMATION_SCHEMA
+        $dbName = $mysqli->query("SELECT DATABASE()")->fetch_row()[0];
+        $colCheck = $mysqli->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='$dbName' AND TABLE_NAME='win_points_daily_mission_tasks' AND COLUMN_NAME IN ('day20_multiplier','month_end_multiplier')");
+        $existingCols = [];
+        while ($colRow = $colCheck->fetch_row()) { $existingCols[] = $colRow[0]; }
+        if (!in_array('day20_multiplier', $existingCols)) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_tasks ADD COLUMN day20_multiplier DECIMAL(8,2) NULL DEFAULT NULL");
+        }
+        if (!in_array('month_end_multiplier', $existingCols)) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_tasks ADD COLUMN month_end_multiplier DECIMAL(8,2) NULL DEFAULT NULL");
+        }
 
         $mysqli->query(
             "CREATE TABLE IF NOT EXISTS win_points_daily_mission_prizes (
@@ -1027,13 +1041,15 @@ if (!function_exists('daily_missions_resolve_level_key')) {
 }
 
 if (!function_exists('daily_missions_resolve_task_multiplier')) {
-    function daily_missions_resolve_task_multiplier(array $settings, int $streakDays, string $missionDate): float {
+    function daily_missions_resolve_task_multiplier(array $settings, int $streakDays, string $missionDate, array $task = []): float {
         if (daily_missions_is_month_end($missionDate)) {
-            return max(0.0, (float) ($settings['month_end_multiplier'] ?? 1));
+            $taskMult = isset($task['month_end_multiplier']) && $task['month_end_multiplier'] !== null ? (float) $task['month_end_multiplier'] : null;
+            return $taskMult !== null ? max(0.0, $taskMult) : max(0.0, (float) ($settings['month_end_multiplier'] ?? 1));
         }
 
         if ($streakDays === 20) {
-            return max(0.0, (float) ($settings['day20_multiplier'] ?? 1));
+            $taskMult = isset($task['day20_multiplier']) && $task['day20_multiplier'] !== null ? (float) $task['day20_multiplier'] : null;
+            return $taskMult !== null ? max(0.0, $taskMult) : max(0.0, (float) ($settings['day20_multiplier'] ?? 1));
         }
 
         return 1.0;
@@ -1043,7 +1059,7 @@ if (!function_exists('daily_missions_resolve_task_multiplier')) {
 if (!function_exists('daily_missions_calculate_reward_points')) {
     function daily_missions_calculate_reward_points(array $task, array $settings, int $streakDays, string $missionDate): int {
         $basePoints = max(0, (int) ($task['base_points'] ?? 0));
-        $multiplier = daily_missions_resolve_task_multiplier($settings, $streakDays, $missionDate);
+        $multiplier = daily_missions_resolve_task_multiplier($settings, $streakDays, $missionDate, $task);
 
         return (int) round($basePoints * $multiplier);
     }
