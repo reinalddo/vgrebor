@@ -46,6 +46,7 @@ $menuScript = <<<'SCRIPT'
 <script>
   const __ADMIN_WA_BASE_URL__ = "__ADMIN_WA_BASE_URL__";
   const __AUTH_USER_DISPLAY_NAME__ = "__AUTH_USER_DISPLAY_NAME__";
+  const __WP_NAME__ = "__WP_NAME__";
   const menuToggle = document.getElementById("menu-toggle");
   const menuOverlay = document.getElementById("menu-overlay");
   const menuPanel = document.getElementById("menu-panel");
@@ -243,7 +244,7 @@ $menuScript = <<<'SCRIPT'
 
   const dailyMissionRewardLabel = (prizeType) => {
     const labels = {
-      winpoints: "Win Points",
+      winpoints: __WP_NAME__,
       coupon: "Cupón",
       immunity: "Escudo",
       streaming_ticket: "Ticket de streaming",
@@ -282,7 +283,7 @@ $menuScript = <<<'SCRIPT'
 
   const renderDailyMissionHistoryCard = (entry) => {
     const dateParts = formatMissionDateParts(entry.created_at || entry.claimed_at || entry.resolved_at || "");
-    const prizeLabel = entry.prize_label || dailyMissionRewardLabel(entry.prize_type);
+    const prizeLabel = dailyMissionRewardLabel(entry.prize_type);
     const reason = entry.reason || entry.mission_key || "Premio diario";
     const status = dailyMissionRewardStatusLabel(entry.reward_status);
     const reclaimBtn = buildStreamingReclaimBtn(entry);
@@ -290,7 +291,6 @@ $menuScript = <<<'SCRIPT'
       <article class="rounded-4 border border-info-subtle p-3" style="background:rgba(8,15,24,0.78);box-shadow:0 0 16px rgba(34,211,238,0.08);">
         <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
           <div>
-            <div class="small text-uppercase text-info" style="letter-spacing:0.14em;">${escapeHtml(dailyMissionRewardLabel(entry.prize_type))}</div>
             <div class="small text-secondary">${escapeHtml(dateParts.date)}${dateParts.time ? ` · ${escapeHtml(dateParts.time)}` : ""}</div>
           </div>
           <span class="badge rounded-pill text-bg-dark border border-info-subtle text-info">${escapeHtml(status)}</span>
@@ -318,13 +318,13 @@ $menuScript = <<<'SCRIPT'
 
   const renderDailyMissionHistoryRow = (entry) => {
     const dateParts = formatMissionDateParts(entry.created_at || entry.claimed_at || entry.resolved_at || "");
-    const prizeLabel = entry.prize_label || dailyMissionRewardLabel(entry.prize_type);
+    const prizeLabel = dailyMissionRewardLabel(entry.prize_type);
     const reason = entry.reason || entry.mission_key || "Premio diario";
     const status = dailyMissionRewardStatusLabel(entry.reward_status);
     const reclaimBtn = buildStreamingReclaimBtn(entry);
     return `
       <tr>
-        <td class="bg-transparent border-bottom border-info-subtle text-light fw-semibold">${escapeHtml(prizeLabel)}<div class="small text-secondary fw-normal">${escapeHtml(dailyMissionRewardLabel(entry.prize_type))}</div></td>
+        <td class="bg-transparent border-bottom border-info-subtle text-light fw-semibold">${escapeHtml(prizeLabel)}</td>
         <td class="bg-transparent border-bottom border-info-subtle text-light">${escapeHtml(reason)}</td>
         <td class="bg-transparent border-bottom border-info-subtle"><span class="badge rounded-pill text-bg-dark border border-info-subtle text-info">${escapeHtml(status)}</span></td>
         <td class="bg-transparent border-bottom border-info-subtle text-secondary">${escapeHtml(dateParts.date)}</td>
@@ -448,7 +448,7 @@ $menuScript = <<<'SCRIPT'
 
     const config = payload.config || {};
     const summary = payload.summary || {};
-    const programName = config.name || "Win Points";
+    const programName = config.name || __WP_NAME__;
 
     if (userMenuRewardsName) {
       userMenuRewardsName.textContent = programName;
@@ -934,9 +934,12 @@ $adminWaBaseUrl     = store_config_whatsapp_link($whatsappValue);
 $adminWaBaseUrlJs   = json_encode($adminWaBaseUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 $footerAuthName     = trim((string) ($_SESSION['auth_user']['nombre'] ?? ($_SESSION['auth_user']['email'] ?? '')));
 $footerAuthNameJs   = json_encode($footerAuthName, JSON_UNESCAPED_UNICODE);
+$footerWpName   = win_points_program_name();
+$footerWpNameJs = json_encode($footerWpName, JSON_UNESCAPED_UNICODE);
 $menuScript = str_replace('__ACCOUNT_API_URL__', $accountApiUrlJs, $menuScript);
 $menuScript = str_replace('"__ADMIN_WA_BASE_URL__"', $adminWaBaseUrlJs, $menuScript);
 $menuScript = str_replace('"__AUTH_USER_DISPLAY_NAME__"', $footerAuthNameJs, $menuScript);
+$menuScript = str_replace('"__WP_NAME__"', $footerWpNameJs, $menuScript);
 
 $rechargeNotificationsScript = <<<'SCRIPT'
 <script>

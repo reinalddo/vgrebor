@@ -149,7 +149,7 @@ function admin_missions_status_badge(string $status): array {
 
 function admin_missions_prize_label(string $prizeType): string {
     $labels = [
-        'winpoints'        => 'Win Points',
+        'winpoints'        => win_points_program_name(),
         'coupon'           => 'Cupón',
         'immunity'         => 'Escudo',
         'streaming_ticket' => 'Ticket streaming',
@@ -466,7 +466,7 @@ include __DIR__ . '/includes/header.php';
       </div>
       <div class="d-flex flex-wrap gap-2">
         <a href="<?php echo htmlspecialchars(app_path('/admin/dashboard'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info rounded-pill fw-bold px-4">Dashboard</a>
-        <a href="<?php echo htmlspecialchars(app_path('/admin/win-points'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info rounded-pill fw-bold px-4">Win Points</a>
+        <a href="<?php echo htmlspecialchars(app_path('/admin/win-points'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info rounded-pill fw-bold px-4"><?php echo htmlspecialchars(win_points_program_name(), ENT_QUOTES, 'UTF-8'); ?></a>
         <a href="<?php echo htmlspecialchars(app_path('/admin/cupones'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info rounded-pill fw-bold px-4">Cupones</a>
       </div>
     </div>
@@ -840,7 +840,7 @@ include __DIR__ . '/includes/header.php';
 
                       <?php if ($pt === 'winpoints'): ?>
                         <div class="col-6">
-                          <label class="missions-admin-label mb-1">Cantidad WP</label>
+                          <label class="missions-admin-label mb-1">Cantidad <?php echo htmlspecialchars(win_points_program_name(), ENT_QUOTES, 'UTF-8'); ?></label>
                           <input type="number" class="missions-form-input prize-points" min="0" max="99999"
                                  value="<?php echo (int) ($prize['points_amount'] ?? 0); ?>">
                         </div>

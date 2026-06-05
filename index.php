@@ -1998,7 +1998,7 @@ $dailyMissionsScriptPayload = [
                 <div class="daily-mission-body">
                   <div class="daily-mission-topline">
                     <div class="daily-mission-topline-copy">
-                      <div class="small text-uppercase" style="letter-spacing:0.28em;">Recompensas por Win Points</div>
+                      <div class="small text-uppercase" style="letter-spacing:0.28em;">Recompensas por <?php echo htmlspecialchars(win_points_program_name(), ENT_QUOTES, 'UTF-8'); ?></div>
                       <h3 class="mb-0">Racha actual: <span id="daily-mission-streak-text" class="text-info"><?php echo number_format($dailyMissionStreak); ?></span> dias</h3>
                       <div class="text-secondary small"><?php echo htmlspecialchars($dailyMissionRemainingLabel, ENT_QUOTES, 'UTF-8'); ?> | Inmunidad: <span id="daily-mission-immunity-text" class="text-warning"><?php echo number_format($dailyMissionImmunity); ?></span></div>
                     </div>
