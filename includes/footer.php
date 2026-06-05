@@ -44,6 +44,8 @@ $hasWhatsappChannel = $whatsappChannelFloatingEnabled && store_config_is_valid_s
 
 $menuScript = <<<'SCRIPT'
 <script>
+  const __ADMIN_WA_BASE_URL__ = "__ADMIN_WA_BASE_URL__";
+  const __AUTH_USER_DISPLAY_NAME__ = "__AUTH_USER_DISPLAY_NAME__";
   const menuToggle = document.getElementById("menu-toggle");
   const menuOverlay = document.getElementById("menu-overlay");
   const menuPanel = document.getElementById("menu-panel");
@@ -283,6 +285,7 @@ $menuScript = <<<'SCRIPT'
     const prizeLabel = entry.prize_label || dailyMissionRewardLabel(entry.prize_type);
     const reason = entry.reason || entry.mission_key || "Premio diario";
     const status = dailyMissionRewardStatusLabel(entry.reward_status);
+    const reclaimBtn = buildStreamingReclaimBtn(entry);
     return `
       <article class="rounded-4 border border-info-subtle p-3" style="background:rgba(8,15,24,0.78);box-shadow:0 0 16px rgba(34,211,238,0.08);">
         <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
@@ -294,8 +297,23 @@ $menuScript = <<<'SCRIPT'
         </div>
         <div class="text-light fw-semibold mb-1">${escapeHtml(prizeLabel)}</div>
         <div class="small text-secondary mb-1"><strong class="text-light">Motivo:</strong> ${escapeHtml(reason)}</div>
-        <div class="small text-info">Estado: ${escapeHtml(status)}</div>
+        ${reclaimBtn ? `<div class="mt-2">${reclaimBtn}</div>` : `<div class="small text-info">Estado: ${escapeHtml(status)}</div>`}
       </article>`;
+  };
+
+  const buildStreamingReclaimBtn = (entry) => {
+    if (entry.prize_type !== 'streaming_ticket' || entry.reward_status !== 'pending') return '';
+    const waBase = __ADMIN_WA_BASE_URL__;
+    if (!waBase) return '';
+    const userName = __AUTH_USER_DISPLAY_NAME__ || 'usuario';
+    const levelLabels = { basic: 'Básico', intermediate: 'Intermedio', legendary: 'Legendario' };
+    const levelLabel = levelLabels[entry.level_key] || entry.level_key || 'Básico';
+    const msg = encodeURIComponent(`Hola soy el usuario ${userName} y gané una cuenta streaming del cofre ${levelLabel}`);
+    return `<a href="${waBase}?text=${msg}" target="_blank" rel="noopener"
+      style="display:inline-flex;align-items:center;gap:.4rem;background:#25d366;color:#fff;border:none;border-radius:.6rem;padding:.32rem .75rem;font-size:.78rem;font-weight:700;text-decoration:none;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.136.558 4.14 1.534 5.874L0 24l6.335-1.652A11.955 11.955 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.882a9.876 9.876 0 01-5.03-1.375l-.36-.214-3.732.977.995-3.633-.235-.374A9.862 9.862 0 012.118 12C2.118 6.531 6.531 2.118 12 2.118c5.469 0 9.882 4.413 9.882 9.882 0 5.469-4.413 9.882-9.882 9.882z"/></svg>
+      Reclamar
+    </a>`;
   };
 
   const renderDailyMissionHistoryRow = (entry) => {
@@ -303,6 +321,7 @@ $menuScript = <<<'SCRIPT'
     const prizeLabel = entry.prize_label || dailyMissionRewardLabel(entry.prize_type);
     const reason = entry.reason || entry.mission_key || "Premio diario";
     const status = dailyMissionRewardStatusLabel(entry.reward_status);
+    const reclaimBtn = buildStreamingReclaimBtn(entry);
     return `
       <tr>
         <td class="bg-transparent border-bottom border-info-subtle text-light fw-semibold">${escapeHtml(prizeLabel)}<div class="small text-secondary fw-normal">${escapeHtml(dailyMissionRewardLabel(entry.prize_type))}</div></td>
@@ -310,6 +329,7 @@ $menuScript = <<<'SCRIPT'
         <td class="bg-transparent border-bottom border-info-subtle"><span class="badge rounded-pill text-bg-dark border border-info-subtle text-info">${escapeHtml(status)}</span></td>
         <td class="bg-transparent border-bottom border-info-subtle text-secondary">${escapeHtml(dateParts.date)}</td>
         <td class="bg-transparent border-bottom border-info-subtle text-secondary">${escapeHtml(dateParts.time)}</td>
+        <td class="bg-transparent border-bottom border-info-subtle">${reclaimBtn}</td>
       </tr>`;
   };
 
@@ -548,15 +568,106 @@ $menuScript = <<<'SCRIPT'
       const hasTransactions = transactions.length > 0;
       const hasMissionHistory = missionHistory.length > 0;
 
+      // ─── WP Movements: paginación + filtros ──────────────────────────────
+      const WP_PER_PAGE = 10;
+      let wpCurrentPage = 1;
+      let wpCurrentFilter = 'all';
+
+      const getFilteredTx = () => wpCurrentFilter === 'all'
+        ? transactions
+        : transactions.filter(t => (t.source_type || t.type || '') === wpCurrentFilter);
+
+      const renderWpPage = () => {
+        const filtered = getFilteredTx();
+        const totalPages = Math.max(1, Math.ceil(filtered.length / WP_PER_PAGE));
+        wpCurrentPage = Math.min(Math.max(1, wpCurrentPage), totalPages);
+        const slice = filtered.slice((wpCurrentPage - 1) * WP_PER_PAGE, wpCurrentPage * WP_PER_PAGE);
+        userRewardsTableBody.innerHTML = slice.map(renderRewardTransactionRow).join("");
+        userRewardsCards.innerHTML = slice.map(renderRewardTransactionCard).join("");
+        const pageInfo = document.getElementById('rewards-page-info');
+        if (pageInfo) pageInfo.textContent = `Página ${wpCurrentPage} de ${totalPages} (${filtered.length} movimientos)`;
+        const pagination = document.getElementById('user-rewards-pagination');
+        const prevBtn = document.getElementById('rewards-prev-page');
+        const nextBtn = document.getElementById('rewards-next-page');
+        if (pagination) {
+          if (filtered.length > WP_PER_PAGE) { pagination.classList.remove('d-none'); pagination.style.display = 'flex'; }
+          else { pagination.classList.add('d-none'); }
+        }
+        if (prevBtn)  { prevBtn.disabled  = wpCurrentPage <= 1; }
+        if (nextBtn)  { nextBtn.disabled  = wpCurrentPage >= totalPages; }
+      };
+
       if (hasTransactions) {
-        userRewardsTableBody.innerHTML = transactions.map(renderRewardTransactionRow).join("");
-        userRewardsCards.innerHTML = transactions.map(renderRewardTransactionCard).join("");
+        const filterBar = document.getElementById('user-rewards-filter-bar');
+        if (filterBar) {
+          filterBar.classList.remove('d-none');
+          filterBar.querySelectorAll('[data-wp-filter]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              filterBar.querySelectorAll('[data-wp-filter]').forEach(b => b.classList.remove('active'));
+              btn.classList.add('active');
+              wpCurrentFilter = btn.dataset.wpFilter;
+              wpCurrentPage = 1;
+              renderWpPage();
+            });
+          });
+        }
+        const prevBtnWp = document.getElementById('rewards-prev-page');
+        const nextBtnWp = document.getElementById('rewards-next-page');
+        if (prevBtnWp) prevBtnWp.addEventListener('click', () => { wpCurrentPage--; renderWpPage(); });
+        if (nextBtnWp) nextBtnWp.addEventListener('click', () => { wpCurrentPage++; renderWpPage(); });
+        renderWpPage();
         showElement(userRewardsTransactionsList);
       }
 
       if (hasMissionHistory) {
-        userMissionsHistoryTableBody.innerHTML = missionHistory.map(renderDailyMissionHistoryRow).join("");
-        userMissionsHistoryCards.innerHTML = missionHistory.map(renderDailyMissionHistoryCard).join("");
+        const MISSIONS_PER_PAGE = 10;
+        let missionsCurrentPage = 1;
+        let missionsCurrentFilter = 'all';
+
+        const getFilteredMissions = () => {
+          if (missionsCurrentFilter === 'task') return missionHistory.filter(e => !e.level_key);
+          if (missionsCurrentFilter === 'chest') return missionHistory.filter(e => e.level_key);
+          return missionHistory;
+        };
+
+        const renderMissionsPage = () => {
+          const filtered = getFilteredMissions();
+          const totalPages = Math.max(1, Math.ceil(filtered.length / MISSIONS_PER_PAGE));
+          missionsCurrentPage = Math.min(Math.max(1, missionsCurrentPage), totalPages);
+          const slice = filtered.slice((missionsCurrentPage - 1) * MISSIONS_PER_PAGE, missionsCurrentPage * MISSIONS_PER_PAGE);
+          userMissionsHistoryTableBody.innerHTML = slice.map(renderDailyMissionHistoryRow).join("");
+          userMissionsHistoryCards.innerHTML = slice.map(renderDailyMissionHistoryCard).join("");
+          const pageInfo = document.getElementById('missions-page-info');
+          const pagination = document.getElementById('user-missions-pagination');
+          const prevBtn = document.getElementById('missions-prev-page');
+          const nextBtn = document.getElementById('missions-next-page');
+          if (pageInfo) pageInfo.textContent = `Página ${missionsCurrentPage} de ${totalPages} (${filtered.length} entradas)`;
+          if (pagination) {
+            if (filtered.length > MISSIONS_PER_PAGE) { pagination.classList.remove('d-none'); pagination.style.display = 'flex'; }
+            else { pagination.classList.add('d-none'); }
+          }
+          if (prevBtn) prevBtn.disabled = missionsCurrentPage <= 1;
+          if (nextBtn) nextBtn.disabled = missionsCurrentPage >= totalPages;
+        };
+
+        const missionsFilterBar = document.getElementById('user-missions-filter-bar');
+        if (missionsFilterBar) {
+          missionsFilterBar.classList.remove('d-none');
+          missionsFilterBar.querySelectorAll('[data-missions-filter]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              missionsFilterBar.querySelectorAll('[data-missions-filter]').forEach(b => b.classList.remove('active'));
+              btn.classList.add('active');
+              missionsCurrentFilter = btn.dataset.missionsFilter;
+              missionsCurrentPage = 1;
+              renderMissionsPage();
+            });
+          });
+        }
+        const prevBtnM = document.getElementById('missions-prev-page');
+        const nextBtnM = document.getElementById('missions-next-page');
+        if (prevBtnM) prevBtnM.addEventListener('click', () => { missionsCurrentPage--; renderMissionsPage(); });
+        if (nextBtnM) nextBtnM.addEventListener('click', () => { missionsCurrentPage++; renderMissionsPage(); });
+        renderMissionsPage();
         showElement(userMissionsHistoryList);
       } else {
         showElement(userMissionsHistoryEmpty);
@@ -819,7 +930,13 @@ $menuScript = <<<'SCRIPT'
   }
 </script>
 SCRIPT;
+$adminWaBaseUrl     = store_config_whatsapp_link($whatsappValue);
+$adminWaBaseUrlJs   = json_encode($adminWaBaseUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+$footerAuthName     = trim((string) ($_SESSION['auth_user']['nombre'] ?? ($_SESSION['auth_user']['email'] ?? '')));
+$footerAuthNameJs   = json_encode($footerAuthName, JSON_UNESCAPED_UNICODE);
 $menuScript = str_replace('__ACCOUNT_API_URL__', $accountApiUrlJs, $menuScript);
+$menuScript = str_replace('"__ADMIN_WA_BASE_URL__"', $adminWaBaseUrlJs, $menuScript);
+$menuScript = str_replace('"__AUTH_USER_DISPLAY_NAME__"', $footerAuthNameJs, $menuScript);
 
 $rechargeNotificationsScript = <<<'SCRIPT'
 <script>

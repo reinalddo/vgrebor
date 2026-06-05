@@ -81,19 +81,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pointsAmount      = max(0, (int) ($_POST['points_amount'] ?? 0));
             $couponDiscountPct = max(0, min(100, (int) ($_POST['coupon_discount_percent'] ?? 0)));
             $immunityDays      = max(0, (int) ($_POST['immunity_days'] ?? 0));
-            $streamingUserId   = (int) ($_POST['streaming_user_id'] ?? 0) > 0 ? (int) $_POST['streaming_user_id'] : null;
 
             if ($prizeId <= 0) { echo json_encode(['ok' => false, 'error' => 'ID de premio inválido.']); exit; }
 
             $stmt = $mysqli->prepare(
                 'UPDATE win_points_daily_mission_prizes
-                 SET chance_percent=?, points_amount=?, coupon_discount_percent=?,
-                     immunity_days=?, streaming_user_id=?
+                 SET chance_percent=?, points_amount=?, coupon_discount_percent=?, immunity_days=?
                  WHERE id=?'
             );
             if (!$stmt) { echo json_encode(['ok' => false, 'error' => $mysqli->error]); exit; }
-            $stmt->bind_param('diiiii', $chancePercent, $pointsAmount, $couponDiscountPct,
-                $immunityDays, $streamingUserId, $prizeId);
+            $stmt->bind_param('diiii', $chancePercent, $pointsAmount, $couponDiscountPct,
+                $immunityDays, $prizeId);
             $stmt->execute();
             $stmt->close();
             echo json_encode(['ok' => true]);
@@ -221,6 +219,18 @@ function admin_missions_pagination_url(string $base, array $params, int $page): 
     return $base . (empty($params) ? '' : '?' . http_build_query($params));
 }
 
+function admin_missions_fetch_pending_streaming_user_ids(mysqli $mysqli): array {
+    $result = $mysqli->query(
+        "SELECT DISTINCT user_id FROM win_points_daily_mission_rewards
+         WHERE prize_type='streaming_ticket' AND reward_status='pending'"
+    );
+    $ids = [];
+    if ($result instanceof mysqli_result) {
+        while ($row = $result->fetch_row()) { $ids[(int) $row[0]] = true; }
+    }
+    return $ids;
+}
+
 function admin_missions_fetch_all_users_list(mysqli $mysqli): array {
     $result = $mysqli->query("SELECT id, nombre, email FROM usuarios ORDER BY nombre ASC LIMIT 200");
     $rows = [];
@@ -315,7 +325,8 @@ $prizesByLevel    = [];
 foreach ($prizeLevels as $lk) {
     $prizesByLevel[$lk] = daily_missions_fetch_prizes($mysqli, $lk, false);
 }
-$allUsersList     = admin_missions_fetch_all_users_list($mysqli);
+$allUsersList            = admin_missions_fetch_all_users_list($mysqli);
+$pendingStreamingUserIds = admin_missions_fetch_pending_streaming_user_ids($mysqli);
 
 $ajaxUrl  = app_path('/admin/misiones-premios');
 $allRoles = ['admin', 'root', 'empleado', 'influencer', 'usuario'];
@@ -568,13 +579,14 @@ include __DIR__ . '/includes/header.php';
                       </td>
                       <td class="text-secondary small"><?php echo htmlspecialchars((string) ($uRow['creado_en'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
                       <td class="text-end">
+                        <?php $hasPending = isset($pendingStreamingUserIds[(int) ($uRow['id'] ?? 0)]); ?>
                         <button type="button"
                                 class="btn btn-outline-info btn-sm rounded-pill fw-bold btn-ver-historial"
                                 data-user-id="<?php echo (int) ($uRow['id'] ?? 0); ?>"
                                 data-user-name="<?php echo htmlspecialchars((string) ($uRow['nombre'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
                                 data-user-rol="<?php echo htmlspecialchars(strtoupper((string) ($uRow['rol'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>"
                                 data-user-email="<?php echo htmlspecialchars((string) ($uRow['email'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
-                          Ver historial
+                          Ver historial<?php if ($hasPending): ?> <span class="badge bg-warning text-dark ms-1" title="Tiene un ticket streaming pendiente">▶ Pendiente</span><?php endif; ?>
                         </button>
                       </td>
                     </tr>
@@ -846,18 +858,7 @@ include __DIR__ . '/includes/header.php';
                         </div>
                       <?php elseif ($pt === 'streaming_ticket'): ?>
                         <div class="col-12 mt-1">
-                          <label class="missions-admin-label mb-1">Cuenta streaming a regalar</label>
-                          <select class="missions-form-input prize-streaming-user">
-                            <option value="0">— Selecciona una cuenta —</option>
-                            <?php foreach ($allUsersList as $u): ?>
-                              <option value="<?php echo (int) $u['id']; ?>"
-                                      <?php echo (int) ($prize['streaming_user_id'] ?? 0) === (int) $u['id'] ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars(($u['nombre'] !== '' ? $u['nombre'] : $u['email']), ENT_QUOTES, 'UTF-8'); ?>
-                                (<?php echo htmlspecialchars($u['email'], ENT_QUOTES, 'UTF-8'); ?>)
-                              </option>
-                            <?php endforeach; ?>
-                          </select>
-                          <p class="text-secondary small mt-1 mb-0">Probabilidad = 0 deshabilita este premio.</p>
+                          <p class="text-secondary small mb-0">Al salir este premio, se registra como <strong class="text-warning">Pendiente</strong> en el historial del usuario. El usuario podrá reclamar vía WhatsApp y el administrador lo marcará como entregado desde el historial.</p>
                         </div>
                       <?php endif; ?>
 
@@ -917,7 +918,15 @@ include __DIR__ . '/includes/header.php';
 
   // ─── Modal historial ──────────────────────────────────────────────
   function buildModalHtml(data) {
-    let html = '<div class="row g-3 mb-4">'
+    const pendingTickets = (data.history || []).filter(e => e.prize_type === 'streaming_ticket' && e.reward_status === 'pending');
+    let html = '';
+    if (pendingTickets.length > 0) {
+      html += '<div class="alert d-flex align-items-center gap-2 mb-3" style="background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.4);color:#fbbf24;border-radius:.75rem;">'
+        + '<span style="font-size:1.2rem">▶</span>'
+        + '<span><strong>Ticket streaming pendiente:</strong> Este usuario tiene ' + pendingTickets.length + ' ticket(s) de streaming sin entregar. Revisa el historial y marca como entregado.</span>'
+        + '</div>';
+    }
+    html += '<div class="row g-3 mb-4">'
       + stat('Racha actual', data.streak)
       + stat('Inmunidad', data.immunity)
       + stat('Progreso hoy', data.progress + '%', data.completed_tasks + '/' + data.required_tasks + ' tareas')
@@ -938,7 +947,7 @@ include __DIR__ . '/includes/header.php';
       const isTicket   = e.prize_type === 'streaming_ticket';
       const canResolve = isTicket && (e.reward_status === 'assigned' || e.reward_status === 'pending');
       const resolveBtn = canResolve
-        ? '<button class="save-btn btn-resolve-ticket" data-reward-id="' + esc(e.id) + '" type="button">Marcar resuelto</button>'
+        ? '<button class="save-btn btn-resolve-ticket" data-reward-id="' + esc(e.id) + '" type="button" style="background:rgba(74,222,128,.12);border-color:rgba(74,222,128,.4);color:#4ade80">✓ Marcar entregado</button>'
         : '';
       html += '<tr>'
         + td('<span class="text-secondary">' + esc(e.date) + '</span>')
@@ -1114,7 +1123,6 @@ include __DIR__ . '/includes/header.php';
       fd.append('points_amount',   row.querySelector('.prize-points')?.value ?? '0');
       fd.append('coupon_discount_percent', row.querySelector('.prize-coupon-pct')?.value ?? '0');
       fd.append('immunity_days',   row.querySelector('.prize-immunity')?.value ?? '0');
-      fd.append('streaming_user_id', row.querySelector('.prize-streaming-user')?.value ?? '0');
 
       fetch(ajaxBase, { method: 'POST', body: fd })
         .then(r => r.json())
