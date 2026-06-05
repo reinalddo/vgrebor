@@ -294,14 +294,14 @@ include __DIR__ . '/includes/header.php';
   <section class="missions-admin-panel">
     <div class="row g-3 align-items-stretch">
       <div class="col-12 col-lg-8">
-        <form method="get" action="<?php echo htmlspecialchars(app_path('/admin_misiones_premios.php'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3 align-items-end">
+        <form method="get" action="/admin/misiones-premios" class="row g-3 align-items-end">
           <div class="col-md-8">
             <label for="mission-user-query" class="form-label missions-admin-label mb-2">Buscar usuario</label>
             <input id="mission-user-query" type="text" name="q" value="<?php echo htmlspecialchars($searchTerm, ENT_QUOTES, 'UTF-8'); ?>" class="form-control form-control-lg bg-dark text-info border-info" placeholder="Nombre o correo del usuario" autocomplete="off">
           </div>
           <div class="col-md-4 d-flex gap-2">
             <button type="submit" class="btn btn-info fw-bold rounded-pill px-4 flex-grow-1">Buscar</button>
-            <a href="<?php echo htmlspecialchars(app_path('/admin_misiones_premios.php'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info fw-bold rounded-pill px-4">Limpiar</a>
+            <a href="/admin/misiones-premios" class="btn btn-outline-info fw-bold rounded-pill px-4">Limpiar</a>
           </div>
         </form>
       </div>
@@ -345,7 +345,7 @@ include __DIR__ . '/includes/header.php';
                     <span class="badge rounded-pill text-bg-dark border border-info-subtle text-info"><?php echo htmlspecialchars(strtoupper((string) ($userRow['rol'] ?? 'usuario')), ENT_QUOTES, 'UTF-8'); ?></span>
                   </div>
                   <div class="small text-secondary mb-3">Registrado: <?php echo htmlspecialchars((string) ($userRow['creado_en'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
-                  <a href="<?php echo htmlspecialchars(app_path('/admin_misiones_premios.php') . '?user_id=' . (int) ($userRow['id'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info w-100 rounded-pill fw-bold">Ver historial</a>
+                  <a href="/admin/misiones-premios?user_id=<?php echo (int) ($userRow['id'] ?? 0); ?>" class="btn btn-outline-info w-100 rounded-pill fw-bold">Ver historial</a>
                 </div>
               </div>
             <?php endforeach; ?>
