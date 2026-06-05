@@ -76,25 +76,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         case 'save_prize': {
-            $prizeId              = (int) ($_POST['prize_id'] ?? 0);
-            $chancePercent        = max(0.0, min(100.0, (float) ($_POST['chance_percent'] ?? 0)));
-            $pointsAmount         = max(0, (int) ($_POST['points_amount'] ?? 0));
-            $couponDiscountPct    = max(0, min(100, (int) ($_POST['coupon_discount_percent'] ?? 0)));
-            $immunityDays         = max(0, (int) ($_POST['immunity_days'] ?? 0));
-            $streamingUserId      = (int) ($_POST['streaming_user_id'] ?? 0) > 0 ? (int) $_POST['streaming_user_id'] : null;
-            $active               = (int) ($_POST['active'] ?? 1) > 0 ? 1 : 0;
+            $prizeId           = (int) ($_POST['prize_id'] ?? 0);
+            $chancePercent     = max(0.0, min(100.0, (float) ($_POST['chance_percent'] ?? 0)));
+            $pointsAmount      = max(0, (int) ($_POST['points_amount'] ?? 0));
+            $couponDiscountPct = max(0, min(100, (int) ($_POST['coupon_discount_percent'] ?? 0)));
+            $immunityDays      = max(0, (int) ($_POST['immunity_days'] ?? 0));
+            $streamingUserId   = (int) ($_POST['streaming_user_id'] ?? 0) > 0 ? (int) $_POST['streaming_user_id'] : null;
 
             if ($prizeId <= 0) { echo json_encode(['ok' => false, 'error' => 'ID de premio inválido.']); exit; }
 
             $stmt = $mysqli->prepare(
                 'UPDATE win_points_daily_mission_prizes
                  SET chance_percent=?, points_amount=?, coupon_discount_percent=?,
-                     immunity_days=?, streaming_user_id=?, active=?
+                     immunity_days=?, streaming_user_id=?
                  WHERE id=?'
             );
             if (!$stmt) { echo json_encode(['ok' => false, 'error' => $mysqli->error]); exit; }
-            $stmt->bind_param('diiiiii', $chancePercent, $pointsAmount, $couponDiscountPct,
-                $immunityDays, $streamingUserId, $active, $prizeId);
+            $stmt->bind_param('diiiii', $chancePercent, $pointsAmount, $couponDiscountPct,
+                $immunityDays, $streamingUserId, $prizeId);
             $stmt->execute();
             $stmt->close();
             echo json_encode(['ok' => true]);
@@ -847,9 +846,9 @@ include __DIR__ . '/includes/header.php';
                         </div>
                       <?php elseif ($pt === 'streaming_ticket'): ?>
                         <div class="col-12 mt-1">
-                          <label class="missions-admin-label mb-1">Usuario de streaming a regalar</label>
+                          <label class="missions-admin-label mb-1">Cuenta streaming a regalar</label>
                           <select class="missions-form-input prize-streaming-user">
-                            <option value="0">— Usar el de Configuración general —</option>
+                            <option value="0">— Selecciona una cuenta —</option>
                             <?php foreach ($allUsersList as $u): ?>
                               <option value="<?php echo (int) $u['id']; ?>"
                                       <?php echo (int) ($prize['streaming_user_id'] ?? 0) === (int) $u['id'] ? 'selected' : ''; ?>>
@@ -858,16 +857,12 @@ include __DIR__ . '/includes/header.php';
                               </option>
                             <?php endforeach; ?>
                           </select>
+                          <p class="text-secondary small mt-1 mb-0">Probabilidad = 0 deshabilita este premio.</p>
                         </div>
                       <?php endif; ?>
 
-                      <div class="col-12 d-flex align-items-center gap-2 mt-1">
-                        <div class="form-check mb-0">
-                          <input class="form-check-input prize-active" type="checkbox" id="active-<?php echo (int) ($prize['id'] ?? 0); ?>"
-                                 <?php echo !empty($prize['active']) ? 'checked' : ''; ?>>
-                          <label class="form-check-label text-secondary small" for="active-<?php echo (int) ($prize['id'] ?? 0); ?>">Activo</label>
-                        </div>
-                        <button class="save-btn btn-save-prize ms-auto" type="button">Guardar</button>
+                      <div class="col-12 d-flex align-items-center justify-content-end gap-2 mt-2">
+                        <button class="save-btn btn-save-prize" type="button">Guardar</button>
                         <span class="save-feedback prize-feedback"></span>
                       </div>
                     </div>
@@ -1120,7 +1115,6 @@ include __DIR__ . '/includes/header.php';
       fd.append('coupon_discount_percent', row.querySelector('.prize-coupon-pct')?.value ?? '0');
       fd.append('immunity_days',   row.querySelector('.prize-immunity')?.value ?? '0');
       fd.append('streaming_user_id', row.querySelector('.prize-streaming-user')?.value ?? '0');
-      fd.append('active', row.querySelector('.prize-active')?.checked ? '1' : '0');
 
       fetch(ajaxBase, { method: 'POST', body: fd })
         .then(r => r.json())

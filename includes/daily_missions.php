@@ -920,46 +920,40 @@ if (!function_exists('daily_missions_ensure_schema')) {
             );
         }
 
-        foreach (daily_missions_default_prizes() as $prize) {
-            $levelKey = addslashes((string) $prize['level_key']);
-            $prizeType = addslashes((string) $prize['prize_type']);
-            $prizeLabel = addslashes((string) $prize['prize_label']);
-            $chancePercent = (float) $prize['chance_percent'];
-            $pointsAmount = (int) $prize['points_amount'];
-            $couponDiscountPercent = (int) $prize['coupon_discount_percent'];
-            $immunityDays = (int) $prize['immunity_days'];
-            $streamingUserId = 'NULL';
-            $active = (int) $prize['active'];
-            $sortOrder = (int) $prize['sort_order'];
-            $metadataJson = 'NULL';
-
+        // Limpiar filas duplicadas de premios si existen (bug de versiones anteriores sin UNIQUE constraint)
+        $prizeCount = (int) ($mysqli->query("SELECT COUNT(*) FROM win_points_daily_mission_prizes")->fetch_row()[0] ?? 0);
+        if ($prizeCount > 12) {
             $mysqli->query(
-                "INSERT IGNORE INTO win_points_daily_mission_prizes (
-                    level_key,
-                    prize_type,
-                    prize_label,
-                    chance_percent,
-                    points_amount,
-                    coupon_discount_percent,
-                    immunity_days,
-                    streaming_user_id,
-                    active,
-                    sort_order,
-                    metadata_json
-                ) VALUES (
-                    '{$levelKey}',
-                    '{$prizeType}',
-                    '{$prizeLabel}',
-                    {$chancePercent},
-                    {$pointsAmount},
-                    {$couponDiscountPercent},
-                    {$immunityDays},
-                    {$streamingUserId},
-                    {$active},
-                    {$sortOrder},
-                    {$metadataJson}
-                )"
+                "DELETE p1 FROM win_points_daily_mission_prizes p1
+                 INNER JOIN win_points_daily_mission_prizes p2
+                 ON p1.level_key = p2.level_key AND p1.prize_type = p2.prize_type AND p1.id < p2.id"
             );
+            $prizeCount = (int) ($mysqli->query("SELECT COUNT(*) FROM win_points_daily_mission_prizes")->fetch_row()[0] ?? 0);
+        }
+        // Sembrar premios por defecto solo si la tabla está vacía
+        if ($prizeCount === 0) {
+            foreach (daily_missions_default_prizes() as $prize) {
+                $levelKey = addslashes((string) $prize['level_key']);
+                $prizeType = addslashes((string) $prize['prize_type']);
+                $prizeLabel = addslashes((string) $prize['prize_label']);
+                $chancePercent = (float) $prize['chance_percent'];
+                $pointsAmount = (int) $prize['points_amount'];
+                $couponDiscountPercent = (int) $prize['coupon_discount_percent'];
+                $immunityDays = (int) $prize['immunity_days'];
+                $sortOrder = (int) $prize['sort_order'];
+
+                $mysqli->query(
+                    "INSERT INTO win_points_daily_mission_prizes (
+                        level_key, prize_type, prize_label,
+                        chance_percent, points_amount, coupon_discount_percent,
+                        immunity_days, streaming_user_id, active, sort_order
+                    ) VALUES (
+                        '{$levelKey}', '{$prizeType}', '{$prizeLabel}',
+                        {$chancePercent}, {$pointsAmount}, {$couponDiscountPercent},
+                        {$immunityDays}, NULL, 1, {$sortOrder}
+                    )"
+                );
+            }
         }
 
         $initialized = true;
