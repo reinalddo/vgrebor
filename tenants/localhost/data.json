@@ -1,0 +1,16 @@
+{
+  "tenant": {
+    "slug": "localhost",
+    "domains": ["localhost", "127.0.0.1", "vgrebor"]
+  },
+  "brand": {
+    "name": "Reborxstore"
+  },
+  "database": {
+    "host": "localhost",
+    "name": "vgrebor",
+    "user": "root",
+    "password": "",
+    "charset": "utf8mb4"
+  }
+}
