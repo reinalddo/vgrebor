@@ -452,6 +452,68 @@ include __DIR__ . '/includes/header.php';
   @media (max-width:767.98px) {
     .missions-admin-hero, .missions-admin-panel { padding: 1rem; }
   }
+
+  /* ── Historial: ocultar columnas secundarias en móvil ── */
+  @media (max-width:575.98px) {
+    #tab-historial .table thead th:nth-child(1),
+    #tab-historial .table thead th:nth-child(3),
+    #tab-historial .table thead th:nth-child(5),
+    #tab-historial .table tbody td:nth-child(1),
+    #tab-historial .table tbody td:nth-child(3),
+    #tab-historial .table tbody td:nth-child(5) { display: none; }
+
+    #tab-historial .table td:nth-child(6) { text-align: left; }
+    #tab-historial .table td:nth-child(2) .fw-semibold { font-size: .84rem; }
+
+    /* Formulario de filtros: botones en línea completa */
+    #tab-historial form .col-auto { width: 100%; }
+    #tab-historial form .col-auto .btn { flex: 1; }
+  }
+
+  /* ── Tareas y multiplicadores: tarjeta por tarea en móvil ── */
+  @media (max-width:575.98px) {
+    #tab-tareas .missions-admin-table-wrap thead { display: none; }
+
+    #tab-tareas .missions-admin-table-wrap .table tbody tr {
+      display: block;
+      padding: .85rem;
+      border-bottom: 1px solid rgba(255,255,255,.07);
+    }
+    #tab-tareas .missions-admin-table-wrap .table tbody tr:last-child { border-bottom: none; }
+
+    #tab-tareas .missions-admin-table-wrap .table tbody td {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: none;
+      padding: .32rem 0;
+    }
+    /* Nombre de la tarea: ocupa toda la fila */
+    #tab-tareas .missions-admin-table-wrap .table tbody td:first-child {
+      display: block;
+      padding-bottom: .65rem;
+      margin-bottom: .4rem;
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    /* Etiqueta generada por data-label */
+    #tab-tareas .missions-admin-table-wrap .table tbody td[data-label]::before {
+      content: attr(data-label);
+      color: #22d3ee;
+      font-size: .69rem;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      flex-shrink: 0;
+      margin-right: .75rem;
+    }
+    #tab-tareas .missions-admin-table-wrap .table tbody td[data-label=""]::before { display: none; }
+    /* Fila del botón: alineada a la derecha */
+    #tab-tareas .missions-admin-table-wrap .table tbody td[data-label=""] {
+      justify-content: flex-end;
+      padding-top: .55rem;
+    }
+    #tab-tareas .missions-admin-table-wrap .missions-form-input { width: 90px; }
+  }
 </style>
 
 <div class="container py-4 py-lg-5 missions-admin-shell">
@@ -759,22 +821,22 @@ include __DIR__ . '/includes/header.php';
                         <?php if (!($task['active'] ?? false)): ?><span class="badge bg-secondary ms-1">inactiva</span><?php endif; ?>
                       </div>
                     </td>
-                    <td>
+                    <td data-label="WP diario">
                       <input type="number" class="missions-form-input task-base-points" min="0" max="9999"
                              value="<?php echo (int) ($task['base_points'] ?? 0); ?>"
                              placeholder="WP">
                     </td>
-                    <td>
+                    <td data-label="x Día 20">
                       <input type="number" class="missions-form-input task-day20-mult" min="0" step="0.1"
                              value="<?php echo isset($task['day20_multiplier']) && $task['day20_multiplier'] !== null ? number_format((float) $task['day20_multiplier'], 2, '.', '') : ''; ?>"
                              placeholder="global">
                     </td>
-                    <td>
+                    <td data-label="x Final de mes">
                       <input type="number" class="missions-form-input task-monthend-mult" min="0" step="0.1"
                              value="<?php echo isset($task['month_end_multiplier']) && $task['month_end_multiplier'] !== null ? number_format((float) $task['month_end_multiplier'], 2, '.', '') : ''; ?>"
                              placeholder="global">
                     </td>
-                    <td>
+                    <td data-label="">
                       <button class="save-btn btn-save-task" type="button">Guardar</button>
                       <span class="save-feedback task-feedback"></span>
                     </td>
