@@ -1530,9 +1530,24 @@ $dailyMissionsScriptPayload = [
           gap: 1rem;
           align-items: stretch;
         }
-        @media (max-width: 991.98px) {
+        @media (max-width: 991.98px) and (min-width: 768px) {
+          #daily-missions-shell .daily-mission-layout {
+            grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+            align-items: start;
+          }
+          #daily-missions-shell .daily-mission-chest-stage {
+            min-height: 0;
+            padding: 0.9rem 0.6rem;
+          }
+        }
+        @media (max-width: 767.98px) {
           #daily-missions-shell .daily-mission-layout {
             grid-template-columns: 1fr;
+            align-items: stretch;
+          }
+          #daily-missions-shell .daily-mission-chest-stage {
+            min-height: 22rem;
+            padding: 0.85rem;
           }
         }
         #daily-missions-shell .daily-mission-column {
@@ -1843,16 +1858,49 @@ $dailyMissionsScriptPayload = [
           #daily-missions-shell .daily-mission-body {
             padding: 0.9rem;
           }
-          #daily-missions-shell .daily-mission-chest-stage {
-            min-height: 22rem;
-            padding: 0.85rem;
-          }
           #daily-missions-shell .daily-mission-task-card {
-            padding: 0.9rem;
+            padding: 0.75rem 0.6rem;
           }
           #daily-missions-shell .daily-mission-social-icons {
             margin-left: 0;
           }
+        }
+        #daily-missions-shell .daily-mission-guest-banner {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 0.6rem 0.9rem;
+          padding: 0.85rem 1rem;
+          border-radius: 0.75rem;
+          background: rgba(245,158,11,0.07);
+          border: 1px solid rgba(245,158,11,0.28);
+          color: #fbbf24;
+          font-size: 0.91rem;
+          line-height: 1.4;
+        }
+        #daily-missions-shell .daily-mission-guest-banner i {
+          font-size: 1.1rem;
+          flex-shrink: 0;
+        }
+        #daily-missions-shell .daily-mission-guest-banner span {
+          flex: 1;
+          min-width: 180px;
+        }
+        #daily-missions-shell .daily-mission-guest-link {
+          color: #fff;
+          background: rgba(245,158,11,0.22);
+          border: 1px solid rgba(245,158,11,0.45);
+          padding: 0.3rem 1rem;
+          border-radius: 0.4rem;
+          text-decoration: none;
+          font-weight: 600;
+          font-size: 0.88rem;
+          white-space: nowrap;
+          transition: background 0.2s ease;
+        }
+        #daily-missions-shell .daily-mission-guest-link:hover {
+          background: rgba(245,158,11,0.38);
+          color: #fff;
         }
       </style>
 
@@ -1996,20 +2044,21 @@ $dailyMissionsScriptPayload = [
         </section>
       <?php endif; ?>
 
-      <?php if ($dailyMissionsUserId > 0): ?>
+      <?php if (!empty($dailyMissionsPayload['enabled'])): ?>
         <?php
+            $dailyMissionsIsGuest = $dailyMissionsUserId === 0;
             $dailyMissionExploreTarget = $dailyMissionsExploreTargets[0] ?? app_path('/juegos');
             $dailyMissionSocialTargets = array_values($dailyMissionsSocialTargets);
             $dailyMissionPrimaryShareTarget = (string) ($dailyMissionSocialTargets[0]['url'] ?? $dailyMissionExploreTarget);
           $dailyMissionShareTargetsJson = json_encode($dailyMissionsSocialTargets, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
           $dailyMissionTaskCount = max(1, count($dailyMissionsTasks));
-          $dailyMissionCompletedCount = max(0, (int) ($dailyMissionsDay['completed_tasks_count'] ?? 0));
+          $dailyMissionCompletedCount = $dailyMissionsIsGuest ? 0 : max(0, (int) ($dailyMissionsDay['completed_tasks_count'] ?? 0));
           $dailyMissionRemaining = max(0, $dailyMissionTaskCount - $dailyMissionCompletedCount);
-          $dailyMissionStreak = max(0, (int) ($dailyMissionsDay['current_streak_days'] ?? 0));
-          $dailyMissionImmunity = max(0, (int) ($dailyMissionsState['immunity_balance'] ?? 0));
-          $dailyMissionRewardLabel = $dailyMissionsCanOpenChest ? 'Cofre listo para abrir' : 'Completa las tareas para abrirlo';
+          $dailyMissionStreak = $dailyMissionsIsGuest ? 0 : max(0, (int) ($dailyMissionsDay['current_streak_days'] ?? 0));
+          $dailyMissionImmunity = $dailyMissionsIsGuest ? 0 : max(0, (int) ($dailyMissionsState['immunity_balance'] ?? 0));
+          $dailyMissionRewardLabel = $dailyMissionsIsGuest ? 'Completa las tareas para abrirlo' : ($dailyMissionsCanOpenChest ? 'Cofre listo para abrir' : 'Completa las tareas para abrirlo');
           $dailyMissionRemainingLabel = $dailyMissionRemaining === 1 ? '1 tarea restante' : $dailyMissionRemaining . ' tareas restantes';
-          $dailyMissionProgressLabel = $dailyMissionsProgressPercent >= 100 ? '100% completado' : $dailyMissionsProgressPercent . '% completado';
+          $dailyMissionProgressLabel = $dailyMissionsIsGuest ? '0% completado' : ($dailyMissionsProgressPercent >= 100 ? '100% completado' : $dailyMissionsProgressPercent . '% completado');
         ?>
         <section
           id="daily-missions-shell"
@@ -2045,6 +2094,13 @@ $dailyMissionsScriptPayload = [
               </h2>
               <div id="daily-missions-collapse" class="accordion-collapse collapse" aria-labelledby="daily-missions-heading" data-bs-parent="#daily-missions-accordion">
                 <div class="daily-mission-body">
+                  <?php if ($dailyMissionsIsGuest): ?>
+                  <div class="daily-mission-guest-banner" role="alert">
+                    <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                    <span>Regístrate o loguéate para realizar misiones diarias y ganar premios</span>
+                    <a href="<?php echo htmlspecialchars(app_path('/login.php'), ENT_QUOTES, 'UTF-8'); ?>" class="daily-mission-guest-link">Entrar</a>
+                  </div>
+                  <?php endif; ?>
                   <div class="daily-mission-topline">
                     <div class="daily-mission-topline-copy">
                       <div class="small text-uppercase" style="letter-spacing:0.28em;">Recompensas por <?php echo htmlspecialchars(win_points_program_name(), ENT_QUOTES, 'UTF-8'); ?></div>
@@ -2140,8 +2196,8 @@ $dailyMissionsScriptPayload = [
                         <?php foreach ($dailyMissionsTasks as $taskIndex => $task): ?>
                           <?php
                             $taskType = (string) ($task['task_type'] ?? '');
-                            $taskCompleted = !empty($task['completed_today']);
-                            $taskDisabled = empty($task['active']);
+                            $taskCompleted = $dailyMissionsIsGuest ? false : !empty($task['completed_today']);
+                            $taskDisabled = $dailyMissionsIsGuest || empty($task['active']);
                             $taskDescription = trim((string) ($task['description'] ?? ''));
                             $taskHref = app_path('/juegos');
                             $taskTargetAttr = '';
