@@ -1,2 +1,5 @@
 .venv/
 .vscode/
+uploads/
+uploads_backup/
+assets/img/
