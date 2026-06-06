@@ -1030,108 +1030,199 @@ $dailyMissionsScriptPayload = [
         .daily-mission-chest-shell:disabled {
           cursor: not-allowed;
         }
-        .daily-mission-chest-shell:not(.is-open),
-        .daily-mission-chest-3d:not(.is-open) {
-          filter: grayscale(1) saturate(0.2) brightness(0.78);
+        /* ═══════════════════════════════════════════════════════
+           3D CHEST — pure CSS perspective chest
+           JS adds/removes: is-open · is-spinning · girando · abierto
+           on .daily-mission-chest-3d
+           ═══════════════════════════════════════════════════════ */
+
+        /* Color vars — locked/gray default */
+        .daily-mission-chest-3d {
+          --dm-front-lg: linear-gradient(90deg,#6b7280 0%,#6b7280 44%,#9ca3af 44%,#9ca3af 56%,#4b5563 56%,#4b5563 100%);
+          --dm-side-dark: #374151;
+          --dm-side-light: #6b7280;
+          --dm-top-side: #4b5563;
+          --dm-top-light: #6b7280;
+          --dm-outline: #9ca3af;
+          --dm-lock-bg: linear-gradient(180deg,#b8bec8,#787f89);
+          --dm-lock-border: #9ca3af;
         }
-        .daily-mission-chest-shell.is-open,
-        .daily-mission-chest-3d.is-open {
-          animation: daily-mission-chest-pulse 2.4s ease-in-out infinite;
-          filter: none;
+
+        /* Scene + cofre */
+        .dm-scene {
+          width: 200px; height: 150px;
+          perspective: 900px;
+          perspective-origin: 50% 35%;
+          margin: 16px auto 8px;
+          position: relative;
         }
-        .daily-mission-modal-sparks,
-        .daily-mission-modal-lid,
-        .daily-mission-modal-band,
-        .daily-mission-modal-base,
-        .daily-mission-modal-lock {
+        .dm-cofre {
+          position: relative;
+          width: 200px; height: 150px;
+          transform-style: preserve-3d;
+          transform: rotateX(-15deg) rotateY(-35deg) scale(1);
+          transition: transform 0.5s ease;
+        }
+
+        /* Base + tapa containers */
+        .dm-base, .dm-tapa {
           position: absolute;
-          inset: 0;
+          top: 0; left: 0;
+          width: 100%; height: 100%;
+          transform-style: preserve-3d;
         }
-        .daily-mission-modal-sparks {
-          inset: -6%;
-          border-radius: inherit;
-          background:
-            radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.6), transparent 26%),
-            radial-gradient(circle at 18% 26%, rgba(34, 211, 238, 0.48), transparent 18%),
-            radial-gradient(circle at 82% 24%, rgba(250, 204, 21, 0.45), transparent 18%);
-          opacity: 0;
-          transform: scale(0.92);
-          transition: opacity 0.2s ease, transform 0.2s ease;
-          pointer-events: none;
+        .dm-tapa {
+          transform-origin: 50% 50px -75px;
+          transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
-        .daily-mission-chest-shell.is-open .daily-mission-modal-sparks,
-        .daily-mission-chest-3d.is-open .daily-mission-modal-sparks {
-          opacity: 1;
-          transform: scale(1);
-          animation: daily-mission-sparks 1.8s linear infinite;
+
+        /* Generic face */
+        .dm-cara {
+          position: absolute;
+          box-sizing: border-box;
+          border: 3px solid var(--dm-outline, #9ca3af);
+          box-shadow: inset 0 0 30px rgba(0,0,0,0.8);
         }
-        .daily-mission-modal-lid {
-          left: 12%;
-          right: 12%;
-          top: 14%;
-          height: 30%;
-          border-radius: 1rem 1rem 0.6rem 0.6rem;
-          background: linear-gradient(180deg, #475569, #1e293b);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          box-shadow: inset 0 -8px 18px rgba(0, 0, 0, 0.22);
-          transform-origin: bottom center;
-          transition: transform 0.32s ease, filter 0.32s ease;
-          z-index: 2;
+        .dm-madera { background: var(--dm-front-lg); }
+        .dm-oscura { background: var(--dm-side-dark, #374151); }
+        .dm-clara  { background: var(--dm-side-light, #6b7280); }
+
+        /* Base faces */
+        .dm-frente { width:200px; height:100px; top:50px; left:0;    transform:translateZ(75px); }
+        .dm-atras  { width:200px; height:100px; top:50px; left:0;    transform:rotateY(180deg) translateZ(75px); }
+        .dm-der    { width:150px; height:100px; top:50px; left:25px; transform:rotateY(90deg) translateZ(100px); }
+        .dm-izq    { width:150px; height:100px; top:50px; left:25px; transform:rotateY(-90deg) translateZ(100px); }
+        .dm-fondo  { width:200px; height:150px; top:50px; left:0;    transform:rotateX(-90deg) translateZ(50px);
+                     background:var(--dm-side-dark,#374151) !important; border:none !important; box-shadow:none !important; }
+
+        /* Lid side faces */
+        .dm-t-der {
+          width:150px; height:75px; top:-25px; left:25px;
+          border-radius:75px 75px 0 0;
+          transform:rotateY(90deg) translateZ(100px);
+          border-bottom:none !important;
+          background:var(--dm-top-side,#4b5563) !important;
         }
-        .daily-mission-chest-shell.is-open .daily-mission-modal-lid,
-        .daily-mission-chest-3d.is-open .daily-mission-modal-lid {
-          transform: translateY(-12%) rotate(-7deg);
+        .dm-t-izq {
+          width:150px; height:75px; top:-25px; left:25px;
+          border-radius:75px 75px 0 0;
+          transform:rotateY(-90deg) translateZ(100px);
+          border-bottom:none !important;
+          background:var(--dm-top-light,#6b7280) !important;
         }
-        .daily-mission-modal-base {
-          left: 12%;
-          right: 12%;
-          bottom: 12%;
-          height: 42%;
-          border-radius: 1rem;
-          background: linear-gradient(180deg, #0f172a, #1f2937);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          box-shadow: inset 0 -10px 20px rgba(0, 0, 0, 0.35);
-          z-index: 1;
+
+        /* Band strips — 10 strips form the curved lid */
+        .dm-tira {
+          position:absolute;
+          width:200px; height:26px;
+          top:37px; left:0;
+          border-left:3px solid var(--dm-outline,#9ca3af);
+          border-right:3px solid var(--dm-outline,#9ca3af);
+          border-top:1px solid rgba(0,0,0,0.35);
+          box-sizing:border-box;
+          background:var(--dm-front-lg);
         }
-        .daily-mission-modal-band.is-top {
-          left: 12%;
-          right: 12%;
-          top: 40%;
-          height: 9%;
-          border-radius: 999px;
-          background: linear-gradient(90deg, rgba(148, 163, 184, 0.65), rgba(226, 232, 240, 0.88), rgba(148, 163, 184, 0.65));
-          z-index: 3;
-          box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+        .dm-tr-1  { transform:rotateX(9deg)   translateZ(75px); }
+        .dm-tr-2  { transform:rotateX(27deg)  translateZ(75px); }
+        .dm-tr-3  { transform:rotateX(45deg)  translateZ(75px); }
+        .dm-tr-4  { transform:rotateX(63deg)  translateZ(75px); }
+        .dm-tr-5  { transform:rotateX(81deg)  translateZ(75px); }
+        .dm-tr-6  { transform:rotateX(99deg)  translateZ(75px); }
+        .dm-tr-7  { transform:rotateX(117deg) translateZ(75px); }
+        .dm-tr-8  { transform:rotateX(135deg) translateZ(75px); }
+        .dm-tr-9  { transform:rotateX(153deg) translateZ(75px); }
+        .dm-tr-10 { transform:rotateX(171deg) translateZ(75px); }
+
+        /* Lock */
+        .dm-cerradura {
+          position:absolute;
+          width:30px; height:40px;
+          background:var(--dm-lock-bg,linear-gradient(180deg,#b8bec8,#787f89));
+          border:3px solid var(--dm-lock-border,#9ca3af);
+          border-radius:5px;
+          top:30px; left:85px;
+          transform:translateZ(77px);
+          box-shadow:0 4px 8px rgba(0,0,0,0.55);
+          z-index:4;
         }
-        .daily-mission-chest-shell.is-open .daily-mission-modal-band.is-top,
-        .daily-mission-chest-3d.is-open .daily-mission-modal-band.is-top {
-          background: linear-gradient(90deg, var(--daily-accent, #22d3ee), rgba(255, 255, 255, 0.95), var(--daily-accent, #22d3ee));
-          box-shadow: 0 0 18px var(--daily-glow, rgba(34, 211, 238, 0.28));
+        .dm-cerradura::after {
+          content:'';
+          position:absolute;
+          top:15px; left:10px;
+          width:4px; height:12px;
+          background:rgba(0,0,0,0.55);
+          border-radius:2px;
         }
-        .daily-mission-modal-band.is-bottom {
-          left: 16%;
-          right: 16%;
-          bottom: 22%;
-          height: 8%;
-          border-radius: 999px;
-          background: rgba(15, 23, 42, 0.85);
-          z-index: 3;
+
+        /* Chains overlay — shows when locked */
+        .dm-chains {
+          position:absolute; inset:0;
+          z-index:10; pointer-events:none;
+          transition:opacity 0.4s ease;
         }
-        .daily-mission-modal-lock {
-          left: 50%;
-          top: 51%;
-          width: 18%;
-          aspect-ratio: 1;
-          transform: translate(-50%, -5%);
-          border-radius: 50%;
-          background: radial-gradient(circle at 35% 30%, #f8fafc, #94a3b8 70%, #475569 100%);
-          box-shadow: inset 0 -5px 10px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.08);
-          z-index: 4;
+        .daily-mission-chest-3d:not(.is-open) .dm-chains { opacity:1; }
+        .daily-mission-chest-3d.is-open         .dm-chains { opacity:0; }
+        .dm-chain {
+          position:absolute;
+          width:8px; height:115%; top:-7.5%;
+          border-radius:4px;
+          background:repeating-linear-gradient(
+            to bottom,
+            rgba(155,160,170,.95) 0px, rgba(155,160,170,.95) 7px,
+            rgba(75,80,90,.9) 7px, rgba(75,80,90,.9) 13px
+          );
+          box-shadow:1px 0 5px rgba(0,0,0,.5),-1px 0 5px rgba(0,0,0,.5);
         }
-        .daily-mission-chest-shell.is-open .daily-mission-modal-lock,
-        .daily-mission-chest-3d.is-open .daily-mission-modal-lock {
-          background: radial-gradient(circle at 35% 30%, #fff9c4, #facc15 70%, #b45309 100%);
-          box-shadow: 0 0 18px rgba(250, 204, 21, 0.3), inset 0 -5px 10px rgba(0, 0, 0, 0.25);
+        .dm-chain-diag-l { left:28%; transform:rotate(-38deg); transform-origin:center center; }
+        .dm-chain-diag-r { left:66%; transform:rotate( 38deg); transform-origin:center center; }
+        .dm-padlock-css {
+          position:absolute; top:50%; left:50%;
+          transform:translate(-50%,-55%);
+        }
+        .dm-padlock-shackle {
+          width:18px; height:14px;
+          border:3px solid #8a8f9a; border-bottom:0;
+          border-radius:9px 9px 0 0;
+          margin:0 auto; position:relative; bottom:-1px;
+        }
+        .dm-padlock-body {
+          width:30px; height:26px;
+          background:linear-gradient(180deg,#c8cdd7,#8a8f9a);
+          border:2px solid #5e636e; border-radius:5px;
+          position:relative;
+          box-shadow:0 4px 10px rgba(0,0,0,.55);
+        }
+        .dm-padlock-body::after {
+          content:''; position:absolute;
+          top:48%; left:50%;
+          width:7px; height:9px;
+          background:#374151; border-radius:3px;
+          transform:translate(-50%,-30%);
+        }
+
+        /* Glow ring — available state */
+        .dm-glow-ring {
+          position:absolute; inset:-12%;
+          border-radius:50%; opacity:0;
+          pointer-events:none; transition:opacity .5s ease;
+          background:radial-gradient(circle,transparent 60%,rgba(245,197,24,.1) 80%,transparent 100%);
+        }
+        .daily-mission-chest-3d.is-open .dm-glow-ring {
+          opacity:1;
+          animation:dm-glow-pulse 1.6s ease-in-out infinite;
+        }
+        @keyframes dm-glow-pulse {
+          0%,100% { box-shadow:0 0 22px 8px rgba(245,197,24,.28),0 0 44px 16px rgba(245,197,24,.12); }
+          50%      { box-shadow:0 0 36px 14px rgba(245,197,24,.48),0 0 70px 28px rgba(245,197,24,.22); }
+        }
+
+        /* Prize reveal (modal) */
+        .daily-mission-modal-sorpresa {
+          position:absolute; top:50%; left:50%;
+          transform:translate(-50%,-50%) rotateY(35deg) rotateX(15deg) scale(0);
+          text-align:center; opacity:0; pointer-events:none; white-space:nowrap;
+          transition:all .7s cubic-bezier(.175,.885,.32,1.275);
+          z-index:20;
         }
         .daily-mission-progress {
           height: 0.9rem;
@@ -1303,42 +1394,43 @@ $dailyMissionsScriptPayload = [
           justify-items: center;
           gap: 1rem;
         }
-        /* Cofre giratorio: animación adaptada del cofre proporcionado */
+        /* Spin: applied to inner dm-cofre */
         @keyframes girarExplosion {
-          0%   { transform: rotateX(-15deg) rotateY(-35deg) scale(1); }
-          40%  { transform: rotateX(-20deg) rotateY(325deg) scale(1.05); }
-          75%  { transform: rotateX(-10deg) rotateY(1045deg) scale(1.15); }
-          90%  { transform: rotateX(-18deg) rotateY(1225deg) scale(1.2) translate(3px, -3px); }
-          100% { transform: rotateX(-15deg) rotateY(1405deg) scale(1.25) translate(-3px, 3px); }
+          0%   { transform:rotateX(-15deg) rotateY(-35deg) scale(1); }
+          40%  { transform:rotateX(-20deg) rotateY(325deg) scale(1.05); }
+          75%  { transform:rotateX(-10deg) rotateY(1045deg) scale(1.15); }
+          90%  { transform:rotateX(-18deg) rotateY(1225deg) scale(1.2) translate(3px,-3px); }
+          100% { transform:rotateX(-15deg) rotateY(1405deg) scale(1.25) translate(-3px,3px); }
         }
-        .daily-mission-chest-3d.is-spinning {
-          animation: girarExplosion 1.8s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards;
-          transform-style: preserve-3d;
+        .daily-mission-chest-3d.is-spinning .dm-cofre,
+        .daily-mission-chest-3d.girando     .dm-cofre {
+          animation:girarExplosion 1.8s cubic-bezier(0.55,0.085,0.68,0.53) forwards !important;
         }
-        /* Abrir tapa al finalizar */
-        .daily-mission-chest-3d.is-open .daily-mission-modal-lid {
-          transform: rotateX(120deg);
-          transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        /* Lid opens ONLY inside the modal (page chest keeps lid closed — available state) */
+        #daily-mission-modal .daily-mission-chest-3d.is-open  .dm-tapa,
+        #daily-mission-modal .daily-mission-chest-3d.abierto  .dm-tapa {
+          transform:rotateX(120deg);
         }
-        /* Chispas / explosión visual */
+        /* Prize reveal triggers in modal */
+        #daily-mission-modal .daily-mission-chest-3d.is-open  .daily-mission-modal-sorpresa,
+        #daily-mission-modal .daily-mission-chest-3d.abierto  .daily-mission-modal-sorpresa {
+          transform:translate(-50%,-190px) rotateY(35deg) rotateX(15deg) scale(1);
+          opacity:1;
+        }
+        /* Spark particles (created by JS) */
         .daily-mission-modal-spark {
-          position: absolute;
-          top: 50px; left: 100px;
-          font-size: 24px; opacity: 0; pointer-events: none; z-index: 15;
-          transition: opacity 0.2s ease;
+          position:absolute; top:50px; left:100px;
+          font-size:24px; opacity:0; pointer-events:none; z-index:15;
         }
         @keyframes estallar {
-          0% { transform: rotateY(35deg) translate3d(0,0,0) scale(0); opacity: 1; filter: brightness(2); }
-          100% { transform: rotateY(35deg) translate3d(var(--x), var(--y), 150px) scale(1) rotate(180deg); opacity: 0; }
+          0%   { transform:rotateY(35deg) translate3d(0,0,0) scale(0); opacity:1; filter:brightness(2); }
+          100% { transform:rotateY(35deg) translate3d(var(--x),var(--y),150px) scale(1) rotate(180deg); opacity:0; }
         }
-        @keyframes daily-mission-chest-pulse {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.02); }
-        }
-        @keyframes daily-mission-sparks {
-          0% { filter: brightness(1); }
-          50% { filter: brightness(1.2); }
-          100% { filter: brightness(1); }
+        /* Available state: gentle rock on page chest */
+        @keyframes dm-rock {
+          0%,100% { transform:rotateX(-15deg) rotateY(-35deg) scale(1); }
+          30%     { transform:rotateX(-18deg) rotateY(-28deg) scale(1.03); }
+          70%     { transform:rotateX(-12deg) rotateY(-42deg) scale(1.03); }
         }
         @media (max-width: 767.98px) {
           .daily-mission-toggle,
@@ -1496,145 +1588,53 @@ $dailyMissionsScriptPayload = [
           transform: translateY(30%);
           pointer-events: none;
         }
-        .daily-mission-modal-sparks,
-        .daily-mission-modal-lid,
-        .daily-mission-modal-band,
-        .daily-mission-modal-base,
-        .daily-mission-modal-lock {
-          position: absolute;
-          inset: 0;
-          pointer-events: none;
-        }
-        .daily-mission-modal-sparks {
-          inset: 0;
-          border-radius: inherit;
-          background:
-            radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.42), transparent 26%),
-            radial-gradient(circle at 18% 24%, rgba(34, 211, 238, 0.34), transparent 18%),
-            radial-gradient(circle at 82% 24%, rgba(250, 204, 21, 0.34), transparent 18%);
-          opacity: 0;
-          transition: opacity 0.2s ease;
-          mix-blend-mode: screen;
-          z-index: 4;
-        }
-        #daily-missions-shell .daily-mission-chest-shell.is-open .daily-mission-modal-sparks,
-        #daily-missions-shell .daily-mission-chest-3d.is-open .daily-mission-modal-sparks,
-        #daily-mission-modal .daily-mission-chest-3d.is-open .daily-mission-modal-sparks {
-          opacity: 1;
-        }
-        .daily-mission-modal-base {
-          left: 15%;
-          right: 15%;
-          bottom: 14%;
-          height: 37%;
-          border-radius: 0 0 1.05rem 1.05rem;
-          border: 2px solid var(--daily-chest-outline, #d7b200);
-          background: linear-gradient(180deg, var(--daily-chest-front-light), var(--daily-chest-front-dark));
-          box-shadow:
-            inset 0 -16px 24px rgba(0, 0, 0, 0.28),
-            inset 0 8px 16px rgba(255, 255, 255, 0.08),
-            0 18px 30px rgba(0, 0, 0, 0.22);
-          z-index: 1;
-        }
-        .daily-mission-modal-lid {
-          left: 13%;
-          right: 13%;
-          top: 11%;
-          height: 33%;
-          border-radius: 2rem 2rem 0.9rem 0.9rem;
-          border: 2px solid var(--daily-chest-outline, #d7b200);
-          background: linear-gradient(180deg, var(--daily-chest-top-light), var(--daily-chest-top-dark));
-          box-shadow:
-            inset 0 8px 18px rgba(255, 255, 255, 0.08),
-            inset 0 -10px 18px rgba(0, 0, 0, 0.18),
-            0 12px 24px rgba(0, 0, 0, 0.18);
-          z-index: 2;
-        }
-        .daily-mission-modal-band.is-top {
-          left: 14%;
-          right: 14%;
-          top: 42%;
-          height: 10%;
-          border-radius: 999px;
-          background: linear-gradient(90deg, var(--daily-chest-outline), #fff4b8 30%, var(--daily-chest-outline) 70%);
-          box-shadow: 0 0 18px rgba(250, 204, 21, 0.16);
-          z-index: 3;
-        }
-        .daily-mission-modal-band.is-bottom {
-          left: 18%;
-          right: 18%;
-          bottom: 18%;
-          height: 8%;
-          border-radius: 999px;
-          background: linear-gradient(180deg, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.28));
-          z-index: 3;
-        }
-        .daily-mission-modal-lock {
-          left: 50%;
-          top: 48%;
-          width: 18%;
-          aspect-ratio: 1;
-          transform: translate(-50%, -50%);
-          border-radius: 0.45rem;
-          border: 2px solid var(--daily-chest-outline, #d7b200);
-          background: linear-gradient(180deg, #ffd84d, #d88d12);
-          box-shadow: inset 0 -4px 8px rgba(0, 0, 0, 0.2), 0 0 12px rgba(255, 214, 72, 0.25);
-          z-index: 4;
-        }
-        .daily-mission-modal-lock::after {
-          content: '';
-          position: absolute;
-          left: 50%;
-          top: 50%;
-          width: 28%;
-          height: 36%;
-          border-radius: 999px 999px 0 0;
-          border: 2px solid rgba(110, 67, 0, 0.9);
-          border-bottom: 0;
-          transform: translate(-50%, -72%);
-          background: transparent;
-        }
-        #daily-missions-shell .daily-mission-chest-shell:not(.is-open),
-        #daily-missions-shell .daily-mission-chest-3d:not(.is-open),
-        #daily-mission-modal .daily-mission-chest-3d:not(.is-open) {
-          --daily-chest-front-light: #9096a0;
-          --daily-chest-front-dark: #535a65;
-          --daily-chest-top-light: #b8bec8;
-          --daily-chest-top-dark: #787f89;
-          --daily-chest-outline: #d7dce4;
-          filter: saturate(0.1) grayscale(1) brightness(0.9);
-        }
-        #daily-missions-shell .daily-mission-chest-shell.is-open,
-        #daily-missions-shell .daily-mission-chest-3d.is-open,
-        #daily-mission-modal .daily-mission-chest-3d.is-open {
-          filter: none;
-        }
-        #daily-missions-shell .daily-mission-chest-shell[data-level="basic"].is-open,
+        /* ─── dm-* color vars per level (set on .daily-mission-chest-3d) ─── */
+
+        /* Basic — brown with golden borders */
         #daily-missions-shell .daily-mission-chest-3d[data-level="basic"].is-open,
-        #daily-mission-modal .daily-mission-chest-3d[data-level="basic"].is-open {
-          --daily-chest-front-light: #ac6831;
-          --daily-chest-front-dark: #6b3f1c;
-          --daily-chest-top-light: #cb8348;
-          --daily-chest-top-dark: #8a552c;
-          --daily-chest-outline: #f5c518;
+        #daily-mission-modal  .daily-mission-chest-3d[data-level="basic"].is-open,
+        #daily-mission-modal  .daily-mission-chest-3d[data-level="basic"].abierto {
+          --dm-front-lg:    linear-gradient(90deg,#7a3c10 0%,#7a3c10 44%,#f5c518 44%,#f5c518 56%,#4d2509 56%,#4d2509 100%);
+          --dm-side-dark:   #3d1e08;
+          --dm-side-light:  #7a3c10;
+          --dm-top-side:    #5c3010;
+          --dm-top-light:   #ac6831;
+          --dm-outline:     #f5c518;
+          --dm-lock-bg:     linear-gradient(180deg,#ffd84d,#c8880e);
+          --dm-lock-border: #c8880e;
         }
-        #daily-missions-shell .daily-mission-chest-shell[data-level="intermediate"].is-open,
+
+        /* Intermediate — blue with golden borders */
         #daily-missions-shell .daily-mission-chest-3d[data-level="intermediate"].is-open,
-        #daily-mission-modal .daily-mission-chest-3d[data-level="intermediate"].is-open {
-          --daily-chest-front-light: #4a86eb;
-          --daily-chest-front-dark: #2454aa;
-          --daily-chest-top-light: #6aa2f2;
-          --daily-chest-top-dark: #3566c1;
-          --daily-chest-outline: #f5c518;
+        #daily-mission-modal  .daily-mission-chest-3d[data-level="intermediate"].is-open,
+        #daily-mission-modal  .daily-mission-chest-3d[data-level="intermediate"].abierto {
+          --dm-front-lg:    linear-gradient(90deg,#1e3f8a 0%,#1e3f8a 44%,#f5c518 44%,#f5c518 56%,#122770 56%,#122770 100%);
+          --dm-side-dark:   #0e1e60;
+          --dm-side-light:  #2a55b0;
+          --dm-top-side:    #152e80;
+          --dm-top-light:   #4a86eb;
+          --dm-outline:     #f5c518;
+          --dm-lock-bg:     linear-gradient(180deg,#ffd84d,#c8880e);
+          --dm-lock-border: #c8880e;
         }
-        #daily-missions-shell .daily-mission-chest-shell[data-level="legendary"].is-open,
+
+        /* Legendary — purple with golden borders */
         #daily-missions-shell .daily-mission-chest-3d[data-level="legendary"].is-open,
-        #daily-mission-modal .daily-mission-chest-3d[data-level="legendary"].is-open {
-          --daily-chest-front-light: #8f45d8;
-          --daily-chest-front-dark: #5e24a6;
-          --daily-chest-top-light: #ab69e8;
-          --daily-chest-top-dark: #752ec5;
-          --daily-chest-outline: #f5c518;
+        #daily-mission-modal  .daily-mission-chest-3d[data-level="legendary"].is-open,
+        #daily-mission-modal  .daily-mission-chest-3d[data-level="legendary"].abierto {
+          --dm-front-lg:    linear-gradient(90deg,#4d1890 0%,#4d1890 44%,#f5c518 44%,#f5c518 56%,#330e68 56%,#330e68 100%);
+          --dm-side-dark:   #260860;
+          --dm-side-light:  #6020a8;
+          --dm-top-side:    #360d78;
+          --dm-top-light:   #8f45d8;
+          --dm-outline:     #f5c518;
+          --dm-lock-bg:     linear-gradient(180deg,#ffd84d,#c8880e);
+          --dm-lock-border: #c8880e;
+        }
+
+        /* Available state rock animation — only on page chest (not modal) */
+        #daily-missions-shell .daily-mission-chest-3d.is-open:not(.is-spinning):not(.girando) .dm-cofre {
+          animation: dm-rock 3.5s ease-in-out infinite;
         }
         #daily-missions-shell .daily-mission-chest-copy {
           display: grid;
@@ -1765,7 +1765,7 @@ $dailyMissionsScriptPayload = [
           background: rgba(34, 211, 238, 0.08);
           color: #9ff7ff;
           text-decoration: none;
-          transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+          transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
         }
         #daily-missions-shell .daily-mission-social-icon.daily-mission-mini-action i {
           font-size: 0.92rem;
@@ -1774,6 +1774,55 @@ $dailyMissionsScriptPayload = [
           transform: translateY(-1px);
           background: rgba(34, 211, 238, 0.18);
           color: #fff;
+        }
+        /* Counting state — spinner border, no text change */
+        #daily-missions-shell .daily-mission-social-icon.is-counting {
+          opacity: 0.65;
+          pointer-events: none;
+          border-color: var(--daily-accent, #22d3ee);
+          animation: dm-social-spin 0.85s linear infinite;
+        }
+        @keyframes dm-social-spin {
+          to { transform: rotate(360deg); }
+        }
+        /* ─── Task check box ─── */
+        #daily-missions-shell .daily-mission-task-check-box {
+          width: 1.85rem;
+          height: 1.85rem;
+          flex: 0 0 auto;
+          border-radius: 0.45rem;
+          border: 2px solid rgba(34, 211, 238, 0.22);
+          background: rgba(34, 211, 238, 0.04);
+          display: grid;
+          place-items: center;
+          align-self: center;
+          transition: background 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
+          position: relative;
+          overflow: hidden;
+        }
+        #daily-missions-shell .daily-mission-task-check-box::after {
+          content: '';
+          display: block;
+          width: 0.6rem;
+          height: 0.34rem;
+          border-left: 2.5px solid rgba(34, 211, 238, 0.3);
+          border-bottom: 2.5px solid rgba(34, 211, 238, 0.3);
+          transform: rotate(-45deg) translateY(-10%);
+          transition: border-color 0.35s ease, filter 0.35s ease;
+        }
+        #daily-missions-shell .daily-mission-task-card[data-completed="1"] .daily-mission-task-check-box {
+          background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);
+          border-color: #22c55e;
+          box-shadow: 0 0 14px rgba(34,197,94,.5), 0 0 28px rgba(34,197,94,.2);
+          animation: dm-check-glow 1.8s ease-in-out infinite;
+        }
+        #daily-missions-shell .daily-mission-task-card[data-completed="1"] .daily-mission-task-check-box::after {
+          border-color: #fff;
+          filter: drop-shadow(0 0 3px rgba(255,255,255,.65));
+        }
+        @keyframes dm-check-glow {
+          0%,100% { box-shadow:0 0 14px rgba(34,197,94,.5),0 0 28px rgba(34,197,94,.2); }
+          50%      { box-shadow:0 0 22px rgba(34,197,94,.75),0 0 44px rgba(34,197,94,.35); }
         }
         #daily-missions-shell .daily-mission-progress-shell {
           width: 100%;
@@ -2032,12 +2081,41 @@ $dailyMissionsScriptPayload = [
                       <div class="daily-mission-chest-stage">
                         <button type="button" class="daily-mission-chest-shell<?php echo $dailyMissionsCanOpenChest ? ' is-open' : ''; ?>" id="daily-mission-chest-shell" data-daily-mission-chest data-level="<?php echo htmlspecialchars($dailyMissionsLevelKey, ENT_QUOTES, 'UTF-8'); ?>" aria-label="Abrir cofre diario"<?php echo $dailyMissionsCanOpenChest ? '' : ' disabled'; ?>>
                           <div class="daily-mission-chest-3d<?php echo $dailyMissionsCanOpenChest ? ' is-open' : ''; ?>" id="daily-mission-chest-3d" data-level="<?php echo htmlspecialchars($dailyMissionsLevelKey, ENT_QUOTES, 'UTF-8'); ?>">
-                            <div class="daily-mission-modal-sparks"></div>
-                            <div class="daily-mission-modal-lid"></div>
-                            <div class="daily-mission-modal-band is-top"></div>
-                            <div class="daily-mission-modal-band is-bottom"></div>
-                            <div class="daily-mission-modal-base"></div>
-                            <div class="daily-mission-modal-lock"></div>
+                            <div class="dm-scene">
+                              <div class="dm-cofre">
+                                <div class="dm-base">
+                                  <div class="dm-cara dm-frente dm-madera"></div>
+                                  <div class="dm-cara dm-atras dm-madera"></div>
+                                  <div class="dm-cara dm-der dm-oscura"></div>
+                                  <div class="dm-cara dm-izq dm-clara"></div>
+                                  <div class="dm-cara dm-fondo"></div>
+                                </div>
+                                <div class="dm-tapa">
+                                  <div class="dm-cara dm-t-der"></div>
+                                  <div class="dm-cara dm-t-izq"></div>
+                                  <div class="dm-tira dm-tr-1"></div>
+                                  <div class="dm-tira dm-tr-2"></div>
+                                  <div class="dm-tira dm-tr-3"></div>
+                                  <div class="dm-tira dm-tr-4"></div>
+                                  <div class="dm-tira dm-tr-5"></div>
+                                  <div class="dm-tira dm-tr-6"></div>
+                                  <div class="dm-tira dm-tr-7"></div>
+                                  <div class="dm-tira dm-tr-8"></div>
+                                  <div class="dm-tira dm-tr-9"></div>
+                                  <div class="dm-tira dm-tr-10"></div>
+                                  <div class="dm-cerradura"></div>
+                                </div>
+                              </div>
+                            </div>
+                            <div class="dm-chains" aria-hidden="true">
+                              <div class="dm-chain dm-chain-diag-l"></div>
+                              <div class="dm-chain dm-chain-diag-r"></div>
+                              <div class="dm-padlock-css">
+                                <div class="dm-padlock-shackle"></div>
+                                <div class="dm-padlock-body"></div>
+                              </div>
+                            </div>
+                            <div class="dm-glow-ring" aria-hidden="true"></div>
                           </div>
                         </button>
                         <div class="daily-mission-chest-copy text-center">
@@ -2124,6 +2202,7 @@ $dailyMissionsScriptPayload = [
                                 <?php endif; ?>
                               </div>
                             </div>
+                            <div class="daily-mission-task-check-box" aria-hidden="true"></div>
                           </li>
                         <?php endforeach; ?>
                       </ul>
@@ -2156,16 +2235,37 @@ $dailyMissionsScriptPayload = [
           </div>
           <div class="daily-mission-modal-stage" id="daily-mission-modal-stage" data-level="<?php echo htmlspecialchars($dailyMissionsLevelKey, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="daily-mission-chest-3d">
-              <div class="daily-mission-modal-sparks"></div>
-              <div class="daily-mission-modal-lid"></div>
-              <div class="daily-mission-modal-band is-top"></div>
-              <div class="daily-mission-modal-band is-bottom"></div>
-              <div class="daily-mission-modal-base"></div>
-              <div class="daily-mission-modal-lock"></div>
+              <div class="dm-scene">
+                <div class="dm-cofre">
+                  <div class="dm-base">
+                    <div class="dm-cara dm-frente dm-madera"></div>
+                    <div class="dm-cara dm-atras dm-madera"></div>
+                    <div class="dm-cara dm-der dm-oscura"></div>
+                    <div class="dm-cara dm-izq dm-clara"></div>
+                    <div class="dm-cara dm-fondo"></div>
+                  </div>
+                  <div class="dm-tapa">
+                    <div class="dm-cara dm-t-der"></div>
+                    <div class="dm-cara dm-t-izq"></div>
+                    <div class="dm-tira dm-tr-1"></div>
+                    <div class="dm-tira dm-tr-2"></div>
+                    <div class="dm-tira dm-tr-3"></div>
+                    <div class="dm-tira dm-tr-4"></div>
+                    <div class="dm-tira dm-tr-5"></div>
+                    <div class="dm-tira dm-tr-6"></div>
+                    <div class="dm-tira dm-tr-7"></div>
+                    <div class="dm-tira dm-tr-8"></div>
+                    <div class="dm-tira dm-tr-9"></div>
+                    <div class="dm-tira dm-tr-10"></div>
+                    <div class="dm-cerradura"></div>
+                  </div>
+                </div>
+              </div>
               <div class="daily-mission-modal-sorpresa sorpresa">
                 <div class="icono-s" id="daily-mission-modal-icono">🎁</div>
                 <div class="texto-s" id="daily-mission-modal-texto">¡Sorpresa!</div>
               </div>
+              <div class="dm-glow-ring" aria-hidden="true"></div>
             </div>
           </div>
           <div class="daily-mission-modal-body px-3 pb-3">
@@ -2181,24 +2281,30 @@ $dailyMissionsScriptPayload = [
         </div>
       </div>
       <style>
-        /* Modal surprise override (scoped) */
-        #daily-mission-modal .daily-mission-modal-sorpresa {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%) rotateY(35deg) rotateX(15deg) scale(0);
-          text-align: center;
-          opacity: 0;
-          pointer-events: none;
-          transition: all 0.7s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-          z-index: 10;
+        /* Modal stage sizing and sorpresa visual styles */
+        #daily-mission-modal .daily-mission-modal-stage {
+          min-height: 260px;
+          position: relative;
+          overflow: visible;
         }
-        #daily-mission-modal .daily-mission-chest-3d.is-open .daily-mission-modal-sorpresa {
-          transform: translate(-50%, -200px) rotateY(35deg) rotateX(15deg) scale(1);
-          opacity: 1;
+        #daily-mission-modal .daily-mission-chest-3d {
+          overflow: visible;
         }
-        #daily-mission-modal .daily-mission-modal-sorpresa .icono-s { font-size: 56px; filter: drop-shadow(0 0 18px rgba(255,215,0,0.8)); margin-bottom: 8px; }
-        #daily-mission-modal .daily-mission-modal-sorpresa .texto-s { background: #f39c12; padding: 8px 14px; border-radius: 6px; font-weight: 700; color: #fff; border: 2px solid rgba(255,255,255,0.9); }
+        #daily-mission-modal .daily-mission-modal-sorpresa .icono-s {
+          font-size: 56px;
+          filter: drop-shadow(0 0 18px rgba(255,215,0,0.8));
+          margin-bottom: 8px;
+          display: block;
+        }
+        #daily-mission-modal .daily-mission-modal-sorpresa .texto-s {
+          background: #f39c12;
+          padding: 8px 14px;
+          border-radius: 6px;
+          font-weight: 700;
+          color: #fff;
+          border: 2px solid rgba(255,255,255,0.9);
+          display: inline-block;
+        }
       </style>
 
       <section class="mt-5">
@@ -3196,12 +3302,14 @@ SCRIPT,
       window.clearInterval(countdown.timerId);
       missionCountdowns.delete(taskKey);
 
-      if (restoreLabel && countdown.button && countdown.button.dataset.originalLabel) {
-        countdown.button.textContent = countdown.button.dataset.originalLabel;
-      }
-
-      if (countdown.button && countdown.button.tagName === "BUTTON") {
-        countdown.button.disabled = false;
+      if (countdown.button) {
+        countdown.button.classList.remove("is-counting");
+        if (restoreLabel && countdown.button.dataset.originalLabel && !countdown.button.hasAttribute("data-daily-mission-social")) {
+          countdown.button.textContent = countdown.button.dataset.originalLabel;
+        }
+        if (countdown.button.tagName === "BUTTON") {
+          countdown.button.disabled = false;
+        }
       }
     };
 
@@ -3210,6 +3318,7 @@ SCRIPT,
         return;
       }
 
+      const isSocialIcon = button.hasAttribute("data-daily-mission-social");
       const originalLabel = button.dataset.originalLabel || button.textContent.trim() || "Procesando";
       const duration = Math.max(1, safeNumber(timerSeconds, 1));
       let remaining = duration;
@@ -3219,16 +3328,26 @@ SCRIPT,
         button.disabled = true;
       }
 
+      if (isSocialIcon) {
+        button.classList.add("is-counting");
+      }
+
       if (targetUrl && taskType !== "purchase") {
         openTargetUrl(targetUrl);
       }
 
       const updateLabel = () => {
-        button.textContent = originalLabel + " (" + remaining + "s)";
+        if (!isSocialIcon) {
+          button.textContent = originalLabel + " (" + remaining + "s)";
+        }
         if (remaining <= 0) {
           clearInterval(timerId);
           missionCountdowns.delete(taskKey);
-          button.textContent = originalLabel;
+          if (!isSocialIcon) {
+            button.textContent = originalLabel;
+          } else {
+            button.classList.remove("is-counting");
+          }
           if (button.tagName === "BUTTON") {
             button.disabled = false;
           }
