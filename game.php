@@ -7459,7 +7459,10 @@ include __DIR__ . "/includes/header.php";
     if (!playerVerificationConfig || !activePack || isAccountSalePack(activePack)) {
       return false;
     }
-
+    // La verificación de jugador solo aplica a paquetes de TiendaGiftVen, no Discord
+    if (String(activePack.provider || '').trim() === 'discord') {
+      return false;
+    }
     return true;
   }
 

@@ -57,9 +57,33 @@ function player_verification_definition_for_game(array $game): ?array {
         ];
     }
 
-    if (strpos($haystack, 'blood strike') !== false) {
+    if (strpos($haystack, 'blood strike') !== false || strpos($haystack, 'bloodstrike') !== false) {
         return [
             'key' => 'blood_strike',
+            'button_label' => 'Verificar nombre del jugador',
+            'default_fields' => [
+                [
+                    'name' => 'input1',
+                    'label' => 'ID del jugador',
+                    'placeholder' => 'Ingresa ID del Jugador',
+                    'inputMode' => 'numeric',
+                    'maxLength' => 32,
+                ],
+            ],
+        ];
+    }
+
+    $discordCategory = strtolower(trim((string) ($game['categoria_api_discord'] ?? '')));
+
+    if (
+        strpos($haystack, 'honor of king') !== false
+        || strpos($haystack, 'honorofking') !== false
+        || strpos($haystack, ' hok') !== false
+        || substr($haystack, 0, 3) === 'hok'
+        || strpos($discordCategory, 'hokup') !== false
+    ) {
+        return [
+            'key' => 'honor_of_kings',
             'button_label' => 'Verificar nombre del jugador',
             'default_fields' => [
                 [
@@ -305,6 +329,47 @@ function player_verification_verify(array $game, string $userIdentifier, array $
 
                 $providerMessage = trim((string) ($data['msg'] ?? ''));
                 return player_verification_result(false, 'not_found', $providerMessage !== '' ? $providerMessage : 'ID del jugador no encontrado.');
+
+            case 'honor_of_kings':
+                $response = player_verification_http_get('https://api.isan.eu.org/nickname/hok?id=' . rawurlencode($userIdentifier), [
+                    'Accept: application/json,text/plain,*/*',
+                    'User-Agent: TVirtualGaming/1.0',
+                ]);
+                $body = trim((string) $response['body']);
+                $bodyLower = strtolower($body);
+                $data = player_verification_decode_json($body);
+
+                if (is_array($data)) {
+                    $nicknamePaths = [
+                        ['nickname'],
+                        ['name'],
+                        ['username'],
+                        ['data', 'nickname'],
+                        ['data', 'name'],
+                        ['result', 'nickname'],
+                        ['result', 'name'],
+                    ];
+                    foreach ($nicknamePaths as $path) {
+                        $nickname = player_verification_extract_value_by_path($data, $path);
+                        if ($nickname !== '') {
+                            return player_verification_result(true, 'verified', 'Jugador encontrado: ' . $nickname, ['player_name' => $nickname]);
+                        }
+                    }
+
+                    $providerMessage = trim((string) ($data['message'] ?? $data['error'] ?? ''));
+                    if ($providerMessage !== '') {
+                        if (stripos($providerMessage, 'not found') !== false || stripos($providerMessage, 'invalid') !== false) {
+                            return player_verification_result(false, 'not_found', 'ID del jugador no encontrado.');
+                        }
+                        return player_verification_result(false, 'unavailable', $providerMessage);
+                    }
+                }
+
+                if (strpos($bodyLower, 'not found') !== false || strpos($bodyLower, 'invalid') !== false) {
+                    return player_verification_result(false, 'not_found', 'ID del jugador no encontrado.');
+                }
+
+                return player_verification_result(false, 'unavailable', 'No se pudo verificar el jugador en este momento.');
 
             case 'mobile_legends':
                 $zoneValue = player_verification_extract_zone_value($playerFields);
