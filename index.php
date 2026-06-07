@@ -1036,16 +1036,19 @@ $dailyMissionsScriptPayload = [
            on .daily-mission-chest-3d
            ═══════════════════════════════════════════════════════ */
 
-        /* Color vars — locked/gray default */
+        /* Color vars — locked/gray default (no glow, no animation) */
         .daily-mission-chest-3d {
-          --dm-front-lg: linear-gradient(90deg,#6b7280 0%,#6b7280 44%,#9ca3af 44%,#9ca3af 56%,#4b5563 56%,#4b5563 100%);
-          --dm-side-dark: #374151;
-          --dm-side-light: #6b7280;
-          --dm-top-side: #4b5563;
-          --dm-top-light: #6b7280;
-          --dm-outline: #9ca3af;
-          --dm-lock-bg: linear-gradient(180deg,#b8bec8,#787f89);
+          --dm-front-lg:    linear-gradient(160deg,#8892a0 0%,#5a6475 40%,#3a4150 70%,#252d38 100%);
+          --dm-side-dark:   #252d38;
+          --dm-side-light:  #4a5568;
+          --dm-top-side:    #363f4e;
+          --dm-top-light:   #6b7a8a;
+          --dm-outline:     #7a8796;
+          --dm-lock-bg:     linear-gradient(180deg,#b8bec8,#787f89);
           --dm-lock-border: #9ca3af;
+          --dm-glow-clr:    rgba(0,0,0,0);
+          --dm-led:         rgba(0,0,0,0);
+          --dm-crys:        #9ca3af;
         }
 
         /* Scene + cofre */
@@ -1080,12 +1083,40 @@ $dailyMissionsScriptPayload = [
         .dm-cara {
           position: absolute;
           box-sizing: border-box;
-          border: 3px solid var(--dm-outline, #9ca3af);
-          box-shadow: inset 0 0 30px rgba(0,0,0,0.8);
+          border: 2px solid var(--dm-outline, #7a8796);
+          box-shadow: inset 0 0 28px rgba(0,0,0,0.82), inset 0 0 5px rgba(255,255,255,0.04);
+          transition: box-shadow 0.45s ease;
         }
-        .dm-madera { background: var(--dm-front-lg); }
-        .dm-oscura { background: var(--dm-side-dark, #374151); }
-        .dm-clara  { background: var(--dm-side-light, #6b7280); }
+        /* Glowing border when chest is available */
+        .daily-mission-chest-3d.is-open .dm-cara {
+          box-shadow:
+            inset 0 0 28px rgba(0,0,0,0.78),
+            inset 0 0 5px rgba(255,255,255,0.05),
+            0 0 12px 4px var(--dm-glow-clr),
+            0 0 26px 8px var(--dm-led);
+        }
+        /* Geometric/faceted face backgrounds — diamond X pattern */
+        .dm-madera {
+          background:
+            linear-gradient(135deg, transparent 46%, rgba(255,255,255,0.26) 46%, rgba(255,255,255,0.26) 48%, transparent 48%),
+            linear-gradient(45deg,  transparent 46%, rgba(255,255,255,0.26) 46%, rgba(255,255,255,0.26) 48%, transparent 48%),
+            linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.15) 46%, transparent 54%),
+            linear-gradient(315deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.28) 46%, transparent 54%),
+            radial-gradient(ellipse 22% 22% at 50% 50%, rgba(255,255,255,0.1) 0%, transparent 100%),
+            var(--dm-front-lg);
+        }
+        .dm-oscura {
+          background:
+            linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.1) 46%, transparent 54%),
+            linear-gradient(315deg, rgba(0,0,0,0.22) 0%, rgba(0,0,0,0.22) 46%, transparent 54%),
+            var(--dm-side-dark, #252d38);
+        }
+        .dm-clara  {
+          background:
+            linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.18) 46%, transparent 54%),
+            linear-gradient(315deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.18) 46%, transparent 54%),
+            var(--dm-side-light, #4a5568);
+        }
 
         /* Base faces */
         .dm-frente { width:200px; height:100px; top:50px; left:0;    transform:translateZ(75px); }
@@ -1095,64 +1126,120 @@ $dailyMissionsScriptPayload = [
         .dm-fondo  { width:200px; height:150px; top:50px; left:0;    transform:rotateX(-90deg) translateZ(50px);
                      background:var(--dm-side-dark,#374151) !important; border:none !important; box-shadow:none !important; }
 
-        /* Lid side faces */
-        .dm-t-der {
-          width:150px; height:75px; top:-25px; left:25px;
-          border-radius:75px 75px 0 0;
-          transform:rotateY(90deg) translateZ(100px);
-          border-bottom:none !important;
-          background:var(--dm-top-side,#4b5563) !important;
-        }
-        .dm-t-izq {
-          width:150px; height:75px; top:-25px; left:25px;
-          border-radius:75px 75px 0 0;
-          transform:rotateY(-90deg) translateZ(100px);
-          border-bottom:none !important;
-          background:var(--dm-top-light,#6b7280) !important;
-        }
+        /* ── FLAT SQUARE LID faces ───────────────────────────── */
+        .dm-tapa-frente { width:200px; height:50px; top:0; left:0;    transform:translateZ(75px); }
+        .dm-tapa-atras  { width:200px; height:50px; top:0; left:0;    transform:rotateY(180deg) translateZ(75px); }
+        .dm-tapa-der    { width:150px; height:50px; top:0; left:25px; transform:rotateY(90deg)  translateZ(100px); }
+        .dm-tapa-izq    { width:150px; height:50px; top:0; left:25px; transform:rotateY(-90deg) translateZ(100px); }
 
-        /* Band strips — 10 strips form the curved lid */
-        .dm-tira {
+        /* Flat horizontal lid top — spans full box XZ plane at y=0 */
+        .dm-tapa-top {
           position:absolute;
-          width:200px; height:26px;
-          top:37px; left:0;
-          border-left:3px solid var(--dm-outline,#9ca3af);
-          border-right:3px solid var(--dm-outline,#9ca3af);
-          border-top:1px solid rgba(0,0,0,0.35);
-          box-sizing:border-box;
-          background:var(--dm-front-lg);
+          width:200px; height:150px; top:0; left:0;
+          transform-origin:50% 0;
+          transform:rotateX(-90deg) translateY(-75px);
+          background:
+            linear-gradient(135deg, transparent 46%, rgba(255,255,255,0.3) 46%, rgba(255,255,255,0.3) 48%, transparent 48%),
+            linear-gradient(45deg,  transparent 46%, rgba(255,255,255,0.3) 46%, rgba(255,255,255,0.3) 48%, transparent 48%),
+            linear-gradient(90deg,  transparent 46%, rgba(255,255,255,0.15) 46%, rgba(255,255,255,0.15) 48%, transparent 48%),
+            linear-gradient(0deg,   transparent 46%, rgba(255,255,255,0.15) 46%, rgba(255,255,255,0.15) 48%, transparent 48%),
+            linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.18) 44%, transparent 56%),
+            linear-gradient(315deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.28) 44%, transparent 56%),
+            var(--dm-top-side,#363f4e) !important;
+          border:2px solid var(--dm-outline,#7a8796) !important;
+          box-shadow:inset 0 0 22px rgba(0,0,0,0.7), inset 0 0 5px rgba(255,255,255,0.03);
+          transition:box-shadow 0.45s ease;
         }
-        .dm-tr-1  { transform:rotateX(9deg)   translateZ(75px); }
-        .dm-tr-2  { transform:rotateX(27deg)  translateZ(75px); }
-        .dm-tr-3  { transform:rotateX(45deg)  translateZ(75px); }
-        .dm-tr-4  { transform:rotateX(63deg)  translateZ(75px); }
-        .dm-tr-5  { transform:rotateX(81deg)  translateZ(75px); }
-        .dm-tr-6  { transform:rotateX(99deg)  translateZ(75px); }
-        .dm-tr-7  { transform:rotateX(117deg) translateZ(75px); }
-        .dm-tr-8  { transform:rotateX(135deg) translateZ(75px); }
-        .dm-tr-9  { transform:rotateX(153deg) translateZ(75px); }
-        .dm-tr-10 { transform:rotateX(171deg) translateZ(75px); }
+        .daily-mission-chest-3d.is-open .dm-tapa-top {
+          box-shadow:
+            inset 0 0 22px rgba(0,0,0,0.65),
+            inset 0 0 4px rgba(255,255,255,0.04),
+            0 0 14px 4px var(--dm-glow-clr),
+            0 0 28px 10px var(--dm-led) !important;
+        }
 
-        /* Lock */
+        /* Corner studs — diamond accents at lid front corners */
+        .dm-stud {
+          position:absolute;
+          width:14px; height:14px;
+          background:linear-gradient(135deg, var(--dm-top-light,#a0aec0) 0%, var(--dm-outline,#7a8796) 100%);
+          border:1.5px solid rgba(255,255,255,0.45);
+          clip-path:polygon(50% 0%,100% 50%,50% 100%,0% 50%);
+          box-shadow:0 0 10px var(--dm-glow-clr,transparent);
+          z-index:6;
+          transition:box-shadow 0.4s;
+        }
+        .daily-mission-chest-3d.is-open .dm-stud {
+          box-shadow:0 0 18px 4px var(--dm-glow-clr);
+        }
+        .dm-stud-fl { top:-7px; left:-7px;   transform:translateZ(80px); }
+        .dm-stud-fr { top:-7px; left:193px;  transform:translateZ(80px); }
+
+        /* Clasp — flat rectangular lock at lid-body seam */
         .dm-cerradura {
           position:absolute;
-          width:30px; height:40px;
+          width:32px; height:14px;
           background:var(--dm-lock-bg,linear-gradient(180deg,#b8bec8,#787f89));
-          border:3px solid var(--dm-lock-border,#9ca3af);
-          border-radius:5px;
-          top:30px; left:85px;
-          transform:translateZ(77px);
-          box-shadow:0 4px 8px rgba(0,0,0,0.55);
-          z-index:4;
+          border:2px solid var(--dm-lock-border,#9ca3af);
+          border-radius:3px;
+          top:43px; left:84px;
+          transform:translateZ(78px);
+          box-shadow:0 2px 8px rgba(0,0,0,0.55), 0 0 0px var(--dm-glow-clr);
+          z-index:5;
+          transition:box-shadow 0.4s;
         }
         .dm-cerradura::after {
           content:'';
           position:absolute;
-          top:15px; left:10px;
-          width:4px; height:12px;
-          background:rgba(0,0,0,0.55);
+          top:50%; left:50%;
+          width:10px; height:6px;
+          background:rgba(0,0,0,0.4);
           border-radius:2px;
+          transform:translate(-50%,-50%);
         }
+        .daily-mission-chest-3d.is-open .dm-cerradura {
+          box-shadow:0 2px 8px rgba(0,0,0,0.55), 0 0 14px 4px var(--dm-glow-clr);
+        }
+
+        /* LED strip at TOP edge of lid front (rim between top and front) */
+        .dm-tapa-frente::before {
+          content:'';
+          position:absolute;
+          top:-1px; left:3px; right:3px; height:3px;
+          background:var(--dm-led,transparent);
+          box-shadow:0 0 12px 6px var(--dm-glow-clr,transparent);
+          border-radius:2px 2px 0 0;
+          pointer-events:none;
+          opacity:0; transition:opacity 0.45s;
+        }
+        .daily-mission-chest-3d.is-open .dm-tapa-frente::before { opacity:1; }
+
+        /* LED strip at BOTTOM edge of lid front (seam) */
+        .dm-tapa-frente::after {
+          content:'';
+          position:absolute;
+          bottom:-1px; left:3px; right:3px; height:3px;
+          background:var(--dm-led,transparent);
+          box-shadow:0 0 12px 6px var(--dm-glow-clr,transparent);
+          border-radius:0 0 2px 2px;
+          pointer-events:none;
+          opacity:0; transition:opacity 0.45s;
+        }
+        .daily-mission-chest-3d.is-open .dm-tapa-frente::after { opacity:1; }
+
+        /* Vertical LED on lid sides */
+        .dm-tapa-der::after, .dm-tapa-izq::after {
+          content:'';
+          position:absolute;
+          top:0; bottom:0; width:3px;
+          background:linear-gradient(180deg,var(--dm-led,transparent) 0%,var(--dm-led,transparent) 100%);
+          opacity:0; transition:opacity 0.45s;
+          pointer-events:none;
+        }
+        .dm-tapa-der::after { right:0; }
+        .dm-tapa-izq::after { left:0; }
+        .daily-mission-chest-3d.is-open .dm-tapa-der::after,
+        .daily-mission-chest-3d.is-open .dm-tapa-izq::after { opacity:0.75; }
 
         /* Chains overlay — shows when locked */
         .dm-chains {
@@ -1202,19 +1289,112 @@ $dailyMissionsScriptPayload = [
 
         /* Glow ring — available state */
         .dm-glow-ring {
-          position:absolute; inset:-12%;
+          position:absolute; inset:-20%;
           border-radius:50%; opacity:0;
           pointer-events:none; transition:opacity .5s ease;
-          background:radial-gradient(circle,transparent 60%,rgba(245,197,24,.1) 80%,transparent 100%);
+          background:radial-gradient(circle at center,transparent 44%,var(--dm-glow-clr,rgba(245,197,24,.12)) 70%,transparent 100%);
         }
         .daily-mission-chest-3d.is-open .dm-glow-ring {
           opacity:1;
-          animation:dm-glow-pulse 1.6s ease-in-out infinite;
+          animation:dm-glow-pulse 1.8s ease-in-out infinite;
         }
         @keyframes dm-glow-pulse {
-          0%,100% { box-shadow:0 0 22px 8px rgba(245,197,24,.28),0 0 44px 16px rgba(245,197,24,.12); }
-          50%      { box-shadow:0 0 36px 14px rgba(245,197,24,.48),0 0 70px 28px rgba(245,197,24,.22); }
+          0%,100% {
+            box-shadow:0 0 30px 12px var(--dm-glow-clr,rgba(245,197,24,.3)),
+                       0 0 60px 24px var(--dm-led,rgba(245,197,24,.12));
+            opacity:0.65;
+          }
+          50% {
+            box-shadow:0 0 52px 22px var(--dm-glow-clr,rgba(245,197,24,.55)),
+                       0 0 100px 44px var(--dm-led,rgba(245,197,24,.22));
+            opacity:1;
+          }
         }
+
+        /* Face icon — star symbol on chest front panel */
+        .dm-face-icon {
+          position:absolute; inset:0;
+          display:flex; align-items:center; justify-content:center;
+          padding-bottom:8px;
+          font-size:22px; pointer-events:none; user-select:none;
+          color:var(--dm-outline,#7a8796);
+          opacity:0.22;
+          filter:drop-shadow(0 0 3px rgba(255,255,255,0.12));
+          transition:opacity 0.45s, filter 0.45s;
+        }
+        .daily-mission-chest-3d.is-open .dm-face-icon {
+          opacity:0.8;
+          filter:drop-shadow(0 0 14px var(--dm-glow-clr,rgba(245,197,24,.7)));
+          animation:dm-icon-pulse 2.2s ease-in-out infinite;
+        }
+        @keyframes dm-icon-pulse {
+          0%,100% { filter:drop-shadow(0 0 10px var(--dm-glow-clr)); opacity:0.65; }
+          50%     { filter:drop-shadow(0 0 24px var(--dm-glow-clr)); opacity:1; }
+        }
+
+        /* Ground aura beneath chest — positioned at ~bottom of dm-scene */
+        .dm-aura {
+          position:absolute;
+          width:160px; height:16px;
+          left:50%; bottom:18%;
+          transform:translateX(-50%);
+          border-radius:50%;
+          background:var(--dm-glow-clr,transparent);
+          filter:blur(16px);
+          opacity:0; pointer-events:none;
+          transition:opacity 0.5s ease;
+        }
+        .daily-mission-chest-3d.is-open .dm-aura {
+          opacity:1;
+          animation:dm-aura-breathe 2.2s ease-in-out infinite;
+        }
+        @keyframes dm-aura-breathe {
+          0%,100% { opacity:0.65; transform:translateX(-50%) scaleX(0.85); }
+          50%     { opacity:1;    transform:translateX(-50%) scaleX(1.22); }
+        }
+
+        /* LED strip — top edge of body front (seam between lid and body) */
+        .dm-frente::before {
+          content:'';
+          position:absolute;
+          top:-1px; left:3px; right:3px;
+          height:3px;
+          background:var(--dm-led,transparent);
+          box-shadow:0 0 14px 7px var(--dm-glow-clr,transparent);
+          border-radius:2px 2px 0 0;
+          pointer-events:none;
+          opacity:0; transition:opacity 0.45s;
+        }
+        .daily-mission-chest-3d.is-open .dm-frente::before { opacity:1; }
+
+        /* LED strip — bottom edge of body front face */
+        .dm-frente::after {
+          content:'';
+          position:absolute;
+          bottom:-1px; left:3px; right:3px;
+          height:3px;
+          background:var(--dm-led,transparent);
+          box-shadow:0 0 12px 6px var(--dm-glow-clr,transparent);
+          border-radius:0 0 2px 2px;
+          pointer-events:none;
+          opacity:0; transition:opacity 0.45s;
+        }
+        .daily-mission-chest-3d.is-open .dm-frente::after { opacity:1; }
+
+        /* Vertical glow strips on side faces */
+        .dm-der::after, .dm-izq::after {
+          content:'';
+          position:absolute;
+          top:0; bottom:0;
+          width:3px;
+          background:linear-gradient(180deg,transparent 0%,var(--dm-led,transparent) 50%,transparent 100%);
+          opacity:0; transition:opacity 0.45s;
+          pointer-events:none;
+        }
+        .dm-der::after { right:0; }
+        .dm-izq::after { left:0; }
+        .daily-mission-chest-3d.is-open .dm-der::after,
+        .daily-mission-chest-3d.is-open .dm-izq::after { opacity:0.75; }
 
         /* Prize reveal (modal) */
         .daily-mission-modal-sorpresa {
@@ -1394,17 +1574,10 @@ $dailyMissionsScriptPayload = [
           justify-items: center;
           gap: 1rem;
         }
-        /* Spin: applied to inner dm-cofre */
-        @keyframes girarExplosion {
-          0%   { transform:rotateX(-15deg) rotateY(-35deg) scale(1); }
-          40%  { transform:rotateX(-20deg) rotateY(325deg) scale(1.05); }
-          75%  { transform:rotateX(-10deg) rotateY(1045deg) scale(1.15); }
-          90%  { transform:rotateX(-18deg) rotateY(1225deg) scale(1.2) translate(3px,-3px); }
-          100% { transform:rotateX(-15deg) rotateY(1405deg) scale(1.25) translate(-3px,3px); }
-        }
+        /* Spin animation class rules (keyframes defined below) */
         .daily-mission-chest-3d.is-spinning .dm-cofre,
         .daily-mission-chest-3d.girando     .dm-cofre {
-          animation:girarExplosion 1.8s cubic-bezier(0.55,0.085,0.68,0.53) forwards !important;
+          animation:girarExplosion 1.8s cubic-bezier(0.4,0.1,0.6,0.9) forwards !important;
         }
         /* Lid opens ONLY inside the modal (page chest keeps lid closed — available state) */
         #daily-mission-modal .daily-mission-chest-3d.is-open  .dm-tapa,
@@ -1417,20 +1590,37 @@ $dailyMissionsScriptPayload = [
           transform:translate(-50%,-190px) rotateY(35deg) rotateX(15deg) scale(1);
           opacity:1;
         }
+        /* Spin animation — more explosive */
+        @keyframes girarExplosion {
+          0%   { transform:rotateX(-15deg) rotateY(-35deg) scale(1); }
+          15%  { transform:rotateX(-22deg) rotateY(50deg) scale(1.04); }
+          40%  { transform:rotateX(-20deg) rotateY(325deg) scale(1.09); }
+          68%  { transform:rotateX(-10deg) rotateY(780deg) scale(1.16); }
+          88%  { transform:rotateX(-18deg) rotateY(1100deg) scale(1.24) translateY(-6px); }
+          100% { transform:rotateX(-15deg) rotateY(1405deg) scale(1.3) translateY(-5px); }
+        }
+        /* Flash burst on chest open */
+        @keyframes dm-flash-burst {
+          0%   { opacity:0.95; transform:scale(0.3); }
+          55%  { opacity:0.6;  transform:scale(1.7); }
+          100% { opacity:0;    transform:scale(2.8); }
+        }
         /* Spark particles (created by JS) */
         .daily-mission-modal-spark {
           position:absolute; top:50px; left:100px;
-          font-size:24px; opacity:0; pointer-events:none; z-index:15;
+          font-size:30px; opacity:0; pointer-events:none; z-index:15;
         }
         @keyframes estallar {
-          0%   { transform:rotateY(35deg) translate3d(0,0,0) scale(0); opacity:1; filter:brightness(2); }
-          100% { transform:rotateY(35deg) translate3d(var(--x),var(--y),150px) scale(1) rotate(180deg); opacity:0; }
+          0%   { transform:rotateY(35deg) translate3d(0,0,0) scale(0.2); opacity:1; filter:brightness(3); }
+          40%  { opacity:1; filter:brightness(2); }
+          100% { transform:rotateY(35deg) translate3d(var(--x),var(--y),200px) scale(1.3) rotate(220deg); opacity:0; filter:brightness(1); }
         }
-        /* Available state: gentle rock on page chest */
+        /* Available state: floating rock */
         @keyframes dm-rock {
-          0%,100% { transform:rotateX(-15deg) rotateY(-35deg) scale(1); }
-          30%     { transform:rotateX(-18deg) rotateY(-28deg) scale(1.03); }
-          70%     { transform:rotateX(-12deg) rotateY(-42deg) scale(1.03); }
+          0%,100% { transform:rotateX(-15deg) rotateY(-35deg) scale(1) translateY(0); }
+          25%     { transform:rotateX(-19deg) rotateY(-27deg) scale(1.04) translateY(-7px); }
+          60%     { transform:rotateX(-11deg) rotateY(-43deg) scale(1.04) translateY(-5px); }
+          85%     { transform:rotateX(-16deg) rotateY(-38deg) scale(1.02) translateY(-2px); }
         }
         @media (max-width: 767.98px) {
           .daily-mission-toggle,
@@ -1603,48 +1793,57 @@ $dailyMissionsScriptPayload = [
           transform: translateY(30%);
           pointer-events: none;
         }
-        /* ─── dm-* color vars per level (set on .daily-mission-chest-3d) ─── */
+        /* ─── dm-* color vars per level — apply when chest is available (.is-open) ─── */
 
-        /* Basic — brown with golden borders */
+        /* Basic — marrón profundo con bordes y brillo dorado */
         #daily-missions-shell .daily-mission-chest-3d[data-level="basic"].is-open,
         #daily-mission-modal  .daily-mission-chest-3d[data-level="basic"].is-open,
         #daily-mission-modal  .daily-mission-chest-3d[data-level="basic"].abierto {
-          --dm-front-lg:    linear-gradient(90deg,#7a3c10 0%,#7a3c10 44%,#f5c518 44%,#f5c518 56%,#4d2509 56%,#4d2509 100%);
-          --dm-side-dark:   #3d1e08;
-          --dm-side-light:  #7a3c10;
-          --dm-top-side:    #5c3010;
-          --dm-top-light:   #ac6831;
+          --dm-front-lg:    linear-gradient(160deg,#d07848 0%,#8a3d10 35%,#5a2208 68%,#2e1004 100%);
+          --dm-side-dark:   #2e1004;
+          --dm-side-light:  #9a4c20;
+          --dm-top-side:    #5a2208;
+          --dm-top-light:   #b06030;
           --dm-outline:     #f5c518;
           --dm-lock-bg:     linear-gradient(180deg,#ffd84d,#c8880e);
-          --dm-lock-border: #c8880e;
+          --dm-lock-border: #f5c518;
+          --dm-glow-clr:    rgba(245,197,24,0.55);
+          --dm-led:         rgba(245,197,24,0.95);
+          --dm-crys:        #ffd700;
         }
 
-        /* Intermediate — blue with golden borders */
+        /* Intermediate — azul profundo con bordes dorados y LED azul */
         #daily-missions-shell .daily-mission-chest-3d[data-level="intermediate"].is-open,
         #daily-mission-modal  .daily-mission-chest-3d[data-level="intermediate"].is-open,
         #daily-mission-modal  .daily-mission-chest-3d[data-level="intermediate"].abierto {
-          --dm-front-lg:    linear-gradient(90deg,#1e3f8a 0%,#1e3f8a 44%,#f5c518 44%,#f5c518 56%,#122770 56%,#122770 100%);
-          --dm-side-dark:   #0e1e60;
+          --dm-front-lg:    linear-gradient(160deg,#4090f0 0%,#1e3f8a 35%,#0e1e60 68%,#060d30 100%);
+          --dm-side-dark:   #060d30;
           --dm-side-light:  #2a55b0;
-          --dm-top-side:    #152e80;
-          --dm-top-light:   #4a86eb;
+          --dm-top-side:    #0e2060;
+          --dm-top-light:   #3a70d8;
           --dm-outline:     #f5c518;
           --dm-lock-bg:     linear-gradient(180deg,#ffd84d,#c8880e);
-          --dm-lock-border: #c8880e;
+          --dm-lock-border: #f5c518;
+          --dm-glow-clr:    rgba(59,130,246,0.55);
+          --dm-led:         rgba(96,165,250,0.95);
+          --dm-crys:        #60a5fa;
         }
 
-        /* Legendary — purple with golden borders */
+        /* Legendary — morado oscuro con bordes dorados y LED violeta */
         #daily-missions-shell .daily-mission-chest-3d[data-level="legendary"].is-open,
         #daily-mission-modal  .daily-mission-chest-3d[data-level="legendary"].is-open,
         #daily-mission-modal  .daily-mission-chest-3d[data-level="legendary"].abierto {
-          --dm-front-lg:    linear-gradient(90deg,#4d1890 0%,#4d1890 44%,#f5c518 44%,#f5c518 56%,#330e68 56%,#330e68 100%);
-          --dm-side-dark:   #260860;
-          --dm-side-light:  #6020a8;
-          --dm-top-side:    #360d78;
-          --dm-top-light:   #8f45d8;
+          --dm-front-lg:    linear-gradient(160deg,#9840e8 0%,#4d1890 35%,#280a60 68%,#10023a 100%);
+          --dm-side-dark:   #10023a;
+          --dm-side-light:  #6830a8;
+          --dm-top-side:    #280a60;
+          --dm-top-light:   #8040c0;
           --dm-outline:     #f5c518;
           --dm-lock-bg:     linear-gradient(180deg,#ffd84d,#c8880e);
-          --dm-lock-border: #c8880e;
+          --dm-lock-border: #f5c518;
+          --dm-glow-clr:    rgba(168,85,247,0.55);
+          --dm-led:         rgba(192,132,252,0.95);
+          --dm-crys:        #c084fc;
         }
 
         /* Available state rock animation — only on page chest (not modal) */
@@ -2140,29 +2339,25 @@ $dailyMissionsScriptPayload = [
                             <div class="dm-scene">
                               <div class="dm-cofre">
                                 <div class="dm-base">
-                                  <div class="dm-cara dm-frente dm-madera"></div>
+                                  <div class="dm-cara dm-frente dm-madera"><span class="dm-face-icon" aria-hidden="true">✦</span></div>
                                   <div class="dm-cara dm-atras dm-madera"></div>
                                   <div class="dm-cara dm-der dm-oscura"></div>
                                   <div class="dm-cara dm-izq dm-clara"></div>
                                   <div class="dm-cara dm-fondo"></div>
                                 </div>
                                 <div class="dm-tapa">
-                                  <div class="dm-cara dm-t-der"></div>
-                                  <div class="dm-cara dm-t-izq"></div>
-                                  <div class="dm-tira dm-tr-1"></div>
-                                  <div class="dm-tira dm-tr-2"></div>
-                                  <div class="dm-tira dm-tr-3"></div>
-                                  <div class="dm-tira dm-tr-4"></div>
-                                  <div class="dm-tira dm-tr-5"></div>
-                                  <div class="dm-tira dm-tr-6"></div>
-                                  <div class="dm-tira dm-tr-7"></div>
-                                  <div class="dm-tira dm-tr-8"></div>
-                                  <div class="dm-tira dm-tr-9"></div>
-                                  <div class="dm-tira dm-tr-10"></div>
+                                  <div class="dm-tapa-top"></div>
+                                  <div class="dm-cara dm-tapa-frente dm-madera"></div>
+                                  <div class="dm-cara dm-tapa-atras dm-oscura"></div>
+                                  <div class="dm-cara dm-tapa-der dm-oscura"></div>
+                                  <div class="dm-cara dm-tapa-izq dm-clara"></div>
+                                  <div class="dm-stud dm-stud-fl"></div>
+                                  <div class="dm-stud dm-stud-fr"></div>
                                   <div class="dm-cerradura"></div>
                                 </div>
                               </div>
                             </div>
+                            <div class="dm-aura" aria-hidden="true"></div>
                             <div class="dm-chains" aria-hidden="true">
                               <div class="dm-chain dm-chain-diag-l"></div>
                               <div class="dm-chain dm-chain-diag-r"></div>
@@ -2294,29 +2489,25 @@ $dailyMissionsScriptPayload = [
               <div class="dm-scene">
                 <div class="dm-cofre">
                   <div class="dm-base">
-                    <div class="dm-cara dm-frente dm-madera"></div>
+                    <div class="dm-cara dm-frente dm-madera"><span class="dm-face-icon" aria-hidden="true">✦</span></div>
                     <div class="dm-cara dm-atras dm-madera"></div>
                     <div class="dm-cara dm-der dm-oscura"></div>
                     <div class="dm-cara dm-izq dm-clara"></div>
                     <div class="dm-cara dm-fondo"></div>
                   </div>
                   <div class="dm-tapa">
-                    <div class="dm-cara dm-t-der"></div>
-                    <div class="dm-cara dm-t-izq"></div>
-                    <div class="dm-tira dm-tr-1"></div>
-                    <div class="dm-tira dm-tr-2"></div>
-                    <div class="dm-tira dm-tr-3"></div>
-                    <div class="dm-tira dm-tr-4"></div>
-                    <div class="dm-tira dm-tr-5"></div>
-                    <div class="dm-tira dm-tr-6"></div>
-                    <div class="dm-tira dm-tr-7"></div>
-                    <div class="dm-tira dm-tr-8"></div>
-                    <div class="dm-tira dm-tr-9"></div>
-                    <div class="dm-tira dm-tr-10"></div>
+                    <div class="dm-tapa-top"></div>
+                    <div class="dm-cara dm-tapa-frente dm-madera"></div>
+                    <div class="dm-cara dm-tapa-atras dm-oscura"></div>
+                    <div class="dm-cara dm-tapa-der dm-oscura"></div>
+                    <div class="dm-cara dm-tapa-izq dm-clara"></div>
+                    <div class="dm-stud dm-stud-fl"></div>
+                    <div class="dm-stud dm-stud-fr"></div>
                     <div class="dm-cerradura"></div>
                   </div>
                 </div>
               </div>
+              <div class="dm-aura" aria-hidden="true"></div>
               <div class="daily-mission-modal-sorpresa sorpresa">
                 <div class="icono-s" id="daily-mission-modal-icono">🎁</div>
                 <div class="texto-s" id="daily-mission-modal-texto">¡Sorpresa!</div>
@@ -2347,19 +2538,29 @@ $dailyMissionsScriptPayload = [
           overflow: visible;
         }
         #daily-mission-modal .daily-mission-modal-sorpresa .icono-s {
-          font-size: 56px;
-          filter: drop-shadow(0 0 18px rgba(255,215,0,0.8));
-          margin-bottom: 8px;
+          font-size: 76px;
+          filter: drop-shadow(0 0 28px rgba(255,215,0,0.98)) drop-shadow(0 0 56px rgba(255,165,0,0.55));
+          margin-bottom: 14px;
           display: block;
+          animation: dm-prize-pop 0.65s cubic-bezier(0.175,0.885,0.32,1.5) both;
+        }
+        @keyframes dm-prize-pop {
+          0%   { transform:scale(0) translateY(18px); opacity:0; }
+          65%  { transform:scale(1.25) translateY(-5px); opacity:1; }
+          100% { transform:scale(1) translateY(0); opacity:1; }
         }
         #daily-mission-modal .daily-mission-modal-sorpresa .texto-s {
-          background: #f39c12;
-          padding: 8px 14px;
-          border-radius: 6px;
-          font-weight: 700;
-          color: #fff;
-          border: 2px solid rgba(255,255,255,0.9);
+          background: linear-gradient(135deg,#f5c518,#e67e22);
+          padding: 11px 24px;
+          border-radius: 12px;
+          font-weight: 900;
+          font-size: 1.08rem;
+          letter-spacing: 0.05em;
+          color: #1a0a00;
+          border: 2px solid rgba(255,255,255,0.92);
           display: inline-block;
+          box-shadow: 0 0 26px rgba(245,197,24,0.85), 0 0 52px rgba(245,197,24,0.38);
+          text-shadow: 0 1px 4px rgba(255,255,255,0.45);
         }
       </style>
 
@@ -2486,27 +2687,34 @@ $pageScripts = [
     const createMissionSparks = (container) => {
       const target = container || (missionModalStage && missionModalStage.querySelector('.daily-mission-chest-3d')) || missionChest3d;
       if (!target) return;
-      // remove previous sparks
       target.querySelectorAll('.daily-mission-modal-spark').forEach(s => s.remove());
 
-      const emojis = ['💥', '🔥', '✨', '⚡', '🌟'];
-      const count = 36;
+      // Flash burst overlay
+      const flash = document.createElement('div');
+      flash.style.cssText = 'position:absolute;inset:-30px;border-radius:50%;background:radial-gradient(circle,rgba(255,240,160,.95) 0%,rgba(255,200,60,.55) 45%,transparent 75%);pointer-events:none;z-index:30;animation:dm-flash-burst 0.7s ease-out forwards;';
+      target.style.position = 'relative';
+      target.appendChild(flash);
+      setTimeout(() => { try { flash.remove(); } catch(e){} }, 800);
+
+      const emojis = ['💥', '🔥', '✨', '⚡', '🌟', '💫', '⭐'];
+      const count = 42;
       for (let i = 0; i < count; i++) {
         const el = document.createElement('div');
         el.className = 'daily-mission-modal-spark';
         el.textContent = emojis[Math.floor(Math.random() * emojis.length)];
 
         const ang = Math.random() * Math.PI * 2;
-        const dist = Math.random() * 300 + 80;
+        const dist = Math.random() * 340 + 90;
         const x = (Math.cos(ang) * dist) + 'px';
-        const y = (Math.sin(ang) * dist - 100) + 'px';
+        const y = (Math.sin(ang) * dist - 120) + 'px';
 
         el.style.setProperty('--x', x);
         el.style.setProperty('--y', y);
         el.style.left = '50%';
         el.style.top = '50%';
         el.style.transform = 'translate(-50%, -50%)';
-        el.style.animation = 'estallar 1.2s cubic-bezier(0.1, 0.8, 0.3, 1) forwards';
+        const delay = (Math.random() * 0.18).toFixed(2);
+        el.style.animation = `estallar 1.3s ${delay}s cubic-bezier(0.08,0.85,0.28,1) forwards`;
 
         target.appendChild(el);
       }
