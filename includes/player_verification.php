@@ -331,44 +331,66 @@ function player_verification_verify(array $game, string $userIdentifier, array $
                 return player_verification_result(false, 'not_found', $providerMessage !== '' ? $providerMessage : 'ID del jugador no encontrado.');
 
             case 'honor_of_kings':
-                $response = player_verification_http_get('https://api.isan.eu.org/nickname/hok?id=' . rawurlencode($userIdentifier), [
-                    'Accept: application/json,text/plain,*/*',
-                    'User-Agent: TVirtualGaming/1.0',
-                ]);
-                $body = trim((string) $response['body']);
-                $bodyLower = strtolower($body);
-                $data = player_verification_decode_json($body);
-
-                if (is_array($data)) {
-                    $nicknamePaths = [
-                        ['nickname'],
-                        ['name'],
-                        ['username'],
-                        ['data', 'nickname'],
-                        ['data', 'name'],
-                        ['result', 'nickname'],
-                        ['result', 'name'],
-                    ];
-                    foreach ($nicknamePaths as $path) {
-                        $nickname = player_verification_extract_value_by_path($data, $path);
-                        if ($nickname !== '') {
-                            return player_verification_result(true, 'verified', 'Jugador encontrado: ' . $nickname, ['player_name' => $nickname]);
-                        }
+                $hokUrls = [
+                    'https://api.isan.eu.org/nickname/hok?uid=' . rawurlencode($userIdentifier),
+                    'https://api.isan.eu.org/nickname/hok?id=' . rawurlencode($userIdentifier),
+                ];
+                $hokNickname = '';
+                $hokUnavailable = false;
+                foreach ($hokUrls as $hokUrl) {
+                    try {
+                        $response = player_verification_http_get($hokUrl, [
+                            'Accept: application/json,text/plain,*/*',
+                            'User-Agent: TVirtualGaming/1.0',
+                        ], 8);
+                    } catch (Throwable $e) {
+                        $hokUnavailable = true;
+                        break;
                     }
+                    $body = trim((string) $response['body']);
+                    $bodyLower = strtolower($body);
+                    $data = player_verification_decode_json($body);
 
-                    $providerMessage = trim((string) ($data['message'] ?? $data['error'] ?? ''));
-                    if ($providerMessage !== '') {
-                        if (stripos($providerMessage, 'not found') !== false || stripos($providerMessage, 'invalid') !== false) {
+                    if (is_array($data)) {
+                        $nicknamePaths = [
+                            ['nickname'], ['name'], ['username'],
+                            ['data', 'nickname'], ['data', 'name'], ['data', 'username'],
+                            ['result', 'nickname'], ['result', 'name'],
+                        ];
+                        foreach ($nicknamePaths as $path) {
+                            $candidate = player_verification_extract_value_by_path($data, $path);
+                            if ($candidate !== '') {
+                                $hokNickname = $candidate;
+                                break 2;
+                            }
+                        }
+
+                        $providerMessage = trim((string) ($data['message'] ?? $data['error'] ?? ''));
+                        if (
+                            stripos($providerMessage, 'not found') !== false
+                            || stripos($providerMessage, 'invalid') !== false
+                            || stripos($providerMessage, 'no encontrado') !== false
+                        ) {
                             return player_verification_result(false, 'not_found', 'ID del jugador no encontrado.');
                         }
-                        return player_verification_result(false, 'unavailable', $providerMessage);
+                        // "Bad request" or similar → try next URL
+                        if (stripos($providerMessage, 'bad request') !== false || $response['status'] === 400) {
+                            continue;
+                        }
+                        if ($providerMessage !== '') {
+                            $hokUnavailable = true;
+                            break;
+                        }
+                    }
+
+                    if (strpos($bodyLower, 'not found') !== false || strpos($bodyLower, 'invalid') !== false) {
+                        return player_verification_result(false, 'not_found', 'ID del jugador no encontrado.');
                     }
                 }
 
-                if (strpos($bodyLower, 'not found') !== false || strpos($bodyLower, 'invalid') !== false) {
-                    return player_verification_result(false, 'not_found', 'ID del jugador no encontrado.');
+                if ($hokNickname !== '') {
+                    return player_verification_result(true, 'verified', 'Jugador encontrado: ' . $hokNickname, ['player_name' => $hokNickname]);
                 }
-
                 return player_verification_result(false, 'unavailable', 'No se pudo verificar el jugador en este momento.');
 
             case 'mobile_legends':

@@ -7574,7 +7574,7 @@ include __DIR__ . "/includes/header.php";
       requestBody.set('user_identifier', payload.userIdentifier);
       requestBody.set('player_fields_json', JSON.stringify(payload.playerFields));
 
-      const response = await fetch(buildAppUrl('/api/verify_player.php'), {
+      const response = await fetch(buildAppUrl('/api/verify_player.php?game_id=<?= (int) ($game['id'] ?? 0) ?>'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: requestBody.toString(),
