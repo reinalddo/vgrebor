@@ -1049,7 +1049,10 @@ $dailyMissionsScriptPayload = [
           --dm-glow-clr:    rgba(0,0,0,0);
           --dm-led:         rgba(0,0,0,0);
           --dm-crys:        #9ca3af;
+          --dm-diag:        rgba(0,0,0,0);
         }
+        /* X pattern only shows on available (colored) chests */
+        .daily-mission-chest-3d.is-open { --dm-diag: rgba(255,255,255,0.26); }
 
         /* Scene + cofre */
         .dm-scene {
@@ -1095,11 +1098,11 @@ $dailyMissionsScriptPayload = [
             0 0 12px 4px var(--dm-glow-clr),
             0 0 26px 8px var(--dm-led);
         }
-        /* Geometric/faceted face backgrounds — diamond X pattern */
+        /* Geometric/faceted face backgrounds — diamond X pattern (only on available chests) */
         .dm-madera {
           background:
-            linear-gradient(135deg, transparent 46%, rgba(255,255,255,0.26) 46%, rgba(255,255,255,0.26) 48%, transparent 48%),
-            linear-gradient(45deg,  transparent 46%, rgba(255,255,255,0.26) 46%, rgba(255,255,255,0.26) 48%, transparent 48%),
+            linear-gradient(135deg, transparent 46%, var(--dm-diag) 46%, var(--dm-diag) 48%, transparent 48%),
+            linear-gradient(45deg,  transparent 46%, var(--dm-diag) 46%, var(--dm-diag) 48%, transparent 48%),
             linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.15) 46%, transparent 54%),
             linear-gradient(315deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.28) 46%, transparent 54%),
             radial-gradient(ellipse 22% 22% at 50% 50%, rgba(255,255,255,0.1) 0%, transparent 100%),
@@ -1139,10 +1142,10 @@ $dailyMissionsScriptPayload = [
           transform-origin:50% 0;
           transform:rotateX(-90deg) translateY(-75px);
           background:
-            linear-gradient(135deg, transparent 46%, rgba(255,255,255,0.3) 46%, rgba(255,255,255,0.3) 48%, transparent 48%),
-            linear-gradient(45deg,  transparent 46%, rgba(255,255,255,0.3) 46%, rgba(255,255,255,0.3) 48%, transparent 48%),
-            linear-gradient(90deg,  transparent 46%, rgba(255,255,255,0.15) 46%, rgba(255,255,255,0.15) 48%, transparent 48%),
-            linear-gradient(0deg,   transparent 46%, rgba(255,255,255,0.15) 46%, rgba(255,255,255,0.15) 48%, transparent 48%),
+            linear-gradient(135deg, transparent 46%, var(--dm-diag) 46%, var(--dm-diag) 48%, transparent 48%),
+            linear-gradient(45deg,  transparent 46%, var(--dm-diag) 46%, var(--dm-diag) 48%, transparent 48%),
+            linear-gradient(90deg,  transparent 46%, var(--dm-diag) 46%, var(--dm-diag) 48%, transparent 48%),
+            linear-gradient(0deg,   transparent 46%, var(--dm-diag) 46%, var(--dm-diag) 48%, transparent 48%),
             linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.18) 44%, transparent 56%),
             linear-gradient(315deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.28) 44%, transparent 56%),
             var(--dm-top-side,#363f4e) !important;
@@ -1241,51 +1244,6 @@ $dailyMissionsScriptPayload = [
         .daily-mission-chest-3d.is-open .dm-tapa-der::after,
         .daily-mission-chest-3d.is-open .dm-tapa-izq::after { opacity:0.75; }
 
-        /* Chains overlay — shows when locked */
-        .dm-chains {
-          position:absolute; inset:0;
-          z-index:10; pointer-events:none;
-          transition:opacity 0.4s ease;
-        }
-        .daily-mission-chest-3d:not(.is-open) .dm-chains { opacity:1; }
-        .daily-mission-chest-3d.is-open         .dm-chains { opacity:0; }
-        .dm-chain {
-          position:absolute;
-          width:8px; height:115%; top:-7.5%;
-          border-radius:4px;
-          background:repeating-linear-gradient(
-            to bottom,
-            rgba(155,160,170,.95) 0px, rgba(155,160,170,.95) 7px,
-            rgba(75,80,90,.9) 7px, rgba(75,80,90,.9) 13px
-          );
-          box-shadow:1px 0 5px rgba(0,0,0,.5),-1px 0 5px rgba(0,0,0,.5);
-        }
-        .dm-chain-diag-l { left:28%; transform:rotate(-38deg); transform-origin:center center; }
-        .dm-chain-diag-r { left:66%; transform:rotate( 38deg); transform-origin:center center; }
-        .dm-padlock-css {
-          position:absolute; top:50%; left:50%;
-          transform:translate(-50%,-55%);
-        }
-        .dm-padlock-shackle {
-          width:18px; height:14px;
-          border:3px solid #8a8f9a; border-bottom:0;
-          border-radius:9px 9px 0 0;
-          margin:0 auto; position:relative; bottom:-1px;
-        }
-        .dm-padlock-body {
-          width:30px; height:26px;
-          background:linear-gradient(180deg,#c8cdd7,#8a8f9a);
-          border:2px solid #5e636e; border-radius:5px;
-          position:relative;
-          box-shadow:0 4px 10px rgba(0,0,0,.55);
-        }
-        .dm-padlock-body::after {
-          content:''; position:absolute;
-          top:48%; left:50%;
-          width:7px; height:9px;
-          background:#374151; border-radius:3px;
-          transform:translate(-50%,-30%);
-        }
 
         /* Glow ring — available state */
         .dm-glow-ring {
@@ -2358,14 +2316,6 @@ $dailyMissionsScriptPayload = [
                               </div>
                             </div>
                             <div class="dm-aura" aria-hidden="true"></div>
-                            <div class="dm-chains" aria-hidden="true">
-                              <div class="dm-chain dm-chain-diag-l"></div>
-                              <div class="dm-chain dm-chain-diag-r"></div>
-                              <div class="dm-padlock-css">
-                                <div class="dm-padlock-shackle"></div>
-                                <div class="dm-padlock-body"></div>
-                              </div>
-                            </div>
                             <div class="dm-glow-ring" aria-hidden="true"></div>
                           </div>
                         </button>
