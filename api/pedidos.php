@@ -2604,12 +2604,32 @@ function resolve_order_payment_discount_snapshot(array $order, string $paymentMo
         $taxPercentage = payment_method_paypal_tax_percentage();
     }
 
+    // Regla descuento máximo: cuando hay cupón Y descuento de método de pago,
+    // solo se aplica el mayor; si son iguales gana el cupón.
+    $couponDiscountedPrice = null;
+    if (!empty(trim((string) ($order['cupon'] ?? '')))) {
+        $rawCoupon = (float) ($order['precio_original'] ?? 0);
+        $couponDiscountedPrice = payment_difference_normalize_amount($rawCoupon > 0 ? $rawCoupon : (float) ($order['precio'] ?? 0));
+    }
+
+    if ($couponDiscountedPrice !== null && $percentage > 0.0) {
+        $couponDiscountAmount = max(0.0, $baseAmount - $couponDiscountedPrice);
+        $paymentDiscountAmount = payment_difference_normalize_amount(($baseAmount * $percentage) / 100);
+        if ($couponDiscountAmount >= $paymentDiscountAmount) {
+            $percentage = 0.0; // cupón gana: se suprime el descuento del método de pago
+        } else {
+            $couponDiscountedPrice = null; // método de pago gana: se ignora el cupón
+        }
+    }
+
     $discountAmount = payment_difference_normalize_amount(($baseAmount * $percentage) / 100);
     if ($discountAmount > $baseAmount) {
         $discountAmount = $baseAmount;
     }
 
-    $subtotalAmount = payment_difference_normalize_amount(max(0, $baseAmount - $discountAmount));
+    $subtotalAmount = $couponDiscountedPrice !== null
+        ? payment_difference_normalize_amount(max(0.0, $couponDiscountedPrice))
+        : payment_difference_normalize_amount(max(0.0, $baseAmount - $discountAmount));
     $taxAmount = payment_difference_normalize_amount(($subtotalAmount * $taxPercentage) / 100);
 
     return [
@@ -7808,6 +7828,8 @@ if ($action === 'create') {
         json_error('Faltan datos obligatorios del pedido: ' . implode(', ', $missing));
     }
 
+    $priceBeforeCoupon = $price; // precio original del paquete antes del cupón
+
     // Validar y aplicar cupón si existe
     if ($cupon) {
         $couponData = fetch_valid_coupon($mysqli, $cupon, (int) $game_id);
@@ -7863,7 +7885,7 @@ if ($action === 'create') {
             'api_provider' => $packageApiProvider !== '' ? $packageApiProvider : null,
             'moneda' => $currency,
             'precio' => $price,
-            'precio_descuento_metodo_pago_base' => $price,
+            'precio_descuento_metodo_pago_base' => $priceBeforeCoupon,
             'descuento_metodo_pago_porcentaje' => 0,
             'descuento_metodo_pago_monto' => 0,
             'precio_original' => $priceBeforeDifferenceCredit,

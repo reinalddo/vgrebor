@@ -5833,7 +5833,7 @@ include __DIR__ . "/includes/header.php";
       : null;
     const pricing = resolvePaymentPricing(selection.mode, selectedMethod);
     const rows = [];
-    const couponDiscountAmount = selection.mode === 'points'
+    const couponDiscountAmount = (selection.mode === 'points' || pricing.couponSuppressedByPayment)
       ? 0
       : normalizeCurrencyAmount(Number(appliedCouponSummary.discountAmount || 0), pricing.showDecimals);
     const couponCode = String(appliedCouponSummary.code || '').trim();
@@ -6128,8 +6128,26 @@ include __DIR__ . "/includes/header.php";
     const preferredCurrencyCode = resolvePreferredDisplayCurrencyCode(resolvedMode, method && method.id ? String(method.id) : '', pack);
     const currencyCode = String(preferredCurrencyCode || (activePaymentOrder && activePaymentOrder.currency) || (pack && pack.moneda) || monedaActualClave || '').trim().toUpperCase();
     const showDecimals = Boolean(pack && pack.showDecimals);
-    const baseAmount = normalizeCurrencyAmount(Number(activePaymentOrder && activePaymentOrder.baseAmount !== undefined ? activePaymentOrder.baseAmount : selectedTotalValue), showDecimals);
-    const discountPercentage = resolvePaymentModeDiscountPercentage(resolvedMode, method);
+    let baseAmount = normalizeCurrencyAmount(Number(activePaymentOrder && activePaymentOrder.baseAmount !== undefined ? activePaymentOrder.baseAmount : selectedTotalValue), showDecimals);
+    let discountPercentage = resolvePaymentModeDiscountPercentage(resolvedMode, method);
+
+    // Regla descuento máximo: cupón vs método de pago, solo se aplica el mayor.
+    let couponSuppressedByPayment = false;
+    const couponIsActive = couponApplied && Number(appliedCouponSummary.discountAmount || 0) > 0;
+    if (couponIsActive && discountPercentage > 0) {
+      const originalPackAmount = normalizeCurrencyAmount(Number(appliedCouponSummary.originalAmount || 0), showDecimals);
+      if (originalPackAmount > 0) {
+        const couponDiscountAmt = normalizeCurrencyAmount(Number(appliedCouponSummary.discountAmount), showDecimals);
+        const paymentDiscountAmt = normalizeCurrencyAmount((originalPackAmount * discountPercentage) / 100, showDecimals);
+        if (couponDiscountAmt >= paymentDiscountAmt) {
+          discountPercentage = 0; // cupón gana: se suprime el descuento del método de pago
+        } else {
+          baseAmount = originalPackAmount; // método de pago gana: precio base = precio original sin cupón
+          couponSuppressedByPayment = true;
+        }
+      }
+    }
+
     const discountAmount = discountPercentage > 0
       ? normalizeCurrencyAmount((baseAmount * discountPercentage) / 100, showDecimals)
       : 0;
@@ -6149,6 +6167,7 @@ include __DIR__ . "/includes/header.php";
       taxPercentage,
       taxAmount,
       totalAmount,
+      couponSuppressedByPayment,
       baseText: formatPaymentDifferenceMoney(currencyCode, baseAmount, showDecimals),
       discountText: formatPaymentDifferenceMoney(currencyCode, discountAmount, showDecimals),
       taxText: formatPaymentDifferenceMoney(currencyCode, taxAmount, showDecimals),
