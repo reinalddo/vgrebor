@@ -7441,7 +7441,7 @@ include __DIR__ . "/includes/header.php";
       return false;
     }
 
-    return String(activePack.provider || '').trim().toLowerCase() !== 'discord';
+    return true;
   }
 
   function requiresVerifiedPlayerForCheckout() {
@@ -9651,6 +9651,12 @@ include __DIR__ . "/includes/header.php";
       pack.purchaseQuantity = quantity;
       selectedPack.textContent = pack.name;
       selectedTotalValue = getPackTotalPrice(pack, quantity);
+      if (couponApplied && Number(appliedCouponSummary.discountAmount || 0) > 0) {
+        selectedTotalValue = normalizeCurrencyAmount(
+          Math.max(0, selectedTotalValue - Number(appliedCouponSummary.discountAmount)),
+          Boolean(pack.showDecimals)
+        );
+      }
       updateSelectedPriceDisplay(pack);
       if (selectedWinPointsTotal) {
         const requiredPoints = getPackRequiredPoints(pack, quantity);
