@@ -1589,8 +1589,8 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                 </div>
                 <div id="user-rewards-filter-bar" class="d-none gap-2 mb-3 flex-wrap">
                   <button class="btn btn-sm btn-outline-info active" data-wp-filter="all">Todos</button>
-                  <button class="btn btn-sm btn-outline-info" data-wp-filter="daily_mission_task">Tareas</button>
-                  <button class="btn btn-sm btn-outline-info" data-wp-filter="daily_mission_chest">Cofre</button>
+                  <button class="btn btn-sm btn-outline-info" data-wp-filter="gained">Ganados</button>
+                  <button class="btn btn-sm btn-outline-info" data-wp-filter="spent">Gastados</button>
                 </div>
 
                 <div id="user-rewards-empty" class="d-none text-center py-5 text-secondary">Todavia no tienes movimientos en este programa.</div>

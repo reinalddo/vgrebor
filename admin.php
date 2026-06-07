@@ -3565,7 +3565,9 @@ require_once __DIR__ . '/includes/header.php';
                 <?php endif; ?>
                 <a href="/admin/misiones-premios" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🎯</span>Misiones y Premios</a>
                 <a href="/admin/cupones" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>✏️</span>Cupones</a>
+                <?php if (admin_is_root_role($adminUserRole)): ?>
                 <a href="<?= htmlspecialchars($adminExtraFeaturesPath, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🧩</span>Comprar Funciones Extra</a>
+                <?php endif; ?>
                 <?php if ($influencerInstructionsEnabled): ?>
                 <a href="<?= htmlspecialchars($adminInfluencerInstructionsPath, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🤝</span>Instrucciones Influencer</a>
                 <?php endif; ?>

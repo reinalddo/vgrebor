@@ -169,7 +169,10 @@ function admin_missions_fetch_users_paginated(mysqli $mysqli, string $searchTerm
         $params[]      = $like;
         $types        .= 'ss';
     }
-    if ($roleFilter !== '') {
+    // Nunca mostrar usuarios root en el historial
+    $conditions[] = "rol != 'root'";
+
+    if ($roleFilter !== '' && $roleFilter !== 'root') {
         $conditions[] = 'rol = ?';
         $params[]     = $roleFilter;
         $types       .= 's';
@@ -269,15 +272,35 @@ if (isset($_GET['modal']) && $_GET['modal'] === '1') {
 
     $historyOut = [];
     foreach ($history as $entry) {
-        $dp           = admin_missions_date_parts((string) ($entry['created_at'] ?? $entry['claimed_at'] ?? $entry['resolved_at'] ?? ''));
-        $sb           = admin_missions_status_badge((string) ($entry['reward_status'] ?? 'pending'));
+        $dp         = admin_missions_date_parts((string) ($entry['created_at'] ?? $entry['claimed_at'] ?? $entry['resolved_at'] ?? ''));
+        $sb         = admin_missions_status_badge((string) ($entry['reward_status'] ?? 'pending'));
+        $ePrizeType = (string) ($entry['prize_type'] ?? '');
+
+        // Usar mission_date como fecha de display (refleja el día simulado o real)
+        $missionDate = trim((string) ($entry['mission_date'] ?? ''));
+        if ($missionDate !== '') {
+            $bits        = explode('-', $missionDate);
+            $displayDate = count($bits) === 3 ? $bits[2] . '/' . $bits[1] . '/' . $bits[0] : $missionDate;
+        } else {
+            $displayDate = $dp['date'];
+        }
+
+        // Detectar si es un registro simulado
+        $metaRaw  = (string) ($entry['metadata_json'] ?? '');
+        $isSim    = false;
+        if ($metaRaw !== '') {
+            $decoded = json_decode($metaRaw, true);
+            $isSim   = is_array($decoded) && !empty($decoded['simulated']);
+        }
+
         $historyOut[] = [
             'id'               => (int) ($entry['id'] ?? 0),
-            'date'             => $dp['date'],
+            'date'             => $displayDate,
             'time'             => $dp['time'],
-            'prize_label'      => $entry['prize_label'] ?? admin_missions_prize_label((string) ($entry['prize_type'] ?? '')),
-            'prize_type'       => (string) ($entry['prize_type'] ?? ''),
-            'prize_type_label' => admin_missions_prize_label((string) ($entry['prize_type'] ?? '')),
+            'is_simulated'     => $isSim,
+            'prize_type'       => $ePrizeType,
+            'prize_type_label' => admin_missions_prize_label($ePrizeType),
+            'points_amount'    => (int) ($entry['points_amount'] ?? 0),
             'reason'           => (string) ($entry['reason'] ?? ''),
             'reward_status'    => (string) ($entry['reward_status'] ?? 'pending'),
             'status_label'     => $sb['label'],
@@ -329,7 +352,7 @@ $allUsersList            = admin_missions_fetch_all_users_list($mysqli);
 $pendingStreamingUserIds = admin_missions_fetch_pending_streaming_user_ids($mysqli);
 
 $ajaxUrl  = app_path('/admin/misiones-premios');
-$allRoles = ['admin', 'root', 'empleado', 'influencer', 'usuario'];
+$allRoles = ['admin', 'empleado', 'influencer', 'usuario'];
 $pageBase = '/admin/misiones-premios';
 $activeTab = trim((string) ($_GET['tab'] ?? 'historial'));
 if (!in_array($activeTab, ['historial', 'config', 'tareas', 'cofre'], true)) {
@@ -530,6 +553,7 @@ include __DIR__ . '/includes/header.php';
         <a href="<?php echo htmlspecialchars(app_path('/admin/dashboard'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info rounded-pill fw-bold px-4">Dashboard</a>
         <a href="<?php echo htmlspecialchars(app_path('/admin/win-points'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info rounded-pill fw-bold px-4"><?php echo htmlspecialchars(win_points_program_name(), ENT_QUOTES, 'UTF-8'); ?></a>
         <a href="<?php echo htmlspecialchars(app_path('/admin/cupones'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info rounded-pill fw-bold px-4">Cupones</a>
+        <a href="<?php echo htmlspecialchars(app_path('/admin/sim-misiones'), ENT_QUOTES, 'UTF-8'); ?>" class="btn rounded-pill fw-bold px-4" style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35);color:#fbbf24;" title="Simulador de misiones para testing"><i class="fa-solid fa-flask-vial me-1"></i>Simulador</a>
       </div>
     </div>
 
@@ -1011,10 +1035,20 @@ include __DIR__ . '/includes/header.php';
       const resolveBtn = canResolve
         ? '<button class="save-btn btn-resolve-ticket" data-reward-id="' + esc(e.id) + '" type="button" style="background:rgba(74,222,128,.12);border-color:rgba(74,222,128,.4);color:#4ade80">✓ Marcar entregado</button>'
         : '';
+      const dateCellHtml = e.is_simulated
+        ? '<span style="color:#f59e0b;font-weight:600">' + esc(e.date) + '</span>'
+          + '<div style="margin-top:.2rem"><span style="font-size:.63rem;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.28);color:#fbbf24;padding:.08rem .38rem;border-radius:.3rem;letter-spacing:.06em;font-weight:700">SIMULACIÓN</span></div>'
+        : '<span class="text-secondary">' + esc(e.date) + '</span>';
       html += '<tr>'
-        + td('<span class="text-secondary">' + esc(e.date) + '</span>')
+        + td(dateCellHtml)
         + td('<span class="text-secondary">' + esc(e.time) + '</span>')
-        + td('<span class="fw-semibold text-light">' + esc(e.prize_label) + '</span><div class="small text-info">' + esc(e.prize_type_label) + '</div>')
+        + td((function(e) {
+            const name = esc(e.prize_type_label);
+            const sub  = (e.prize_type === 'winpoints' && e.points_amount > 0)
+              ? '<div class="small" style="color:#22d3ee">+' + e.points_amount + ' ' + name + '</div>'
+              : '';
+            return '<span class="fw-semibold text-light">' + name + '</span>' + sub;
+          })(e))
         + td('<span class="text-light">' + esc(e.reason) + '</span>')
         + td('<span class="badge rounded-pill text-bg-dark border ' + esc(e.status_class) + '" id="rsts-' + esc(e.id) + '">' + esc(e.status_label) + '</span>')
         + td('<span class="text-info fw-semibold">' + esc(e.level_label) + '</span>')

@@ -216,6 +216,8 @@ $menuScript = <<<'SCRIPT'
       redeem_refund: "Reembolso de canje",
       admin_adjustment: "Ajuste manual",
       expiration: "Vencimiento",
+      mission_daily: "Misión diaria",
+      purchase: "Compra",
     };
     return labels[type] || type || "Movimiento";
   };
@@ -281,9 +283,20 @@ $menuScript = <<<'SCRIPT'
     return { date, time };
   };
 
+  const missionEntryDateParts = (entry) => {
+    const mDate = String(entry.mission_date || "").trim();
+    const tSrc = String(entry.created_at || entry.claimed_at || entry.resolved_at || "").trim();
+    const timePart = tSrc.includes(" ") ? tSrc.split(" ")[1] : "";
+    if (mDate) {
+      const dp = mDate.split("-");
+      const date = dp.length === 3 ? `${dp[2]}/${dp[1]}/${dp[0]}` : mDate;
+      return { date, time: timePart ? timePart.slice(0, 5) : "" };
+    }
+    return formatMissionDateParts(tSrc);
+  };
+
   const renderDailyMissionHistoryCard = (entry) => {
-    const dateParts = formatMissionDateParts(entry.created_at || entry.claimed_at || entry.resolved_at || "");
-    const prizeLabel = dailyMissionRewardLabel(entry.prize_type);
+    const dateParts = missionEntryDateParts(entry);
     const reason = entry.reason || entry.mission_key || "Premio diario";
     const status = dailyMissionRewardStatusLabel(entry.reward_status);
     const reclaimBtn = buildStreamingReclaimBtn(entry);
@@ -295,9 +308,9 @@ $menuScript = <<<'SCRIPT'
           </div>
           <span class="badge rounded-pill text-bg-dark border border-info-subtle text-info">${escapeHtml(status)}</span>
         </div>
-        <div class="text-light fw-semibold mb-1">${escapeHtml(prizeLabel)}</div>
+        <div class="mb-1">${buildMissionPrizeCell(entry)}</div>
         <div class="small text-secondary mb-1"><strong class="text-light">Motivo:</strong> ${escapeHtml(reason)}</div>
-        ${reclaimBtn ? `<div class="mt-2">${reclaimBtn}</div>` : `<div class="small text-info">Estado: ${escapeHtml(status)}</div>`}
+        ${reclaimBtn ? `<div class="mt-2">${reclaimBtn}</div>` : ""}
       </article>`;
   };
 
@@ -316,15 +329,29 @@ $menuScript = <<<'SCRIPT'
     </a>`;
   };
 
+  const buildMissionPrizeCell = (entry) => {
+    const label = dailyMissionRewardLabel(entry.prize_type);
+    if (entry.prize_type === 'winpoints' && Number(entry.points_amount || 0) > 0) {
+      return `<span class="fw-semibold text-light">${escapeHtml(label)}</span><div class="small" style="color:#22d3ee">+${escapeHtml(formatPointsNumber(entry.points_amount))}</div>`;
+    }
+    if (entry.prize_type === 'coupon' && Number(entry.coupon_discount_percent || 0) > 0) {
+      return `<span class="fw-semibold text-light">${escapeHtml(label)}</span><div class="small text-secondary">${escapeHtml(String(entry.coupon_discount_percent))}% desc.</div>`;
+    }
+    if (entry.prize_type === 'immunity' && Number(entry.immunity_days || 0) > 0) {
+      const d = Number(entry.immunity_days);
+      return `<span class="fw-semibold text-light">${escapeHtml(label)}</span><div class="small text-secondary">${d} día${d !== 1 ? "s" : ""}</div>`;
+    }
+    return `<span class="fw-semibold text-light">${escapeHtml(label)}</span>`;
+  };
+
   const renderDailyMissionHistoryRow = (entry) => {
-    const dateParts = formatMissionDateParts(entry.created_at || entry.claimed_at || entry.resolved_at || "");
-    const prizeLabel = dailyMissionRewardLabel(entry.prize_type);
+    const dateParts = missionEntryDateParts(entry);
     const reason = entry.reason || entry.mission_key || "Premio diario";
     const status = dailyMissionRewardStatusLabel(entry.reward_status);
     const reclaimBtn = buildStreamingReclaimBtn(entry);
     return `
       <tr>
-        <td class="bg-transparent border-bottom border-info-subtle text-light fw-semibold">${escapeHtml(prizeLabel)}</td>
+        <td class="bg-transparent border-bottom border-info-subtle">${buildMissionPrizeCell(entry)}</td>
         <td class="bg-transparent border-bottom border-info-subtle text-light">${escapeHtml(reason)}</td>
         <td class="bg-transparent border-bottom border-info-subtle"><span class="badge rounded-pill text-bg-dark border border-info-subtle text-info">${escapeHtml(status)}</span></td>
         <td class="bg-transparent border-bottom border-info-subtle text-secondary">${escapeHtml(dateParts.date)}</td>
@@ -402,28 +429,41 @@ $menuScript = <<<'SCRIPT'
       </tr>`;
   };
 
+  const formatTxDate = (createdAt) => {
+    const raw = String(createdAt || "").trim();
+    if (!raw) return { date: "", time: "" };
+    const [d, t = ""] = raw.split(" ");
+    const dp = d.split("-");
+    const date = dp.length === 3 ? `${dp[2]}/${dp[1]}/${dp[0]}` : d;
+    return { date, time: t ? t.slice(0, 5) : "" };
+  };
+
   const renderRewardTransactionCard = (transaction) => {
     const delta = Number(transaction.points_delta || 0);
     const deltaClass = delta >= 0 ? "text-success" : "text-warning";
-    const orderText = transaction.order_id ? `Pedido #${escapeHtml(transaction.order_id)}` : "Sin pedido asociado";
+    const orderText = transaction.order_id ? `Pedido #${escapeHtml(String(transaction.order_id))}` : "";
+    const txDate = formatTxDate(transaction.created_at);
+    const dateDisplay = txDate.date + (txDate.time ? ` · ${txDate.time}` : "");
+    const desc = transaction.description || orderText || "—";
     return `
       <article class="rounded-4 border border-info p-3" style="background:rgba(8,15,24,0.78);box-shadow:0 0 16px rgba(34,211,238,0.08);">
         <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
           <div>
             <div class="small text-uppercase text-info" style="letter-spacing:0.14em;">${escapeHtml(rewardsTypeLabel(transaction.transaction_type))}</div>
-            <div class="small text-secondary">${escapeHtml(transaction.created_at || "")}</div>
+            <div class="small text-secondary">${escapeHtml(dateDisplay)}</div>
           </div>
           <div class="fw-bold ${deltaClass}">${delta >= 0 ? "+" : ""}${escapeHtml(formatPointsNumber(delta))}</div>
         </div>
-        <div class="text-light fw-semibold mb-1">${escapeHtml(transaction.description || orderText)}</div>
-        <div class="small text-secondary mb-1">${escapeHtml(orderText)}</div>
-        <div class="small text-info">Saldo luego del movimiento: ${escapeHtml(formatPointsNumber(transaction.balance_after || 0))}</div>
+        <div class="text-light fw-semibold mb-1">${escapeHtml(desc)}</div>
+        ${orderText ? `<div class="small text-secondary mb-1">${escapeHtml(orderText)}</div>` : ""}
+        <div class="small text-info">Saldo: ${escapeHtml(formatPointsNumber(transaction.balance_after || 0))}</div>
       </article>`;
   };
 
   const renderRewardTransactionRow = (transaction) => {
     const delta = Number(transaction.points_delta || 0);
     const deltaClass = delta >= 0 ? "text-success" : "text-warning";
+    const txDate = formatTxDate(transaction.created_at);
     const detailParts = [transaction.description || ""];
     if (transaction.juego_nombre || transaction.paquete_nombre) {
       detailParts.push(`${transaction.juego_nombre || ""} ${transaction.paquete_nombre || ""}`.trim());
@@ -433,7 +473,7 @@ $menuScript = <<<'SCRIPT'
     }
     return `
       <tr>
-        <td class="bg-transparent border-bottom border-info-subtle text-secondary">${escapeHtml(transaction.created_at || "")}</td>
+        <td class="bg-transparent border-bottom border-info-subtle text-secondary">${escapeHtml(txDate.date)}${txDate.time ? `<div class="small" style="opacity:.65">${escapeHtml(txDate.time)}</div>` : ""}</td>
         <td class="bg-transparent border-bottom border-info-subtle text-light fw-semibold">${escapeHtml(rewardsTypeLabel(transaction.transaction_type))}</td>
         <td class="bg-transparent border-bottom border-info-subtle text-light">${escapeHtml(detailParts.filter(Boolean).join(" | "))}</td>
         <td class="bg-transparent border-bottom border-info-subtle text-end fw-bold ${deltaClass}">${delta >= 0 ? "+" : ""}${escapeHtml(formatPointsNumber(delta))}</td>
@@ -573,9 +613,12 @@ $menuScript = <<<'SCRIPT'
       let wpCurrentPage = 1;
       let wpCurrentFilter = 'all';
 
-      const getFilteredTx = () => wpCurrentFilter === 'all'
-        ? transactions
-        : transactions.filter(t => (t.source_type || t.type || '') === wpCurrentFilter);
+      const getFilteredTx = () => {
+        if (wpCurrentFilter === 'all') return transactions;
+        if (wpCurrentFilter === 'gained') return transactions.filter(t => Number(t.points_delta || 0) > 0);
+        if (wpCurrentFilter === 'spent') return transactions.filter(t => Number(t.points_delta || 0) < 0);
+        return transactions.filter(t => (t.transaction_type || '') === wpCurrentFilter);
+      };
 
       const renderWpPage = () => {
         const filtered = getFilteredTx();
@@ -625,8 +668,8 @@ $menuScript = <<<'SCRIPT'
         let missionsCurrentFilter = 'all';
 
         const getFilteredMissions = () => {
-          if (missionsCurrentFilter === 'task') return missionHistory.filter(e => !e.level_key);
-          if (missionsCurrentFilter === 'chest') return missionHistory.filter(e => e.level_key);
+          if (missionsCurrentFilter === 'task') return missionHistory.filter(e => e.origin_type === 'task');
+          if (missionsCurrentFilter === 'chest') return missionHistory.filter(e => e.origin_type === 'chest');
           return missionHistory;
         };
 
