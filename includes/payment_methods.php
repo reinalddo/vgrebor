@@ -356,18 +356,29 @@ function payment_methods_save(array $data, ?int $id = null): bool {
     payment_methods_ensure_table();
 
     $mysqli = payment_methods_db();
+    $nombre = (string) ($data['nombre'] ?? '');
+    $datos = (string) ($data['datos'] ?? '');
+    $imagePath = (string) ($data['image_path'] ?? '');
+    $qrImagePath = (string) ($data['qr_image_path'] ?? '');
+    $cornerImagePath = (string) ($data['corner_image_path'] ?? '');
+    $monedaId = (int) ($data['moneda_id'] ?? 0);
+    $referenciaDigitos = (int) ($data['referencia_digitos'] ?? 0);
+    $descuentoPct = (float) ($data['descuento_porcentaje'] ?? 0);
+    $impuestoPct = (float) ($data['impuesto_porcentaje'] ?? 0);
+    $activo = (int) ($data['activo'] ?? 0);
+
     if ($id === null) {
         $stmt = $mysqli->prepare('INSERT INTO payment_methods (nombre, datos, image_path, qr_image_path, corner_image_path, moneda_id, referencia_digitos, descuento_porcentaje, impuesto_porcentaje, activo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         if (!$stmt) {
             return false;
         }
-        $stmt->bind_param('sssssiiddi', $data['nombre'], $data['datos'], $data['image_path'], $data['qr_image_path'], $data['corner_image_path'], $data['moneda_id'], $data['referencia_digitos'], $data['descuento_porcentaje'], $data['impuesto_porcentaje'], $data['activo']);
+        $stmt->bind_param('sssssiiddi', $nombre, $datos, $imagePath, $qrImagePath, $cornerImagePath, $monedaId, $referenciaDigitos, $descuentoPct, $impuestoPct, $activo);
     } else {
         $stmt = $mysqli->prepare('UPDATE payment_methods SET nombre = ?, datos = ?, image_path = ?, qr_image_path = ?, corner_image_path = ?, moneda_id = ?, referencia_digitos = ?, descuento_porcentaje = ?, impuesto_porcentaje = ?, activo = ? WHERE id = ?');
         if (!$stmt) {
             return false;
         }
-        $stmt->bind_param('sssssiiddii', $data['nombre'], $data['datos'], $data['image_path'], $data['qr_image_path'], $data['corner_image_path'], $data['moneda_id'], $data['referencia_digitos'], $data['descuento_porcentaje'], $data['impuesto_porcentaje'], $data['activo'], $id);
+        $stmt->bind_param('sssssiiddii', $nombre, $datos, $imagePath, $qrImagePath, $cornerImagePath, $monedaId, $referenciaDigitos, $descuentoPct, $impuestoPct, $activo, $id);
     }
 
     $ok = $stmt->execute();
