@@ -214,7 +214,7 @@ function player_verification_extract_value_by_path(array $data, array $path): st
 }
 
 function player_verification_extract_zone_value(array $playerFields): string {
-    $normalizedCandidates = ['input2', 'zoneid', 'zone_id', 'zone', 'serverid', 'server_id', 'server'];
+    $normalizedCandidates = ['input2', 'zoneid', 'zone_id', 'zone', 'serverid', 'server_id', 'server', 'sv'];
     $fallbackValues = [];
 
     foreach ($playerFields as $fieldName => $fieldValue) {
