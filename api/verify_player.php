@@ -67,14 +67,7 @@ if ($packageId > 0) {
     $packageStmt->close();
 
     if ($package) {
-        $packageProvider = verify_player_normalize_package_provider($game, $package);
-        if ($packageProvider === 'discord') {
-            verify_player_json([
-                'ok' => false,
-                'status' => 'unsupported',
-                'message' => 'La verificación automática no aplica para paquetes configurados con api_discord.',
-            ], 422);
-        }
+        verify_player_normalize_package_provider($game, $package);
     }
 }
 

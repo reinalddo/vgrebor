@@ -2588,6 +2588,7 @@ function resolve_order_payment_discount_snapshot(array $order, string $paymentMo
         if (payment_method_discount_feature_enabled()) {
             $percentage = payment_methods_normalize_discount_percentage($method['descuento_porcentaje'] ?? 0);
         }
+        $taxPercentage = payment_methods_normalize_discount_percentage($method['impuesto_porcentaje'] ?? 0);
     } elseif ($normalizedMode === 'binance_pagonorte') {
         $methodName = 'Binance';
         if (payment_method_discount_feature_enabled()) {
@@ -3657,12 +3658,16 @@ function sync_local_order_with_binance_payload(mysqli $mysqli, array $order, arr
 
     if (order_uses_api_discord($updatedOrder)) {
         $dispatchResult = execute_api_discord_order_dispatch($updatedOrder);
-        persist_api_discord_dispatch_result($mysqli, $updatedOrder, $dispatchResult, 'pagado', 'pagado', $verifiedReference, $phone);
+        $discordTargetState = (!empty($dispatchResult['sent']) && ($dispatchResult['provider_status'] ?? '') === 'sent') ? 'enviado' : 'pagado';
+        persist_api_discord_dispatch_result($mysqli, $updatedOrder, $dispatchResult, 'pagado', $discordTargetState, $verifiedReference, $phone);
 
         $paidOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
         recharge_notifications_emit_for_order($mysqli, $paidOrder);
         register_influencer_coupon_sale($mysqli, $paidOrder);
-        if (!empty($dispatchResult['sent'])) {
+        if ($discordTargetState === 'enviado') {
+            win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+            notify_free_fire_recharge_success($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, trim((string) ($dispatchResult['provider_reference'] ?? '')), trim((string) ($dispatchResult['provider_message'] ?? '')));
+        } elseif (!empty($dispatchResult['sent'])) {
             notify_catalog_purchase_pending($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, trim((string) ($dispatchResult['provider_reference'] ?? '')), trim((string) ($dispatchResult['provider_message'] ?? '')));
         } else {
             notify_bank_payment_verified_paid($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone);
@@ -3670,7 +3675,7 @@ function sync_local_order_with_binance_payload(mysqli $mysqli, array $order, arr
 
         return [
             'order' => $paidOrder,
-            'local_status' => trim((string) ($paidOrder['estado'] ?? 'pagado')),
+            'local_status' => trim((string) ($paidOrder['estado'] ?? $discordTargetState)),
             'provider_flow' => order_provider_flow_from_row($paidOrder),
         ];
     }
@@ -4051,12 +4056,16 @@ function sync_local_order_with_paypal_payload(mysqli $mysqli, array $order, arra
 
     if (order_uses_api_discord($updatedOrder)) {
         $dispatchResult = execute_api_discord_order_dispatch($updatedOrder);
-        persist_api_discord_dispatch_result($mysqli, $updatedOrder, $dispatchResult, 'pagado', 'pagado', $verifiedReference, $phone);
+        $discordTargetState = (!empty($dispatchResult['sent']) && ($dispatchResult['provider_status'] ?? '') === 'sent') ? 'enviado' : 'pagado';
+        persist_api_discord_dispatch_result($mysqli, $updatedOrder, $dispatchResult, 'pagado', $discordTargetState, $verifiedReference, $phone);
 
         $paidOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
         recharge_notifications_emit_for_order($mysqli, $paidOrder);
         register_influencer_coupon_sale($mysqli, $paidOrder);
-        if (!empty($dispatchResult['sent'])) {
+        if ($discordTargetState === 'enviado') {
+            win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+            notify_free_fire_recharge_success($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, trim((string) ($dispatchResult['provider_reference'] ?? '')), trim((string) ($dispatchResult['provider_message'] ?? '')));
+        } elseif (!empty($dispatchResult['sent'])) {
             notify_catalog_purchase_pending($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, trim((string) ($dispatchResult['provider_reference'] ?? '')), trim((string) ($dispatchResult['provider_message'] ?? '')));
         } else {
             notify_bank_payment_verified_paid($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone);
@@ -4064,7 +4073,7 @@ function sync_local_order_with_paypal_payload(mysqli $mysqli, array $order, arra
 
         return [
             'order' => $paidOrder,
-            'local_status' => trim((string) ($paidOrder['estado'] ?? 'pagado')),
+            'local_status' => trim((string) ($paidOrder['estado'] ?? $discordTargetState)),
             'provider_flow' => order_provider_flow_from_row($paidOrder),
         ];
     }
@@ -8884,7 +8893,8 @@ if ($action === 'submit_payment') {
 
             if (order_uses_api_discord($updatedOrder)) {
                 $dispatchResult = execute_api_discord_order_dispatch($updatedOrder);
-                if (!persist_api_discord_dispatch_result($mysqli, $updatedOrder, $dispatchResult, 'pendiente', 'pagado', $verifiedReference, $phone)) {
+                $discordTargetState = (!empty($dispatchResult['sent']) && ($dispatchResult['provider_status'] ?? '') === 'sent') ? 'enviado' : 'pagado';
+                if (!persist_api_discord_dispatch_result($mysqli, $updatedOrder, $dispatchResult, 'pendiente', $discordTargetState, $verifiedReference, $phone)) {
                     json_error('No se pudo guardar el resultado del envío Discord.', 500);
                 }
 
@@ -8894,14 +8904,19 @@ if ($action === 'submit_payment') {
                     'ok' => true,
                     'message' => trim((string) ($dispatchResult['provider_message'] ?? 'El pago fue verificado y la orden quedó registrada para Discord.')),
                     'order_id' => $orderId,
-                    'estado' => trim((string) ($paidOrder['estado'] ?? 'pagado')),
+                    'estado' => trim((string) ($paidOrder['estado'] ?? $discordTargetState)),
                     'verified' => true,
                     'provider_flow' => trim((string) ($dispatchResult['provider_flow'] ?? 'manual_review')),
                     'provider_status' => trim((string) ($dispatchResult['provider_status'] ?? 'review')),
                     'provider_reference' => trim((string) ($dispatchResult['provider_reference'] ?? '')),
                     'provider_message' => trim((string) ($dispatchResult['provider_message'] ?? '')),
-                ], $paidOrder, $overpaymentAmount), $paidOrder), 200, static function () use ($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, $dispatchResult): void {
+                ], $paidOrder, $overpaymentAmount), $paidOrder), 200, static function () use ($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, $dispatchResult, $discordTargetState, $orderId): void {
                     register_influencer_coupon_sale($mysqli, $paidOrder);
+                    if ($discordTargetState === 'enviado') {
+                        win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+                        notify_free_fire_recharge_success($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, trim((string) ($dispatchResult['provider_reference'] ?? '')), trim((string) ($dispatchResult['provider_message'] ?? '')));
+                        return;
+                    }
                     if (!empty($dispatchResult['sent'])) {
                         notify_catalog_purchase_pending($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, trim((string) ($dispatchResult['provider_reference'] ?? '')), trim((string) ($dispatchResult['provider_message'] ?? '')));
                         return;
@@ -9811,7 +9826,8 @@ if ($action === 'admin_retry_recharge') {
 
     if (order_uses_api_discord($order)) {
         $dispatchResult = execute_api_discord_order_dispatch($order);
-        if (!persist_api_discord_dispatch_result($mysqli, $order, $dispatchResult, 'pagado', 'pagado', $verifiedReference, $phone)) {
+        $discordTargetState = (!empty($dispatchResult['sent']) && ($dispatchResult['provider_status'] ?? '') === 'sent') ? 'enviado' : 'pagado';
+        if (!persist_api_discord_dispatch_result($mysqli, $order, $dispatchResult, 'pagado', $discordTargetState, $verifiedReference, $phone)) {
             json_error('No se pudo guardar el resultado del envío Discord.', 500);
         }
 
@@ -9820,12 +9836,17 @@ if ($action === 'admin_retry_recharge') {
             'ok' => true,
             'message' => trim((string) ($dispatchResult['provider_message'] ?? 'La orden quedó actualizada para Discord.')),
             'order_id' => $orderId,
-            'estado' => trim((string) ($updatedOrder['estado'] ?? 'pagado')),
+            'estado' => trim((string) ($updatedOrder['estado'] ?? $discordTargetState)),
             'provider_flow' => trim((string) ($dispatchResult['provider_flow'] ?? 'manual_review')),
             'provider_status' => trim((string) ($dispatchResult['provider_status'] ?? 'review')),
             'provider_reference' => trim((string) ($dispatchResult['provider_reference'] ?? '')),
             'provider_message' => trim((string) ($dispatchResult['provider_message'] ?? '')),
-        ], $updatedOrder), 200, static function () use ($mysqli, $updatedOrder, $paymentMethodName, $verifiedReference, $phone, $dispatchResult): void {
+        ], $updatedOrder), 200, static function () use ($mysqli, $updatedOrder, $paymentMethodName, $verifiedReference, $phone, $dispatchResult, $discordTargetState, $orderId): void {
+            if ($discordTargetState === 'enviado') {
+                win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+                notify_free_fire_recharge_success($mysqli, $updatedOrder, $paymentMethodName, $verifiedReference, $phone, trim((string) ($dispatchResult['provider_reference'] ?? '')), trim((string) ($dispatchResult['provider_message'] ?? '')));
+                return;
+            }
             if (!empty($dispatchResult['sent'])) {
                 notify_catalog_purchase_pending($mysqli, $updatedOrder, $paymentMethodName, $verifiedReference, $phone, trim((string) ($dispatchResult['provider_reference'] ?? '')), trim((string) ($dispatchResult['provider_message'] ?? '')));
             }

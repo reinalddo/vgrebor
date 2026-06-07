@@ -237,7 +237,7 @@
     "key": "hokup_topup",
     "kind": "topup",
     "label": "HOK recarga",
-    "game": "hok",
+    "game": "honor_of_kings",
     "template": ".hokup {id} {cantidad}",
     "sample": ".hokup 123456789 10",
     "params": ["id", "cantidad"]

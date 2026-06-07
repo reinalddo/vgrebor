@@ -90,6 +90,7 @@ $galleryForm = [
     'moneda_id' => isset($paymentMethodEditItem['moneda_id']) ? (int) $paymentMethodEditItem['moneda_id'] : 0,
     'referencia_digitos' => isset($paymentMethodEditItem['referencia_digitos']) ? max(0, (int) $paymentMethodEditItem['referencia_digitos']) : 0,
     'descuento_porcentaje' => $paymentMethodDiscountsEnabled && isset($paymentMethodEditItem['descuento_porcentaje']) ? (float) $paymentMethodEditItem['descuento_porcentaje'] : 0,
+    'impuesto_porcentaje' => isset($paymentMethodEditItem['impuesto_porcentaje']) ? (float) $paymentMethodEditItem['impuesto_porcentaje'] : 0,
     'activo' => !array_key_exists('activo', $paymentMethodEditItem ?? []) ? true : !empty($paymentMethodEditItem['activo']),
   ];
 $themeDefinitions = store_theme_definitions();
@@ -3026,6 +3027,11 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                       <div class="form-text">Ejemplo: `3` aplica 3% de descuento cuando el cliente elige este método.</div>
                     </div>
                     <?php endif; ?>
+                    <div class="col-md-6">
+                      <label class="form-label">Impuesto / cargo adicional (%)</label>
+                      <input type="number" name="impuesto_metodo_pago_porcentaje" min="0" max="100" step="0.01" value="<?= htmlspecialchars(number_format((float) $paymentMethodForm['impuesto_porcentaje'], 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>" class="form-control" placeholder="0.00">
+                      <div class="form-text">Ejemplo: `3` suma 3% al total cuando el cliente elige este método. Deja en 0 para no aplicar.</div>
+                    </div>
                     <div class="col-12">
                       <div class="form-check">
                         <input class="form-check-input" type="checkbox" value="1" id="activoMetodoPago" name="activo_metodo_pago" <?= $paymentMethodForm['activo'] ? 'checked' : '' ?>>

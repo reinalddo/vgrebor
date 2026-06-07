@@ -405,7 +405,7 @@ include __DIR__ . "/includes/header.php";
       : [];
     $packageFeaturesByPackage = package_features_for_packages($mysqli, array_map(static fn (array $package): int => (int) ($package['id'] ?? 0), $paquetes));
   ?>
-  <div class="row row-cols-2 row-cols-sm-3 row-cols-lg-4 g-3 mb-4" id="pack-grid">
+  <div class="row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-3 mb-4" id="pack-grid">
     <?php foreach ($paquetes as $pack):
         $precio_base = floatval($pack['precio']);
         $precio_mostrar = $moneda_actual ? currency_convert_from_base($precio_base, $moneda_actual) : currency_apply_amount_rule($precio_base, null);
@@ -3954,7 +3954,7 @@ include __DIR__ . "/includes/header.php";
     }
 
     .payment-method-catalog-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 0.65rem;
     }
 
@@ -6092,11 +6092,13 @@ include __DIR__ . "/includes/header.php";
     return 0;
   }
 
-  function resolvePaymentModeTaxPercentage(mode) {
+  function resolvePaymentModeTaxPercentage(mode, method = null) {
     if (mode === 'paypal') {
       return normalizeDiscountPercentage(paypalPayTaxPercentage);
     }
-
+    if (mode === 'money' && method && Number(method.impuesto_porcentaje || 0) > 0) {
+      return normalizeDiscountPercentage(method.impuesto_porcentaje);
+    }
     return 0;
   }
 
@@ -6132,7 +6134,7 @@ include __DIR__ . "/includes/header.php";
       ? normalizeCurrencyAmount((baseAmount * discountPercentage) / 100, showDecimals)
       : 0;
     const subtotalAmount = normalizeCurrencyAmount(Math.max(0, baseAmount - discountAmount), showDecimals);
-    const taxPercentage = resolvePaymentModeTaxPercentage(resolvedMode);
+    const taxPercentage = resolvePaymentModeTaxPercentage(resolvedMode, method);
     const taxAmount = taxPercentage > 0
       ? normalizeCurrencyAmount((subtotalAmount * taxPercentage) / 100, showDecimals)
       : 0;
@@ -9418,7 +9420,7 @@ include __DIR__ . "/includes/header.php";
     const digits = Number(method.referencia_digitos || 0);
     paymentReferenceInput.placeholder = paymentReferencePlaceholder(method);
     paymentReferenceHelp.textContent = paymentReferenceHelpText(method);
-    paymentReferenceInput.maxLength = digits > 0 ? digits : 120;
+    paymentReferenceInput.maxLength = 120;
     paymentReferenceInput.dataset.requiredDigits = String(digits > 0 ? digits : 0);
   }
 
@@ -9936,7 +9938,7 @@ include __DIR__ . "/includes/header.php";
                   const methodId = button.dataset.methodId || '';
                   const previousCurrencyCode = String(monedaActualClave || '').trim().toUpperCase();
                   storePreferredCheckoutPayment(mode, methodId);
-                  const switchedCurrency = syncVisibleCurrencyWithPreferredPayment(activePack, { resetCoupon: true });
+                  const switchedCurrency = syncVisibleCurrencyWithPreferredPayment(activePack, { resetCoupon: !couponApplied });
                   const nextCurrencyCode = String(monedaActualClave || '').trim().toUpperCase();
                   if (!switchedCurrency) {
                     updateResumenCompra(activePack);
@@ -9951,6 +9953,16 @@ include __DIR__ . "/includes/header.php";
               }
 
               if (paymentReferenceInput) {
+                paymentReferenceInput.addEventListener('paste', function(e) {
+                  const requiredDigits = Number(paymentReferenceInput.dataset.requiredDigits || '0');
+                  if (requiredDigits <= 0) return;
+                  e.preventDefault();
+                  const pasted = (e.clipboardData || window.clipboardData).getData('text');
+                  const digitsOnly = pasted.replace(/\D+/g, '');
+                  paymentReferenceInput.value = digitsOnly.length > requiredDigits
+                    ? digitsOnly.slice(-requiredDigits)
+                    : digitsOnly;
+                });
                 paymentReferenceInput.addEventListener('input', function() {
                   const digitsOnly = paymentReferenceInput.value.replace(/\D+/g, '');
                   const requiredDigits = Number(paymentReferenceInput.dataset.requiredDigits || '0');

@@ -531,7 +531,7 @@ $dailyMissionsScriptPayload = [
         .startup-popup-gallery-dots {
           position: absolute;
           left: 50%;
-          bottom: 1rem;
+          bottom: 0.25rem;
           transform: translateX(-50%);
           display: inline-flex;
           align-items: center;
@@ -2661,6 +2661,27 @@ $pageScripts = [
         }
       });
     });
+
+    const galleryViewport = popup.querySelector(".startup-popup-gallery-viewport");
+    if (galleryViewport && gallerySlides.length > 1) {
+      let swipeStartX = null;
+      let swipeStartY = null;
+      galleryViewport.addEventListener("touchstart", (e) => {
+        if (e.touches.length !== 1) return;
+        swipeStartX = e.touches[0].clientX;
+        swipeStartY = e.touches[0].clientY;
+      }, { passive: true });
+      galleryViewport.addEventListener("touchend", (e) => {
+        if (swipeStartX === null || e.changedTouches.length !== 1) return;
+        const dx = e.changedTouches[0].clientX - swipeStartX;
+        const dy = e.changedTouches[0].clientY - swipeStartY;
+        swipeStartX = null;
+        swipeStartY = null;
+        if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+        setGalleryIndex(galleryIndex + (dx < 0 ? 1 : -1));
+        startGalleryAutoplay();
+      }, { passive: true });
+    }
 
     popup.addEventListener("click", (event) => {
       if (event.target === popup) {
