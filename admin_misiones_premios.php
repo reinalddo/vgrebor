@@ -6,6 +6,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/db_connect.php';
 require_once __DIR__ . '/includes/daily_missions.php';
 require_once __DIR__ . '/includes/win_points.php';
+require_once __DIR__ . '/includes/roulette.php';
 
 $adminUser = auth_sync_session_user();
 $adminRole = trim((string) ($adminUser['rol'] ?? ''));
@@ -111,6 +112,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute();
             $stmt->close();
             echo json_encode(['ok' => true]);
+            exit;
+        }
+
+        // ── Ruleta ─────────────────────────────────────────────────────
+        case 'rlt_get_data': {
+            roulette_ensure_schema();
+            echo json_encode([
+                'ok'       => true,
+                'config'   => roulette_fetch_config($mysqli),
+                'sections' => roulette_fetch_sections($mysqli),
+                'history'  => roulette_fetch_all_history($mysqli, 50),
+            ]);
+            exit;
+        }
+
+        case 'rlt_save_config': {
+            roulette_admin_save_config($mysqli, $_POST);
+            echo json_encode(['ok' => true]);
+            exit;
+        }
+
+        case 'rlt_save_section': {
+            $sectionOrder = max(1, min(8, (int) ($_POST['section_order'] ?? 1)));
+            roulette_admin_save_section($mysqli, $sectionOrder, $_POST);
+            echo json_encode(['ok' => true]);
+            exit;
+        }
+
+        case 'rlt_get_history': {
+            roulette_ensure_schema();
+            echo json_encode(['ok' => true, 'history' => roulette_fetch_all_history($mysqli, 100)]);
             exit;
         }
     }
@@ -355,7 +387,7 @@ $ajaxUrl  = app_path('/admin/misiones-premios');
 $allRoles = ['admin', 'empleado', 'influencer', 'usuario'];
 $pageBase = '/admin/misiones-premios';
 $activeTab = trim((string) ($_GET['tab'] ?? 'historial'));
-if (!in_array($activeTab, ['historial', 'config', 'tareas', 'cofre'], true)) {
+if (!in_array($activeTab, ['historial', 'config', 'tareas', 'cofre', 'ruleta'], true)) {
     $activeTab = 'historial';
 }
 
@@ -582,6 +614,12 @@ include __DIR__ . '/includes/header.php';
           <button class="nav-link <?php echo $activeTab === 'cofre' ? 'active' : ''; ?>"
                   data-bs-toggle="tab" data-bs-target="#tab-cofre" type="button">
             Cofre por nivel
+          </button>
+        </li>
+        <li role="presentation">
+          <button class="nav-link <?php echo $activeTab === 'ruleta' ? 'active' : ''; ?>"
+                  data-bs-toggle="tab" data-bs-target="#tab-ruleta" type="button">
+            🎰 Ruleta
           </button>
         </li>
       </ul>
@@ -964,6 +1002,160 @@ include __DIR__ . '/includes/header.php';
       </section>
     </div>
 
+    <!-- ══════════════════ TAB: RULETA ══════════════════ -->
+    <div class="tab-pane fade <?php echo $activeTab === 'ruleta' ? 'show active' : ''; ?>" id="tab-ruleta">
+      <section class="missions-admin-panel">
+
+<style>
+  .rlt-admin-card2 {
+    border-radius: 1.2rem; border: 1px solid rgba(99,102,241,.22);
+    background: radial-gradient(circle at top,rgba(99,102,241,.08),transparent 30%),
+      linear-gradient(180deg,rgba(8,15,28,.96),rgba(13,22,39,.94));
+    box-shadow: 0 12px 32px rgba(0,0,0,.2); padding: 1.2rem 1.4rem; margin-bottom: 1.2rem;
+  }
+  .rlt2-label {
+    font-size:.72rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
+    color:#818cf8; margin-bottom:.8rem; display:flex; align-items:center; gap:.5rem;
+  }
+  .rlt2-label::after { content:''; flex:1; height:1px; background:rgba(99,102,241,.18); }
+  .rlt2-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:.75rem; margin-bottom:.75rem; }
+  .rlt2-field label { display:block; font-size:.72rem; color:#818cf8; font-weight:700; text-transform:uppercase; letter-spacing:.1em; margin-bottom:.25rem; }
+  .rlt2-field input, .rlt2-field select {
+    width:100%; padding:.42rem .75rem; border-radius:.55rem;
+    background:rgba(255,255,255,.05); border:1px solid rgba(99,102,241,.25);
+    color:#e2e8f0; font-size:.87rem; outline:none; transition:border-color .2s;
+  }
+  .rlt2-field input:focus,.rlt2-field select:focus { border-color:rgba(99,102,241,.55); }
+  .rlt2-field input[type="color"] { padding:.2rem .35rem; height:36px; cursor:pointer; }
+  .rlt2-field input[type="number"] { width:80px; }
+  .rlt2-toggle { display:flex; align-items:center; gap:.5rem; }
+  .rlt2-toggle input[type="checkbox"] { width:16px; height:16px; accent-color:#6366f1; cursor:pointer; }
+  .rlt2-save-btn {
+    padding:.45rem 1.3rem; border-radius:.55rem;
+    background:rgba(99,102,241,.2); border:1px solid rgba(99,102,241,.4);
+    color:#c7d2fe; font-size:.84rem; font-weight:700; cursor:pointer; transition:background .15s;
+  }
+  .rlt2-save-btn:hover { background:rgba(99,102,241,.35); color:#fff; }
+  .rlt2-msg { font-size:.78rem; margin-left:.75rem; min-height:1.1em; }
+  .rlt2-msg.ok  { color:#34d399; }
+  .rlt2-msg.err { color:#f87171; }
+  .rlt2-tbl { width:100%; border-collapse:collapse; font-size:.8rem; }
+  .rlt2-tbl th { color:#818cf8; font-size:.67rem; letter-spacing:.1em; text-transform:uppercase; padding:.4rem .5rem; border-bottom:1px solid rgba(99,102,241,.18); text-align:left; }
+  .rlt2-tbl td { padding:.38rem .45rem; border-bottom:1px solid rgba(255,255,255,.04); vertical-align:middle; }
+  .rlt2-tbl tr:hover td { background:rgba(99,102,241,.04); }
+  .rlt2-inp {
+    background:rgba(255,255,255,.04); border:1px solid rgba(99,102,241,.2);
+    border-radius:.4rem; padding:.22rem .5rem; color:#e2e8f0; font-size:.8rem; outline:none;
+  }
+  select.rlt2-inp { background:#0b1422; }
+  .rlt2-inp option { background:#0b1422; color:#e2e8f0; }
+  .rlt2-inp:focus { border-color:rgba(99,102,241,.5); }
+  .rlt2-inp[type="number"] { width:70px; }
+  .rlt2-inp[type="text"]   { width:110px; }
+  .rlt2-inp[type="color"]  { width:42px; height:28px; padding:.1rem .25rem; cursor:pointer; }
+  .rlt2-sect-btn {
+    padding:.2rem .6rem; border-radius:.4rem; white-space:nowrap;
+    background:rgba(99,102,241,.15); border:1px solid rgba(99,102,241,.3);
+    color:#a5b4fc; font-size:.72rem; font-weight:700; cursor:pointer;
+  }
+  .rlt2-sect-btn:hover { background:rgba(99,102,241,.3); }
+  .rlt2-sect-msg { font-size:.67rem; color:#34d399; min-width:50px; }
+  .rlt2-hist-tbl { width:100%; border-collapse:collapse; font-size:.8rem; }
+  .rlt2-hist-tbl th { color:#818cf8; font-size:.67rem; letter-spacing:.1em; text-transform:uppercase; padding:.4rem .6rem; border-bottom:1px solid rgba(99,102,241,.18); text-align:left; }
+  .rlt2-hist-tbl td { padding:.42rem .6rem; border-bottom:1px solid rgba(255,255,255,.04); color:#cbd5e1; vertical-align:middle; }
+  .rlt2-hist-tbl tr:hover td { background:rgba(99,102,241,.04); }
+  .rlt2-tag { display:inline-block; padding:.08rem .4rem; border-radius:.3rem; font-size:.67rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+  .rlt2-tag-wp   { background:rgba(34,211,238,.12); color:#22d3ee; }
+  .rlt2-tag-cup  { background:rgba(251,146,60,.12);  color:#fb923c; }
+  .rlt2-tag-imm  { background:rgba(74,222,128,.12);  color:#4ade80; }
+  .rlt2-tag-str  { background:rgba(244,114,182,.12); color:#f472b6; }
+</style>
+
+        <!-- Config Card -->
+        <div class="rlt-admin-card2">
+          <div class="rlt2-label"><i class="fa-solid fa-dice"></i> Ruleta — Configuración general</div>
+          <div class="rlt2-grid" id="rlt2ConfigGrid">
+            <div class="rlt2-field">
+              <label>Estado</label>
+              <div class="rlt2-toggle">
+                <input type="checkbox" id="rlt2CfgEnabled"> <span style="font-size:.85rem;color:#e2e8f0;">Ruleta activa</span>
+              </div>
+            </div>
+            <div class="rlt2-field">
+              <label>Costo por giro</label>
+              <input type="number" id="rlt2CfgCost" value="10" min="0" max="9999">
+            </div>
+            <div class="rlt2-field">
+              <label>Título</label>
+              <input type="text" id="rlt2CfgTitle" value="Ruleta de Premios" maxlength="120" style="width:100%">
+            </div>
+            <div class="rlt2-field">
+              <label>Subtítulo</label>
+              <input type="text" id="rlt2CfgSubtitle" value="Gira y gana premios increíbles." maxlength="255" style="width:100%">
+            </div>
+            <div class="rlt2-field">
+              <label>Exp. cupones (días)</label>
+              <input type="number" id="rlt2CfgExpDays" value="30" min="1" max="365">
+            </div>
+            <div class="rlt2-field">
+              <label>ID usuario streaming</label>
+              <input type="number" id="rlt2CfgStreamUid" value="0" min="0">
+            </div>
+            <div class="rlt2-field">
+              <label>Color borde rueda</label>
+              <div style="display:flex;align-items:center;gap:.5rem;">
+                <input type="color" id="rlt2CfgRingColor" value="#6366f1">
+                <input type="text" id="rlt2CfgRingColorHex" value="#6366f1" maxlength="7" style="width:80px">
+              </div>
+            </div>
+            <div class="rlt2-field">
+              <label>Grosor borde rueda (px)</label>
+              <input type="number" id="rlt2CfgRingWidth" value="2" min="1" max="10">
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">
+            <button type="button" class="rlt2-save-btn" id="rlt2SaveConfigBtn">Guardar configuración</button>
+            <span class="rlt2-msg" id="rlt2CfgMsg"></span>
+          </div>
+        </div>
+
+        <!-- Sections Card -->
+        <div class="rlt-admin-card2">
+          <div class="rlt2-label"><i class="fa-solid fa-table-cells"></i> Ruleta — 8 Secciones</div>
+          <div style="overflow-x:auto;">
+            <table class="rlt2-tbl" id="rlt2SectionsTable">
+              <thead>
+                <tr>
+                  <th>#</th><th>Act.</th><th>Emoji</th><th>Color slot</th>
+                  <th>Tipo premio</th><th>Etiqueta</th>
+                  <th>% Prob.</th><th>WP</th><th>Cupón%</th><th>Inmun.días</th>
+                  <th></th><th></th>
+                </tr>
+              </thead>
+              <tbody id="rlt2SectionsBody">
+                <tr><td colspan="12" style="text-align:center;color:#64748b;padding:1rem;">Cargando…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p style="margin-top:.5rem;font-size:.72rem;color:#475569;">
+            Las probabilidades no necesitan sumar exactamente 100% — el sistema normaliza internamente.
+          </p>
+        </div>
+
+        <!-- History Card -->
+        <div class="rlt-admin-card2">
+          <div class="rlt2-label">
+            <i class="fa-solid fa-history"></i> Historial de giros
+            <button type="button" class="rlt2-sect-btn" id="rlt2HistLoadBtn" style="margin-left:auto;">Cargar historial</button>
+          </div>
+          <div id="rlt2HistContainer" style="font-size:.82rem;color:#64748b;text-align:center;padding:1rem;">
+            Haz clic en «Cargar historial» para ver los giros recientes.
+          </div>
+        </div>
+
+      </section>
+    </div>
+
   </div><!-- /tab-content -->
 
 </div><!-- /container -->
@@ -1233,6 +1425,203 @@ include __DIR__ . '/includes/header.php';
     });
   });
 
+})();
+</script>
+
+<script>
+// ── Ruleta Admin ─────────────────────────────────────────────────────────────
+(function () {
+  const base = <?php echo json_encode($ajaxUrl); ?>;
+  const PRIZE_TYPES = ['winpoints','coupon','immunity','streaming_ticket'];
+  const PRIZE_LABELS = {winpoints:'<?= htmlspecialchars(win_points_program_name(), ENT_QUOTES, 'UTF-8') ?>',coupon:'Cupón',immunity:'Inmunidad',streaming_ticket:'Ticket Streaming'};
+
+  function rltPost(action, extraData, cb) {
+    const fd = new FormData();
+    fd.append('action', action);
+    if (extraData) Object.entries(extraData).forEach(([k,v]) => fd.append(k, v));
+    fetch(base, {method:'POST', body:fd})
+      .then(r => r.json())
+      .then(cb)
+      .catch(() => cb({ok:false,error:'Error de conexión'}));
+  }
+
+  function esc(s) {
+    return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function showMsg(el, text, isOk) {
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'rlt2-msg' + (isOk ? ' ok' : ' err');
+    if (isOk) setTimeout(() => { el.textContent = ''; el.className = 'rlt2-msg'; }, 3000);
+  }
+
+  // ── Load data on tab activation ──
+  let rltLoaded = false;
+  const rltTab = document.querySelector('[data-bs-target="#tab-ruleta"]');
+  if (rltTab) {
+    rltTab.addEventListener('shown.bs.tab', function () {
+      if (!rltLoaded) { loadRltData(); rltLoaded = true; }
+    });
+    // If already active on load
+    if (rltTab.classList.contains('active')) { loadRltData(); rltLoaded = true; }
+  }
+
+  function loadRltData() {
+    rltPost('rlt_get_data', null, function (data) {
+      if (!data.ok) return;
+      applyConfig(data.config || {});
+      renderSections(data.sections || []);
+    });
+  }
+
+  function applyConfig(cfg) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+    setChk('rlt2CfgEnabled', cfg.enabled);
+    set('rlt2CfgCost', cfg.spin_cost ?? 10);
+    set('rlt2CfgTitle', cfg.title ?? 'Ruleta de Premios');
+    set('rlt2CfgSubtitle', cfg.subtitle ?? '');
+    set('rlt2CfgExpDays', cfg.coupon_expiration_days ?? 30);
+    set('rlt2CfgStreamUid', cfg.streaming_user_id ?? 0);
+    const rc = cfg.ring_color ?? '#6366f1';
+    set('rlt2CfgRingColor', rc);
+    set('rlt2CfgRingColorHex', rc);
+    set('rlt2CfgRingWidth', cfg.ring_width ?? 2);
+  }
+
+  // Sync color input ↔ hex text
+  const ringColorEl = document.getElementById('rlt2CfgRingColor');
+  const ringHexEl   = document.getElementById('rlt2CfgRingColorHex');
+  if (ringColorEl) ringColorEl.addEventListener('input', () => { if (ringHexEl) ringHexEl.value = ringColorEl.value; });
+  if (ringHexEl)   ringHexEl.addEventListener('input',  () => { if (/^#[0-9a-fA-F]{6}$/.test(ringHexEl.value)) { if (ringColorEl) ringColorEl.value = ringHexEl.value; } });
+
+  // Save config
+  const saveConfigBtn = document.getElementById('rlt2SaveConfigBtn');
+  const cfgMsg        = document.getElementById('rlt2CfgMsg');
+  if (saveConfigBtn) {
+    saveConfigBtn.addEventListener('click', function () {
+      saveConfigBtn.disabled = true;
+      const ringColor = (ringHexEl?.value || ringColorEl?.value || '#6366f1').trim();
+      rltPost('rlt_save_config', {
+        enabled:                document.getElementById('rlt2CfgEnabled')?.checked ? 1 : 0,
+        spin_cost:              document.getElementById('rlt2CfgCost')?.value ?? 10,
+        title:                  document.getElementById('rlt2CfgTitle')?.value ?? '',
+        subtitle:               document.getElementById('rlt2CfgSubtitle')?.value ?? '',
+        coupon_expiration_days: document.getElementById('rlt2CfgExpDays')?.value ?? 30,
+        streaming_user_id:      document.getElementById('rlt2CfgStreamUid')?.value ?? 0,
+        ring_color:             ringColor,
+        ring_width:             document.getElementById('rlt2CfgRingWidth')?.value ?? 2,
+      }, function (data) {
+        saveConfigBtn.disabled = false;
+        showMsg(cfgMsg, data.ok ? '✓ Guardado' : ('✗ ' + (data.error||'Error')), data.ok);
+      });
+    });
+  }
+
+  // ── Sections table ──
+  function renderSections(sections) {
+    const tbody = document.getElementById('rlt2SectionsBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    for (let i = 0; i < 8; i++) {
+      const s = sections[i] || { section_order: i+1, prize_type:'winpoints', prize_label:'', chance_percent:12.5, points_amount:0, coupon_discount_percent:0, immunity_days:0, color:'#22d3ee', icon_emoji:'🎁', active:true };
+      const ord = s.section_order ?? (i+1);
+      const typeOpts = PRIZE_TYPES.map(t =>
+        `<option value="${t}"${s.prize_type===t?' selected':''}>${PRIZE_LABELS[t]||t}</option>`
+      ).join('');
+      const row = document.createElement('tr');
+      row.dataset.order = ord;
+      row.innerHTML = `
+        <td style="color:#818cf8;font-weight:700">${esc(ord)}</td>
+        <td><input type="checkbox" class="rlt2-sect-active" style="accent-color:#6366f1;cursor:pointer"${s.active?' checked':''}></td>
+        <td><input type="text" class="rlt2-inp rlt2-sect-emoji" value="${esc(s.icon_emoji||'🎁')}" maxlength="4" style="width:46px;text-align:center"></td>
+        <td>
+          <div style="display:flex;align-items:center;gap:3px">
+            <input type="color" class="rlt2-inp rlt2-sect-color" value="${esc(s.color||'#22d3ee')}">
+            <input type="text" class="rlt2-inp rlt2-sect-color-hex" value="${esc(s.color||'#22d3ee')}" maxlength="7" style="width:70px">
+          </div>
+        </td>
+        <td><select class="rlt2-inp rlt2-sect-type" style="width:130px">${typeOpts}</select></td>
+        <td><input type="text" class="rlt2-inp rlt2-sect-label" value="${esc(s.prize_label||'')}" maxlength="60"></td>
+        <td><input type="number" class="rlt2-inp rlt2-sect-chance" value="${parseFloat(s.chance_percent||0).toFixed(1)}" min="0" max="100" step="0.5"></td>
+        <td><input type="number" class="rlt2-inp rlt2-sect-wp" value="${esc(s.points_amount||0)}" min="0"></td>
+        <td><input type="number" class="rlt2-inp rlt2-sect-coupon" value="${esc(s.coupon_discount_percent||0)}" min="0" max="100"></td>
+        <td><input type="number" class="rlt2-inp rlt2-sect-imm" value="${esc(s.immunity_days||0)}" min="0"></td>
+        <td><button type="button" class="rlt2-sect-btn rlt2-sect-save">Guardar</button></td>
+        <td><span class="rlt2-sect-msg"></span></td>
+      `;
+      // Sync color picker ↔ hex
+      const colorPicker = row.querySelector('.rlt2-sect-color');
+      const colorHex    = row.querySelector('.rlt2-sect-color-hex');
+      colorPicker.addEventListener('input', () => { colorHex.value = colorPicker.value; });
+      colorHex.addEventListener('input',   () => { if (/^#[0-9a-fA-F]{6}$/.test(colorHex.value)) colorPicker.value = colorHex.value; });
+      // Save
+      row.querySelector('.rlt2-sect-save').addEventListener('click', function () {
+        const btn = this;
+        btn.disabled = true;
+        const colorVal = colorHex.value.trim() || colorPicker.value;
+        rltPost('rlt_save_section', {
+          section_order:           ord,
+          active:                  row.querySelector('.rlt2-sect-active').checked ? 1 : 0,
+          icon_emoji:              row.querySelector('.rlt2-sect-emoji').value,
+          color:                   colorVal,
+          prize_type:              row.querySelector('.rlt2-sect-type').value,
+          prize_label:             row.querySelector('.rlt2-sect-label').value,
+          chance_percent:          row.querySelector('.rlt2-sect-chance').value,
+          points_amount:           row.querySelector('.rlt2-sect-wp').value,
+          coupon_discount_percent: row.querySelector('.rlt2-sect-coupon').value,
+          immunity_days:           row.querySelector('.rlt2-sect-imm').value,
+        }, function (data) {
+          btn.disabled = false;
+          const msgEl = row.querySelector('.rlt2-sect-msg');
+          msgEl.textContent = data.ok ? '✓' : '✗';
+          msgEl.style.color = data.ok ? '#34d399' : '#f87171';
+          setTimeout(() => { msgEl.textContent = ''; }, 2500);
+        });
+      });
+      tbody.appendChild(row);
+    }
+  }
+
+  // ── History ──
+  const histLoadBtn = document.getElementById('rlt2HistLoadBtn');
+  if (histLoadBtn) {
+    histLoadBtn.addEventListener('click', function () {
+      this.disabled = true;
+      rltPost('rlt_get_history', null, function (data) {
+        histLoadBtn.disabled = false;
+        const container = document.getElementById('rlt2HistContainer');
+        if (!data.ok || !data.history?.length) {
+          container.innerHTML = '<div style="color:#64748b;text-align:center;padding:1rem;">Sin giros registrados.</div>';
+          return;
+        }
+        const tagClass = {winpoints:'rlt2-tag-wp',coupon:'rlt2-tag-cup',immunity:'rlt2-tag-imm',streaming_ticket:'rlt2-tag-str'};
+        let html = '<div style="overflow-x:auto"><table class="rlt2-hist-tbl"><thead><tr>'
+          + '<th>Fecha</th><th>Usuario</th><th>Sección</th><th>Premio</th><th>Costo WP</th><th>Saldo antes</th><th>Saldo después</th>'
+          + '</tr></thead><tbody>';
+        for (const r of data.history) {
+          const tCls = tagClass[r.prize_type] || 'rlt2-tag-wp';
+          html += `<tr>
+            <td>${esc(r.created_at||'')}</td>
+            <td><span style="font-weight:600;color:#e2f8ff">${esc(r.nombre||'—')}</span><br><span style="font-size:.7rem;color:#64748b">${esc(r.email||'')}</span></td>
+            <td style="text-align:center">${esc(r.section_order||'')}</td>
+            <td>
+              <span class="rlt2-tag ${tCls}">${esc(r.prize_type||'')}</span><br>
+              <span style="font-size:.75rem;color:#e2e8f0">${esc(r.prize_label||'')}</span>
+              ${r.prize_type==='winpoints'&&r.points_amount>0?`<span style="color:#22d3ee;font-size:.75rem"> +${esc(r.points_amount)}</span>`:''}
+              ${r.prize_type==='coupon'&&r.coupon_code?`<span style="color:#fb923c;font-size:.7rem"> ${esc(r.coupon_code)}</span>`:''}
+            </td>
+            <td style="color:#f87171">-${esc(r.wp_cost||0)}</td>
+            <td style="color:#94a3b8">${esc(r.balance_before||0)}</td>
+            <td style="color:#22d3ee">${esc(r.balance_after||0)}</td>
+          </tr>`;
+        }
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+      });
+    });
+  }
 })();
 </script>
 

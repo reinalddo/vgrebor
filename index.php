@@ -68,6 +68,7 @@ if ($startupPopupShouldRender) {
   }
 }
 include __DIR__ . "/includes/header.php";
+require_once __DIR__ . '/includes/roulette.php';
 home_gallery_ensure_table();
 $galleryItems = home_gallery_all();
 $galleryFeatured = home_gallery_featured();
@@ -223,6 +224,13 @@ $dailyMissionsScriptPayload = [
   'social_targets' => $dailyMissionsSocialTargets,
   'api_url' => app_path('/api/daily_missions.php'),
 ];
+
+$rouletteUserId  = !empty($authUser['id']) ? (int) $authUser['id'] : 0;
+$roulettePayload = roulette_public_payload($mysqli, $rouletteUserId);
+$rouletteConfig  = $roulettePayload['config'];
+$rouletteSections = $roulettePayload['sections'];
+$rouletteBalance  = (int) ($roulettePayload['balance'] ?? 0);
+$rouletteEnabled  = !empty($rouletteConfig['enabled']);
 ?>
 
       <style>
@@ -2512,6 +2520,413 @@ $dailyMissionsScriptPayload = [
         }
       </style>
 
+      <?php if ($rouletteEnabled): ?>
+      <style>
+        .roulette-shell { position: relative; z-index: 1; }
+        .roulette-banner {
+          display: grid;
+          grid-template-columns: auto 1fr;
+          gap: 0;
+          border-radius: 1.5rem;
+          border: 1px solid rgba(99,102,241,0.28);
+          background:
+            radial-gradient(ellipse at top left, rgba(99,102,241,0.14) 0%, transparent 55%),
+            radial-gradient(ellipse at bottom right, rgba(34,211,238,0.08) 0%, transparent 55%),
+            linear-gradient(160deg, rgba(8,12,22,0.98), rgba(4,8,16,0.99));
+          box-shadow: 0 20px 48px rgba(0,0,0,0.36), 0 0 32px rgba(99,102,241,0.08), inset 0 0 0 1px rgba(99,102,241,0.1);
+          overflow: hidden;
+        }
+        @media (max-width: 600px) {
+          .roulette-banner { grid-template-columns: 1fr; }
+        }
+
+        /* Wheel side */
+        .roulette-wheel-side {
+          position: relative;
+          width: 240px;
+          flex-shrink: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: flex-end;
+          background: linear-gradient(90deg, rgba(99,102,241,0.10) 0%, transparent 100%);
+        }
+        @media (max-width: 600px) {
+          .roulette-wheel-side {
+            width: 100%;
+            border-bottom: 1px solid rgba(99,102,241,0.15);
+          }
+        }
+        .roulette-pointer {
+          position: absolute;
+          bottom: 148px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 10;
+          font-size: 1.6rem;
+          color: #fcd34d;
+          filter: drop-shadow(0 0 8px rgba(252,211,77,0.8)) drop-shadow(0 0 18px rgba(252,211,77,0.4));
+          line-height: 1;
+          user-select: none;
+        }
+        @media (max-width: 600px) {
+          .roulette-pointer { bottom: 138px; }
+        }
+        .roulette-clip-box {
+          overflow: hidden;
+          height: 148px;
+          width: 240px;
+          position: relative;
+          display: flex;
+          align-items: flex-end;
+          justify-content: center;
+        }
+        @media (max-width: 600px) {
+          .roulette-clip-box { height: 138px; }
+        }
+        .roulette-svg-wrap {
+          position: absolute;
+          bottom: -100px;
+          left: 50%;
+          transform: translateX(-50%);
+          width: 240px;
+          height: 240px;
+          will-change: transform;
+        }
+        .roulette-svg {
+          width: 100%;
+          height: 100%;
+          filter: drop-shadow(0 0 22px rgba(99,102,241,0.35));
+        }
+        .roulette-wheel-ring {
+          position: absolute;
+          bottom: -100px;
+          left: 50%;
+          transform: translateX(-50%);
+          width: 244px; height: 244px;
+          border-radius: 50%;
+          border: 2px solid rgba(99,102,241,0.5);
+          box-shadow: 0 0 24px rgba(99,102,241,0.25), inset 0 0 24px rgba(99,102,241,0.12);
+          pointer-events: none;
+          z-index: 5;
+        }
+
+        /* Info side */
+        .roulette-info-side {
+          padding: 1.5rem 1.6rem;
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          gap: 1.5rem;
+        }
+        .roulette-info-copy {
+          flex: 1;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 0.55rem;
+        }
+        @media (max-width: 600px) {
+          .roulette-info-side { flex-direction: column; align-items: flex-start; gap: 1rem; }
+        }
+        .roulette-title {
+          font-family: 'Oxanium', sans-serif;
+          font-size: clamp(1.3rem, 3vw, 2rem);
+          font-weight: 900;
+          line-height: 1.05;
+          color: #fff;
+          margin: 0;
+          text-shadow: 0 0 20px rgba(99,102,241,0.4);
+        }
+        .roulette-sub {
+          font-size: 0.88rem;
+          color: #94a3b8;
+          margin: 0;
+        }
+        .roulette-cost-row {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          flex-wrap: wrap;
+          margin-top: 0.25rem;
+        }
+        .roulette-cost-badge {
+          display: inline-flex;
+          align-items: baseline;
+          gap: 0.3rem;
+          background: rgba(99,102,241,0.12);
+          border: 1px solid rgba(99,102,241,0.28);
+          border-radius: 0.6rem;
+          padding: 0.28rem 0.75rem;
+        }
+        .roulette-cost-amount {
+          font-size: 1.1rem;
+          font-weight: 900;
+          color: #818cf8;
+          font-family: 'Oxanium', sans-serif;
+        }
+        .roulette-cost-unit {
+          font-size: 0.72rem;
+          color: #94a3b8;
+        }
+        .roulette-balance-badge {
+          font-size: 0.78rem;
+          color: #64748b;
+        }
+        .roulette-balance-badge strong { color: #e2e8f0; }
+
+        /* Spin button */
+        .roulette-btn-row {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          flex-wrap: wrap;
+          flex-shrink: 0;
+        }
+        .roulette-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.6rem;
+          padding: 0.75rem 1.8rem;
+          border-radius: 0.9rem;
+          border: 1px solid rgba(99,102,241,0.5);
+          background: linear-gradient(135deg, rgba(99,102,241,0.25), rgba(34,211,238,0.15));
+          color: #e0e7ff;
+          font-size: 0.95rem;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          cursor: pointer;
+          transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+          box-shadow: 0 0 16px rgba(99,102,241,0.2);
+          text-decoration: none;
+          align-self: flex-start;
+        }
+        .roulette-btn:hover:not(:disabled) {
+          background: linear-gradient(135deg, rgba(99,102,241,0.45), rgba(34,211,238,0.3));
+          box-shadow: 0 0 28px rgba(99,102,241,0.45), 0 0 8px rgba(34,211,238,0.2);
+          transform: translateY(-1px);
+          color: #fff;
+        }
+        .roulette-btn:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+          transform: none;
+        }
+        .roulette-btn.spinning .roulette-btn-icon { animation: rlt-spin-icon 0.6s linear infinite; }
+        @keyframes rlt-spin-icon { to { transform: rotate(360deg); } }
+        .roulette-btn-icon { font-size: 1.1rem; display: inline-block; }
+        .roulette-btn-guest {
+          background: rgba(51,65,85,0.4);
+          border-color: rgba(255,255,255,0.1);
+          color: #94a3b8;
+        }
+
+        .roulette-msg {
+          font-size: 0.8rem;
+          color: #f87171;
+          min-height: 1.2em;
+        }
+        .roulette-msg.ok { color: #34d399; }
+
+        /* Modal */
+        .roulette-modal {
+          position: fixed;
+          inset: 0;
+          z-index: 1085;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 1rem;
+          pointer-events: auto;
+        }
+        .roulette-modal.is-hidden { display: none; }
+        .roulette-modal-backdrop {
+          position: absolute;
+          inset: 0;
+          background: rgba(2,6,14,0.72);
+          backdrop-filter: blur(10px);
+          cursor: pointer;
+        }
+        .roulette-modal-card {
+          position: relative;
+          z-index: 1;
+          background: linear-gradient(160deg, rgba(12,14,28,0.98), rgba(6,8,18,0.99));
+          border: 1px solid rgba(99,102,241,0.35);
+          border-radius: 1.5rem;
+          padding: 2rem 1.6rem 1.5rem;
+          max-width: 360px;
+          width: 100%;
+          text-align: center;
+          box-shadow: 0 24px 60px rgba(0,0,0,0.55), 0 0 40px rgba(99,102,241,0.18);
+          animation: rlt-modal-in 0.45s cubic-bezier(0.175,0.885,0.32,1.5) both;
+        }
+        @keyframes rlt-modal-in {
+          0%   { opacity:0; transform:scale(0.6) translateY(20px); }
+          100% { opacity:1; transform:scale(1) translateY(0); }
+        }
+        .roulette-modal-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 1.5rem;
+        }
+        .roulette-modal-eyebrow {
+          font-size: 0.7rem;
+          font-weight: 800;
+          letter-spacing: 0.24em;
+          text-transform: uppercase;
+          color: #818cf8;
+        }
+        .roulette-modal-close-btn {
+          background: none;
+          border: none;
+          color: #475569;
+          font-size: 1rem;
+          cursor: pointer;
+          padding: 0.2rem 0.4rem;
+          border-radius: 0.3rem;
+          line-height: 1;
+        }
+        .roulette-modal-close-btn:hover { color: #94a3b8; }
+        .roulette-modal-prize-icon {
+          font-size: 4.5rem;
+          margin-bottom: 0.75rem;
+          display: block;
+          filter: drop-shadow(0 0 22px rgba(252,211,77,0.85));
+          animation: rlt-prize-pop 0.65s cubic-bezier(0.175,0.885,0.32,1.5) both 0.1s;
+        }
+        @keyframes rlt-prize-pop {
+          0%   { transform:scale(0) rotate(-20deg); opacity:0; }
+          65%  { transform:scale(1.2) rotate(5deg); opacity:1; }
+          100% { transform:scale(1) rotate(0); opacity:1; }
+        }
+        .roulette-modal-prize-label {
+          font-family: 'Oxanium', sans-serif;
+          font-size: 1.5rem;
+          font-weight: 900;
+          color: #fff;
+          margin-bottom: 0.4rem;
+          text-shadow: 0 0 18px rgba(99,102,241,0.5);
+        }
+        .roulette-modal-prize-desc {
+          font-size: 0.88rem;
+          color: #94a3b8;
+          margin-bottom: 0.5rem;
+        }
+        .roulette-modal-coupon {
+          font-size: 0.82rem;
+          background: rgba(99,102,241,0.12);
+          border: 1px solid rgba(99,102,241,0.28);
+          border-radius: 0.5rem;
+          padding: 0.4rem 0.9rem;
+          color: #a5b4fc;
+          margin-bottom: 0.5rem;
+          word-break: break-all;
+        }
+        .roulette-modal-actions { margin-top: 1rem; }
+        .roulette-btn-small {
+          padding: 0.55rem 1.5rem;
+          border-radius: 0.7rem;
+          border: 1px solid rgba(99,102,241,0.4);
+          background: rgba(99,102,241,0.18);
+          color: #c7d2fe;
+          font-size: 0.88rem;
+          font-weight: 700;
+          cursor: pointer;
+          transition: background 0.15s;
+        }
+        .roulette-btn-small:hover { background: rgba(99,102,241,0.32); color: #fff; }
+
+        /* Sparks animation for modal */
+        .rlt-spark {
+          position: fixed;
+          pointer-events: none;
+          z-index: 1090;
+          font-size: 1.2rem;
+          animation: rlt-spark-fly 1.1s ease-out forwards;
+        }
+        @keyframes rlt-spark-fly {
+          0%   { opacity:1; transform: translate(0,0) scale(1); }
+          100% { opacity:0; transform: translate(var(--sx),var(--sy)) scale(0.3); }
+        }
+      </style>
+
+      <section class="mt-5 roulette-shell" id="roulette-shell">
+        <div class="roulette-banner">
+          <!-- Wheel side -->
+          <div class="roulette-wheel-side">
+            <div class="roulette-pointer" aria-hidden="true">▼</div>
+            <div class="roulette-clip-box">
+              <div class="roulette-svg-wrap" id="roulette-svg-wrap">
+                <svg id="roulette-svg" class="roulette-svg" viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+                  <g id="roulette-wheel-group"></g>
+                </svg>
+              </div>
+              <div class="roulette-wheel-ring" aria-hidden="true"></div>
+            </div>
+          </div>
+
+          <!-- Info side -->
+          <div class="roulette-info-side">
+            <div class="roulette-info-copy">
+              <h2 class="roulette-title"><?= htmlspecialchars((string) ($rouletteConfig['title'] ?? 'Ruleta de Premios'), ENT_QUOTES, 'UTF-8') ?></h2>
+              <p class="roulette-sub"><?= htmlspecialchars((string) ($rouletteConfig['subtitle'] ?? 'Gira y gana premios increíbles.'), ENT_QUOTES, 'UTF-8') ?></p>
+              <div class="roulette-cost-row">
+                <span class="roulette-cost-badge">
+                  <span class="roulette-cost-amount"><?= (int) ($rouletteConfig['spin_cost'] ?? 10) ?></span>
+                  <span class="roulette-cost-unit"><?= htmlspecialchars(win_points_program_name(), ENT_QUOTES, 'UTF-8') ?> / giro</span>
+                </span>
+                <?php if ($rouletteUserId > 0): ?>
+                <span class="roulette-balance-badge">Saldo: <strong id="roulette-balance-val"><?= (int) $rouletteBalance ?></strong> <?= htmlspecialchars(win_points_program_name(), ENT_QUOTES, 'UTF-8') ?></span>
+                <?php endif; ?>
+              </div>
+            </div>
+
+            <div class="roulette-btn-row">
+              <?php if ($rouletteUserId > 0): ?>
+                <button type="button" id="roulette-spin-btn" class="roulette-btn"
+                  data-spin-cost="<?= (int) ($rouletteConfig['spin_cost'] ?? 10) ?>"
+                  data-api-url="<?= htmlspecialchars(app_path('/api/roulette.php'), ENT_QUOTES, 'UTF-8') ?>">
+                  <span class="roulette-btn-icon" id="roulette-btn-icon">🎰</span>
+                  <span>GIRAR AHORA</span>
+                </button>
+                <div id="roulette-msg" class="roulette-msg" aria-live="polite"></div>
+              <?php else: ?>
+                <div style="display:flex;flex-direction:column;gap:.4rem;">
+                  <a href="<?= htmlspecialchars(app_path('/login.php'), ENT_QUOTES, 'UTF-8') ?>" class="roulette-btn roulette-btn-guest">
+                    <span class="roulette-btn-icon">🔐</span>
+                    <span>INICIA SESIÓN PARA GIRAR</span>
+                  </a>
+                  <span style="font-size:.75rem;color:#64748b;">Inicia sesión o regístrate para jugar y ganar premios.</span>
+                </div>
+              <?php endif; ?>
+            </div>
+          </div>
+        </div>
+
+        <!-- Prize modal -->
+        <div id="roulette-prize-modal" class="roulette-modal is-hidden" aria-hidden="true">
+          <div class="roulette-modal-backdrop" id="roulette-modal-backdrop"></div>
+          <div class="roulette-modal-card">
+            <div class="roulette-modal-head">
+              <span class="roulette-modal-eyebrow">🎰 RULETA — PREMIO</span>
+              <button type="button" class="roulette-modal-close-btn" id="roulette-modal-close-btn" aria-label="Cerrar">✕</button>
+            </div>
+            <span class="roulette-modal-prize-icon" id="roulette-modal-icon">🎁</span>
+            <div class="roulette-modal-prize-label" id="roulette-modal-label">¡Premio!</div>
+            <div class="roulette-modal-prize-desc" id="roulette-modal-desc"></div>
+            <div class="roulette-modal-coupon" id="roulette-modal-coupon" style="display:none">
+              Tu cupón: <strong id="roulette-modal-coupon-code"></strong>
+            </div>
+            <div class="roulette-modal-actions">
+              <button type="button" id="roulette-modal-ok" class="roulette-btn-small">¡Continuar!</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <?php endif; ?>
+
       <section class="mt-5">
         <div class="d-flex align-items-center justify-content-between">
           <h2 class="fw-bold" style="font-family:'Oxanium',sans-serif;font-size:1.1rem;">Juegos populares</h2>
@@ -3752,5 +4167,304 @@ $homeGalleryIntervalSeconds = max(1, min(60, (int) store_config_get('home_galler
 $homeGalleryIntervalMs = $homeGalleryIntervalSeconds * 1000;
 array_unshift($pageScripts, '<script>window._dmVidMap={basic:' . json_encode(app_path('/assets/video/cofre basico rebor.mp4')) . ',intermediate:' . json_encode(app_path('/assets/video/cofre intermedio.mp4')) . ',legendary:' . json_encode(app_path('/assets/video/cofre legendario rebor.mp4')) . '};</script>');
 array_unshift($pageScripts, '<script>window._vgHomeGalleryIntervalMs = ' . $homeGalleryIntervalMs . ';</script>');
+if ($rouletteEnabled) {
+  $rouletteScriptSections = array_map(fn($s) => [
+    'section_order'           => (int) $s['section_order'],
+    'prize_type'              => (string) $s['prize_type'],
+    'prize_label'             => (string) $s['prize_label'],
+    'points_amount'           => (int) $s['points_amount'],
+    'coupon_discount_percent' => (int) $s['coupon_discount_percent'],
+    'immunity_days'           => (int) $s['immunity_days'],
+    'color'                   => (string) $s['color'],
+    'icon_emoji'              => (string) $s['icon_emoji'],
+    'active'                  => !empty($s['active']),
+  ], $rouletteSections);
+  array_unshift($pageScripts, '<script>window._rouletteData=' . json_encode([
+    'sections'   => $rouletteScriptSections,
+    'spin_cost'  => (int) ($rouletteConfig['spin_cost'] ?? 10),
+    'balance'    => (int) $rouletteBalance,
+    'enabled'    => true,
+    'wp_name'    => win_points_program_name(),
+    'ring_color' => (string) ($rouletteConfig['ring_color'] ?? '#6366f1'),
+    'ring_width' => (int)    ($rouletteConfig['ring_width'] ?? 2),
+  ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . ';</script>');
+  $pageScripts[] = <<<'RLTSCRIPT'
+<script>
+(function () {
+  'use strict';
+
+  const data = window._rouletteData;
+  if (!data || !data.enabled) return;
+
+  const svgEl        = document.getElementById('roulette-wheel-group');
+  const svgWrap      = document.getElementById('roulette-svg-wrap');
+  const spinBtn      = document.getElementById('roulette-spin-btn');
+  const spinIcon     = document.getElementById('roulette-btn-icon');
+  const msgEl        = document.getElementById('roulette-msg');
+  const balanceEl    = document.getElementById('roulette-balance-val');
+  const modal        = document.getElementById('roulette-prize-modal');
+  const modalIcon    = document.getElementById('roulette-modal-icon');
+  const modalLabel   = document.getElementById('roulette-modal-label');
+  const modalDesc    = document.getElementById('roulette-modal-desc');
+  const modalCoupon  = document.getElementById('roulette-modal-coupon');
+  const modalCouponCode = document.getElementById('roulette-modal-coupon-code');
+  const modalOk      = document.getElementById('roulette-modal-ok');
+  const modalClose   = document.getElementById('roulette-modal-close-btn');
+  const modalBackdrop= document.getElementById('roulette-modal-backdrop');
+
+  if (!svgEl || !svgWrap) return;
+
+  const N = 8;
+  const R = 120;
+  const CX = 120, CY = 120;
+  const TAU = Math.PI * 2;
+  let currentRotation = 0;
+  let isSpinning = false;
+
+  // ─── Draw wheel ───────────────────────────────────────────────
+  function drawWheel(sections) {
+    svgEl.innerHTML = '';
+    const colors = sections.map(s => s.color || '#22d3ee');
+
+    sections.forEach((sec, i) => {
+      const startAng = (i / N) * TAU - Math.PI / 2;
+      const endAng   = ((i + 1) / N) * TAU - Math.PI / 2;
+      const x1 = CX + R * Math.cos(startAng);
+      const y1 = CY + R * Math.sin(startAng);
+      const x2 = CX + R * Math.cos(endAng);
+      const y2 = CY + R * Math.sin(endAng);
+
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${CX} ${CY} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${R} ${R} 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`);
+      path.setAttribute('fill', sec.color || '#22d3ee');
+      const isDark = i % 2 === 0;
+      path.setAttribute('fill-opacity', isDark ? '1' : '0.82');
+      path.setAttribute('stroke', '#050814');
+      path.setAttribute('stroke-width', '1.5');
+      svgEl.appendChild(path);
+
+      // Divider lines with glow
+      const midAng = (startAng + endAng) / 2;
+      const lr = R * 0.62;
+      const tx = CX + lr * Math.cos(midAng);
+      const ty = CY + lr * Math.sin(midAng);
+      const rotateDeg = (midAng * 180 / Math.PI) + 90;
+
+      // Emoji
+      const emojiEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      emojiEl.setAttribute('x', tx.toFixed(2));
+      emojiEl.setAttribute('y', (ty - 7).toFixed(2));
+      emojiEl.setAttribute('text-anchor', 'middle');
+      emojiEl.setAttribute('dominant-baseline', 'middle');
+      emojiEl.setAttribute('font-size', '16');
+      emojiEl.setAttribute('transform', `rotate(${rotateDeg.toFixed(1)}, ${tx.toFixed(2)}, ${ty.toFixed(2)})`);
+      emojiEl.textContent = sec.icon_emoji || '🎁';
+      svgEl.appendChild(emojiEl);
+
+      // Label
+      const labelR = R * 0.83;
+      const lx = CX + labelR * Math.cos(midAng);
+      const ly = CY + labelR * Math.sin(midAng);
+      const labelEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      labelEl.setAttribute('x', lx.toFixed(2));
+      labelEl.setAttribute('y', ly.toFixed(2));
+      labelEl.setAttribute('text-anchor', 'middle');
+      labelEl.setAttribute('dominant-baseline', 'middle');
+      labelEl.setAttribute('font-size', '7');
+      labelEl.setAttribute('fill', '#fff');
+      labelEl.setAttribute('font-weight', '800');
+      labelEl.setAttribute('font-family', 'Oxanium, sans-serif');
+      labelEl.setAttribute('transform', `rotate(${rotateDeg.toFixed(1)}, ${lx.toFixed(2)}, ${ly.toFixed(2)})`);
+      const lbl = sec.prize_label || '';
+      labelEl.textContent = lbl.length > 11 ? lbl.substring(0, 10) + '…' : lbl;
+      svgEl.appendChild(labelEl);
+    });
+
+    // Outer ring — uses configurable ring_color/ring_width from admin
+    const ringColor = data.ring_color || '#6366f1';
+    const ringWidth = Math.max(1, parseInt(data.ring_width || 2, 10));
+    const ringEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    ringEl.setAttribute('cx', CX); ringEl.setAttribute('cy', CY);
+    ringEl.setAttribute('r', R - 0.5); ringEl.setAttribute('fill', 'none');
+    ringEl.setAttribute('stroke', ringColor); ringEl.setAttribute('stroke-width', String(ringWidth));
+    ringEl.setAttribute('stroke-opacity', '0.7');
+    svgEl.appendChild(ringEl);
+    // Apply same color to the CSS glow ring div
+    const cssRing = document.querySelector('.roulette-wheel-ring');
+    if (cssRing) {
+      cssRing.style.border = `${ringWidth}px solid ${ringColor}`;
+      cssRing.style.boxShadow = `0 0 20px ${ringColor}55, inset 0 0 20px ${ringColor}22`;
+    }
+
+    // Center circle
+    const centEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    centEl.setAttribute('cx', CX); centEl.setAttribute('cy', CY);
+    centEl.setAttribute('r', '16'); centEl.setAttribute('fill', '#060c1c');
+    centEl.setAttribute('stroke', '#6366f1'); centEl.setAttribute('stroke-width', '2');
+    svgEl.appendChild(centEl);
+
+    const starEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    starEl.setAttribute('x', CX); starEl.setAttribute('y', CY);
+    starEl.setAttribute('text-anchor', 'middle'); starEl.setAttribute('dominant-baseline', 'middle');
+    starEl.setAttribute('font-size', '14');
+    starEl.textContent = '⭐';
+    svgEl.appendChild(starEl);
+  }
+
+  drawWheel(data.sections);
+
+  // ─── Spin animation ────────────────────────────────────────────
+  // Rotate the <g> element (SVG coordinate space) so transform-origin
+  // is always the wheel center (120,120) regardless of the wrapper's CSS.
+  function spinTo(winnerIndex, onDone) {
+    const sectorAng   = (360 - ((winnerIndex * 45 + 22.5) % 360)) % 360;
+    const currAng     = ((currentRotation % 360) + 360) % 360;
+    let   diff        = ((sectorAng - currAng) + 360) % 360;
+    if (diff < 1) diff = 360;
+    const finalRot    = currentRotation + 5 * 360 + diff;
+
+    svgEl.style.transformOrigin = CX + 'px ' + CY + 'px';
+    svgEl.style.transition = 'none';
+    void svgWrap.offsetWidth; // force reflow on parent to flush pending paint
+    svgEl.style.transition = 'transform 4.6s cubic-bezier(0.17,0.67,0.18,0.99)';
+    svgEl.style.transform  = `rotate(${finalRot}deg)`;
+    currentRotation = finalRot;
+
+    const timeout = setTimeout(onDone, 4700);
+    svgEl.addEventListener('transitionend', function handler() {
+      clearTimeout(timeout);
+      svgEl.removeEventListener('transitionend', handler);
+      onDone();
+    }, { once: true });
+  }
+
+  // ─── Prize modal ──────────────────────────────────────────────
+  function showPrizeModal(result) {
+    if (!modal) return;
+    const icons = { winpoints: '🪙', coupon: '🎟️', immunity: '🛡️', streaming_ticket: '🎬' };
+    const icon = result.icon_emoji || icons[result.prize_type] || '🎁';
+    modalIcon.textContent = icon;
+    modalLabel.textContent = result.prize_label || '¡Premio!';
+
+    let desc = '';
+    if (result.prize_type === 'winpoints' && result.points_amount > 0) {
+      desc = '+' + result.points_amount + ' ' + (data.wp_name || 'Win Points') + ' añadidos a tu saldo.';
+    } else if (result.prize_type === 'coupon' && result.coupon_discount_percent > 0) {
+      desc = 'Descuento del ' + result.coupon_discount_percent + '% en tu próxima compra.';
+    } else if (result.prize_type === 'immunity' && result.immunity_days > 0) {
+      desc = result.immunity_days + ' día(s) de protección de racha añadidos.';
+    } else if (result.prize_type === 'streaming_ticket') {
+      desc = 'Ticket de streaming asignado. El admin lo gestionará pronto.';
+    }
+    modalDesc.textContent = desc;
+
+    if (result.coupon_code && result.prize_type === 'coupon') {
+      modalCoupon.style.display = '';
+      modalCouponCode.textContent = result.coupon_code;
+    } else {
+      modalCoupon.style.display = 'none';
+    }
+
+    modal.classList.remove('is-hidden');
+    modal.removeAttribute('aria-hidden');
+    burstSparks();
+  }
+
+  function closeModal() {
+    if (!modal) return;
+    modal.classList.add('is-hidden');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  if (modalOk) modalOk.addEventListener('click', closeModal);
+  if (modalClose) modalClose.addEventListener('click', closeModal);
+  if (modalBackdrop) modalBackdrop.addEventListener('click', closeModal);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && modal && !modal.classList.contains('is-hidden')) closeModal();
+  });
+
+  // ─── Sparks ───────────────────────────────────────────────────
+  function burstSparks() {
+    const emojis = ['✨', '🌟', '💫', '⭐', '🎉', '🎊', '💥', '🔥'];
+    const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+    for (let i = 0; i < 28; i++) {
+      const el = document.createElement('div');
+      el.className = 'rlt-spark';
+      el.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+      const ang = Math.random() * Math.PI * 2;
+      const dist = Math.random() * 280 + 80;
+      el.style.setProperty('--sx', (Math.cos(ang) * dist) + 'px');
+      el.style.setProperty('--sy', (Math.sin(ang) * dist - 80) + 'px');
+      el.style.left = cx + 'px';
+      el.style.top  = cy + 'px';
+      el.style.animationDelay = (Math.random() * 0.15) + 's';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 1400);
+    }
+  }
+
+  // ─── Spin button ──────────────────────────────────────────────
+  function setMsg(text, isOk) {
+    if (!msgEl) return;
+    msgEl.textContent = text;
+    msgEl.className = 'roulette-msg' + (isOk ? ' ok' : '');
+  }
+
+  function setSpinning(on) {
+    isSpinning = on;
+    if (!spinBtn) return;
+    spinBtn.disabled = on;
+    if (spinIcon) spinIcon.style.animation = on ? 'rlt-spin-icon 0.5s linear infinite' : '';
+  }
+
+  if (spinBtn) {
+    const apiUrl = spinBtn.dataset.apiUrl || '/api/roulette.php';
+
+    spinBtn.addEventListener('click', () => {
+      if (isSpinning) return;
+
+      const curBalance = parseInt(balanceEl ? balanceEl.textContent : '0', 10) || 0;
+      const spinCost   = parseInt(spinBtn.dataset.spinCost || '10', 10);
+      if (curBalance < spinCost) {
+        setMsg('No tienes suficientes puntos para girar. Necesitas ' + spinCost + '.', false);
+        return;
+      }
+
+      setSpinning(true);
+      setMsg('', false);
+
+      const fd = new FormData();
+      fd.append('action', 'spin');
+
+      fetch(apiUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(data => {
+          if (!data.ok) {
+            setMsg(data.message || 'No se pudo girar la ruleta.', false);
+            setSpinning(false);
+            return;
+          }
+          const result = data.result;
+          // Animate to winning section
+          const winIdx = (result.section_order || 1) - 1;
+
+          spinTo(winIdx, () => {
+            setSpinning(false);
+            if (balanceEl && data.payload && data.payload.balance !== undefined) {
+              balanceEl.textContent = data.payload.balance;
+            }
+            showPrizeModal(result);
+          });
+        })
+        .catch(() => {
+          setMsg('Error de conexión. Inténtalo de nuevo.', false);
+          setSpinning(false);
+        });
+    });
+  }
+})();
+</script>
+RLTSCRIPT;
+}
 include __DIR__ . "/includes/footer.php";
 ?>

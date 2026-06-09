@@ -6,6 +6,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/db_connect.php';
 require_once __DIR__ . '/includes/daily_missions.php';
 require_once __DIR__ . '/includes/win_points.php';
+require_once __DIR__ . '/includes/roulette.php';
 
 $adminUser = auth_sync_session_user();
 $adminRole = trim((string) ($adminUser['rol'] ?? ''));
@@ -183,7 +184,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['action'])) {
     $uid    = (int) ($_POST['user_id'] ?? 0);
     $out    = ['ok' => false, 'msg' => 'Acción desconocida.'];
 
-    if ($action !== 'search_users' && $uid <= 0) {
+    $noUidActions = ['search_users', 'rlt_get_data', 'rlt_save_config', 'rlt_save_section', 'rlt_get_history'];
+    if (!in_array($action, $noUidActions, true) && $uid <= 0) {
         $out = ['ok' => false, 'msg' => 'Usuario inválido.'];
     } else {
         switch ($action) {
@@ -437,6 +439,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['action'])) {
                     $stWP->close();
                 }
                 $out = ['ok' => true, 'msg' => 'Estado de misiones del usuario reseteado completamente.'];
+                break;
+            }
+
+            // ── Ruleta admin ──────────────────────────────────────────────
+            case 'rlt_get_data': {
+                roulette_ensure_schema();
+                $config   = roulette_fetch_config($mysqli);
+                $sections = roulette_fetch_sections($mysqli);
+                $history  = roulette_fetch_all_history($mysqli, 50);
+                $out = ['ok' => true, 'config' => $config, 'sections' => $sections, 'history' => $history];
+                break;
+            }
+
+            case 'rlt_save_config': {
+                roulette_ensure_schema();
+                roulette_admin_save_config($mysqli, [
+                    'enabled'                => (int) ($_POST['enabled'] ?? 1),
+                    'spin_cost'              => (int) ($_POST['spin_cost'] ?? 10),
+                    'title'                  => trim((string) ($_POST['title'] ?? '')),
+                    'subtitle'               => trim((string) ($_POST['subtitle'] ?? '')),
+                    'coupon_expiration_days' => (int) ($_POST['coupon_expiration_days'] ?? 30),
+                    'streaming_user_id'      => (int) ($_POST['streaming_user_id'] ?? 0),
+                ]);
+                $out = ['ok' => true, 'msg' => 'Configuración guardada.'];
+                break;
+            }
+
+            case 'rlt_save_section': {
+                roulette_ensure_schema();
+                $sectionOrder = (int) ($_POST['section_order'] ?? 1);
+                roulette_admin_save_section($mysqli, $sectionOrder, [
+                    'prize_type'              => trim((string) ($_POST['prize_type'] ?? 'winpoints')),
+                    'prize_label'             => trim((string) ($_POST['prize_label'] ?? '')),
+                    'chance_percent'          => (float) ($_POST['chance_percent'] ?? 0),
+                    'points_amount'           => (int) ($_POST['points_amount'] ?? 0),
+                    'coupon_discount_percent' => (int) ($_POST['coupon_discount_percent'] ?? 0),
+                    'immunity_days'           => (int) ($_POST['immunity_days'] ?? 0),
+                    'streaming_user_id'       => (int) ($_POST['streaming_user_id'] ?? 0),
+                    'color'                   => trim((string) ($_POST['color'] ?? '#22d3ee')),
+                    'icon_emoji'              => trim((string) ($_POST['icon_emoji'] ?? '🎁')),
+                    'active'                  => (int) ($_POST['active'] ?? 1),
+                ]);
+                $out = ['ok' => true, 'msg' => 'Sección ' . $sectionOrder . ' guardada.'];
+                break;
+            }
+
+            case 'rlt_get_history': {
+                roulette_ensure_schema();
+                $history = roulette_fetch_all_history($mysqli, 100);
+                $out = ['ok' => true, 'history' => $history];
                 break;
             }
         }
@@ -739,6 +791,165 @@ $isAdminPage = true;
 
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- RULETA ADMIN                                                          -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<style>
+  .rlt-admin-shell { display: grid; gap: 1.4rem; max-width: 1200px; margin: 1.4rem auto 0; padding: 0 1.25rem; }
+  .rlt-admin-card {
+    border-radius: 1.4rem;
+    border: 1px solid rgba(99,102,241,.22);
+    background:
+      radial-gradient(circle at top, rgba(99,102,241,.10), transparent 30%),
+      linear-gradient(180deg, rgba(8,15,28,.96), rgba(13,22,39,.94));
+    box-shadow: 0 14px 36px rgba(0,0,0,.22), 0 0 20px rgba(99,102,241,.06);
+    padding: 1.25rem 1.4rem;
+  }
+  .rlt-section-label {
+    font-size: .72rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+    color: #818cf8; margin-bottom: .8rem;
+    display: flex; align-items: center; gap: .5rem;
+  }
+  .rlt-section-label::after { content: ''; flex: 1; height: 1px; background: rgba(99,102,241,.18); }
+  .rlt-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: .75rem; margin-bottom: .75rem; }
+  .rlt-field label { display: block; font-size: .72rem; color: #818cf8; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; margin-bottom: .25rem; }
+  .rlt-field input, .rlt-field select {
+    width: 100%; padding: .45rem .8rem; border-radius: .6rem;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(99,102,241,.25);
+    color: #e2e8f0; font-size: .88rem; outline: none; transition: border-color .2s;
+  }
+  .rlt-field input:focus, .rlt-field select:focus { border-color: rgba(99,102,241,.55); }
+  .rlt-field input[type="color"] { padding: .2rem .4rem; height: 36px; cursor: pointer; }
+  .rlt-toggle { display: flex; align-items: center; gap: .5rem; }
+  .rlt-toggle input[type="checkbox"] { width: 16px; height: 16px; accent-color: #6366f1; }
+
+  .rlt-save-btn {
+    padding: .5rem 1.4rem; border-radius: .6rem;
+    background: rgba(99,102,241,.2); border: 1px solid rgba(99,102,241,.4);
+    color: #c7d2fe; font-size: .85rem; font-weight: 700; cursor: pointer;
+    transition: background .15s;
+  }
+  .rlt-save-btn:hover { background: rgba(99,102,241,.36); color: #fff; }
+  .rlt-msg { font-size: .78rem; margin-top: .4rem; min-height: 1.1em; }
+  .rlt-msg.ok  { color: #34d399; }
+  .rlt-msg.err { color: #f87171; }
+
+  .rlt-sections-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+  .rlt-sections-table th {
+    color: #818cf8; font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+    padding: .4rem .6rem; border-bottom: 1px solid rgba(99,102,241,.18); text-align: left;
+  }
+  .rlt-sections-table td { padding: .4rem .5rem; border-bottom: 1px solid rgba(255,255,255,.04); vertical-align: middle; }
+  .rlt-sections-table tr:hover td { background: rgba(99,102,241,.04); }
+  .rlt-sect-input {
+    width: 100%; background: rgba(255,255,255,.04); border: 1px solid rgba(99,102,241,.2);
+    border-radius: .4rem; padding: .25rem .5rem; color: #e2e8f0; font-size: .8rem;
+  }
+  .rlt-sect-input:focus { outline: none; border-color: rgba(99,102,241,.5); }
+  .rlt-sect-save-btn {
+    padding: .22rem .65rem; border-radius: .4rem;
+    background: rgba(99,102,241,.16); border: 1px solid rgba(99,102,241,.3);
+    color: #a5b4fc; font-size: .72rem; font-weight: 700; cursor: pointer;
+    white-space: nowrap;
+  }
+  .rlt-sect-save-btn:hover { background: rgba(99,102,241,.32); }
+  .rlt-sect-msg { font-size: .68rem; color: #34d399; min-width: 60px; }
+
+  .rlt-hist-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+  .rlt-hist-table th { color: #818cf8; font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; padding: .4rem .7rem; border-bottom: 1px solid rgba(99,102,241,.18); text-align: left; }
+  .rlt-hist-table td { padding: .45rem .7rem; border-bottom: 1px solid rgba(255,255,255,.04); color: #cbd5e1; vertical-align: middle; }
+  .rlt-hist-table tr:hover td { background: rgba(99,102,241,.04); }
+  .rlt-prize-type-tag {
+    display: inline-block; padding: .1rem .45rem; border-radius: .3rem; font-size: .68rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em;
+  }
+  .rlt-t-winpoints   { background: rgba(34,211,238,.12); color: #22d3ee; }
+  .rlt-t-coupon      { background: rgba(251,146,60,.12);  color: #fb923c; }
+  .rlt-t-immunity    { background: rgba(74,222,128,.12);  color: #4ade80; }
+  .rlt-t-streaming   { background: rgba(244,114,182,.12); color: #f472b6; }
+</style>
+
+<div class="rlt-admin-shell">
+
+  <!-- Config card -->
+  <div class="rlt-admin-card">
+    <div class="rlt-section-label"><i class="fa-solid fa-dice"></i> Ruleta — Configuración general</div>
+    <div class="rlt-form-grid" id="rltConfigForm">
+      <div class="rlt-field">
+        <label>Estado</label>
+        <div class="rlt-toggle">
+          <input type="checkbox" id="rlt-cfg-enabled" checked> <span style="font-size:.85rem;color:#e2e8f0;">Ruleta activa</span>
+        </div>
+      </div>
+      <div class="rlt-field">
+        <label>Costo por giro (WP)</label>
+        <input type="number" id="rlt-cfg-cost" value="10" min="0" max="9999">
+      </div>
+      <div class="rlt-field">
+        <label>Título</label>
+        <input type="text" id="rlt-cfg-title" value="Ruleta de Premios" maxlength="120">
+      </div>
+      <div class="rlt-field">
+        <label>Subtítulo</label>
+        <input type="text" id="rlt-cfg-subtitle" value="Gira y gana premios increíbles." maxlength="255">
+      </div>
+      <div class="rlt-field">
+        <label>Exp. cupones (días)</label>
+        <input type="number" id="rlt-cfg-exp-days" value="30" min="1" max="365">
+      </div>
+      <div class="rlt-field">
+        <label>ID usuario streaming</label>
+        <input type="number" id="rlt-cfg-stream-uid" value="0" min="0">
+      </div>
+    </div>
+    <button type="button" class="rlt-save-btn" id="rltSaveConfigBtn">Guardar configuración</button>
+    <div class="rlt-msg" id="rltCfgMsg"></div>
+  </div>
+
+  <!-- Sections card -->
+  <div class="rlt-admin-card">
+    <div class="rlt-section-label"><i class="fa-solid fa-table-cells"></i> Ruleta — 8 Secciones</div>
+    <div style="overflow-x:auto;">
+      <table class="rlt-sections-table" id="rltSectionsTable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Activa</th>
+            <th>Emoji</th>
+            <th>Color</th>
+            <th>Tipo premio</th>
+            <th>Etiqueta</th>
+            <th>% Prob.</th>
+            <th>WP</th>
+            <th>Cupón%</th>
+            <th>Inmun.</th>
+            <th></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rltSectionsBody">
+          <tr><td colspan="12" style="text-align:center;color:#64748b;padding:1rem;"><span class="sim-spinner"></span> Cargando secciones…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:.5rem;font-size:.72rem;color:#475569;">
+      Las probabilidades no necesitan sumar exactamente 100% — el sistema normaliza internamente. Una sección con 0% nunca gana pero sigue siendo visible en la ruleta.
+    </div>
+  </div>
+
+  <!-- History card -->
+  <div class="rlt-admin-card">
+    <div class="rlt-section-label" style="cursor:pointer;" id="rltHistToggle">
+      <i class="fa-solid fa-history"></i> Historial de giros
+      <button type="button" style="margin-left:auto;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);color:#a5b4fc;padding:.2rem .7rem;border-radius:.4rem;font-size:.72rem;font-weight:700;cursor:pointer;" id="rltHistLoadBtn">Cargar historial</button>
+    </div>
+    <div id="rltHistContainer">
+      <div style="font-size:.82rem;color:#64748b;text-align:center;padding:1rem;">Haz clic en «Cargar historial» para ver los giros recientes.</div>
+    </div>
+  </div>
+
+</div>
+
 <!-- Responsive fix for main grid -->
 <style>
   @media (max-width: 700px) {
@@ -1031,6 +1242,165 @@ $isAdminPage = true;
 
   function esc(s) {
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+})();
+</script>
+
+<script>
+// ── Ruleta Admin JS ────────────────────────────────────────────────────────
+(function () {
+  const SIM_URL = '<?php echo htmlspecialchars(app_path('/admin/sim-misiones'), ENT_QUOTES); ?>';
+  const PRIZE_TYPES = { winpoints: 'Win Points', coupon: 'Cupón', immunity: 'Inmunidad', streaming_ticket: 'Streaming' };
+
+  function rltPost(payload) {
+    const fd = new FormData();
+    Object.entries(payload).forEach(([k, v]) => fd.append(k, v));
+    return fetch(SIM_URL, { method: 'POST', body: fd, credentials: 'same-origin' }).then(r => r.json());
+  }
+
+  function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  function setMsg(el, text, ok) {
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'rlt-msg ' + (ok ? 'ok' : 'err');
+    if (text) setTimeout(() => { if (el.textContent === text) el.textContent = ''; }, 4000);
+  }
+
+  // ── Load initial data ──────────────────────────────────────────────────
+  rltPost({ action: 'rlt_get_data' }).then(data => {
+    if (!data.ok) return;
+
+    // Config
+    const cfg = data.config || {};
+    const cfgEnabled   = document.getElementById('rlt-cfg-enabled');
+    const cfgCost      = document.getElementById('rlt-cfg-cost');
+    const cfgTitle     = document.getElementById('rlt-cfg-title');
+    const cfgSubtitle  = document.getElementById('rlt-cfg-subtitle');
+    const cfgExpDays   = document.getElementById('rlt-cfg-exp-days');
+    const cfgStreamUid = document.getElementById('rlt-cfg-stream-uid');
+
+    if (cfgEnabled)   cfgEnabled.checked       = !!cfg.enabled;
+    if (cfgCost)      cfgCost.value            = cfg.spin_cost ?? 10;
+    if (cfgTitle)     cfgTitle.value           = cfg.title || '';
+    if (cfgSubtitle)  cfgSubtitle.value        = cfg.subtitle || '';
+    if (cfgExpDays)   cfgExpDays.value         = cfg.coupon_expiration_days ?? 30;
+    if (cfgStreamUid) cfgStreamUid.value       = cfg.streaming_user_id ?? 0;
+
+    // Sections
+    renderSections(data.sections || []);
+  });
+
+  // ── Save config ────────────────────────────────────────────────────────
+  const saveConfigBtn = document.getElementById('rltSaveConfigBtn');
+  const cfgMsg        = document.getElementById('rltCfgMsg');
+
+  if (saveConfigBtn) {
+    saveConfigBtn.addEventListener('click', () => {
+      rltPost({
+        action: 'rlt_save_config',
+        enabled: document.getElementById('rlt-cfg-enabled').checked ? 1 : 0,
+        spin_cost: parseInt(document.getElementById('rlt-cfg-cost').value || '10', 10),
+        title: document.getElementById('rlt-cfg-title').value.trim(),
+        subtitle: document.getElementById('rlt-cfg-subtitle').value.trim(),
+        coupon_expiration_days: parseInt(document.getElementById('rlt-cfg-exp-days').value || '30', 10),
+        streaming_user_id: parseInt(document.getElementById('rlt-cfg-stream-uid').value || '0', 10),
+      }).then(d => setMsg(cfgMsg, d.msg || (d.ok ? 'Guardado.' : 'Error.'), d.ok));
+    });
+  }
+
+  // ── Sections table ─────────────────────────────────────────────────────
+  function renderSections(sections) {
+    const tbody = document.getElementById('rltSectionsBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    sections.forEach((sec, i) => {
+      const order = sec.section_order || (i + 1);
+      const msgId = `rlt-sect-msg-${order}`;
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td><strong style="color:#818cf8">${order}</strong></td>
+        <td><input type="checkbox" class="rlt-sect-active" id="rlt-s${order}-active" style="accent-color:#6366f1;" ${sec.active ? 'checked' : ''}></td>
+        <td><input type="text" class="rlt-sect-input" id="rlt-s${order}-emoji" value="${esc(sec.icon_emoji||'🎁')}" style="width:52px;text-align:center;font-size:1rem;" maxlength="8"></td>
+        <td><input type="color" class="rlt-sect-input" id="rlt-s${order}-color" value="${esc(sec.color||'#22d3ee')}" style="width:48px;padding:.1rem;height:30px;"></td>
+        <td>
+          <select class="rlt-sect-input" id="rlt-s${order}-type" style="min-width:100px;">
+            <option value="winpoints" ${sec.prize_type==='winpoints'?'selected':''}>Win Points</option>
+            <option value="coupon"    ${sec.prize_type==='coupon'?'selected':''}>Cupón</option>
+            <option value="immunity"  ${sec.prize_type==='immunity'?'selected':''}>Inmunidad</option>
+            <option value="streaming_ticket" ${sec.prize_type==='streaming_ticket'?'selected':''}>Streaming</option>
+          </select>
+        </td>
+        <td><input type="text" class="rlt-sect-input" id="rlt-s${order}-label" value="${esc(sec.prize_label||'')}" maxlength="60" style="min-width:90px;"></td>
+        <td><input type="number" class="rlt-sect-input" id="rlt-s${order}-chance" value="${parseFloat(sec.chance_percent||0).toFixed(1)}" min="0" max="100" step="0.5" style="width:62px;"></td>
+        <td><input type="number" class="rlt-sect-input" id="rlt-s${order}-pts"    value="${sec.points_amount||0}" min="0" style="width:52px;"></td>
+        <td><input type="number" class="rlt-sect-input" id="rlt-s${order}-cpct"   value="${sec.coupon_discount_percent||0}" min="0" max="100" style="width:52px;"></td>
+        <td><input type="number" class="rlt-sect-input" id="rlt-s${order}-imm"    value="${sec.immunity_days||0}" min="0" max="30" style="width:52px;"></td>
+        <td><button type="button" class="rlt-sect-save-btn" data-order="${order}">Guardar</button></td>
+        <td><span class="rlt-sect-msg" id="${msgId}"></span></td>
+      `;
+      tbody.appendChild(row);
+    });
+
+    tbody.querySelectorAll('.rlt-sect-save-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const o = btn.dataset.order;
+        const msgEl = document.getElementById(`rlt-sect-msg-${o}`);
+        rltPost({
+          action: 'rlt_save_section',
+          section_order:          o,
+          active:                 document.getElementById(`rlt-s${o}-active`).checked ? 1 : 0,
+          icon_emoji:             document.getElementById(`rlt-s${o}-emoji`).value.trim(),
+          color:                  document.getElementById(`rlt-s${o}-color`).value,
+          prize_type:             document.getElementById(`rlt-s${o}-type`).value,
+          prize_label:            document.getElementById(`rlt-s${o}-label`).value.trim(),
+          chance_percent:         parseFloat(document.getElementById(`rlt-s${o}-chance`).value)||0,
+          points_amount:          parseInt(document.getElementById(`rlt-s${o}-pts`).value||'0', 10),
+          coupon_discount_percent:parseInt(document.getElementById(`rlt-s${o}-cpct`).value||'0', 10),
+          immunity_days:          parseInt(document.getElementById(`rlt-s${o}-imm`).value||'0', 10),
+          streaming_user_id:      0,
+        }).then(d => setMsg(msgEl, d.ok ? '✓' : '✗', d.ok));
+      });
+    });
+  }
+
+  // ── History ────────────────────────────────────────────────────────────
+  const histLoadBtn = document.getElementById('rltHistLoadBtn');
+  const histContainer = document.getElementById('rltHistContainer');
+
+  if (histLoadBtn) {
+    histLoadBtn.addEventListener('click', () => {
+      histContainer.innerHTML = '<div style="text-align:center;color:#64748b;padding:1rem;"><span class="sim-spinner"></span> Cargando…</div>';
+      rltPost({ action: 'rlt_get_history' }).then(data => {
+        if (!data.ok || !data.history || !data.history.length) {
+          histContainer.innerHTML = '<div style="font-size:.82rem;color:#64748b;text-align:center;padding:1rem;">Sin giros registrados.</div>';
+          return;
+        }
+        const typeClasses = { winpoints: 'rlt-t-winpoints', coupon: 'rlt-t-coupon', immunity: 'rlt-t-immunity', streaming_ticket: 'rlt-t-streaming' };
+        let html = `<div style="overflow-x:auto;"><table class="rlt-hist-table"><thead><tr>
+          <th>Fecha</th><th>Usuario</th><th>Sección</th><th>Premio</th><th>Tipo</th><th>Costo WP</th><th>Saldo ant.</th><th>Saldo postr.</th>
+        </tr></thead><tbody>`;
+        data.history.forEach(r => {
+          const tc = typeClasses[r.prize_type] || 'rlt-t-winpoints';
+          const userName = esc((r.nombre || r.email || 'ID ' + r.user_id).substring(0, 28));
+          const date = (r.created_at || '').substring(0, 16).replace('T', ' ');
+          const prize = esc(r.prize_label || r.prize_type || '?');
+          const ptStr = r.points_amount > 0 ? ' +' + r.points_amount + ' WP' : '';
+          html += `<tr>
+            <td style="font-size:.72rem;color:#64748b;">${esc(date)}</td>
+            <td>${userName}</td>
+            <td style="text-align:center;color:#818cf8;">${r.section_order}</td>
+            <td>${prize}${ptStr ? '<span style="color:#34d399;font-size:.72rem;"> ' + esc(ptStr) + '</span>' : ''}</td>
+            <td><span class="rlt-prize-type-tag ${tc}">${esc(PRIZE_TYPES[r.prize_type] || r.prize_type)}</span></td>
+            <td style="color:#f87171;">-${r.wp_cost}</td>
+            <td style="color:#94a3b8;">${r.balance_before}</td>
+            <td style="color:#34d399;">${r.balance_after}</td>
+          </tr>`;
+        });
+        html += '</tbody></table></div>';
+        histContainer.innerHTML = html;
+      });
+    });
   }
 })();
 </script>
