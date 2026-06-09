@@ -3505,6 +3505,9 @@ SCRIPT,
         missionChestShell.toggleAttribute("disabled", !canOpenChest);
         missionChestShell.setAttribute("aria-disabled", canOpenChest ? "false" : "true");
       }
+      if (missionChest3d && !missionChest3d.classList.contains('abierto')) {
+        missionChest3d.classList.toggle("is-open", canOpenChest);
+      }
 
       missionTaskCards.forEach((card) => {
         const task = taskMap.get(card.dataset.missionKey || "");
@@ -3734,6 +3737,11 @@ SCRIPT,
         closeMissionModal();
       }
     });
+
+    try {
+      const _dmBc = new BroadcastChannel('vg_daily_missions');
+      _dmBc.onmessage = () => { refreshMissionStatus(); };
+    } catch(e) {}
 
     refreshMissionStatus();
   })();

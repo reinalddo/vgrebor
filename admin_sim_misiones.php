@@ -277,19 +277,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['action'])) {
             }
 
             case 'advance_day': {
-                $state    = sim_get_state($uid);
-                $lastDate = $state['last_completed_date'] ?? date('Y-m-d', strtotime('-1 day'));
-                $newDate  = date('Y-m-d', strtotime($lastDate . ' +1 day'));
-                $streak   = (int) ($state['current_streak_days'] ?? 0) + 1;
-                $level    = daily_missions_resolve_level_key($streak, $newDate);
-                sim_complete_day($uid, $newDate, $streak, $level);
-                $res = sim_claim_chest($uid, $newDate, $level);
+                $state   = sim_get_state($uid);
+                $today   = date('Y-m-d');
+                $streak  = (int) ($state['current_streak_days'] ?? 0) + 1;
+                $level   = daily_missions_resolve_level_key($streak, $today);
+
+                // Advance streak in state, mark last_completed_date = today
+                // so the next complete_today sees gap=0 and keeps the new streak
+                $stU = $mysqli->prepare(
+                    'INSERT INTO win_points_daily_mission_state (user_id, current_streak_days, last_completed_date)
+                     VALUES (?, ?, ?)
+                     ON DUPLICATE KEY UPDATE
+                       current_streak_days  = VALUES(current_streak_days),
+                       last_completed_date  = VALUES(last_completed_date)'
+                );
+                $stU->bind_param('iis', $uid, $streak, $today);
+                $stU->execute();
+                $stU->close();
+
+                // Delete today's day record so the main page sees a fresh day
+                $stD = $mysqli->prepare(
+                    'DELETE FROM win_points_daily_mission_days WHERE user_id = ? AND mission_date = ?'
+                );
+                $stD->bind_param('is', $uid, $today);
+                $stD->execute();
+                $stD->close();
+
                 $out = [
                     'ok'     => true,
-                    'msg'    => "Día $newDate completado y cofre reclamado. Racha: $streak. Premio: "
-                                . ($res['prize']['prize_label'] ?? '—')
-                                . ($res['points'] > 0 ? ' (+' . $res['points'] . ' WP)' : ''),
-                    'date'   => $newDate,
+                    'msg'    => "Día siguiente iniciado. Racha: $streak. Cofre: $level. Tareas reiniciadas — puedes simular el nuevo día.",
                     'streak' => $streak,
                     'level'  => $level,
                 ];
@@ -305,6 +321,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['action'])) {
                 }
                 $lastDate = $state['last_completed_date'] ?? date('Y-m-d', strtotime('-1 day'));
                 $needed   = 20 - $current;
+                $today    = date('Y-m-d');
                 $log      = [];
                 for ($i = 1; $i <= $needed; $i++) {
                     $newDate   = date('Y-m-d', strtotime($lastDate . " +$i day"));
@@ -314,9 +331,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['action'])) {
                     sim_claim_chest($uid, $newDate, $level);
                     $log[] = "$newDate · racha $newStreak · $level";
                 }
+                $finalStreak = $current + $needed;
+                $finalLevel  = daily_missions_resolve_level_key($finalStreak, $today);
+                $stU = $mysqli->prepare(
+                    'INSERT INTO win_points_daily_mission_state (user_id, current_streak_days, last_completed_date)
+                     VALUES (?, ?, ?)
+                     ON DUPLICATE KEY UPDATE
+                       current_streak_days = VALUES(current_streak_days),
+                       last_completed_date = VALUES(last_completed_date)'
+                );
+                $stU->bind_param('iis', $uid, $finalStreak, $today);
+                $stU->execute();
+                $stU->close();
+                $stD = $mysqli->prepare('DELETE FROM win_points_daily_mission_days WHERE user_id = ? AND mission_date = ?');
+                $stD->bind_param('is', $uid, $today);
+                $stD->execute();
+                $stD->close();
                 $out = [
                     'ok'  => true,
-                    'msg' => "Racha llevada a 20. Días generados: $needed.",
+                    'msg' => "Racha llevada a 20 (cofre: $finalLevel). Días generados: $needed. Tareas reiniciadas.",
                     'log' => $log,
                 ];
                 break;
@@ -332,6 +365,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['action'])) {
                     break;
                 }
                 $needed = (int) round((strtotime($monthEnd) - strtotime($lastDate)) / 86400);
+                $today  = date('Y-m-d');
                 $log    = [];
                 for ($i = 1; $i <= $needed; $i++) {
                     $newDate   = date('Y-m-d', strtotime($lastDate . " +$i day"));
@@ -341,9 +375,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['action'])) {
                     sim_claim_chest($uid, $newDate, $level);
                     $log[] = "$newDate · racha $newStreak · $level";
                 }
+                $finalStreak = $current + $needed;
+                $finalLevel  = daily_missions_resolve_level_key($finalStreak, $today);
+                $stU = $mysqli->prepare(
+                    'INSERT INTO win_points_daily_mission_state (user_id, current_streak_days, last_completed_date)
+                     VALUES (?, ?, ?)
+                     ON DUPLICATE KEY UPDATE
+                       current_streak_days = VALUES(current_streak_days),
+                       last_completed_date = VALUES(last_completed_date)'
+                );
+                $stU->bind_param('iis', $uid, $finalStreak, $today);
+                $stU->execute();
+                $stU->close();
+                $stD = $mysqli->prepare('DELETE FROM win_points_daily_mission_days WHERE user_id = ? AND mission_date = ?');
+                $stD->bind_param('is', $uid, $today);
+                $stD->execute();
+                $stD->close();
                 $out = [
                     'ok'  => true,
-                    'msg' => "Saltado a fin de mes ($monthEnd). Días generados: $needed.",
+                    'msg' => "Saltado a fin de mes ($monthEnd, cofre: $finalLevel). Días generados: $needed. Tareas reiniciadas.",
                     'log' => $log,
                 ];
                 break;
@@ -940,6 +990,7 @@ $isAdminPage = true;
           if (data.log && data.log.length) {
             data.log.forEach(l => logMsg('  ' + l, 'sub'));
           }
+          try { new BroadcastChannel('vg_daily_missions').postMessage({ refresh: true, user_id: selectedUserId }); } catch(e) {}
         } else {
           logMsg('✗ ' + (data.msg || 'Error desconocido.'), 'err');
         }
