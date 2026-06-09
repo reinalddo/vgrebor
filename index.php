@@ -1354,6 +1354,38 @@ $dailyMissionsScriptPayload = [
         .daily-mission-chest-3d.is-open .dm-der::after,
         .daily-mission-chest-3d.is-open .dm-izq::after { opacity:0.75; }
 
+        /* ── VIDEO CHEST ──────────────────────────────────────────── */
+        .dm-video-wrap {
+          position:relative;
+          display:flex; align-items:center; justify-content:center;
+          width:100%; height:100%;
+          transition:opacity 0.5s ease;
+        }
+        .dm-video {
+          width:240px; height:240px;
+          object-fit:contain;
+          display:block;
+          border-radius:6px;
+          transition:filter 0.45s ease;
+        }
+        /* Locked: grayscale */
+        .daily-mission-chest-3d:not(.is-open) .dm-video {
+          filter:grayscale(1) brightness(0.5);
+        }
+        /* Available: colored with gentle pulse */
+        .daily-mission-chest-3d.is-open:not(.dm-vid-playing):not(.abierto) .dm-video {
+          filter:none;
+          animation:dm-vid-chest-pulse 2.8s ease-in-out infinite;
+        }
+        @keyframes dm-vid-chest-pulse {
+          0%,100% { filter:brightness(1); }
+          50% { filter:brightness(1.1) drop-shadow(0 0 16px var(--dm-glow-clr,rgba(245,197,24,.65))); }
+        }
+        /* Playing */
+        .daily-mission-chest-3d.dm-vid-playing .dm-video { filter:none; animation:none; }
+        /* After opening: fade video out so prize shows from behind */
+        .daily-mission-chest-3d.abierto .dm-video-wrap { opacity:0; pointer-events:none; }
+
         /* Prize reveal (modal) */
         .daily-mission-modal-sorpresa {
           position:absolute; top:50%; left:50%;
@@ -1722,8 +1754,8 @@ $dailyMissionsScriptPayload = [
         #daily-missions-shell .daily-mission-chest-shell,
         #daily-missions-shell .daily-mission-chest-3d {
           position: relative;
-          width: min(100%, 270px);
-          aspect-ratio: 1.12 / 1;
+          width: min(100%, 260px);
+          aspect-ratio: 1 / 1;
           border: 0;
           padding: 0;
           background: transparent;
@@ -2294,28 +2326,13 @@ $dailyMissionsScriptPayload = [
                       <div class="daily-mission-chest-stage">
                         <button type="button" class="daily-mission-chest-shell<?php echo $dailyMissionsCanOpenChest ? ' is-open' : ''; ?>" id="daily-mission-chest-shell" data-daily-mission-chest data-level="<?php echo htmlspecialchars($dailyMissionsLevelKey, ENT_QUOTES, 'UTF-8'); ?>" aria-label="Abrir cofre diario"<?php echo $dailyMissionsCanOpenChest ? '' : ' disabled'; ?>>
                           <div class="daily-mission-chest-3d<?php echo $dailyMissionsCanOpenChest ? ' is-open' : ''; ?>" id="daily-mission-chest-3d" data-level="<?php echo htmlspecialchars($dailyMissionsLevelKey, ENT_QUOTES, 'UTF-8'); ?>">
-                            <div class="dm-scene">
-                              <div class="dm-cofre">
-                                <div class="dm-base">
-                                  <div class="dm-cara dm-frente dm-madera"><span class="dm-face-icon" aria-hidden="true">✦</span></div>
-                                  <div class="dm-cara dm-atras dm-madera"></div>
-                                  <div class="dm-cara dm-der dm-oscura"></div>
-                                  <div class="dm-cara dm-izq dm-clara"></div>
-                                  <div class="dm-cara dm-fondo"></div>
-                                </div>
-                                <div class="dm-tapa">
-                                  <div class="dm-tapa-top"></div>
-                                  <div class="dm-cara dm-tapa-frente dm-madera"></div>
-                                  <div class="dm-cara dm-tapa-atras dm-oscura"></div>
-                                  <div class="dm-cara dm-tapa-der dm-oscura"></div>
-                                  <div class="dm-cara dm-tapa-izq dm-clara"></div>
-                                  <div class="dm-stud dm-stud-fl"></div>
-                                  <div class="dm-stud dm-stud-fr"></div>
-                                  <div class="dm-cerradura"></div>
-                                </div>
-                              </div>
+                            <?php
+                              $_dmVids = ['basic'=>'cofre basico rebor.mp4','intermediate'=>'cofre intermedio.mp4','legendary'=>'cofre legendario rebor.mp4'];
+                              $_chestVid = htmlspecialchars(app_path('/assets/video/'.($_dmVids[$dailyMissionsLevelKey]??$_dmVids['basic'])),ENT_QUOTES,'UTF-8');
+                            ?>
+                            <div class="dm-video-wrap">
+                              <video class="dm-video" src="<?php echo $_chestVid; ?>" muted playsinline preload="metadata"></video>
                             </div>
-                            <div class="dm-aura" aria-hidden="true"></div>
                             <div class="dm-glow-ring" aria-hidden="true"></div>
                           </div>
                         </button>
@@ -2436,28 +2453,9 @@ $dailyMissionsScriptPayload = [
           </div>
           <div class="daily-mission-modal-stage" id="daily-mission-modal-stage" data-level="<?php echo htmlspecialchars($dailyMissionsLevelKey, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="daily-mission-chest-3d">
-              <div class="dm-scene">
-                <div class="dm-cofre">
-                  <div class="dm-base">
-                    <div class="dm-cara dm-frente dm-madera"><span class="dm-face-icon" aria-hidden="true">✦</span></div>
-                    <div class="dm-cara dm-atras dm-madera"></div>
-                    <div class="dm-cara dm-der dm-oscura"></div>
-                    <div class="dm-cara dm-izq dm-clara"></div>
-                    <div class="dm-cara dm-fondo"></div>
-                  </div>
-                  <div class="dm-tapa">
-                    <div class="dm-tapa-top"></div>
-                    <div class="dm-cara dm-tapa-frente dm-madera"></div>
-                    <div class="dm-cara dm-tapa-atras dm-oscura"></div>
-                    <div class="dm-cara dm-tapa-der dm-oscura"></div>
-                    <div class="dm-cara dm-tapa-izq dm-clara"></div>
-                    <div class="dm-stud dm-stud-fl"></div>
-                    <div class="dm-stud dm-stud-fr"></div>
-                    <div class="dm-cerradura"></div>
-                  </div>
-                </div>
+              <div class="dm-video-wrap">
+                <video class="dm-video" muted playsinline preload="auto"></video>
               </div>
-              <div class="dm-aura" aria-hidden="true"></div>
               <div class="daily-mission-modal-sorpresa sorpresa">
                 <div class="icono-s" id="daily-mission-modal-icono">🎁</div>
                 <div class="texto-s" id="daily-mission-modal-texto">¡Sorpresa!</div>
@@ -3284,12 +3282,10 @@ SCRIPT,
       try {
         const modalChest = missionModalStage ? missionModalStage.querySelector('.daily-mission-chest-3d') : null;
         if (modalChest) {
-          modalChest.classList.remove('is-spinning');
-          modalChest.classList.remove('is-open');
+          modalChest.classList.remove('is-spinning', 'is-open', 'cofre', 'girando', 'abierto', 'dm-vid-playing');
           modalChest.querySelectorAll('.daily-mission-modal-spark').forEach(s => s.remove());
-          modalChest.classList.remove('cofre');
-          modalChest.classList.remove('girando');
-          modalChest.classList.remove('abierto');
+          const mVid = modalChest.querySelector('.dm-video');
+          if (mVid) { try { mVid.pause(); mVid.currentTime = 0; } catch(e) {} }
         }
       } catch (e) {}
       try {
@@ -3359,28 +3355,39 @@ SCRIPT,
         if (modalText) modalText.textContent = prizeLabel;
       } catch (e) {}
 
-      // Spin the chest inside the modal (activeChest) and then open it + show sparks
+      // Play chest video then reveal prize
       if (activeChest) {
-        // mark as cofre for modal-scoped styles and start spin
-        try { activeChest.classList.add('cofre'); } catch (e) {}
-        activeChest.classList.remove('is-open');
-        activeChest.classList.add('is-spinning');
-        // also add legacy class names used by the original asset CSS
-        activeChest.classList.add('girando');
-        activeChest.classList.remove('abierto');
-      }
-      const spinDuration = 1800; // ms (matches CSS animation)
-      window.setTimeout(() => {
-        // Create sparks and open the chest (inside modal when possible)
-        try { createMissionSparks(activeChest); } catch (e) {}
-        if (activeChest) {
-          activeChest.classList.remove('is-spinning');
-          activeChest.classList.add('is-open');
-          // mirror legacy classes used in the source HTML/CSS
-          activeChest.classList.remove('girando');
-          activeChest.classList.add('abierto');
+        const dmVidMap = window._dmVidMap || {};
+        const video = activeChest.querySelector('.dm-video');
+        const vidSrc = dmVidMap[levelKey] || dmVidMap.basic;
+
+        activeChest.classList.remove('is-open', 'abierto', 'dm-vid-playing');
+
+        const revealPrize = () => {
+          try { createMissionSparks(activeChest); } catch (e) {}
+          activeChest.classList.remove('dm-vid-playing');
+          activeChest.classList.add('is-open', 'abierto');
+        };
+
+        if (video) {
+          video.src = vidSrc;
+          video.currentTime = 0;
+          activeChest.classList.add('dm-vid-playing');
+          const onEnd = () => { video.removeEventListener('ended', onEnd); revealPrize(); };
+          video.addEventListener('ended', onEnd);
+          video.play().catch(() => { setTimeout(revealPrize, 5500); });
+          // Safety fallback if 'ended' never fires
+          setTimeout(() => {
+            if (!activeChest.classList.contains('abierto')) {
+              video.removeEventListener('ended', onEnd);
+              try { video.pause(); } catch(e) {}
+              revealPrize();
+            }
+          }, 7000);
+        } else {
+          setTimeout(revealPrize, 1000);
         }
-      }, spinDuration);
+      }
     };
 
     const syncTaskCard = (card, task) => {
@@ -3735,6 +3742,7 @@ SCRIPT
 ];
 $homeGalleryIntervalSeconds = max(1, min(60, (int) store_config_get('home_gallery_interval_seconds', '6')));
 $homeGalleryIntervalMs = $homeGalleryIntervalSeconds * 1000;
+array_unshift($pageScripts, '<script>window._dmVidMap={basic:' . json_encode(app_path('/assets/video/cofre basico rebor.mp4')) . ',intermediate:' . json_encode(app_path('/assets/video/cofre intermedio.mp4')) . ',legendary:' . json_encode(app_path('/assets/video/cofre legendario rebor.mp4')) . '};</script>');
 array_unshift($pageScripts, '<script>window._vgHomeGalleryIntervalMs = ' . $homeGalleryIntervalMs . ';</script>');
 include __DIR__ . "/includes/footer.php";
 ?>
