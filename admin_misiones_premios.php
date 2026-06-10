@@ -140,6 +140,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
+        case 'rlt_upload_center_image': {
+            if (empty($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
+                echo json_encode(['ok' => false, 'error' => 'No se recibió ningún archivo.']);
+                exit;
+            }
+            $allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $mime  = $finfo->file($_FILES['image']['tmp_name']);
+            if (!in_array($mime, $allowedMimes, true)) {
+                echo json_encode(['ok' => false, 'error' => 'Formato no permitido. Usa JPG, PNG, GIF o WebP.']);
+                exit;
+            }
+            if ($_FILES['image']['size'] > 2 * 1024 * 1024) {
+                echo json_encode(['ok' => false, 'error' => 'La imagen supera el límite de 2 MB.']);
+                exit;
+            }
+            $extMap    = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+            $ext       = $extMap[$mime];
+            $uploadDir = __DIR__ . '/uploads/roulette/';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+            foreach (glob($uploadDir . 'center_*') ?: [] as $old) {
+                @unlink($old);
+            }
+            $filename = 'center_' . bin2hex(random_bytes(6)) . '.' . $ext;
+            $dest     = $uploadDir . $filename;
+            if (!move_uploaded_file($_FILES['image']['tmp_name'], $dest)) {
+                echo json_encode(['ok' => false, 'error' => 'No se pudo guardar la imagen.']);
+                exit;
+            }
+            echo json_encode(['ok' => true, 'url' => app_path('/uploads/roulette/' . $filename)]);
+            exit;
+        }
+
         case 'rlt_upload_image': {
             $sectionOrder = max(1, min(8, (int) ($_POST['section_order'] ?? 1)));
             if (empty($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
@@ -1240,6 +1275,25 @@ include __DIR__ . '/includes/header.php';
                 <input type="checkbox" id="rlt2CfgNeon"> <span style="font-size:.85rem;color:#e2e8f0;">Activar neon en bordes</span>
               </div>
             </div>
+            <div class="rlt2-field" style="grid-column:1/-1">
+              <label>Centro de la ruleta</label>
+              <div style="display:flex;align-items:flex-start;gap:.85rem;flex-wrap:wrap;">
+                <div>
+                  <div style="font-size:.64rem;color:#94a3b8;margin-bottom:.22rem;text-transform:uppercase;letter-spacing:.08em;">Emoji</div>
+                  <input type="text" id="rlt2CfgCenterEmoji" value="⭐" maxlength="4" style="width:58px;text-align:center;">
+                </div>
+                <div style="flex:1;min-width:200px;">
+                  <div style="font-size:.64rem;color:#94a3b8;margin-bottom:.22rem;text-transform:uppercase;letter-spacing:.08em;">Imagen personalizada (reemplaza al emoji)</div>
+                  <div class="rlt2-img-area">
+                    <img class="rlt2-img-preview" id="rlt2CenterImgPreview" src="" alt="">
+                    <input type="file" id="rlt2CenterImgFileInput" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none">
+                    <button type="button" class="rlt2-img-upload-btn" id="rlt2CenterUploadBtn">Subir imagen</button>
+                    <button type="button" class="rlt2-img-remove-btn" id="rlt2CenterRemoveBtn">Quitar</button>
+                    <span id="rlt2CenterImgStatus" style="font-size:.66rem;color:#94a3b8;"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">
             <button type="button" class="rlt2-save-btn" id="rlt2SaveConfigBtn">Guardar configuración</button>
@@ -1591,6 +1645,9 @@ include __DIR__ . '/includes/header.php';
     });
   }
 
+  // Center image state (mutable, shared across applyConfig and save)
+  let centerImgUrl = '';
+
   function applyConfig(cfg) {
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
     const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
@@ -1604,6 +1661,13 @@ include __DIR__ . '/includes/header.php';
     set('rlt2CfgRingColorHex', rc);
     set('rlt2CfgRingWidth', cfg.ring_width ?? 2);
     setChk('rlt2CfgNeon', cfg.ring_neon ?? false);
+    // Center
+    set('rlt2CfgCenterEmoji', cfg.center_emoji ?? '⭐');
+    centerImgUrl = cfg.center_image_url ?? '';
+    const prev = document.getElementById('rlt2CenterImgPreview');
+    const rem  = document.getElementById('rlt2CenterRemoveBtn');
+    if (prev) { prev.src = centerImgUrl; prev.classList.toggle('visible', !!centerImgUrl); }
+    if (rem)  { rem.classList.toggle('visible', !!centerImgUrl); }
   }
 
   // Sync color input ↔ hex text
@@ -1611,6 +1675,50 @@ include __DIR__ . '/includes/header.php';
   const ringHexEl   = document.getElementById('rlt2CfgRingColorHex');
   if (ringColorEl) ringColorEl.addEventListener('input', () => { if (ringHexEl) ringHexEl.value = ringColorEl.value; });
   if (ringHexEl)   ringHexEl.addEventListener('input',  () => { if (/^#[0-9a-fA-F]{6}$/.test(ringHexEl.value)) { if (ringColorEl) ringColorEl.value = ringHexEl.value; } });
+
+  // Center image upload wiring
+  const centerFileInput  = document.getElementById('rlt2CenterImgFileInput');
+  const centerUploadBtn  = document.getElementById('rlt2CenterUploadBtn');
+  const centerRemoveBtn  = document.getElementById('rlt2CenterRemoveBtn');
+  const centerImgPreview = document.getElementById('rlt2CenterImgPreview');
+  const centerImgStatus  = document.getElementById('rlt2CenterImgStatus');
+
+  if (centerUploadBtn) centerUploadBtn.addEventListener('click', () => centerFileInput?.click());
+
+  if (centerFileInput) {
+    centerFileInput.addEventListener('change', async () => {
+      if (!centerFileInput.files || !centerFileInput.files[0]) return;
+      if (centerImgStatus) centerImgStatus.textContent = 'Subiendo…';
+      if (centerUploadBtn) centerUploadBtn.disabled = true;
+      const fd = new FormData();
+      fd.append('action', 'rlt_upload_center_image');
+      fd.append('image', centerFileInput.files[0]);
+      try {
+        const resp = await fetch(ajaxBase, { method: 'POST', body: fd });
+        const data = await resp.json();
+        if (data.ok) {
+          centerImgUrl = data.url;
+          if (centerImgPreview) { centerImgPreview.src = data.url; centerImgPreview.classList.add('visible'); }
+          if (centerRemoveBtn) centerRemoveBtn.classList.add('visible');
+          if (centerImgStatus) centerImgStatus.textContent = '';
+        } else {
+          if (centerImgStatus) centerImgStatus.textContent = data.error || 'Error al subir';
+        }
+      } catch (_) {
+        if (centerImgStatus) centerImgStatus.textContent = 'Error de red';
+      }
+      if (centerUploadBtn) centerUploadBtn.disabled = false;
+      centerFileInput.value = '';
+    });
+  }
+
+  if (centerRemoveBtn) {
+    centerRemoveBtn.addEventListener('click', () => {
+      centerImgUrl = '';
+      if (centerImgPreview) { centerImgPreview.src = ''; centerImgPreview.classList.remove('visible'); }
+      centerRemoveBtn.classList.remove('visible');
+    });
+  }
 
   // Save config
   const saveConfigBtn = document.getElementById('rlt2SaveConfigBtn');
@@ -1628,6 +1736,8 @@ include __DIR__ . '/includes/header.php';
         ring_color:             ringColor,
         ring_width:             document.getElementById('rlt2CfgRingWidth')?.value ?? 2,
         ring_neon:              document.getElementById('rlt2CfgNeon')?.checked ? 1 : 0,
+        center_emoji:           document.getElementById('rlt2CfgCenterEmoji')?.value ?? '⭐',
+        center_image_url:       centerImgUrl,
       }, function (data) {
         saveConfigBtn.disabled = false;
         showMsg(cfgMsg, data.ok ? '✓ Guardado' : ('✗ ' + (data.error||'Error')), data.ok);

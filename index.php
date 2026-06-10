@@ -4190,7 +4190,9 @@ if ($rouletteEnabled) {
     'wp_name'    => win_points_program_name(),
     'ring_color' => (string) ($rouletteConfig['ring_color'] ?? '#6366f1'),
     'ring_width' => (int)    ($rouletteConfig['ring_width'] ?? 2),
-    'ring_neon'  => !empty($rouletteConfig['ring_neon']),
+    'ring_neon'         => !empty($rouletteConfig['ring_neon']),
+    'center_emoji'      => (string) ($rouletteConfig['center_emoji'] ?? '⭐'),
+    'center_image_url'  => (string) ($rouletteConfig['center_image_url'] ?? ''),
   ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . ';</script>');
   $pageScripts[] = <<<'RLTSCRIPT'
 <script>
@@ -4333,44 +4335,97 @@ if ($rouletteEnabled) {
     }
 
     // Center circle
+    const CENTER_R = 16;
     const centEl = document.createElementNS(svgNS, 'circle');
     centEl.setAttribute('cx', CX); centEl.setAttribute('cy', CY);
-    centEl.setAttribute('r', '16'); centEl.setAttribute('fill', '#060c1c');
+    centEl.setAttribute('r', String(CENTER_R)); centEl.setAttribute('fill', '#060c1c');
     centEl.setAttribute('stroke', ringColor); centEl.setAttribute('stroke-width', '2');
     svgEl.appendChild(centEl);
 
-    const starEl = document.createElementNS(svgNS, 'text');
-    starEl.setAttribute('x', CX); starEl.setAttribute('y', CY);
-    starEl.setAttribute('text-anchor', 'middle'); starEl.setAttribute('dominant-baseline', 'middle');
-    starEl.setAttribute('font-size', '14');
-    starEl.textContent = '⭐';
-    svgEl.appendChild(starEl);
+    const centerImgSrc = (data.center_image_url || '').trim();
+    if (centerImgSrc) {
+      // Inject clipPath into defs (or create defs if only neon was off)
+      let defs = svgEl.querySelector('defs');
+      if (!defs) { defs = document.createElementNS(svgNS, 'defs'); svgEl.insertBefore(defs, svgEl.firstChild); }
+      const clipEl = document.createElementNS(svgNS, 'clipPath');
+      clipEl.setAttribute('id', 'rlt-center-clip');
+      const clipCirc = document.createElementNS(svgNS, 'circle');
+      clipCirc.setAttribute('cx', CX); clipCirc.setAttribute('cy', CY); clipCirc.setAttribute('r', String(CENTER_R - 1));
+      clipEl.appendChild(clipCirc);
+      defs.appendChild(clipEl);
+
+      const imgEl = document.createElementNS(svgNS, 'image');
+      imgEl.setAttribute('href', centerImgSrc);
+      imgEl.setAttribute('x', CX - CENTER_R + 1);
+      imgEl.setAttribute('y', CY - CENTER_R + 1);
+      imgEl.setAttribute('width', String((CENTER_R - 1) * 2));
+      imgEl.setAttribute('height', String((CENTER_R - 1) * 2));
+      imgEl.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+      imgEl.setAttribute('clip-path', 'url(#rlt-center-clip)');
+      svgEl.appendChild(imgEl);
+    } else {
+      const starEl = document.createElementNS(svgNS, 'text');
+      starEl.setAttribute('x', CX); starEl.setAttribute('y', CY);
+      starEl.setAttribute('text-anchor', 'middle'); starEl.setAttribute('dominant-baseline', 'middle');
+      starEl.setAttribute('font-size', '14');
+      starEl.textContent = (data.center_emoji || '').trim() || '⭐';
+      svgEl.appendChild(starEl);
+    }
   }
 
   drawWheel(data.sections);
 
-  // ─── Idle sway animation ───────────────────────────────────────
-  let idleAnimId = null;
-  let idleAngle = 0;
-  let idleSpeed = 0.012;
-  let idleDir   = 1;
-  const IDLE_MAX = 3.5;
+  // ─── Idle animation: vaivén lento → rotación completa → repite ───
+  let idleAnimId    = null;
+  let idleStartTime = null;
+  let idlePhase     = 'sway';  // 'sway' | 'fullspin'
+  let idleBaseAngle = 0;       // ángulo extra acumulado durante el idle
 
-  function tickIdle() {
-    idleAngle += idleSpeed * idleDir;
-    if (Math.abs(idleAngle) >= IDLE_MAX) { idleDir = -idleDir; idleAngle = idleDir * IDLE_MAX; }
+  const IDLE_SWAY_AMPLITUDE = 4;     // grados de oscilación izq/der
+  const IDLE_SWAY_PERIOD    = 5000;  // ms por ciclo completo (izq→der→izq)
+  const IDLE_SWAY_CYCLES    = 3;     // cuántos ciclos antes de girar completo
+  const IDLE_SPIN_DURATION  = 7000;  // ms para la rotación completa de 360°
+
+  function tickIdle(ts) {
+    if (!idleStartTime) idleStartTime = ts;
+    const elapsed = ts - idleStartTime;
+    let extra;
+
+    if (idlePhase === 'sway') {
+      const t = (elapsed % IDLE_SWAY_PERIOD) / IDLE_SWAY_PERIOD;
+      extra = idleBaseAngle + IDLE_SWAY_AMPLITUDE * Math.sin(2 * Math.PI * t);
+      if (elapsed >= IDLE_SWAY_PERIOD * IDLE_SWAY_CYCLES) {
+        idlePhase     = 'fullspin';
+        idleStartTime = ts;
+      }
+    } else {
+      const p     = Math.min(elapsed / IDLE_SPIN_DURATION, 1);
+      const eased = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+      extra = idleBaseAngle + 360 * eased;
+      if (p >= 1) {
+        idleBaseAngle += 360;
+        idlePhase      = 'sway';
+        idleStartTime  = ts;
+      }
+    }
+
     svgEl.style.transition = 'none';
-    svgEl.style.transform  = `rotate(${currentRotation + idleAngle}deg)`;
+    svgEl.style.transform  = `rotate(${currentRotation + extra}deg)`;
     idleAnimId = requestAnimationFrame(tickIdle);
   }
+
   function startIdle() {
     if (idleAnimId) return;
     svgEl.style.transformOrigin = CX + 'px ' + CY + 'px';
-    idleAnimId = requestAnimationFrame(tickIdle);
+    idleStartTime = null;
+    idlePhase     = 'sway';
+    idleBaseAngle = 0;
+    idleAnimId    = requestAnimationFrame(tickIdle);
   }
   function stopIdle() {
     if (idleAnimId) { cancelAnimationFrame(idleAnimId); idleAnimId = null; }
-    idleAngle = 0;
+    idleBaseAngle = 0;
+    idleStartTime = null;
   }
   startIdle();
 

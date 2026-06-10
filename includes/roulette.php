@@ -81,6 +81,14 @@ if (!function_exists('roulette_ensure_schema')) {
         if ($chkRingNeon instanceof mysqli_result && (int)($chkRingNeon->fetch_assoc()['n'] ?? 0) === 0) {
             $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN ring_neon TINYINT(1) NOT NULL DEFAULT 0 AFTER ring_width");
         }
+        $chkCenterEmoji = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_config' AND COLUMN_NAME='center_emoji'");
+        if ($chkCenterEmoji instanceof mysqli_result && (int)($chkCenterEmoji->fetch_assoc()['n'] ?? 0) === 0) {
+            $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN center_emoji VARCHAR(16) NOT NULL DEFAULT '⭐' AFTER ring_neon");
+        }
+        $chkCenterImg = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_config' AND COLUMN_NAME='center_image_url'");
+        if ($chkCenterImg instanceof mysqli_result && (int)($chkCenterImg->fetch_assoc()['n'] ?? 0) === 0) {
+            $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN center_image_url VARCHAR(500) NOT NULL DEFAULT '' AFTER center_emoji");
+        }
 
         // Migrations: section columns
         $chkFontSize = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_sections' AND COLUMN_NAME='font_size'");
@@ -216,6 +224,8 @@ if (!function_exists('roulette_fetch_config')) {
             'ring_color'             => $ringColor,
             'ring_width'             => max(1, min(10, (int) ($row['ring_width'] ?? 2))),
             'ring_neon'              => (int) ($row['ring_neon'] ?? 0) === 1,
+            'center_emoji'           => trim((string) ($row['center_emoji'] ?? '⭐')) ?: '⭐',
+            'center_image_url'       => trim((string) ($row['center_image_url'] ?? '')),
         ];
     }
 }
@@ -531,21 +541,24 @@ if (!function_exists('roulette_admin_save_config')) {
             $ringColor = '#6366f1';
         }
         $ringWidth = max(1, min(10, (int) ($data['ring_width'] ?? 2)));
-        $ringNeon  = isset($data['ring_neon']) && (int) $data['ring_neon'] === 1 ? 1 : 0;
+        $ringNeon      = isset($data['ring_neon']) && (int) $data['ring_neon'] === 1 ? 1 : 0;
+        $centerEmoji   = trim((string) ($data['center_emoji'] ?? '⭐')) ?: '⭐';
+        $centerImgUrl  = trim((string) ($data['center_image_url'] ?? ''));
 
         $stmt = $mysqli->prepare(
-            'INSERT INTO win_points_roulette_config (id, enabled, spin_cost, title, subtitle, coupon_expiration_days, streaming_user_id, ring_color, ring_width, ring_neon)
-             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            'INSERT INTO win_points_roulette_config (id, enabled, spin_cost, title, subtitle, coupon_expiration_days, streaming_user_id, ring_color, ring_width, ring_neon, center_emoji, center_image_url)
+             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE enabled=VALUES(enabled), spin_cost=VALUES(spin_cost),
                title=VALUES(title), subtitle=VALUES(subtitle),
                coupon_expiration_days=VALUES(coupon_expiration_days),
                streaming_user_id=VALUES(streaming_user_id),
-               ring_color=VALUES(ring_color), ring_width=VALUES(ring_width), ring_neon=VALUES(ring_neon)'
+               ring_color=VALUES(ring_color), ring_width=VALUES(ring_width), ring_neon=VALUES(ring_neon),
+               center_emoji=VALUES(center_emoji), center_image_url=VALUES(center_image_url)'
         );
         if (!$stmt) {
             return;
         }
-        $stmt->bind_param('iissiiisi', $enabled, $spinCost, $title, $subtitle, $expDays, $streamId, $ringColor, $ringWidth, $ringNeon);
+        $stmt->bind_param('iissiiisiss', $enabled, $spinCost, $title, $subtitle, $expDays, $streamId, $ringColor, $ringWidth, $ringNeon, $centerEmoji, $centerImgUrl);
         $stmt->execute();
         $stmt->close();
     }
