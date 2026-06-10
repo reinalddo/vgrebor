@@ -3564,6 +3564,7 @@ require_once __DIR__ . '/includes/header.php';
                 <a href="/admin/win-points" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🏆</span>Win Points</a>
                 <?php endif; ?>
                 <a href="/admin/misiones-premios" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🎯</span>Misiones y Premios</a>
+                <a href="/admin/streaming-tickets" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>📺</span>Tickets Streaming</a>
                 <a href="/admin/cupones" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>✏️</span>Cupones</a>
                 <?php if (admin_is_root_role($adminUserRole)): ?>
                 <a href="<?= htmlspecialchars($adminExtraFeaturesPath, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🧩</span>Comprar Funciones Extra</a>
@@ -3878,7 +3879,7 @@ require_once __DIR__ . '/includes/header.php';
                 backfill_influencer_sales_pdo($pdo);
                 backfill_influencer_order_payment_status_pdo($pdo);
                 $couponAdminTab = $_GET['tab'] ?? 'cupones';
-                if (!in_array($couponAdminTab, ['cupones', 'influencers'], true)) {
+                if (!in_array($couponAdminTab, ['cupones', 'influencers', 'premios'], true)) {
                     $couponAdminTab = 'cupones';
                 }
                 if ($isInfluencerViewer) {
@@ -3961,6 +3962,7 @@ require_once __DIR__ . '/includes/header.php';
                 <div class="d-flex flex-wrap justify-content-center gap-2 mb-4">
                     <a href="<?= htmlspecialchars($couponTabLink) ?>" class="btn rounded-pill px-4 py-2 fw-semibold <?= $couponAdminTab === 'cupones' ? 'btn-info' : 'btn-outline-info' ?>" style="<?= $couponAdminTab === 'cupones' ? 'background:#00fff7;color:#181f2a;border:2px solid #00fff7;box-shadow:0 0 12px #00fff7;' : 'border:2px solid #00fff7;color:#00fff7;background:#181f2a;' ?>">Cupones</a>
                     <a href="<?= htmlspecialchars($influencerTabLink) ?>" class="btn rounded-pill px-4 py-2 fw-semibold <?= $couponAdminTab === 'influencers' ? 'btn-info' : 'btn-outline-info' ?>" style="<?= $couponAdminTab === 'influencers' ? 'background:#00fff7;color:#181f2a;border:2px solid #00fff7;box-shadow:0 0 12px #00fff7;' : 'border:2px solid #00fff7;color:#00fff7;background:#181f2a;' ?>">Cupones de Influencers</a>
+                    <a href="?seccion=cupones&tab=premios" class="btn rounded-pill px-4 py-2 fw-semibold <?= $couponAdminTab === 'premios' ? 'btn-info' : 'btn-outline-info' ?>" style="<?= $couponAdminTab === 'premios' ? 'background:#00fff7;color:#181f2a;border:2px solid #00fff7;box-shadow:0 0 12px #00fff7;' : 'border:2px solid #00fff7;color:#00fff7;background:#181f2a;' ?>">Cupones de Premios</a>
                 </div>
                 <?php endif; ?>
 
@@ -4677,6 +4679,112 @@ require_once __DIR__ . '/includes/header.php';
                         <?php endif; ?>
                     </div>
                 <?php endif; ?>
+
+                <?php if ($couponAdminTab === 'premios'): ?>
+                <?php
+                // Cupones generados desde misiones diarias
+                $premiosCoupons = [];
+                $premiosStmt = $mysqli->query(
+                    "SELECT r.id, r.user_id, r.coupon_code, r.coupon_discount_percent,
+                            r.origin_type, r.reason, r.level_key, r.mission_date,
+                            r.reward_status, r.created_at,
+                            u.nombre AS user_nombre, u.email AS user_email,
+                            c.usos_actuales, c.limite_usos, c.activo AS cupon_activo,
+                            c.fecha_expiracion AS cupon_expiracion
+                     FROM win_points_daily_mission_rewards r
+                     LEFT JOIN usuarios u ON u.id = r.user_id
+                     LEFT JOIN cupones c ON c.codigo COLLATE utf8mb4_unicode_ci = r.coupon_code
+                     WHERE r.prize_type = 'coupon'
+                     ORDER BY r.created_at DESC
+                     LIMIT 300"
+                );
+                if ($premiosStmt instanceof mysqli_result) {
+                    while ($row = $premiosStmt->fetch_assoc()) $premiosCoupons[] = $row;
+                }
+                $levelLabelsP = ['basic' => 'Básico', 'intermediate' => 'Intermedio', 'legendary' => 'Legendario'];
+                $originLabelsP = ['task' => 'Misión diaria', 'chest' => 'Cofre diario'];
+                ?>
+                <div style="background:#181f2a; border-radius:16px; border:2px solid #00fff7; box-shadow:0 0 24px #00fff733; padding:2rem;">
+                    <h3 class="h5 mb-1" style="color:#00fff7;">Cupones generados por premios</h3>
+                    <p class="mb-3" style="color:#b2f6ff;">Cupones emitidos automáticamente como premio de misiones diarias o cofres.</p>
+                    <?php if (empty($premiosCoupons)): ?>
+                        <p class="text-secondary text-center py-4">Todavía no se han generado cupones por premios.</p>
+                    <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table align-middle mb-0" style="--bs-table-bg:transparent;--bs-table-color:#e5f6ff;">
+                            <thead>
+                                <tr>
+                                    <th style="color:#00fff7;border-bottom:1px solid rgba(0,255,247,0.2);font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;">Cupón</th>
+                                    <th style="color:#00fff7;border-bottom:1px solid rgba(0,255,247,0.2);font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;">Usuario</th>
+                                    <th style="color:#00fff7;border-bottom:1px solid rgba(0,255,247,0.2);font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;">Cómo lo ganó</th>
+                                    <th style="color:#00fff7;border-bottom:1px solid rgba(0,255,247,0.2);font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;">Estado cupón</th>
+                                    <th style="color:#00fff7;border-bottom:1px solid rgba(0,255,247,0.2);font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;">Fecha</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($premiosCoupons as $pc):
+                                $pcCode = htmlspecialchars((string) ($pc['coupon_code'] ?? '—'), ENT_QUOTES, 'UTF-8');
+                                $pcPct  = (int) ($pc['coupon_discount_percent'] ?? 0);
+                                $pcUser = htmlspecialchars(trim((string) ($pc['user_nombre'] ?? '')), ENT_QUOTES, 'UTF-8') ?: '—';
+                                $pcEmail= htmlspecialchars(trim((string) ($pc['user_email'] ?? '')), ENT_QUOTES, 'UTF-8');
+                                $pcOrigin = $originLabelsP[$pc['origin_type'] ?? ''] ?? htmlspecialchars((string) ($pc['origin_type'] ?? ''), ENT_QUOTES, 'UTF-8');
+                                $pcLevel  = $levelLabelsP[$pc['level_key'] ?? ''] ?? htmlspecialchars((string) ($pc['level_key'] ?? ''), ENT_QUOTES, 'UTF-8');
+                                $pcReason = htmlspecialchars((string) ($pc['reason'] ?? ''), ENT_QUOTES, 'UTF-8');
+                                $pcDate   = substr((string) ($pc['created_at'] ?? ''), 0, 10);
+
+                                // Estado del cupón (del join con cupones)
+                                $usos = (int) ($pc['usos_actuales'] ?? 0);
+                                $limite = (int) ($pc['limite_usos'] ?? 0);
+                                $cuponActivo = !empty($pc['cupon_activo']);
+                                $cuponExp = (string) ($pc['cupon_expiracion'] ?? '');
+                                $isExpired = $cuponExp && strtotime($cuponExp) < time();
+
+                                if ($isExpired) {
+                                    $estadoLabel = 'Vencido';
+                                    $estadoStyle = 'color:#6b7280;';
+                                } elseif (!$cuponActivo) {
+                                    $estadoLabel = 'Inactivo';
+                                    $estadoStyle = 'color:#f87171;';
+                                } elseif ($limite > 0 && $usos >= $limite) {
+                                    $estadoLabel = 'Usado';
+                                    $estadoStyle = 'color:#f87171;';
+                                } elseif ($usos > 0) {
+                                    $estadoLabel = 'Usado (' . $usos . 'x)';
+                                    $estadoStyle = 'color:#fb923c;';
+                                } elseif (!isset($pc['cupon_activo'])) {
+                                    $estadoLabel = 'Sin registro';
+                                    $estadoStyle = 'color:#6b7280;';
+                                } else {
+                                    $estadoLabel = 'Disponible';
+                                    $estadoStyle = 'color:#4ade80;';
+                                }
+                            ?>
+                                <tr>
+                                    <td style="border-bottom:1px solid rgba(0,255,247,0.08);">
+                                        <span style="font-family:monospace;font-size:.9rem;background:rgba(34,211,238,0.1);border:1px solid rgba(34,211,238,0.25);border-radius:.35rem;padding:.15rem .5rem;color:#22d3ee;"><?= $pcCode ?></span>
+                                        <?php if ($pcPct > 0): ?><div class="small text-secondary"><?= $pcPct ?>% desc.</div><?php endif; ?>
+                                    </td>
+                                    <td style="border-bottom:1px solid rgba(0,255,247,0.08);">
+                                        <div class="fw-semibold"><?= $pcUser ?></div>
+                                        <div class="small text-secondary"><?= $pcEmail ?></div>
+                                    </td>
+                                    <td style="border-bottom:1px solid rgba(0,255,247,0.08);">
+                                        <div class="fw-semibold" style="color:#e5f6ff;"><?= $pcOrigin ?><?= $pcLevel ? ' — ' . $pcLevel : '' ?></div>
+                                        <?php if ($pcReason): ?><div class="small text-secondary"><?= $pcReason ?></div><?php endif; ?>
+                                    </td>
+                                    <td style="border-bottom:1px solid rgba(0,255,247,0.08);">
+                                        <span style="font-weight:700;<?= $estadoStyle ?>"><?= htmlspecialchars($estadoLabel, ENT_QUOTES, 'UTF-8') ?></span>
+                                    </td>
+                                    <td style="border-bottom:1px solid rgba(0,255,247,0.08);color:#9ca3af;font-size:.85rem;"><?= htmlspecialchars($pcDate, ENT_QUOTES, 'UTF-8') ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+
                 <?php
                 break;
             case 'movimientos':
@@ -5139,6 +5247,108 @@ require_once __DIR__ . '/includes/header.php';
                 break;
             case 'configuracion':
                 require_once __DIR__ . '/admin_configuracion.php';
+                break;
+            case 'streaming-tickets':
+                echo '<h2 class="display-6 fw-bold text-info mb-2">Tickets de Streaming</h2>';
+                echo '<p class="text-secondary mb-4">Premios de tipo Ticket de Streaming ganados por los usuarios en misiones diarias. Marca como entregado cuando hayas proporcionado la cuenta al usuario.</p>';
+
+                // Procesar marcado via POST
+                if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['resolve_ticket_id'])) {
+                    $resolveId = (int) ($_POST['resolve_ticket_id'] ?? 0);
+                    if ($resolveId > 0) {
+                        $stmtR = $mysqli->prepare("UPDATE win_points_daily_mission_rewards SET reward_status = 'granted', resolved_at = NOW() WHERE id = ? AND prize_type = 'streaming_ticket' AND reward_status != 'granted'");
+                        if ($stmtR) {
+                            $stmtR->bind_param('i', $resolveId);
+                            $stmtR->execute();
+                            if ($stmtR->affected_rows > 0) {
+                                echo '<div class="alert alert-success mb-3">✅ Ticket #' . $resolveId . ' marcado como entregado.</div>';
+                            } else {
+                                echo '<div class="alert alert-warning mb-3">El ticket no se encontró o ya estaba entregado.</div>';
+                            }
+                            $stmtR->close();
+                        }
+                    }
+                }
+
+                // Filtro de estado
+                $ticketFilter = trim((string) ($_GET['estado'] ?? 'pending'));
+                $allowedFilters = ['pending', 'granted', 'all'];
+                if (!in_array($ticketFilter, $allowedFilters, true)) $ticketFilter = 'pending';
+
+                $whereClause = "WHERE r.prize_type = 'streaming_ticket'";
+                if ($ticketFilter === 'pending') $whereClause .= " AND r.reward_status NOT IN ('granted', 'resolved')";
+                if ($ticketFilter === 'granted') $whereClause .= " AND r.reward_status IN ('granted', 'resolved')";
+
+                $ticketRows = [];
+                $stmtT = $mysqli->query(
+                    "SELECT r.*, u.nombre AS user_nombre, u.email AS user_email
+                     FROM win_points_daily_mission_rewards r
+                     LEFT JOIN usuarios u ON u.id = r.user_id
+                     {$whereClause}
+                     ORDER BY r.created_at DESC LIMIT 200"
+                );
+                if ($stmtT instanceof mysqli_result) {
+                    while ($row = $stmtT->fetch_assoc()) $ticketRows[] = $row;
+                }
+
+                $filterBase = '?seccion=streaming-tickets';
+                echo '<div class="d-flex gap-2 mb-4">';
+                echo '<a href="' . $filterBase . '&estado=pending" class="btn btn-sm ' . ($ticketFilter === 'pending' ? 'btn-info' : 'btn-outline-info') . '">Pendientes</a>';
+                echo '<a href="' . $filterBase . '&estado=granted" class="btn btn-sm ' . ($ticketFilter === 'granted' ? 'btn-info' : 'btn-outline-info') . '">Entregados</a>';
+                echo '<a href="' . $filterBase . '&estado=all" class="btn btn-sm ' . ($ticketFilter === 'all' ? 'btn-info' : 'btn-outline-info') . '">Todos</a>';
+                echo '</div>';
+
+                if (empty($ticketRows)) {
+                    echo '<div class="text-secondary py-4 text-center">No hay tickets en este filtro.</div>';
+                    break;
+                }
+
+                $levelLabels = ['basic' => 'Básico', 'intermediate' => 'Intermedio', 'legendary' => 'Legendario'];
+                echo '<div class="table-responsive rounded-4 border border-info-subtle overflow-hidden" style="background:rgba(8,15,24,0.85);">';
+                echo '<table class="table align-middle mb-0" style="--bs-table-bg:transparent;--bs-table-color:#e5f6ff;">';
+                echo '<thead><tr>';
+                echo '<th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">#</th>';
+                echo '<th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Usuario</th>';
+                echo '<th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Cofre</th>';
+                echo '<th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Estado</th>';
+                echo '<th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Fecha</th>';
+                echo '<th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Acción</th>';
+                echo '</tr></thead><tbody>';
+
+                foreach ($ticketRows as $ticket) {
+                    $tid = (int) ($ticket['id'] ?? 0);
+                    $tStatus = (string) ($ticket['reward_status'] ?? 'pending');
+                    $tLevel = (string) ($ticket['level_key'] ?? '');
+                    $tLevelLabel = $levelLabels[$tLevel] ?? ucfirst($tLevel) ?: '—';
+                    $tDate = substr((string) ($ticket['created_at'] ?? ''), 0, 16);
+                    $tUserName = htmlspecialchars((string) ($ticket['user_nombre'] ?? '—'), ENT_QUOTES, 'UTF-8');
+                    $tUserEmail = htmlspecialchars((string) ($ticket['user_email'] ?? ''), ENT_QUOTES, 'UTF-8');
+                    $isDelivered = in_array($tStatus, ['granted', 'resolved'], true);
+
+                    $statusBadge = $isDelivered
+                        ? '<span class="badge rounded-pill" style="background:rgba(34,197,94,0.15);color:#4ade80;border:1px solid rgba(34,197,94,0.35);">Entregado</span>'
+                        : '<span class="badge rounded-pill" style="background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.35);">Pendiente</span>';
+
+                    echo '<tr>';
+                    echo '<td class="bg-transparent border-bottom border-info-subtle text-secondary">' . $tid . '</td>';
+                    echo '<td class="bg-transparent border-bottom border-info-subtle"><div class="fw-semibold text-light">' . $tUserName . '</div><div class="small text-secondary">' . $tUserEmail . '</div></td>';
+                    echo '<td class="bg-transparent border-bottom border-info-subtle text-light">' . htmlspecialchars($tLevelLabel, ENT_QUOTES, 'UTF-8') . '</td>';
+                    echo '<td class="bg-transparent border-bottom border-info-subtle">' . $statusBadge . '</td>';
+                    echo '<td class="bg-transparent border-bottom border-info-subtle text-secondary small">' . htmlspecialchars($tDate, ENT_QUOTES, 'UTF-8') . '</td>';
+                    echo '<td class="bg-transparent border-bottom border-info-subtle">';
+                    if (!$isDelivered) {
+                        echo '<form method="POST" action="' . htmlspecialchars($filterBase . '&estado=' . $ticketFilter, ENT_QUOTES, 'UTF-8') . '" onsubmit="return confirm(\'¿Marcar ticket #' . $tid . ' como entregado?\')">';
+                        echo '<input type="hidden" name="resolve_ticket_id" value="' . $tid . '">';
+                        echo '<button type="submit" class="btn btn-sm" style="background:#15803d;color:#fff;border:1px solid #34d399;font-weight:700;">✓ Marcar entregado</button>';
+                        echo '</form>';
+                    } else {
+                        echo '<span class="small text-secondary">—</span>';
+                    }
+                    echo '</td>';
+                    echo '</tr>';
+                }
+
+                echo '</tbody></table></div>';
                 break;
         }
         ?>

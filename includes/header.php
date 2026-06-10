@@ -1581,57 +1581,58 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                   </div>
                 </div>
 
-                <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-2">
-                  <div>
-                    <h4 class="h6 text-info fw-bold mb-1">Historial de movimientos</h4>
-                    <p class="text-secondary small mb-0">Ganancias, canjes, reembolsos y ajustes relacionados con tus premios.</p>
-                  </div>
-                </div>
-                <div id="user-rewards-filter-bar" class="d-none gap-2 mb-3 flex-wrap">
-                  <button class="btn btn-sm btn-outline-info active" data-wp-filter="all">Todos</button>
-                  <button class="btn btn-sm btn-outline-info" data-wp-filter="gained">Ganados</button>
-                  <button class="btn btn-sm btn-outline-info" data-wp-filter="spent">Gastados</button>
-                </div>
-
-                <div id="user-rewards-empty" class="d-none text-center py-5 text-secondary">Todavia no tienes movimientos en este programa.</div>
-                <div id="user-rewards-transactions-list" class="d-none">
-                  <div class="table-responsive d-none d-md-block rounded-4 border border-info-subtle overflow-hidden mb-3" style="background:var(--theme-bg-elevated);">
-                    <table class="table align-middle mb-0" style="--bs-table-bg:transparent;--bs-table-color:var(--theme-text);">
-                      <thead>
-                        <tr>
-                          <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Fecha</th>
-                          <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Tipo</th>
-                          <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Detalle</th>
-                          <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent text-end">Delta</th>
-                          <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent text-end">Saldo</th>
-                        </tr>
-                      </thead>
-                      <tbody id="user-rewards-table-body"></tbody>
-                    </table>
-                  </div>
-                  <div id="user-rewards-cards" class="d-grid d-md-none gap-3"></div>
-                  <div id="user-rewards-pagination" class="d-none justify-content-between align-items-center mt-2 gap-2">
-                    <button id="rewards-prev-page" class="btn btn-sm btn-outline-info rounded-pill px-3">← Anterior</button>
-                    <span id="rewards-page-info" class="small text-secondary"></span>
-                    <button id="rewards-next-page" class="btn btn-sm btn-outline-info rounded-pill px-3">Siguiente →</button>
-                  </div>
+                <!-- Tab nav (se muestra tras cargar datos) -->
+                <div id="user-rewards-tabs" class="d-none gap-1 mb-3 border-bottom border-info-subtle pb-3">
+                  <button class="btn btn-sm btn-info active" data-rewards-tab="movements">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" class="me-1"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    Movimientos
+                  </button>
+                  <button class="btn btn-sm btn-outline-info" data-rewards-tab="missions">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" class="me-1"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    Premios de Misiones
+                  </button>
                 </div>
 
-                <div class="mt-4 pt-4 border-top border-info-subtle">
-                  <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-3">
-                    <div>
-                      <h4 class="h6 text-info fw-bold mb-1">Historial de misiones diarias</h4>
-                      <p class="text-secondary small mb-0">Premios, estado, motivo y fecha/hora de cada cofre o tarea resuelta.</p>
+                <!-- Tab 1: Movimientos de puntos -->
+                <div id="tab-panel-movements">
+                  <div id="user-rewards-filter-bar" class="d-none gap-2 mb-3 flex-wrap">
+                    <button class="btn btn-sm btn-outline-info active" data-wp-filter="all">Todos</button>
+                    <button class="btn btn-sm btn-outline-info" data-wp-filter="gained">Ganados</button>
+                    <button class="btn btn-sm btn-outline-info" data-wp-filter="spent">Gastados</button>
+                  </div>
+                  <div id="user-rewards-empty" class="d-none text-center py-5 text-secondary">Todavía no tienes movimientos en este programa.</div>
+                  <div id="user-rewards-transactions-list" class="d-none">
+                    <div class="table-responsive d-none d-md-block rounded-4 border border-info-subtle overflow-hidden mb-3" style="background:var(--theme-bg-elevated);">
+                      <table class="table align-middle mb-0" style="--bs-table-bg:transparent;--bs-table-color:var(--theme-text);">
+                        <thead>
+                          <tr>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Fecha</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Movimiento</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Detalle</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent text-end">Puntos</th>
+                          </tr>
+                        </thead>
+                        <tbody id="user-rewards-table-body"></tbody>
+                      </table>
+                    </div>
+                    <div id="user-rewards-cards" class="d-grid d-md-none gap-3"></div>
+                    <div id="user-rewards-pagination" class="d-none justify-content-between align-items-center mt-2 gap-2">
+                      <button id="rewards-prev-page" class="btn btn-sm btn-outline-info rounded-pill px-3">← Anterior</button>
+                      <span id="rewards-page-info" class="small text-secondary"></span>
+                      <button id="rewards-next-page" class="btn btn-sm btn-outline-info rounded-pill px-3">Siguiente →</button>
                     </div>
                   </div>
+                </div>
 
-                  <div id="user-missions-history-empty" class="d-none text-center py-5 text-secondary">Todavia no tienes premios de misiones diarias.</div>
+                <!-- Tab 2: Premios de misiones diarias -->
+                <div id="tab-panel-missions" class="d-none">
+                  <div id="user-missions-filter-bar" class="d-none gap-2 mb-3 flex-wrap">
+                    <button class="btn btn-sm btn-outline-info active" data-missions-filter="all">Todos</button>
+                    <button class="btn btn-sm btn-outline-info" data-missions-filter="task">Tareas</button>
+                    <button class="btn btn-sm btn-outline-info" data-missions-filter="chest">Cofre</button>
+                  </div>
+                  <div id="user-missions-history-empty" class="d-none text-center py-5 text-secondary">Todavía no tienes premios de misiones diarias.</div>
                   <div id="user-missions-history-list" class="d-none">
-                    <div id="user-missions-filter-bar" class="d-none gap-2 mb-3 flex-wrap">
-                      <button class="btn btn-sm btn-outline-info active" data-missions-filter="all">Todos</button>
-                      <button class="btn btn-sm btn-outline-info" data-missions-filter="task">Tareas</button>
-                      <button class="btn btn-sm btn-outline-info" data-missions-filter="chest">Cofre</button>
-                    </div>
                     <div class="table-responsive d-none d-md-block rounded-4 border border-info-subtle overflow-hidden mb-3" style="background:var(--theme-bg-elevated);">
                       <table class="table align-middle mb-0" style="--bs-table-bg:transparent;--bs-table-color:var(--theme-text);">
                         <thead>

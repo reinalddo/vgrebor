@@ -210,13 +210,17 @@ $menuScript = <<<'SCRIPT'
 
   const rewardsTypeLabel = (type) => {
     const labels = {
-      earn: "Ganado",
-      redeem: "Canjeado",
+      earn: "Compra",
+      redeem: "Canje de puntos",
       award_reversal: "Reverso de premio",
       redeem_refund: "Reembolso de canje",
       admin_adjustment: "Ajuste manual",
       expiration: "Vencimiento",
       mission_daily: "Misión diaria",
+      daily_mission_task: "Misión diaria",
+      daily_mission_chest: "Cofre diario",
+      roulette_spend: "Giro de ruleta",
+      roulette_earn: "Premio de ruleta",
       purchase: "Compra",
     };
     return labels[type] || type || "Movimiento";
@@ -315,17 +319,24 @@ $menuScript = <<<'SCRIPT'
   };
 
   const buildStreamingReclaimBtn = (entry) => {
-    if (entry.prize_type !== 'streaming_ticket' || entry.reward_status !== 'pending') return '';
+    if (entry.prize_type !== 'streaming_ticket') return '';
+    const status = entry.reward_status;
+    if (status === 'granted' || status === 'resolved') {
+      return `<span style="display:inline-flex;align-items:center;gap:.35rem;background:rgba(34,197,94,0.15);color:#4ade80;border:1px solid rgba(34,197,94,0.35);border-radius:.6rem;padding:.28rem .7rem;font-size:.78rem;font-weight:700;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        Entregado
+      </span>`;
+    }
     const waBase = __ADMIN_WA_BASE_URL__;
     if (!waBase) return '';
     const userName = __AUTH_USER_DISPLAY_NAME__ || 'usuario';
     const levelLabels = { basic: 'Básico', intermediate: 'Intermedio', legendary: 'Legendario' };
     const levelLabel = levelLabels[entry.level_key] || entry.level_key || 'Básico';
-    const msg = encodeURIComponent(`Hola soy el usuario ${userName} y gané una cuenta streaming del cofre ${levelLabel}`);
+    const msg = encodeURIComponent(`Hola, soy ${userName} y gané un Ticket de Streaming del cofre ${levelLabel}. ID de premio: #${entry.id || ''}`);
     return `<a href="${waBase}?text=${msg}" target="_blank" rel="noopener"
       style="display:inline-flex;align-items:center;gap:.4rem;background:#25d366;color:#fff;border:none;border-radius:.6rem;padding:.32rem .75rem;font-size:.78rem;font-weight:700;text-decoration:none;">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.136.558 4.14 1.534 5.874L0 24l6.335-1.652A11.955 11.955 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.882a9.876 9.876 0 01-5.03-1.375l-.36-.214-3.732.977.995-3.633-.235-.374A9.862 9.862 0 012.118 12C2.118 6.531 6.531 2.118 12 2.118c5.469 0 9.882 4.413 9.882 9.882 0 5.469-4.413 9.882-9.882 9.882z"/></svg>
-      Reclamar
+      Reclamar por WhatsApp
     </a>`;
   };
 
@@ -334,12 +345,25 @@ $menuScript = <<<'SCRIPT'
     if (entry.prize_type === 'winpoints' && Number(entry.points_amount || 0) > 0) {
       return `<span class="fw-semibold text-light">${escapeHtml(label)}</span><div class="small" style="color:#22d3ee">+${escapeHtml(formatPointsNumber(entry.points_amount))}</div>`;
     }
-    if (entry.prize_type === 'coupon' && Number(entry.coupon_discount_percent || 0) > 0) {
-      return `<span class="fw-semibold text-light">${escapeHtml(label)}</span><div class="small text-secondary">${escapeHtml(String(entry.coupon_discount_percent))}% desc.</div>`;
+    if (entry.prize_type === 'coupon') {
+      const pct = Number(entry.coupon_discount_percent || 0);
+      const code = String(entry.coupon_code || '').trim();
+      const isUsed = entry.reward_status === 'used';
+      const isExpired = entry.reward_status === 'expired';
+      const statusColor = isUsed ? '#f87171' : isExpired ? '#6b7280' : '#4ade80';
+      const statusText = isUsed ? 'Usado' : isExpired ? 'Vencido' : 'Disponible';
+      let html = `<span class="fw-semibold text-light">${escapeHtml(label)}</span>`;
+      if (pct > 0) html += `<div class="small text-secondary">${pct}% descuento</div>`;
+      if (code) html += `<div class="small mt-1" style="font-family:monospace;letter-spacing:.05em;background:rgba(34,211,238,0.08);border:1px solid rgba(34,211,238,0.2);border-radius:.35rem;padding:.1rem .4rem;display:inline-block;">${escapeHtml(code)}</div>`;
+      html += `<div class="small mt-1" style="color:${statusColor};font-weight:600;">${statusText}</div>`;
+      return html;
+    }
+    if (entry.prize_type === 'streaming_ticket') {
+      return `<span class="fw-semibold text-light">${escapeHtml(label)}</span><div class="small text-secondary">Cuenta de streaming</div>`;
     }
     if (entry.prize_type === 'immunity' && Number(entry.immunity_days || 0) > 0) {
       const d = Number(entry.immunity_days);
-      return `<span class="fw-semibold text-light">${escapeHtml(label)}</span><div class="small text-secondary">${d} día${d !== 1 ? "s" : ""}</div>`;
+      return `<span class="fw-semibold text-light">${escapeHtml(label)}</span><div class="small text-secondary">${d} día${d !== 1 ? "s" : ""} de protección</div>`;
     }
     return `<span class="fw-semibold text-light">${escapeHtml(label)}</span>`;
   };
@@ -456,7 +480,6 @@ $menuScript = <<<'SCRIPT'
         </div>
         <div class="text-light fw-semibold mb-1">${escapeHtml(desc)}</div>
         ${orderText ? `<div class="small text-secondary mb-1">${escapeHtml(orderText)}</div>` : ""}
-        <div class="small text-info">Saldo: ${escapeHtml(formatPointsNumber(transaction.balance_after || 0))}</div>
       </article>`;
   };
 
@@ -477,7 +500,6 @@ $menuScript = <<<'SCRIPT'
         <td class="bg-transparent border-bottom border-info-subtle text-light fw-semibold">${escapeHtml(rewardsTypeLabel(transaction.transaction_type))}</td>
         <td class="bg-transparent border-bottom border-info-subtle text-light">${escapeHtml(detailParts.filter(Boolean).join(" | "))}</td>
         <td class="bg-transparent border-bottom border-info-subtle text-end fw-bold ${deltaClass}">${delta >= 0 ? "+" : ""}${escapeHtml(formatPointsNumber(delta))}</td>
-        <td class="bg-transparent border-bottom border-info-subtle text-end text-info fw-bold">${escapeHtml(formatPointsNumber(transaction.balance_after || 0))}</td>
       </tr>`;
   };
 
@@ -716,6 +738,9 @@ $menuScript = <<<'SCRIPT'
         showElement(userMissionsHistoryEmpty);
       }
 
+      const tabNav = document.getElementById('user-rewards-tabs');
+      if (tabNav) showElement(tabNav, 'd-flex');
+
       if (!hasTransactions && !hasMissionHistory) {
         showElement(userRewardsEmpty);
         return;
@@ -725,6 +750,22 @@ $menuScript = <<<'SCRIPT'
       showFeedback(userRewardsFeedback, error.message || "No se pudo cargar el panel de premios.", "danger");
     }
   };
+
+  document.querySelectorAll('[data-rewards-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-rewards-tab]').forEach(b => {
+        b.classList.remove('btn-info', 'active');
+        b.classList.add('btn-outline-info');
+      });
+      btn.classList.remove('btn-outline-info');
+      btn.classList.add('btn-info', 'active');
+      const tab = btn.dataset.rewardsTab;
+      const movPanel = document.getElementById('tab-panel-movements');
+      const misPanel = document.getElementById('tab-panel-missions');
+      if (movPanel) movPanel.classList.toggle('d-none', tab !== 'movements');
+      if (misPanel) misPanel.classList.toggle('d-none', tab !== 'missions');
+    });
+  });
 
   const updateUserPresentation = (user) => {
     if (!user) {

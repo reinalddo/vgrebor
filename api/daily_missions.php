@@ -73,5 +73,36 @@ if ($action === 'open_chest') {
     ]);
 }
 
+if ($action === 'admin_resolve_streaming_ticket') {
+    $userRole = trim((string) ($authUser['rol'] ?? ''));
+    if (!in_array($userRole, ['admin', 'root'], true)) {
+        daily_missions_api_error('No tienes permiso para esta acción.', 403);
+    }
+
+    $rewardId = (int) ($_POST['reward_id'] ?? 0);
+    if ($rewardId <= 0) {
+        daily_missions_api_error('ID de premio inválido.', 422);
+    }
+
+    $stmt = $mysqli->prepare(
+        "UPDATE win_points_daily_mission_rewards
+         SET reward_status = 'granted', resolved_at = NOW()
+         WHERE id = ? AND prize_type = 'streaming_ticket' AND reward_status != 'granted'"
+    );
+    if (!$stmt) {
+        daily_missions_api_error('Error interno de base de datos.', 500);
+    }
+    $stmt->bind_param('i', $rewardId);
+    $stmt->execute();
+    $affected = $stmt->affected_rows;
+    $stmt->close();
+
+    if ($affected === 0) {
+        daily_missions_api_error('No se encontró el ticket o ya estaba marcado como entregado.', 404);
+    }
+
+    daily_missions_api_ok(['message' => 'Ticket marcado como entregado correctamente.']);
+}
+
 daily_missions_api_error('Acción no soportada.', 422);
 ?>
