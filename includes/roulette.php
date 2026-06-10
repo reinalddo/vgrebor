@@ -68,7 +68,7 @@ if (!function_exists('roulette_ensure_schema')) {
              VALUES (1, 1, 10, 'Ruleta de Premios', 'Gira y gana premios increíbles.')"
         );
 
-        // Migration: add ring columns if not present (compatible with MySQL 5.x+)
+        // Migrations: config columns
         $chkRingColor = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_config' AND COLUMN_NAME='ring_color'");
         if ($chkRingColor instanceof mysqli_result && (int)($chkRingColor->fetch_assoc()['n'] ?? 0) === 0) {
             $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN ring_color VARCHAR(20) NOT NULL DEFAULT '#6366f1' AFTER streaming_user_id");
@@ -76,6 +76,24 @@ if (!function_exists('roulette_ensure_schema')) {
         $chkRingWidth = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_config' AND COLUMN_NAME='ring_width'");
         if ($chkRingWidth instanceof mysqli_result && (int)($chkRingWidth->fetch_assoc()['n'] ?? 0) === 0) {
             $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN ring_width TINYINT UNSIGNED NOT NULL DEFAULT 2 AFTER ring_color");
+        }
+        $chkRingNeon = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_config' AND COLUMN_NAME='ring_neon'");
+        if ($chkRingNeon instanceof mysqli_result && (int)($chkRingNeon->fetch_assoc()['n'] ?? 0) === 0) {
+            $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN ring_neon TINYINT(1) NOT NULL DEFAULT 0 AFTER ring_width");
+        }
+
+        // Migrations: section columns
+        $chkFontSize = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_sections' AND COLUMN_NAME='font_size'");
+        if ($chkFontSize instanceof mysqli_result && (int)($chkFontSize->fetch_assoc()['n'] ?? 0) === 0) {
+            $mysqli->query("ALTER TABLE win_points_roulette_sections ADD COLUMN font_size TINYINT UNSIGNED NOT NULL DEFAULT 7 AFTER active");
+        }
+        $chkFontColor = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_sections' AND COLUMN_NAME='font_color'");
+        if ($chkFontColor instanceof mysqli_result && (int)($chkFontColor->fetch_assoc()['n'] ?? 0) === 0) {
+            $mysqli->query("ALTER TABLE win_points_roulette_sections ADD COLUMN font_color VARCHAR(20) NOT NULL DEFAULT '#ffffff' AFTER font_size");
+        }
+        $chkImgUrl = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_sections' AND COLUMN_NAME='icon_image_url'");
+        if ($chkImgUrl instanceof mysqli_result && (int)($chkImgUrl->fetch_assoc()['n'] ?? 0) === 0) {
+            $mysqli->query("ALTER TABLE win_points_roulette_sections ADD COLUMN icon_image_url VARCHAR(500) NOT NULL DEFAULT '' AFTER font_color");
         }
 
         $mysqli->query(
@@ -151,6 +169,14 @@ if (!function_exists('roulette_ensure_schema')) {
 
 if (!function_exists('roulette_normalize_section')) {
     function roulette_normalize_section(array $row): array {
+        $color = trim((string) ($row['color'] ?? '#22d3ee'));
+        if ($color !== 'transparent' && !preg_match('/^#[0-9a-fA-F]{3,6}$/', $color)) {
+            $color = '#22d3ee';
+        }
+        $fontColor = trim((string) ($row['font_color'] ?? '#ffffff'));
+        if (!preg_match('/^#[0-9a-fA-F]{3,6}$/', $fontColor)) {
+            $fontColor = '#ffffff';
+        }
         return [
             'id'                     => (int) ($row['id'] ?? 0),
             'section_order'          => (int) ($row['section_order'] ?? 1),
@@ -161,9 +187,12 @@ if (!function_exists('roulette_normalize_section')) {
             'coupon_discount_percent'=> max(0, min(100, (int) ($row['coupon_discount_percent'] ?? 0))),
             'immunity_days'          => max(0, (int) ($row['immunity_days'] ?? 0)),
             'streaming_user_id'      => max(0, (int) ($row['streaming_user_id'] ?? 0)),
-            'color'                  => trim((string) ($row['color'] ?? '#22d3ee')),
+            'color'                  => $color,
             'icon_emoji'             => trim((string) ($row['icon_emoji'] ?? '🎁')),
             'active'                 => (int) ($row['active'] ?? 1) === 1,
+            'font_size'              => max(5, min(20, (int) ($row['font_size'] ?? 7))),
+            'font_color'             => $fontColor,
+            'icon_image_url'         => trim((string) ($row['icon_image_url'] ?? '')),
         ];
     }
 }
@@ -186,6 +215,7 @@ if (!function_exists('roulette_fetch_config')) {
             'streaming_user_id'      => (int) ($row['streaming_user_id'] ?? 0) > 0 ? (int) $row['streaming_user_id'] : null,
             'ring_color'             => $ringColor,
             'ring_width'             => max(1, min(10, (int) ($row['ring_width'] ?? 2))),
+            'ring_neon'              => (int) ($row['ring_neon'] ?? 0) === 1,
         ];
     }
 }
@@ -501,20 +531,21 @@ if (!function_exists('roulette_admin_save_config')) {
             $ringColor = '#6366f1';
         }
         $ringWidth = max(1, min(10, (int) ($data['ring_width'] ?? 2)));
+        $ringNeon  = isset($data['ring_neon']) && (int) $data['ring_neon'] === 1 ? 1 : 0;
 
         $stmt = $mysqli->prepare(
-            'INSERT INTO win_points_roulette_config (id, enabled, spin_cost, title, subtitle, coupon_expiration_days, streaming_user_id, ring_color, ring_width)
-             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+            'INSERT INTO win_points_roulette_config (id, enabled, spin_cost, title, subtitle, coupon_expiration_days, streaming_user_id, ring_color, ring_width, ring_neon)
+             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE enabled=VALUES(enabled), spin_cost=VALUES(spin_cost),
                title=VALUES(title), subtitle=VALUES(subtitle),
                coupon_expiration_days=VALUES(coupon_expiration_days),
                streaming_user_id=VALUES(streaming_user_id),
-               ring_color=VALUES(ring_color), ring_width=VALUES(ring_width)'
+               ring_color=VALUES(ring_color), ring_width=VALUES(ring_width), ring_neon=VALUES(ring_neon)'
         );
         if (!$stmt) {
             return;
         }
-        $stmt->bind_param('iissiisi', $enabled, $spinCost, $title, $subtitle, $expDays, $streamId, $ringColor, $ringWidth);
+        $stmt->bind_param('iissiiisi', $enabled, $spinCost, $title, $subtitle, $expDays, $streamId, $ringColor, $ringWidth, $ringNeon);
         $stmt->execute();
         $stmt->close();
     }
@@ -535,31 +566,38 @@ if (!function_exists('roulette_admin_save_section')) {
         $immunityDays = max(0, (int) ($data['immunity_days'] ?? 0));
         $streamId     = max(0, (int) ($data['streaming_user_id'] ?? 0));
         $color        = trim((string) ($data['color'] ?? '#22d3ee'));
-        if (!preg_match('/^#[0-9a-fA-F]{3,6}$/', $color)) {
+        if ($color !== 'transparent' && !preg_match('/^#[0-9a-fA-F]{3,6}$/', $color)) {
             $color = '#22d3ee';
         }
-        $emoji  = trim((string) ($data['icon_emoji'] ?? '🎁'));
-        $active = isset($data['active']) && (int) $data['active'] === 1 ? 1 : 0;
+        $emoji        = trim((string) ($data['icon_emoji'] ?? '🎁'));
+        $active       = isset($data['active']) && (int) $data['active'] === 1 ? 1 : 0;
+        $fontSize     = max(5, min(20, (int) ($data['font_size'] ?? 7)));
+        $fontColor    = trim((string) ($data['font_color'] ?? '#ffffff'));
+        if (!preg_match('/^#[0-9a-fA-F]{3,6}$/', $fontColor)) {
+            $fontColor = '#ffffff';
+        }
+        $iconImageUrl = trim((string) ($data['icon_image_url'] ?? ''));
 
         $stmt = $mysqli->prepare(
             'INSERT INTO win_points_roulette_sections
              (section_order, prize_type, prize_label, chance_percent, points_amount, coupon_discount_percent,
-              immunity_days, streaming_user_id, color, icon_emoji, active)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              immunity_days, streaming_user_id, color, icon_emoji, active, font_size, font_color, icon_image_url)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                prize_type=VALUES(prize_type), prize_label=VALUES(prize_label),
                chance_percent=VALUES(chance_percent), points_amount=VALUES(points_amount),
                coupon_discount_percent=VALUES(coupon_discount_percent), immunity_days=VALUES(immunity_days),
                streaming_user_id=VALUES(streaming_user_id), color=VALUES(color),
-               icon_emoji=VALUES(icon_emoji), active=VALUES(active)'
+               icon_emoji=VALUES(icon_emoji), active=VALUES(active),
+               font_size=VALUES(font_size), font_color=VALUES(font_color), icon_image_url=VALUES(icon_image_url)'
         );
         if (!$stmt) {
             return;
         }
-        $stmt->bind_param('issdiiissi',
+        $stmt->bind_param('issdiiiissiiss',
             $sectionOrder, $prizeType, $prizeLabel, $chance,
             $points, $couponPct, $immunityDays, $streamId,
-            $color, $emoji, $active
+            $color, $emoji, $active, $fontSize, $fontColor, $iconImageUrl
         );
         $stmt->execute();
         $stmt->close();

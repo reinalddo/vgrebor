@@ -140,6 +140,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
+        case 'rlt_upload_image': {
+            $sectionOrder = max(1, min(8, (int) ($_POST['section_order'] ?? 1)));
+            if (empty($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
+                $errCode = (int) ($_FILES['image']['error'] ?? -1);
+                $errMsg  = in_array($errCode, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)
+                    ? 'La imagen es demasiado grande.'
+                    : ($errCode === UPLOAD_ERR_NO_FILE ? 'No se seleccionó ningún archivo.' : 'Error al recibir el archivo.');
+                echo json_encode(['ok' => false, 'error' => $errMsg]);
+                exit;
+            }
+            $allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $mime  = $finfo->file($_FILES['image']['tmp_name']);
+            if (!in_array($mime, $allowedMimes, true)) {
+                echo json_encode(['ok' => false, 'error' => 'Formato no permitido. Usa JPG, PNG, GIF o WebP.']);
+                exit;
+            }
+            if ($_FILES['image']['size'] > 2 * 1024 * 1024) {
+                echo json_encode(['ok' => false, 'error' => 'La imagen supera el límite de 2 MB.']);
+                exit;
+            }
+            $extMap    = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+            $ext       = $extMap[$mime];
+            $uploadDir = __DIR__ . '/uploads/roulette/';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+            foreach (glob($uploadDir . 'slot_' . $sectionOrder . '_*') ?: [] as $old) {
+                @unlink($old);
+            }
+            $filename = 'slot_' . $sectionOrder . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
+            $dest     = $uploadDir . $filename;
+            if (!move_uploaded_file($_FILES['image']['tmp_name'], $dest)) {
+                echo json_encode(['ok' => false, 'error' => 'No se pudo guardar la imagen en el servidor.']);
+                exit;
+            }
+            echo json_encode(['ok' => true, 'url' => app_path('/uploads/roulette/' . $filename)]);
+            exit;
+        }
+
         case 'rlt_get_history': {
             roulette_ensure_schema();
             echo json_encode(['ok' => true, 'history' => roulette_fetch_all_history($mysqli, 100)]);
@@ -541,72 +581,75 @@ include __DIR__ . '/includes/header.php';
     #tab-historial .missions-admin-table-wrap .btn-ver-historial { width: 100%; justify-content: center; }
   }
 
-  /* ── Ruleta: secciones en tarjeta en móvil ── */
-  @media (max-width:767.98px) {
-    #tab-ruleta #rlt2SectionsTable thead { display: none; }
-
-    #tab-ruleta #rlt2SectionsTable tbody tr {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: .35rem .6rem;
-      padding: .85rem;
-      border-bottom: 1px solid rgba(99,102,241,.15);
-      margin-bottom: .4rem;
-      background: rgba(255,255,255,.02);
-      border-radius: .6rem;
-    }
-    #tab-ruleta #rlt2SectionsTable tbody td { border: none; padding: 0; display: block; }
-
-    /* Número de sección */
-    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(1) {
-      grid-column: 1; align-self: center;
-      font-size: 1.1rem; font-weight: 700; color: #818cf8;
-    }
-    /* Checkbox activo */
-    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(2) {
-      grid-column: 2; text-align: right; align-self: center;
-    }
-    /* Emoji */
-    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(3) { grid-column: 1; }
-    /* Color */
-    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(4) { grid-column: 2; }
-    /* Tipo premio: fila completa */
-    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(5) { grid-column: 1 / -1; }
-    /* Etiqueta: fila completa */
-    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(6) { grid-column: 1 / -1; }
-    /* % Prob */
-    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(7) { grid-column: 1; }
-    /* WP */
-    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(8) { grid-column: 2; }
-    /* Cupón% */
-    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(9) { grid-column: 1; }
-    /* Inmunidad */
-    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(10) { grid-column: 2; }
-    /* Guardar */
-    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(11) { grid-column: 1; padding-top: .4rem; }
-    /* Mensaje */
-    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(12) { grid-column: 2; align-self: center; padding-top: .4rem; }
-
-    /* Inputs y selects a ancho completo */
-    #tab-ruleta #rlt2SectionsTable .rlt2-inp[type="text"],
-    #tab-ruleta #rlt2SectionsTable .rlt2-inp[type="number"],
-    #tab-ruleta #rlt2SectionsTable select.rlt2-inp { width: 100% !important; }
-
-    /* Botón guardar a ancho completo */
-    #tab-ruleta #rlt2SectionsTable .rlt2-sect-btn { width: 100%; }
-
-    /* Labels inline antes de cada campo con data-label */
-    #tab-ruleta #rlt2SectionsTable td[data-label]::before {
-      content: attr(data-label);
-      display: block;
-      font-size: .64rem;
-      color: #6366f1;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: .1em;
-      margin-bottom: .18rem;
-    }
+  /* ── Ruleta: grid de 8 tarjetas de sección ── */
+  .rlt2-sect-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: .85rem;
+    margin-top: .75rem;
   }
+  @media (max-width:991.98px) { .rlt2-sect-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width:575.98px) { .rlt2-sect-grid { grid-template-columns: 1fr; } }
+
+  .rlt2-sect-card {
+    background: rgba(8,15,28,.9);
+    border: 1px solid rgba(99,102,241,.25);
+    border-radius: 1rem;
+    padding: .85rem;
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+  }
+  .rlt2-sect-card-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-bottom: .5rem;
+    border-bottom: 1px solid rgba(99,102,241,.15);
+  }
+  .rlt2-sect-card-num {
+    font-size: .92rem; font-weight: 700; color: #818cf8;
+    display: flex; align-items: center; gap: .38rem;
+  }
+  .rlt2-sect-card-swatch {
+    width: 14px; height: 14px; border-radius: 3px;
+    border: 1px solid rgba(255,255,255,.2); flex-shrink: 0;
+  }
+  .rlt2-sect-card-field { display: flex; flex-direction: column; gap: .16rem; }
+  .rlt2-sect-card-lbl {
+    font-size: .58rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .1em; color: #6366f1;
+  }
+  .rlt2-sect-card-row { display: grid; grid-template-columns: 1fr 1fr; gap: .42rem; }
+  .rlt2-sect-card-foot {
+    display: flex; align-items: center; gap: .5rem;
+    padding-top: .42rem; border-top: 1px solid rgba(99,102,241,.12);
+    margin-top: auto;
+  }
+  .rlt2-img-area {
+    background: rgba(99,102,241,.06);
+    border: 1px dashed rgba(99,102,241,.3);
+    border-radius: .55rem; padding: .42rem;
+    display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+    min-height: 50px;
+  }
+  .rlt2-img-preview {
+    width: 38px; height: 38px; object-fit: cover;
+    border-radius: .35rem; border: 1px solid rgba(255,255,255,.15);
+    display: none;
+  }
+  .rlt2-img-preview.visible { display: block; }
+  .rlt2-img-upload-btn {
+    background: rgba(99,102,241,.15); border: 1px solid rgba(99,102,241,.4);
+    color: #a5b4fc; border-radius: .45rem; padding: .26rem .58rem;
+    font-size: .68rem; font-weight: 700; cursor: pointer; transition: background .16s;
+  }
+  .rlt2-img-upload-btn:hover { background: rgba(99,102,241,.28); }
+  .rlt2-img-remove-btn {
+    background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.35);
+    color: #f87171; border-radius: .45rem; padding: .26rem .5rem;
+    font-size: .68rem; font-weight: 700; cursor: pointer; display: none; transition: background .16s;
+  }
+  .rlt2-img-remove-btn.visible { display: inline-block; }
+  .rlt2-img-remove-btn:hover { background: rgba(248,113,113,.2); }
 
   /* ── Tareas y multiplicadores: tarjeta por tarea en móvil ── */
   @media (max-width:575.98px) {
@@ -1181,19 +1224,21 @@ include __DIR__ . '/includes/header.php';
               <input type="number" id="rlt2CfgExpDays" value="30" min="1" max="365">
             </div>
             <div class="rlt2-field">
-              <label>ID usuario streaming</label>
-              <input type="number" id="rlt2CfgStreamUid" value="0" min="0">
-            </div>
-            <div class="rlt2-field">
-              <label>Color borde rueda</label>
+              <label>Color borde / divisores</label>
               <div style="display:flex;align-items:center;gap:.5rem;">
                 <input type="color" id="rlt2CfgRingColor" value="#6366f1">
                 <input type="text" id="rlt2CfgRingColorHex" value="#6366f1" maxlength="7" style="width:80px">
               </div>
             </div>
             <div class="rlt2-field">
-              <label>Grosor borde rueda (px)</label>
+              <label>Grosor borde (px)</label>
               <input type="number" id="rlt2CfgRingWidth" value="2" min="1" max="10">
+            </div>
+            <div class="rlt2-field">
+              <label>Efecto neon gaming</label>
+              <div class="rlt2-toggle">
+                <input type="checkbox" id="rlt2CfgNeon"> <span style="font-size:.85rem;color:#e2e8f0;">Activar neon en bordes</span>
+              </div>
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">
@@ -1202,25 +1247,13 @@ include __DIR__ . '/includes/header.php';
           </div>
         </div>
 
-        <!-- Sections Card -->
+        <!-- Sections Grid -->
         <div class="rlt-admin-card2">
           <div class="rlt2-label"><i class="fa-solid fa-table-cells"></i> Ruleta — 8 Secciones</div>
-          <div style="overflow-x:auto;">
-            <table class="rlt2-tbl" id="rlt2SectionsTable">
-              <thead>
-                <tr>
-                  <th>#</th><th>Act.</th><th>Emoji</th><th>Color slot</th>
-                  <th>Tipo premio</th><th>Etiqueta</th>
-                  <th>% Prob.</th><th>WP</th><th>Cupón%</th><th>Inmun.días</th>
-                  <th></th><th></th>
-                </tr>
-              </thead>
-              <tbody id="rlt2SectionsBody">
-                <tr><td colspan="12" style="text-align:center;color:#64748b;padding:1rem;">Cargando…</td></tr>
-              </tbody>
-            </table>
+          <div class="rlt2-sect-grid" id="rlt2SectionsGrid">
+            <div style="grid-column:1/-1;text-align:center;color:#64748b;padding:1.2rem;">Cargando…</div>
           </div>
-          <p style="margin-top:.5rem;font-size:.72rem;color:#475569;">
+          <p style="margin-top:.6rem;font-size:.72rem;color:#475569;">
             Las probabilidades no necesitan sumar exactamente 100% — el sistema normaliza internamente.
           </p>
         </div>
@@ -1566,11 +1599,11 @@ include __DIR__ . '/includes/header.php';
     set('rlt2CfgTitle', cfg.title ?? 'Ruleta de Premios');
     set('rlt2CfgSubtitle', cfg.subtitle ?? '');
     set('rlt2CfgExpDays', cfg.coupon_expiration_days ?? 30);
-    set('rlt2CfgStreamUid', cfg.streaming_user_id ?? 0);
     const rc = cfg.ring_color ?? '#6366f1';
     set('rlt2CfgRingColor', rc);
     set('rlt2CfgRingColorHex', rc);
     set('rlt2CfgRingWidth', cfg.ring_width ?? 2);
+    setChk('rlt2CfgNeon', cfg.ring_neon ?? false);
   }
 
   // Sync color input ↔ hex text
@@ -1592,9 +1625,9 @@ include __DIR__ . '/includes/header.php';
         title:                  document.getElementById('rlt2CfgTitle')?.value ?? '',
         subtitle:               document.getElementById('rlt2CfgSubtitle')?.value ?? '',
         coupon_expiration_days: document.getElementById('rlt2CfgExpDays')?.value ?? 30,
-        streaming_user_id:      document.getElementById('rlt2CfgStreamUid')?.value ?? 0,
         ring_color:             ringColor,
         ring_width:             document.getElementById('rlt2CfgRingWidth')?.value ?? 2,
+        ring_neon:              document.getElementById('rlt2CfgNeon')?.checked ? 1 : 0,
       }, function (data) {
         saveConfigBtn.disabled = false;
         showMsg(cfgMsg, data.ok ? '✓ Guardado' : ('✗ ' + (data.error||'Error')), data.ok);
@@ -1602,68 +1635,201 @@ include __DIR__ . '/includes/header.php';
     });
   }
 
-  // ── Sections table ──
+  // ── Section cards ──
   function renderSections(sections) {
-    const tbody = document.getElementById('rlt2SectionsBody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
+    const grid = document.getElementById('rlt2SectionsGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
     for (let i = 0; i < 8; i++) {
-      const s = sections[i] || { section_order: i+1, prize_type:'winpoints', prize_label:'', chance_percent:12.5, points_amount:0, coupon_discount_percent:0, immunity_days:0, color:'#22d3ee', icon_emoji:'🎁', active:true };
+      const s = sections[i] || { section_order: i+1, prize_type:'winpoints', prize_label:'', chance_percent:12.5, points_amount:0, coupon_discount_percent:0, immunity_days:0, color:'#22d3ee', icon_emoji:'🎁', active:true, font_size:7, font_color:'#ffffff', icon_image_url:'' };
       const ord = s.section_order ?? (i+1);
+      const isTransparent = (s.color||'') === 'transparent';
+      const colorVal = isTransparent ? '#22d3ee' : (s.color||'#22d3ee');
+      const hasImg = !!(s.icon_image_url);
       const typeOpts = PRIZE_TYPES.map(t =>
         `<option value="${t}"${s.prize_type===t?' selected':''}>${PRIZE_LABELS[t]||t}</option>`
       ).join('');
-      const row = document.createElement('tr');
-      row.dataset.order = ord;
-      row.innerHTML = `
-        <td style="color:#818cf8;font-weight:700">Sección ${esc(ord)}</td>
-        <td><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem;color:#c7d2fe;justify-content:flex-end"><input type="checkbox" class="rlt2-sect-active" style="accent-color:#6366f1;cursor:pointer"${s.active?' checked':''}> Activa</label></td>
-        <td data-label="Emoji"><input type="text" class="rlt2-inp rlt2-sect-emoji" value="${esc(s.icon_emoji||'🎁')}" maxlength="4" style="width:46px;text-align:center"></td>
-        <td data-label="Color">
-          <div style="display:flex;align-items:center;gap:3px">
-            <input type="color" class="rlt2-inp rlt2-sect-color" value="${esc(s.color||'#22d3ee')}">
-            <input type="text" class="rlt2-inp rlt2-sect-color-hex" value="${esc(s.color||'#22d3ee')}" maxlength="7" style="width:70px">
+
+      const card = document.createElement('div');
+      card.className = 'rlt2-sect-card';
+      card.dataset.order = ord;
+      card.innerHTML = `
+        <div class="rlt2-sect-card-head">
+          <div class="rlt2-sect-card-num">
+            <span class="rlt2-sect-card-swatch" style="background:${isTransparent?'rgba(255,255,255,.1)':esc(colorVal)};"></span>
+            Sección ${esc(ord)}
           </div>
-        </td>
-        <td data-label="Tipo premio"><select class="rlt2-inp rlt2-sect-type" style="width:130px">${typeOpts}</select></td>
-        <td data-label="Etiqueta"><input type="text" class="rlt2-inp rlt2-sect-label" value="${esc(s.prize_label||'')}" maxlength="60"></td>
-        <td data-label="% Prob."><input type="number" class="rlt2-inp rlt2-sect-chance" value="${parseFloat(s.chance_percent||0).toFixed(1)}" min="0" max="100" step="0.5"></td>
-        <td data-label="WP"><input type="number" class="rlt2-inp rlt2-sect-wp" value="${esc(s.points_amount||0)}" min="0"></td>
-        <td data-label="Cupón %"><input type="number" class="rlt2-inp rlt2-sect-coupon" value="${esc(s.coupon_discount_percent||0)}" min="0" max="100"></td>
-        <td data-label="Inmunidad días"><input type="number" class="rlt2-inp rlt2-sect-imm" value="${esc(s.immunity_days||0)}" min="0"></td>
-        <td><button type="button" class="rlt2-sect-btn rlt2-sect-save">Guardar</button></td>
-        <td><span class="rlt2-sect-msg"></span></td>
+          <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer;font-size:.74rem;color:#c7d2fe;">
+            <input type="checkbox" class="rlt2-sect-active" style="accent-color:#6366f1;"${s.active?' checked':''}> Activa
+          </label>
+        </div>
+
+        <div class="rlt2-sect-card-row">
+          <div class="rlt2-sect-card-field">
+            <span class="rlt2-sect-card-lbl">Emoji</span>
+            <input type="text" class="rlt2-inp rlt2-sect-emoji" value="${esc(s.icon_emoji||'🎁')}" maxlength="4" style="width:100%;text-align:center;">
+          </div>
+          <div class="rlt2-sect-card-field">
+            <span class="rlt2-sect-card-lbl">Color slot</span>
+            <div style="display:flex;gap:3px;align-items:center;">
+              <input type="color" class="rlt2-inp rlt2-sect-color" value="${esc(colorVal)}"${isTransparent?' disabled':''} style="width:32px;height:29px;padding:1px;flex-shrink:0;">
+              <input type="text" class="rlt2-inp rlt2-sect-color-hex" value="${esc(colorVal)}" maxlength="7" style="width:58px;min-width:0;"${isTransparent?' disabled':''}>
+            </div>
+            <label style="display:flex;align-items:center;gap:.28rem;margin-top:3px;font-size:.67rem;color:#94a3b8;cursor:pointer;">
+              <input type="checkbox" class="rlt2-sect-transparent" style="accent-color:#6366f1;"${isTransparent?' checked':''}> Transparente
+            </label>
+          </div>
+        </div>
+
+        <div class="rlt2-sect-card-field">
+          <span class="rlt2-sect-card-lbl">Imagen del slot</span>
+          <div class="rlt2-img-area">
+            <img class="rlt2-img-preview${hasImg?' visible':''}" src="${hasImg?esc(s.icon_image_url):''}" alt="">
+            <input type="file" class="rlt2-img-file-input" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none">
+            <button type="button" class="rlt2-img-upload-btn">Subir imagen</button>
+            <button type="button" class="rlt2-img-remove-btn${hasImg?' visible':''}">Quitar</button>
+            <span class="rlt2-img-status" style="font-size:.66rem;color:#94a3b8;"></span>
+          </div>
+        </div>
+
+        <div class="rlt2-sect-card-field">
+          <span class="rlt2-sect-card-lbl">Tipo de premio</span>
+          <select class="rlt2-inp rlt2-sect-type" style="width:100%">${typeOpts}</select>
+        </div>
+
+        <div class="rlt2-sect-card-field">
+          <span class="rlt2-sect-card-lbl">Etiqueta</span>
+          <input type="text" class="rlt2-inp rlt2-sect-label" value="${esc(s.prize_label||'')}" maxlength="60" style="width:100%">
+        </div>
+
+        <div class="rlt2-sect-card-row">
+          <div class="rlt2-sect-card-field">
+            <span class="rlt2-sect-card-lbl">% Probabilidad</span>
+            <input type="number" class="rlt2-inp rlt2-sect-chance" value="${parseFloat(s.chance_percent||0).toFixed(1)}" min="0" max="100" step="0.5" style="width:100%">
+          </div>
+          <div class="rlt2-sect-card-field">
+            <span class="rlt2-sect-card-lbl">Win Points</span>
+            <input type="number" class="rlt2-inp rlt2-sect-wp" value="${esc(s.points_amount||0)}" min="0" style="width:100%">
+          </div>
+          <div class="rlt2-sect-card-field">
+            <span class="rlt2-sect-card-lbl">Cupón %</span>
+            <input type="number" class="rlt2-inp rlt2-sect-coupon" value="${esc(s.coupon_discount_percent||0)}" min="0" max="100" style="width:100%">
+          </div>
+          <div class="rlt2-sect-card-field">
+            <span class="rlt2-sect-card-lbl">Inmunidad días</span>
+            <input type="number" class="rlt2-inp rlt2-sect-imm" value="${esc(s.immunity_days||0)}" min="0" style="width:100%">
+          </div>
+        </div>
+
+        <div class="rlt2-sect-card-row">
+          <div class="rlt2-sect-card-field">
+            <span class="rlt2-sect-card-lbl">Texto tamaño (px)</span>
+            <input type="number" class="rlt2-inp rlt2-sect-font-size" value="${esc(s.font_size||7)}" min="5" max="20" style="width:100%">
+          </div>
+          <div class="rlt2-sect-card-field">
+            <span class="rlt2-sect-card-lbl">Color texto</span>
+            <input type="color" class="rlt2-inp rlt2-sect-font-color" value="${esc(s.font_color||'#ffffff')}" style="width:100%;height:30px;">
+          </div>
+        </div>
+
+        <div class="rlt2-sect-card-foot">
+          <button type="button" class="rlt2-sect-btn rlt2-sect-save" style="flex:1;">Guardar</button>
+          <span class="rlt2-sect-msg" style="font-size:.76rem;"></span>
+        </div>
       `;
-      // Sync color picker ↔ hex
-      const colorPicker = row.querySelector('.rlt2-sect-color');
-      const colorHex    = row.querySelector('.rlt2-sect-color-hex');
-      colorPicker.addEventListener('input', () => { colorHex.value = colorPicker.value; });
-      colorHex.addEventListener('input',   () => { if (/^#[0-9a-fA-F]{6}$/.test(colorHex.value)) colorPicker.value = colorHex.value; });
+
+      // State: current image URL (mutable per card)
+      let currentImgUrl = s.icon_image_url || '';
+
+      // Color sync ↔ swatch
+      const colorPicker    = card.querySelector('.rlt2-sect-color');
+      const colorHex       = card.querySelector('.rlt2-sect-color-hex');
+      const transparentChk = card.querySelector('.rlt2-sect-transparent');
+      const swatch         = card.querySelector('.rlt2-sect-card-swatch');
+
+      const updateSwatch = () => {
+        swatch.style.background = transparentChk.checked ? 'rgba(255,255,255,.1)' : colorPicker.value;
+      };
+      colorPicker.addEventListener('input', () => { colorHex.value = colorPicker.value; updateSwatch(); });
+      colorHex.addEventListener('input', () => { if (/^#[0-9a-fA-F]{6}$/.test(colorHex.value)) { colorPicker.value = colorHex.value; updateSwatch(); } });
+      transparentChk.addEventListener('change', () => {
+        colorPicker.disabled = transparentChk.checked;
+        colorHex.disabled    = transparentChk.checked;
+        updateSwatch();
+      });
+
+      // Image upload
+      const imgPreview = card.querySelector('.rlt2-img-preview');
+      const fileInput  = card.querySelector('.rlt2-img-file-input');
+      const uploadBtn  = card.querySelector('.rlt2-img-upload-btn');
+      const removeBtn  = card.querySelector('.rlt2-img-remove-btn');
+      const imgStatus  = card.querySelector('.rlt2-img-status');
+
+      uploadBtn.addEventListener('click', () => fileInput.click());
+
+      fileInput.addEventListener('change', async () => {
+        if (!fileInput.files || !fileInput.files[0]) return;
+        imgStatus.textContent = 'Subiendo…';
+        uploadBtn.disabled = true;
+        const fd = new FormData();
+        fd.append('action', 'rlt_upload_image');
+        fd.append('section_order', ord);
+        fd.append('image', fileInput.files[0]);
+        try {
+          const resp = await fetch(ajaxBase, { method: 'POST', body: fd });
+          const data = await resp.json();
+          if (data.ok) {
+            currentImgUrl = data.url;
+            imgPreview.src = data.url;
+            imgPreview.classList.add('visible');
+            removeBtn.classList.add('visible');
+            imgStatus.textContent = '';
+          } else {
+            imgStatus.textContent = data.error || 'Error al subir';
+          }
+        } catch (_) {
+          imgStatus.textContent = 'Error de red';
+        }
+        uploadBtn.disabled = false;
+        fileInput.value = '';
+      });
+
+      removeBtn.addEventListener('click', () => {
+        currentImgUrl = '';
+        imgPreview.src = '';
+        imgPreview.classList.remove('visible');
+        removeBtn.classList.remove('visible');
+      });
+
       // Save
-      row.querySelector('.rlt2-sect-save').addEventListener('click', function () {
+      card.querySelector('.rlt2-sect-save').addEventListener('click', function () {
         const btn = this;
         btn.disabled = true;
-        const colorVal = colorHex.value.trim() || colorPicker.value;
+        const finalColor = transparentChk.checked ? 'transparent' : (colorHex.value.trim() || colorPicker.value);
         rltPost('rlt_save_section', {
           section_order:           ord,
-          active:                  row.querySelector('.rlt2-sect-active').checked ? 1 : 0,
-          icon_emoji:              row.querySelector('.rlt2-sect-emoji').value,
-          color:                   colorVal,
-          prize_type:              row.querySelector('.rlt2-sect-type').value,
-          prize_label:             row.querySelector('.rlt2-sect-label').value,
-          chance_percent:          row.querySelector('.rlt2-sect-chance').value,
-          points_amount:           row.querySelector('.rlt2-sect-wp').value,
-          coupon_discount_percent: row.querySelector('.rlt2-sect-coupon').value,
-          immunity_days:           row.querySelector('.rlt2-sect-imm').value,
+          active:                  card.querySelector('.rlt2-sect-active').checked ? 1 : 0,
+          icon_emoji:              card.querySelector('.rlt2-sect-emoji').value,
+          icon_image_url:          currentImgUrl,
+          color:                   finalColor,
+          prize_type:              card.querySelector('.rlt2-sect-type').value,
+          prize_label:             card.querySelector('.rlt2-sect-label').value,
+          chance_percent:          card.querySelector('.rlt2-sect-chance').value,
+          points_amount:           card.querySelector('.rlt2-sect-wp').value,
+          coupon_discount_percent: card.querySelector('.rlt2-sect-coupon').value,
+          immunity_days:           card.querySelector('.rlt2-sect-imm').value,
+          font_size:               card.querySelector('.rlt2-sect-font-size').value,
+          font_color:              card.querySelector('.rlt2-sect-font-color').value,
         }, function (data) {
           btn.disabled = false;
-          const msgEl = row.querySelector('.rlt2-sect-msg');
-          msgEl.textContent = data.ok ? '✓' : '✗';
+          const msgEl = card.querySelector('.rlt2-sect-msg');
+          msgEl.textContent = data.ok ? '✓ Guardado' : '✗ Error';
           msgEl.style.color = data.ok ? '#34d399' : '#f87171';
           setTimeout(() => { msgEl.textContent = ''; }, 2500);
         });
       });
-      tbody.appendChild(row);
+
+      grid.appendChild(card);
     }
   }
 

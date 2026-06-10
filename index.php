@@ -4178,6 +4178,9 @@ if ($rouletteEnabled) {
     'color'                   => (string) $s['color'],
     'icon_emoji'              => (string) $s['icon_emoji'],
     'active'                  => !empty($s['active']),
+    'font_size'               => max(5, min(20, (int) ($s['font_size'] ?? 7))),
+    'font_color'              => (string) ($s['font_color'] ?? '#ffffff'),
+    'icon_image_url'          => (string) ($s['icon_image_url'] ?? ''),
   ], $rouletteSections);
   array_unshift($pageScripts, '<script>window._rouletteData=' . json_encode([
     'sections'   => $rouletteScriptSections,
@@ -4187,6 +4190,7 @@ if ($rouletteEnabled) {
     'wp_name'    => win_points_program_name(),
     'ring_color' => (string) ($rouletteConfig['ring_color'] ?? '#6366f1'),
     'ring_width' => (int)    ($rouletteConfig['ring_width'] ?? 2),
+    'ring_neon'  => !empty($rouletteConfig['ring_neon']),
   ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . ';</script>');
   $pageScripts[] = <<<'RLTSCRIPT'
 <script>
@@ -4222,9 +4226,24 @@ if ($rouletteEnabled) {
   let isSpinning = false;
 
   // ─── Draw wheel ───────────────────────────────────────────────
+  const svgNS = 'http://www.w3.org/2000/svg';
   function drawWheel(sections) {
     svgEl.innerHTML = '';
-    const colors = sections.map(s => s.color || '#22d3ee');
+    const ringColor = data.ring_color || '#6366f1';
+    const ringWidth = Math.max(1, parseInt(data.ring_width || 2, 10));
+    const neon      = !!data.ring_neon;
+    const strokeColor = neon ? ringColor : '#050814';
+    const strokeWidth = neon ? Math.max(1.5, ringWidth * 0.6) : 1.5;
+
+    // SVG neon filter
+    if (neon) {
+      const defs = document.createElementNS(svgNS, 'defs');
+      defs.innerHTML = `<filter id="rlt-neon" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
+        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>`;
+      svgEl.appendChild(defs);
+    }
 
     sections.forEach((sec, i) => {
       const startAng = (i / N) * TAU - Math.PI / 2;
@@ -4234,44 +4253,57 @@ if ($rouletteEnabled) {
       const x2 = CX + R * Math.cos(endAng);
       const y2 = CY + R * Math.sin(endAng);
 
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const path = document.createElementNS(svgNS, 'path');
       path.setAttribute('d', `M ${CX} ${CY} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${R} ${R} 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`);
-      path.setAttribute('fill', sec.color || '#22d3ee');
-      const isDark = i % 2 === 0;
-      path.setAttribute('fill-opacity', isDark ? '1' : '0.82');
-      path.setAttribute('stroke', '#050814');
-      path.setAttribute('stroke-width', '1.5');
+      const segColor = sec.color === 'transparent' ? 'transparent' : (sec.color || '#22d3ee');
+      path.setAttribute('fill', segColor);
+      path.setAttribute('fill-opacity', i % 2 === 0 ? '1' : '0.82');
+      path.setAttribute('stroke', strokeColor);
+      path.setAttribute('stroke-width', String(strokeWidth));
+      if (neon) path.setAttribute('filter', 'url(#rlt-neon)');
       svgEl.appendChild(path);
 
-      // Divider lines with glow
       const midAng = (startAng + endAng) / 2;
       const lr = R * 0.62;
       const tx = CX + lr * Math.cos(midAng);
       const ty = CY + lr * Math.sin(midAng);
       const rotateDeg = (midAng * 180 / Math.PI) + 90;
 
-      // Emoji
-      const emojiEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      emojiEl.setAttribute('x', tx.toFixed(2));
-      emojiEl.setAttribute('y', (ty - 7).toFixed(2));
-      emojiEl.setAttribute('text-anchor', 'middle');
-      emojiEl.setAttribute('dominant-baseline', 'middle');
-      emojiEl.setAttribute('font-size', '16');
-      emojiEl.setAttribute('transform', `rotate(${rotateDeg.toFixed(1)}, ${tx.toFixed(2)}, ${ty.toFixed(2)})`);
-      emojiEl.textContent = sec.icon_emoji || '🎁';
-      svgEl.appendChild(emojiEl);
+      // Custom image or emoji
+      const imgUrl = (sec.icon_image_url || '').trim();
+      if (imgUrl) {
+        const imgSize = 18;
+        const imgEl = document.createElementNS(svgNS, 'image');
+        imgEl.setAttribute('href', imgUrl);
+        imgEl.setAttribute('x', (tx - imgSize / 2).toFixed(2));
+        imgEl.setAttribute('y', (ty - 7 - imgSize / 2).toFixed(2));
+        imgEl.setAttribute('width', String(imgSize));
+        imgEl.setAttribute('height', String(imgSize));
+        imgEl.setAttribute('transform', `rotate(${rotateDeg.toFixed(1)}, ${tx.toFixed(2)}, ${ty.toFixed(2)})`);
+        svgEl.appendChild(imgEl);
+      } else {
+        const emojiEl = document.createElementNS(svgNS, 'text');
+        emojiEl.setAttribute('x', tx.toFixed(2));
+        emojiEl.setAttribute('y', (ty - 7).toFixed(2));
+        emojiEl.setAttribute('text-anchor', 'middle');
+        emojiEl.setAttribute('dominant-baseline', 'middle');
+        emojiEl.setAttribute('font-size', '16');
+        emojiEl.setAttribute('transform', `rotate(${rotateDeg.toFixed(1)}, ${tx.toFixed(2)}, ${ty.toFixed(2)})`);
+        emojiEl.textContent = sec.icon_emoji || '🎁';
+        svgEl.appendChild(emojiEl);
+      }
 
-      // Label
+      // Label with configurable font_size and font_color
       const labelR = R * 0.83;
       const lx = CX + labelR * Math.cos(midAng);
       const ly = CY + labelR * Math.sin(midAng);
-      const labelEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      const labelEl = document.createElementNS(svgNS, 'text');
       labelEl.setAttribute('x', lx.toFixed(2));
       labelEl.setAttribute('y', ly.toFixed(2));
       labelEl.setAttribute('text-anchor', 'middle');
       labelEl.setAttribute('dominant-baseline', 'middle');
-      labelEl.setAttribute('font-size', '7');
-      labelEl.setAttribute('fill', '#fff');
+      labelEl.setAttribute('font-size', String(sec.font_size || 7));
+      labelEl.setAttribute('fill', sec.font_color || '#ffffff');
       labelEl.setAttribute('font-weight', '800');
       labelEl.setAttribute('font-family', 'Oxanium, sans-serif');
       labelEl.setAttribute('transform', `rotate(${rotateDeg.toFixed(1)}, ${lx.toFixed(2)}, ${ly.toFixed(2)})`);
@@ -4280,30 +4312,34 @@ if ($rouletteEnabled) {
       svgEl.appendChild(labelEl);
     });
 
-    // Outer ring — uses configurable ring_color/ring_width from admin
-    const ringColor = data.ring_color || '#6366f1';
-    const ringWidth = Math.max(1, parseInt(data.ring_width || 2, 10));
-    const ringEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    // Outer ring with neon support
+    const ringEl = document.createElementNS(svgNS, 'circle');
     ringEl.setAttribute('cx', CX); ringEl.setAttribute('cy', CY);
     ringEl.setAttribute('r', R - 0.5); ringEl.setAttribute('fill', 'none');
     ringEl.setAttribute('stroke', ringColor); ringEl.setAttribute('stroke-width', String(ringWidth));
-    ringEl.setAttribute('stroke-opacity', '0.7');
+    ringEl.setAttribute('stroke-opacity', neon ? '1' : '0.7');
+    if (neon) ringEl.setAttribute('filter', 'url(#rlt-neon)');
     svgEl.appendChild(ringEl);
-    // Apply same color to the CSS glow ring div
+
+    // CSS ring glow
     const cssRing = document.querySelector('.roulette-wheel-ring');
     if (cssRing) {
       cssRing.style.border = `${ringWidth}px solid ${ringColor}`;
-      cssRing.style.boxShadow = `0 0 20px ${ringColor}55, inset 0 0 20px ${ringColor}22`;
+      if (neon) {
+        cssRing.style.boxShadow = `0 0 12px 3px ${ringColor}, 0 0 40px ${ringColor}88, inset 0 0 20px ${ringColor}44`;
+      } else {
+        cssRing.style.boxShadow = `0 0 20px ${ringColor}55, inset 0 0 20px ${ringColor}22`;
+      }
     }
 
     // Center circle
-    const centEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    const centEl = document.createElementNS(svgNS, 'circle');
     centEl.setAttribute('cx', CX); centEl.setAttribute('cy', CY);
     centEl.setAttribute('r', '16'); centEl.setAttribute('fill', '#060c1c');
-    centEl.setAttribute('stroke', '#6366f1'); centEl.setAttribute('stroke-width', '2');
+    centEl.setAttribute('stroke', ringColor); centEl.setAttribute('stroke-width', '2');
     svgEl.appendChild(centEl);
 
-    const starEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    const starEl = document.createElementNS(svgNS, 'text');
     starEl.setAttribute('x', CX); starEl.setAttribute('y', CY);
     starEl.setAttribute('text-anchor', 'middle'); starEl.setAttribute('dominant-baseline', 'middle');
     starEl.setAttribute('font-size', '14');
@@ -4313,10 +4349,34 @@ if ($rouletteEnabled) {
 
   drawWheel(data.sections);
 
+  // ─── Idle sway animation ───────────────────────────────────────
+  let idleAnimId = null;
+  let idleAngle = 0;
+  let idleSpeed = 0.012;
+  let idleDir   = 1;
+  const IDLE_MAX = 3.5;
+
+  function tickIdle() {
+    idleAngle += idleSpeed * idleDir;
+    if (Math.abs(idleAngle) >= IDLE_MAX) { idleDir = -idleDir; idleAngle = idleDir * IDLE_MAX; }
+    svgEl.style.transition = 'none';
+    svgEl.style.transform  = `rotate(${currentRotation + idleAngle}deg)`;
+    idleAnimId = requestAnimationFrame(tickIdle);
+  }
+  function startIdle() {
+    if (idleAnimId) return;
+    svgEl.style.transformOrigin = CX + 'px ' + CY + 'px';
+    idleAnimId = requestAnimationFrame(tickIdle);
+  }
+  function stopIdle() {
+    if (idleAnimId) { cancelAnimationFrame(idleAnimId); idleAnimId = null; }
+    idleAngle = 0;
+  }
+  startIdle();
+
   // ─── Spin animation ────────────────────────────────────────────
-  // Rotate the <g> element (SVG coordinate space) so transform-origin
-  // is always the wheel center (120,120) regardless of the wrapper's CSS.
   function spinTo(winnerIndex, onDone) {
+    stopIdle();
     const sectorAng   = (360 - ((winnerIndex * 45 + 22.5) % 360)) % 360;
     const currAng     = ((currentRotation % 360) + 360) % 360;
     let   diff        = ((sectorAng - currAng) + 360) % 360;
@@ -4325,16 +4385,17 @@ if ($rouletteEnabled) {
 
     svgEl.style.transformOrigin = CX + 'px ' + CY + 'px';
     svgEl.style.transition = 'none';
-    void svgWrap.offsetWidth; // force reflow on parent to flush pending paint
+    void svgWrap.offsetWidth;
     svgEl.style.transition = 'transform 4.6s cubic-bezier(0.17,0.67,0.18,0.99)';
     svgEl.style.transform  = `rotate(${finalRot}deg)`;
     currentRotation = finalRot;
 
-    const timeout = setTimeout(onDone, 4700);
+    const timeout = setTimeout(() => { onDone(); startIdle(); }, 4700);
     svgEl.addEventListener('transitionend', function handler() {
       clearTimeout(timeout);
       svgEl.removeEventListener('transitionend', handler);
       onDone();
+      startIdle();
     }, { once: true });
   }
 
