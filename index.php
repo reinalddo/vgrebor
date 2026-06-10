@@ -4234,8 +4234,8 @@ if ($rouletteEnabled) {
     const ringColor = data.ring_color || '#6366f1';
     const ringWidth = Math.max(1, parseInt(data.ring_width || 2, 10));
     const neon      = !!data.ring_neon;
-    const strokeColor = neon ? ringColor : '#050814';
-    const strokeWidth = neon ? Math.max(1.5, ringWidth * 0.6) : 1.5;
+    const strokeColor = ringColor;
+    const strokeWidth = neon ? Math.max(1.5, ringWidth * 0.6) : 1.0;
 
     // SVG neon filter
     if (neon) {

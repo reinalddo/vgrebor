@@ -142,12 +142,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         case 'rlt_upload_center_image': {
             if (empty($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
-                echo json_encode(['ok' => false, 'error' => 'No se recibió ningún archivo.']);
+                $errCode = (int) ($_FILES['image']['error'] ?? -1);
+                $errMsg  = in_array($errCode, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)
+                    ? 'La imagen es demasiado grande.'
+                    : ($errCode === UPLOAD_ERR_NO_FILE ? 'No se seleccionó ningún archivo.' : 'Error al recibir el archivo (código ' . $errCode . ').');
+                echo json_encode(['ok' => false, 'error' => $errMsg]);
                 exit;
             }
             $allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-            $finfo = new finfo(FILEINFO_MIME_TYPE);
-            $mime  = $finfo->file($_FILES['image']['tmp_name']);
+            $imgInfo = @getimagesize($_FILES['image']['tmp_name']);
+            $mime    = $imgInfo ? ($imgInfo['mime'] ?? '') : '';
             if (!in_array($mime, $allowedMimes, true)) {
                 echo json_encode(['ok' => false, 'error' => 'Formato no permitido. Usa JPG, PNG, GIF o WebP.']);
                 exit;
@@ -157,7 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
             $extMap    = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
-            $ext       = $extMap[$mime];
+            $ext       = $extMap[$mime] ?? 'jpg';
             $uploadDir = __DIR__ . '/uploads/roulette/';
             if (!is_dir($uploadDir)) {
                 mkdir($uploadDir, 0755, true);
@@ -186,8 +190,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
             $allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-            $finfo = new finfo(FILEINFO_MIME_TYPE);
-            $mime  = $finfo->file($_FILES['image']['tmp_name']);
+            $imgInfo = @getimagesize($_FILES['image']['tmp_name']);
+            $mime    = $imgInfo ? ($imgInfo['mime'] ?? '') : '';
             if (!in_array($mime, $allowedMimes, true)) {
                 echo json_encode(['ok' => false, 'error' => 'Formato no permitido. Usa JPG, PNG, GIF o WebP.']);
                 exit;
@@ -197,7 +201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
             $extMap    = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
-            $ext       = $extMap[$mime];
+            $ext       = $extMap[$mime] ?? 'jpg';
             $uploadDir = __DIR__ . '/uploads/roulette/';
             if (!is_dir($uploadDir)) {
                 mkdir($uploadDir, 0755, true);
@@ -1695,7 +1699,14 @@ include __DIR__ . '/includes/header.php';
       fd.append('image', centerFileInput.files[0]);
       try {
         const resp = await fetch(ajaxBase, { method: 'POST', body: fd });
-        const data = await resp.json();
+        const txt  = await resp.text();
+        let data;
+        try { data = JSON.parse(txt); } catch (e) {
+          if (centerImgStatus) centerImgStatus.textContent = 'Error servidor: ' + txt.replace(/<[^>]*>/g,'').trim().slice(0, 120);
+          if (centerUploadBtn) centerUploadBtn.disabled = false;
+          centerFileInput.value = '';
+          return;
+        }
         if (data.ok) {
           centerImgUrl = data.url;
           if (centerImgPreview) { centerImgPreview.src = data.url; centerImgPreview.classList.add('visible'); }
@@ -1704,8 +1715,8 @@ include __DIR__ . '/includes/header.php';
         } else {
           if (centerImgStatus) centerImgStatus.textContent = data.error || 'Error al subir';
         }
-      } catch (_) {
-        if (centerImgStatus) centerImgStatus.textContent = 'Error de red';
+      } catch (e) {
+        if (centerImgStatus) centerImgStatus.textContent = 'Error de red: ' + e.message;
       }
       if (centerUploadBtn) centerUploadBtn.disabled = false;
       centerFileInput.value = '';
@@ -1887,7 +1898,14 @@ include __DIR__ . '/includes/header.php';
         fd.append('image', fileInput.files[0]);
         try {
           const resp = await fetch(ajaxBase, { method: 'POST', body: fd });
-          const data = await resp.json();
+          const txt  = await resp.text();
+          let data;
+          try { data = JSON.parse(txt); } catch (e) {
+            imgStatus.textContent = 'Error servidor: ' + txt.replace(/<[^>]*>/g,'').trim().slice(0, 120);
+            uploadBtn.disabled = false;
+            fileInput.value = '';
+            return;
+          }
           if (data.ok) {
             currentImgUrl = data.url;
             imgPreview.src = data.url;
@@ -1897,8 +1915,8 @@ include __DIR__ . '/includes/header.php';
           } else {
             imgStatus.textContent = data.error || 'Error al subir';
           }
-        } catch (_) {
-          imgStatus.textContent = 'Error de red';
+        } catch (e) {
+          imgStatus.textContent = 'Error de red: ' + e.message;
         }
         uploadBtn.disabled = false;
         fileInput.value = '';
