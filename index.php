@@ -2716,6 +2716,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         .roulette-btn.spinning .roulette-btn-icon { animation: rlt-spin-icon 0.6s linear infinite; }
         @keyframes rlt-spin-icon { to { transform: rotate(360deg); } }
         .roulette-btn-icon { font-size: 1.1rem; display: inline-block; }
+        .rlt-btn-img { width: 1.2rem; height: 1.2rem; object-fit: cover; border-radius: 50%; vertical-align: middle; display: inline-block; }
         .roulette-btn-guest {
           background: rgba(51,65,85,0.4);
           border-color: rgba(255,255,255,0.1);
@@ -2888,7 +2889,13 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
                 <button type="button" id="roulette-spin-btn" class="roulette-btn"
                   data-spin-cost="<?= (int) ($rouletteConfig['spin_cost'] ?? 10) ?>"
                   data-api-url="<?= htmlspecialchars(app_path('/api/roulette.php'), ENT_QUOTES, 'UTF-8') ?>">
-                  <span class="roulette-btn-icon" id="roulette-btn-icon">🎰</span>
+                  <?php
+                    $rltBtnImg   = trim((string) ($rouletteConfig['btn_image_url'] ?? ''));
+                    $rltBtnEmoji = trim((string) ($rouletteConfig['btn_emoji'] ?? '🎰')) ?: '🎰';
+                    $rltBtnSzMap = ['small' => '0.85rem', 'medium' => '1.2rem', 'large' => '1.7rem'];
+                    $rltBtnSz    = $rltBtnSzMap[$rouletteConfig['btn_image_size'] ?? 'medium'] ?? '1.2rem';
+                  ?>
+                  <span class="roulette-btn-icon" id="roulette-btn-icon"><?php if ($rltBtnImg): ?><img src="<?= htmlspecialchars($rltBtnImg, ENT_QUOTES, 'UTF-8') ?>" alt="" class="rlt-btn-img" style="width:<?= $rltBtnSz ?>;height:<?= $rltBtnSz ?>;"><?php else: ?><?= htmlspecialchars($rltBtnEmoji, ENT_QUOTES, 'UTF-8') ?><?php endif; ?></span>
                   <span>GIRAR AHORA</span>
                 </button>
                 <div id="roulette-msg" class="roulette-msg" aria-live="polite"></div>
@@ -4180,7 +4187,8 @@ if ($rouletteEnabled) {
     'active'                  => !empty($s['active']),
     'font_size'               => max(5, min(20, (int) ($s['font_size'] ?? 7))),
     'font_color'              => (string) ($s['font_color'] ?? '#ffffff'),
-    'icon_image_url'          => (string) ($s['icon_image_url'] ?? ''),
+    'icon_image_url' => (string) ($s['icon_image_url'] ?? ''),
+    'icon_size'      => (string) ($s['icon_size'] ?? 'medium'),
   ], $rouletteSections);
   array_unshift($pageScripts, '<script>window._rouletteData=' . json_encode([
     'sections'   => $rouletteScriptSections,
@@ -4191,8 +4199,12 @@ if ($rouletteEnabled) {
     'ring_color' => (string) ($rouletteConfig['ring_color'] ?? '#6366f1'),
     'ring_width' => (int)    ($rouletteConfig['ring_width'] ?? 2),
     'ring_neon'         => !empty($rouletteConfig['ring_neon']),
-    'center_emoji'      => (string) ($rouletteConfig['center_emoji'] ?? '⭐'),
-    'center_image_url'  => (string) ($rouletteConfig['center_image_url'] ?? ''),
+    'center_emoji'     => (string) ($rouletteConfig['center_emoji'] ?? '⭐'),
+    'center_image_url' => (string) ($rouletteConfig['center_image_url'] ?? ''),
+    'center_size'      => (string) ($rouletteConfig['center_size'] ?? 'medium'),
+    'btn_emoji'        => (string) ($rouletteConfig['btn_emoji'] ?? '🎰'),
+    'btn_image_url'    => (string) ($rouletteConfig['btn_image_url'] ?? ''),
+    'btn_image_size'   => (string) ($rouletteConfig['btn_image_size'] ?? 'medium'),
   ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . ';</script>');
   $pageScripts[] = <<<'RLTSCRIPT'
 <script>
@@ -4274,7 +4286,7 @@ if ($rouletteEnabled) {
       // Custom image or emoji
       const imgUrl = (sec.icon_image_url || '').trim();
       if (imgUrl) {
-        const imgSize = 18;
+        const imgSize = sec.icon_size === 'small' ? 12 : sec.icon_size === 'large' ? 24 : 18;
         const imgEl = document.createElementNS(svgNS, 'image');
         imgEl.setAttribute('href', imgUrl);
         imgEl.setAttribute('x', (tx - imgSize / 2).toFixed(2));
@@ -4334,8 +4346,8 @@ if ($rouletteEnabled) {
       }
     }
 
-    // Center circle
-    const CENTER_R = 16;
+    // Center circle — size driven by config (small=12, medium=20, large=30)
+    const CENTER_R = data.center_size === 'small' ? 12 : data.center_size === 'large' ? 30 : 20;
     const centEl = document.createElementNS(svgNS, 'circle');
     centEl.setAttribute('cx', CX); centEl.setAttribute('cy', CY);
     centEl.setAttribute('r', String(CENTER_R)); centEl.setAttribute('fill', '#060c1c');

@@ -179,6 +179,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
+        case 'rlt_upload_btn_image': {
+            if (empty($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
+                $errCode = (int) ($_FILES['image']['error'] ?? -1);
+                $errMsg  = in_array($errCode, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)
+                    ? 'La imagen es demasiado grande.'
+                    : ($errCode === UPLOAD_ERR_NO_FILE ? 'No se seleccionó ningún archivo.' : 'Error al recibir el archivo (código ' . $errCode . ').');
+                echo json_encode(['ok' => false, 'error' => $errMsg]);
+                exit;
+            }
+            $allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+            $imgInfo = @getimagesize($_FILES['image']['tmp_name']);
+            $mime    = $imgInfo ? ($imgInfo['mime'] ?? '') : '';
+            if (!in_array($mime, $allowedMimes, true)) {
+                echo json_encode(['ok' => false, 'error' => 'Formato no permitido. Usa JPG, PNG, GIF o WebP.']);
+                exit;
+            }
+            if ($_FILES['image']['size'] > 2 * 1024 * 1024) {
+                echo json_encode(['ok' => false, 'error' => 'La imagen supera el límite de 2 MB.']);
+                exit;
+            }
+            $extMap    = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+            $ext       = $extMap[$mime] ?? 'jpg';
+            $uploadDir = __DIR__ . '/uploads/roulette/';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+            foreach (glob($uploadDir . 'btn_*') ?: [] as $old) {
+                @unlink($old);
+            }
+            $filename = 'btn_' . bin2hex(random_bytes(6)) . '.' . $ext;
+            $dest     = $uploadDir . $filename;
+            if (!move_uploaded_file($_FILES['image']['tmp_name'], $dest)) {
+                echo json_encode(['ok' => false, 'error' => 'No se pudo guardar la imagen.']);
+                exit;
+            }
+            echo json_encode(['ok' => true, 'url' => app_path('/uploads/roulette/' . $filename)]);
+            exit;
+        }
+
         case 'rlt_upload_image': {
             $sectionOrder = max(1, min(8, (int) ($_POST['section_order'] ?? 1)));
             if (empty($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
@@ -1201,6 +1240,14 @@ include __DIR__ . '/includes/header.php';
     color:#c7d2fe; font-size:.84rem; font-weight:700; cursor:pointer; transition:background .15s;
   }
   .rlt2-save-btn:hover { background:rgba(99,102,241,.35); color:#fff; }
+  .rlt2-size-btn {
+    padding:.28rem .62rem; border-radius:.45rem; font-size:.72rem; font-weight:700; cursor:pointer;
+    background:rgba(99,102,241,.1); border:1px solid rgba(99,102,241,.3); color:#94a3b8; transition:all .15s;
+  }
+  .rlt2-size-btn.active {
+    background:rgba(99,102,241,.35); border-color:rgba(99,102,241,.7); color:#c7d2fe;
+  }
+  .rlt2-size-btn:hover { background:rgba(99,102,241,.22); color:#c7d2fe; }
   .rlt2-msg { font-size:.78rem; margin-left:.75rem; min-height:1.1em; }
   .rlt2-msg.ok  { color:#34d399; }
   .rlt2-msg.err { color:#f87171; }
@@ -1295,6 +1342,43 @@ include __DIR__ . '/includes/header.php';
                     <button type="button" class="rlt2-img-remove-btn" id="rlt2CenterRemoveBtn">Quitar</button>
                     <span id="rlt2CenterImgStatus" style="font-size:.66rem;color:#94a3b8;"></span>
                   </div>
+                </div>
+                <div>
+                  <div style="font-size:.64rem;color:#94a3b8;margin-bottom:.42rem;text-transform:uppercase;letter-spacing:.08em;">Tamaño</div>
+                  <div style="display:flex;gap:.3rem;">
+                    <button type="button" class="rlt2-size-btn" data-size="small" id="rlt2SizeSmall">Pequeño</button>
+                    <button type="button" class="rlt2-size-btn" data-size="medium" id="rlt2SizeMedium">Mediano</button>
+                    <button type="button" class="rlt2-size-btn" data-size="large" id="rlt2SizeLarge">Grande</button>
+                  </div>
+                  <input type="hidden" id="rlt2CfgCenterSize" value="medium">
+                </div>
+              </div>
+            </div>
+            <div class="rlt2-field" style="grid-column:1/-1">
+              <label>Icono del botón «Girar Ahora»</label>
+              <div style="display:flex;align-items:flex-start;gap:.85rem;flex-wrap:wrap;">
+                <div>
+                  <div style="font-size:.64rem;color:#94a3b8;margin-bottom:.22rem;text-transform:uppercase;letter-spacing:.08em;">Emoji</div>
+                  <input type="text" id="rlt2CfgBtnEmoji" value="🎰" maxlength="4" style="width:58px;text-align:center;">
+                </div>
+                <div style="flex:1;min-width:200px;">
+                  <div style="font-size:.64rem;color:#94a3b8;margin-bottom:.22rem;text-transform:uppercase;letter-spacing:.08em;">Imagen personalizada (reemplaza al emoji, gira igual)</div>
+                  <div class="rlt2-img-area">
+                    <img class="rlt2-img-preview" id="rlt2BtnImgPreview" src="" alt="">
+                    <input type="file" id="rlt2BtnImgFileInput" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none">
+                    <button type="button" class="rlt2-img-upload-btn" id="rlt2BtnUploadBtn">Subir imagen</button>
+                    <button type="button" class="rlt2-img-remove-btn" id="rlt2BtnRemoveBtn">Quitar</button>
+                    <span id="rlt2BtnImgStatus" style="font-size:.66rem;color:#94a3b8;"></span>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-size:.64rem;color:#94a3b8;margin-bottom:.42rem;text-transform:uppercase;letter-spacing:.08em;">Tamaño</div>
+                  <div style="display:flex;gap:.3rem;">
+                    <button type="button" class="rlt2-size-btn" data-size="small" id="rlt2BtnSizeSmall">Pequeño</button>
+                    <button type="button" class="rlt2-size-btn active" data-size="medium" id="rlt2BtnSizeMedium">Mediano</button>
+                    <button type="button" class="rlt2-size-btn" data-size="large" id="rlt2BtnSizeLarge">Grande</button>
+                  </div>
+                  <input type="hidden" id="rlt2CfgBtnImgSize" value="medium">
                 </div>
               </div>
             </div>
@@ -1649,8 +1733,9 @@ include __DIR__ . '/includes/header.php';
     });
   }
 
-  // Center image state (mutable, shared across applyConfig and save)
+  // Mutable image URLs shared across applyConfig and save
   let centerImgUrl = '';
+  let btnImgUrl    = '';
 
   function applyConfig(cfg) {
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
@@ -1672,6 +1757,24 @@ include __DIR__ . '/includes/header.php';
     const rem  = document.getElementById('rlt2CenterRemoveBtn');
     if (prev) { prev.src = centerImgUrl; prev.classList.toggle('visible', !!centerImgUrl); }
     if (rem)  { rem.classList.toggle('visible', !!centerImgUrl); }
+    // Center size
+    const size = cfg.center_size ?? 'medium';
+    set('rlt2CfgCenterSize', size);
+    document.querySelectorAll('.rlt2-size-btn').forEach(b => b.classList.toggle('active', b.dataset.size === size));
+    // Button icon
+    set('rlt2CfgBtnEmoji', cfg.btn_emoji ?? '🎰');
+    btnImgUrl = cfg.btn_image_url ?? '';
+    const btnPrev = document.getElementById('rlt2BtnImgPreview');
+    const btnRem  = document.getElementById('rlt2BtnRemoveBtn');
+    if (btnPrev) { btnPrev.src = btnImgUrl; btnPrev.classList.toggle('visible', !!btnImgUrl); }
+    if (btnRem)  { btnRem.classList.toggle('visible', !!btnImgUrl); }
+    // Button image size
+    const btnSize = cfg.btn_image_size ?? 'medium';
+    set('rlt2CfgBtnImgSize', btnSize);
+    ['rlt2BtnSizeSmall','rlt2BtnSizeMedium','rlt2BtnSizeLarge'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('active', el.dataset.size === btnSize);
+    });
   }
 
   // Sync color input ↔ hex text
@@ -1698,7 +1801,7 @@ include __DIR__ . '/includes/header.php';
       fd.append('action', 'rlt_upload_center_image');
       fd.append('image', centerFileInput.files[0]);
       try {
-        const resp = await fetch(ajaxBase, { method: 'POST', body: fd });
+        const resp = await fetch(base, { method: 'POST', body: fd });
         const txt  = await resp.text();
         let data;
         try { data = JSON.parse(txt); } catch (e) {
@@ -1731,6 +1834,79 @@ include __DIR__ . '/includes/header.php';
     });
   }
 
+  // Center size selector buttons
+  const centerSizeBtns = [document.getElementById('rlt2SizeSmall'), document.getElementById('rlt2SizeMedium'), document.getElementById('rlt2SizeLarge')].filter(Boolean);
+  centerSizeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      centerSizeBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const hidden = document.getElementById('rlt2CfgCenterSize');
+      if (hidden) hidden.value = btn.dataset.size;
+    });
+  });
+
+  // Button icon size selector
+  const btnSizeBtns = [document.getElementById('rlt2BtnSizeSmall'), document.getElementById('rlt2BtnSizeMedium'), document.getElementById('rlt2BtnSizeLarge')].filter(Boolean);
+  btnSizeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      btnSizeBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const hidden = document.getElementById('rlt2CfgBtnImgSize');
+      if (hidden) hidden.value = btn.dataset.size;
+    });
+  });
+
+  // Button icon upload wiring
+  const btnFileInput  = document.getElementById('rlt2BtnImgFileInput');
+  const btnUploadBtn  = document.getElementById('rlt2BtnUploadBtn');
+  const btnRemoveBtn  = document.getElementById('rlt2BtnRemoveBtn');
+  const btnImgPreview = document.getElementById('rlt2BtnImgPreview');
+  const btnImgStatus  = document.getElementById('rlt2BtnImgStatus');
+
+  if (btnUploadBtn) btnUploadBtn.addEventListener('click', () => btnFileInput?.click());
+
+  if (btnFileInput) {
+    btnFileInput.addEventListener('change', async () => {
+      if (!btnFileInput.files || !btnFileInput.files[0]) return;
+      if (btnImgStatus) btnImgStatus.textContent = 'Subiendo…';
+      if (btnUploadBtn) btnUploadBtn.disabled = true;
+      const fd = new FormData();
+      fd.append('action', 'rlt_upload_btn_image');
+      fd.append('image', btnFileInput.files[0]);
+      try {
+        const resp = await fetch(base, { method: 'POST', body: fd });
+        const txt  = await resp.text();
+        let data;
+        try { data = JSON.parse(txt); } catch (e) {
+          if (btnImgStatus) btnImgStatus.textContent = 'Error servidor: ' + txt.replace(/<[^>]*>/g,'').trim().slice(0, 120);
+          if (btnUploadBtn) btnUploadBtn.disabled = false;
+          btnFileInput.value = '';
+          return;
+        }
+        if (data.ok) {
+          btnImgUrl = data.url;
+          if (btnImgPreview) { btnImgPreview.src = data.url; btnImgPreview.classList.add('visible'); }
+          if (btnRemoveBtn) btnRemoveBtn.classList.add('visible');
+          if (btnImgStatus) btnImgStatus.textContent = '';
+        } else {
+          if (btnImgStatus) btnImgStatus.textContent = data.error || 'Error al subir';
+        }
+      } catch (e) {
+        if (btnImgStatus) btnImgStatus.textContent = 'Error de red: ' + e.message;
+      }
+      if (btnUploadBtn) btnUploadBtn.disabled = false;
+      btnFileInput.value = '';
+    });
+  }
+
+  if (btnRemoveBtn) {
+    btnRemoveBtn.addEventListener('click', () => {
+      btnImgUrl = '';
+      if (btnImgPreview) { btnImgPreview.src = ''; btnImgPreview.classList.remove('visible'); }
+      btnRemoveBtn.classList.remove('visible');
+    });
+  }
+
   // Save config
   const saveConfigBtn = document.getElementById('rlt2SaveConfigBtn');
   const cfgMsg        = document.getElementById('rlt2CfgMsg');
@@ -1749,6 +1925,10 @@ include __DIR__ . '/includes/header.php';
         ring_neon:              document.getElementById('rlt2CfgNeon')?.checked ? 1 : 0,
         center_emoji:           document.getElementById('rlt2CfgCenterEmoji')?.value ?? '⭐',
         center_image_url:       centerImgUrl,
+        center_size:            document.getElementById('rlt2CfgCenterSize')?.value ?? 'medium',
+        btn_emoji:              document.getElementById('rlt2CfgBtnEmoji')?.value ?? '🎰',
+        btn_image_url:          btnImgUrl,
+        btn_image_size:         document.getElementById('rlt2CfgBtnImgSize')?.value ?? 'medium',
       }, function (data) {
         saveConfigBtn.disabled = false;
         showMsg(cfgMsg, data.ok ? '✓ Guardado' : ('✗ ' + (data.error||'Error')), data.ok);
@@ -1762,7 +1942,7 @@ include __DIR__ . '/includes/header.php';
     if (!grid) return;
     grid.innerHTML = '';
     for (let i = 0; i < 8; i++) {
-      const s = sections[i] || { section_order: i+1, prize_type:'winpoints', prize_label:'', chance_percent:12.5, points_amount:0, coupon_discount_percent:0, immunity_days:0, color:'#22d3ee', icon_emoji:'🎁', active:true, font_size:7, font_color:'#ffffff', icon_image_url:'' };
+      const s = sections[i] || { section_order: i+1, prize_type:'winpoints', prize_label:'', chance_percent:12.5, points_amount:0, coupon_discount_percent:0, immunity_days:0, color:'#22d3ee', icon_emoji:'🎁', active:true, font_size:7, font_color:'#ffffff', icon_image_url:'', icon_size:'medium' };
       const ord = s.section_order ?? (i+1);
       const isTransparent = (s.color||'') === 'transparent';
       const colorVal = isTransparent ? '#22d3ee' : (s.color||'#22d3ee');
@@ -1810,6 +1990,12 @@ include __DIR__ . '/includes/header.php';
             <button type="button" class="rlt2-img-upload-btn">Subir imagen</button>
             <button type="button" class="rlt2-img-remove-btn${hasImg?' visible':''}">Quitar</button>
             <span class="rlt2-img-status" style="font-size:.66rem;color:#94a3b8;"></span>
+          </div>
+          <div style="display:flex;gap:.3rem;margin-top:.38rem;">
+            <button type="button" class="rlt2-size-btn rlt2-icon-size-btn${(s.icon_size||'medium')==='small'?' active':''}" data-size="small">Pequeño</button>
+            <button type="button" class="rlt2-size-btn rlt2-icon-size-btn${(s.icon_size||'medium')==='medium'?' active':''}" data-size="medium">Mediano</button>
+            <button type="button" class="rlt2-size-btn rlt2-icon-size-btn${(s.icon_size||'medium')==='large'?' active':''}" data-size="large">Grande</button>
+            <input type="hidden" class="rlt2-icon-size-val" value="${esc(s.icon_size||'medium')}">
           </div>
         </div>
 
@@ -1897,7 +2083,7 @@ include __DIR__ . '/includes/header.php';
         fd.append('section_order', ord);
         fd.append('image', fileInput.files[0]);
         try {
-          const resp = await fetch(ajaxBase, { method: 'POST', body: fd });
+          const resp = await fetch(base, { method: 'POST', body: fd });
           const txt  = await resp.text();
           let data;
           try { data = JSON.parse(txt); } catch (e) {
@@ -1929,6 +2115,16 @@ include __DIR__ . '/includes/header.php';
         removeBtn.classList.remove('visible');
       });
 
+      // Icon size buttons
+      card.querySelectorAll('.rlt2-icon-size-btn').forEach(sBtn => {
+        sBtn.addEventListener('click', () => {
+          card.querySelectorAll('.rlt2-icon-size-btn').forEach(b => b.classList.remove('active'));
+          sBtn.classList.add('active');
+          const sizeInput = card.querySelector('.rlt2-icon-size-val');
+          if (sizeInput) sizeInput.value = sBtn.dataset.size;
+        });
+      });
+
       // Save
       card.querySelector('.rlt2-sect-save').addEventListener('click', function () {
         const btn = this;
@@ -1939,6 +2135,7 @@ include __DIR__ . '/includes/header.php';
           active:                  card.querySelector('.rlt2-sect-active').checked ? 1 : 0,
           icon_emoji:              card.querySelector('.rlt2-sect-emoji').value,
           icon_image_url:          currentImgUrl,
+          icon_size:               card.querySelector('.rlt2-icon-size-val')?.value || 'medium',
           color:                   finalColor,
           prize_type:              card.querySelector('.rlt2-sect-type').value,
           prize_label:             card.querySelector('.rlt2-sect-label').value,

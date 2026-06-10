@@ -89,6 +89,22 @@ if (!function_exists('roulette_ensure_schema')) {
         if ($chkCenterImg instanceof mysqli_result && (int)($chkCenterImg->fetch_assoc()['n'] ?? 0) === 0) {
             $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN center_image_url VARCHAR(500) NOT NULL DEFAULT '' AFTER center_emoji");
         }
+        $chkCenterSize = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_config' AND COLUMN_NAME='center_size'");
+        if ($chkCenterSize instanceof mysqli_result && (int)($chkCenterSize->fetch_assoc()['n'] ?? 0) === 0) {
+            $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN center_size VARCHAR(10) NOT NULL DEFAULT 'medium' AFTER center_image_url");
+        }
+        $chkBtnEmoji = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_config' AND COLUMN_NAME='btn_emoji'");
+        if ($chkBtnEmoji instanceof mysqli_result && (int)($chkBtnEmoji->fetch_assoc()['n'] ?? 0) === 0) {
+            $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN btn_emoji VARCHAR(16) NOT NULL DEFAULT '🎰' AFTER center_size");
+        }
+        $chkBtnImg = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_config' AND COLUMN_NAME='btn_image_url'");
+        if ($chkBtnImg instanceof mysqli_result && (int)($chkBtnImg->fetch_assoc()['n'] ?? 0) === 0) {
+            $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN btn_image_url VARCHAR(500) NOT NULL DEFAULT '' AFTER btn_emoji");
+        }
+        $chkBtnImgSize = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_config' AND COLUMN_NAME='btn_image_size'");
+        if ($chkBtnImgSize instanceof mysqli_result && (int)($chkBtnImgSize->fetch_assoc()['n'] ?? 0) === 0) {
+            $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN btn_image_size VARCHAR(10) NOT NULL DEFAULT 'medium' AFTER btn_image_url");
+        }
 
         // Migrations: section columns
         $chkFontSize = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_sections' AND COLUMN_NAME='font_size'");
@@ -102,6 +118,10 @@ if (!function_exists('roulette_ensure_schema')) {
         $chkImgUrl = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_sections' AND COLUMN_NAME='icon_image_url'");
         if ($chkImgUrl instanceof mysqli_result && (int)($chkImgUrl->fetch_assoc()['n'] ?? 0) === 0) {
             $mysqli->query("ALTER TABLE win_points_roulette_sections ADD COLUMN icon_image_url VARCHAR(500) NOT NULL DEFAULT '' AFTER font_color");
+        }
+        $chkIconSize = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_sections' AND COLUMN_NAME='icon_size'");
+        if ($chkIconSize instanceof mysqli_result && (int)($chkIconSize->fetch_assoc()['n'] ?? 0) === 0) {
+            $mysqli->query("ALTER TABLE win_points_roulette_sections ADD COLUMN icon_size VARCHAR(10) NOT NULL DEFAULT 'medium' AFTER icon_image_url");
         }
 
         $mysqli->query(
@@ -200,7 +220,8 @@ if (!function_exists('roulette_normalize_section')) {
             'active'                 => (int) ($row['active'] ?? 1) === 1,
             'font_size'              => max(5, min(20, (int) ($row['font_size'] ?? 7))),
             'font_color'             => $fontColor,
-            'icon_image_url'         => trim((string) ($row['icon_image_url'] ?? '')),
+            'icon_image_url' => trim((string) ($row['icon_image_url'] ?? '')),
+            'icon_size'      => in_array(trim((string) ($row['icon_size'] ?? '')), ['small','medium','large'], true) ? trim((string) $row['icon_size']) : 'medium',
         ];
     }
 }
@@ -224,8 +245,12 @@ if (!function_exists('roulette_fetch_config')) {
             'ring_color'             => $ringColor,
             'ring_width'             => max(1, min(10, (int) ($row['ring_width'] ?? 2))),
             'ring_neon'              => (int) ($row['ring_neon'] ?? 0) === 1,
-            'center_emoji'           => trim((string) ($row['center_emoji'] ?? '⭐')) ?: '⭐',
-            'center_image_url'       => trim((string) ($row['center_image_url'] ?? '')),
+            'center_emoji'     => trim((string) ($row['center_emoji'] ?? '⭐')) ?: '⭐',
+            'center_image_url' => trim((string) ($row['center_image_url'] ?? '')),
+            'center_size'      => in_array(trim((string) ($row['center_size'] ?? '')), ['small','medium','large'], true) ? trim((string) $row['center_size']) : 'medium',
+            'btn_emoji'        => trim((string) ($row['btn_emoji'] ?? '🎰')) ?: '🎰',
+            'btn_image_url'    => trim((string) ($row['btn_image_url'] ?? '')),
+            'btn_image_size'   => in_array(trim((string) ($row['btn_image_size'] ?? '')), ['small','medium','large'], true) ? trim((string) $row['btn_image_size']) : 'medium',
         ];
     }
 }
@@ -541,24 +566,31 @@ if (!function_exists('roulette_admin_save_config')) {
             $ringColor = '#6366f1';
         }
         $ringWidth = max(1, min(10, (int) ($data['ring_width'] ?? 2)));
-        $ringNeon      = isset($data['ring_neon']) && (int) $data['ring_neon'] === 1 ? 1 : 0;
-        $centerEmoji   = trim((string) ($data['center_emoji'] ?? '⭐')) ?: '⭐';
-        $centerImgUrl  = trim((string) ($data['center_image_url'] ?? ''));
+        $ringNeon     = isset($data['ring_neon']) && (int) $data['ring_neon'] === 1 ? 1 : 0;
+        $centerEmoji  = trim((string) ($data['center_emoji'] ?? '⭐')) ?: '⭐';
+        $centerImgUrl = trim((string) ($data['center_image_url'] ?? ''));
+        $centerSize   = in_array(trim((string) ($data['center_size'] ?? '')), ['small','medium','large'], true) ? trim((string) $data['center_size']) : 'medium';
+        $btnEmoji     = trim((string) ($data['btn_emoji'] ?? '🎰')) ?: '🎰';
+        $btnImgUrl    = trim((string) ($data['btn_image_url'] ?? ''));
+        $btnImgSize   = in_array(trim((string) ($data['btn_image_size'] ?? '')), ['small','medium','large'], true) ? trim((string) $data['btn_image_size']) : 'medium';
 
         $stmt = $mysqli->prepare(
-            'INSERT INTO win_points_roulette_config (id, enabled, spin_cost, title, subtitle, coupon_expiration_days, streaming_user_id, ring_color, ring_width, ring_neon, center_emoji, center_image_url)
-             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            'INSERT INTO win_points_roulette_config (id, enabled, spin_cost, title, subtitle, coupon_expiration_days, streaming_user_id, ring_color, ring_width, ring_neon, center_emoji, center_image_url, center_size, btn_emoji, btn_image_url, btn_image_size)
+             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE enabled=VALUES(enabled), spin_cost=VALUES(spin_cost),
                title=VALUES(title), subtitle=VALUES(subtitle),
                coupon_expiration_days=VALUES(coupon_expiration_days),
                streaming_user_id=VALUES(streaming_user_id),
                ring_color=VALUES(ring_color), ring_width=VALUES(ring_width), ring_neon=VALUES(ring_neon),
-               center_emoji=VALUES(center_emoji), center_image_url=VALUES(center_image_url)'
+               center_emoji=VALUES(center_emoji), center_image_url=VALUES(center_image_url),
+               center_size=VALUES(center_size), btn_emoji=VALUES(btn_emoji),
+               btn_image_url=VALUES(btn_image_url), btn_image_size=VALUES(btn_image_size)'
         );
         if (!$stmt) {
             return;
         }
-        $stmt->bind_param('iissiiisiss', $enabled, $spinCost, $title, $subtitle, $expDays, $streamId, $ringColor, $ringWidth, $ringNeon, $centerEmoji, $centerImgUrl);
+        // i=int s=string: enabled,spinCost,title,subtitle,expDays,streamId,ringColor,ringWidth,ringNeon,centerEmoji,centerImgUrl,centerSize,btnEmoji,btnImgUrl,btnImgSize
+        $stmt->bind_param('iissiisiissssss', $enabled, $spinCost, $title, $subtitle, $expDays, $streamId, $ringColor, $ringWidth, $ringNeon, $centerEmoji, $centerImgUrl, $centerSize, $btnEmoji, $btnImgUrl, $btnImgSize);
         $stmt->execute();
         $stmt->close();
     }
@@ -590,27 +622,29 @@ if (!function_exists('roulette_admin_save_section')) {
             $fontColor = '#ffffff';
         }
         $iconImageUrl = trim((string) ($data['icon_image_url'] ?? ''));
+        $iconSize     = in_array(trim((string) ($data['icon_size'] ?? '')), ['small','medium','large'], true) ? trim((string) $data['icon_size']) : 'medium';
 
         $stmt = $mysqli->prepare(
             'INSERT INTO win_points_roulette_sections
              (section_order, prize_type, prize_label, chance_percent, points_amount, coupon_discount_percent,
-              immunity_days, streaming_user_id, color, icon_emoji, active, font_size, font_color, icon_image_url)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              immunity_days, streaming_user_id, color, icon_emoji, active, font_size, font_color, icon_image_url, icon_size)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                prize_type=VALUES(prize_type), prize_label=VALUES(prize_label),
                chance_percent=VALUES(chance_percent), points_amount=VALUES(points_amount),
                coupon_discount_percent=VALUES(coupon_discount_percent), immunity_days=VALUES(immunity_days),
                streaming_user_id=VALUES(streaming_user_id), color=VALUES(color),
                icon_emoji=VALUES(icon_emoji), active=VALUES(active),
-               font_size=VALUES(font_size), font_color=VALUES(font_color), icon_image_url=VALUES(icon_image_url)'
+               font_size=VALUES(font_size), font_color=VALUES(font_color),
+               icon_image_url=VALUES(icon_image_url), icon_size=VALUES(icon_size)'
         );
         if (!$stmt) {
             return;
         }
-        $stmt->bind_param('issdiiiissiiss',
+        $stmt->bind_param('issdiiiissiisss',
             $sectionOrder, $prizeType, $prizeLabel, $chance,
             $points, $couponPct, $immunityDays, $streamId,
-            $color, $emoji, $active, $fontSize, $fontColor, $iconImageUrl
+            $color, $emoji, $active, $fontSize, $fontColor, $iconImageUrl, $iconSize
         );
         $stmt->execute();
         $stmt->close();
