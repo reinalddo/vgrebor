@@ -508,21 +508,104 @@ include __DIR__ . '/includes/header.php';
     .missions-admin-hero, .missions-admin-panel { padding: 1rem; }
   }
 
-  /* ── Historial: ocultar columnas secundarias en móvil ── */
+  /* ── Historial: tarjeta por usuario en móvil ── */
   @media (max-width:575.98px) {
-    #tab-historial .table thead th:nth-child(1),
-    #tab-historial .table thead th:nth-child(3),
-    #tab-historial .table thead th:nth-child(5),
-    #tab-historial .table tbody td:nth-child(1),
-    #tab-historial .table tbody td:nth-child(3),
-    #tab-historial .table tbody td:nth-child(5) { display: none; }
-
-    #tab-historial .table td:nth-child(6) { text-align: left; }
-    #tab-historial .table td:nth-child(2) .fw-semibold { font-size: .84rem; }
-
-    /* Formulario de filtros: botones en línea completa */
+    /* Filtros: stack completo */
     #tab-historial form .col-auto { width: 100%; }
     #tab-historial form .col-auto .btn { flex: 1; }
+
+    /* Tabla de usuarios: layout de tarjeta */
+    #tab-historial .missions-admin-table-wrap thead { display: none; }
+
+    #tab-historial .missions-admin-table-wrap .table tbody tr {
+      display: block;
+      padding: .9rem;
+      border-bottom: 1px solid rgba(255,255,255,.07);
+    }
+    #tab-historial .missions-admin-table-wrap .table tbody tr:last-child { border-bottom: none; }
+
+    #tab-historial .missions-admin-table-wrap .table tbody td {
+      display: block;
+      border: none;
+      padding: .15rem 0;
+    }
+    /* Ocultar #  y Registrado */
+    #tab-historial .missions-admin-table-wrap .table tbody td:nth-child(1),
+    #tab-historial .missions-admin-table-wrap .table tbody td:nth-child(5) { display: none; }
+
+    /* Email: gris y pequeño */
+    #tab-historial .missions-admin-table-wrap .table tbody td:nth-child(3) { font-size: .78rem; }
+
+    /* Acciones: padding superior y botón ancho completo */
+    #tab-historial .missions-admin-table-wrap .table tbody td:nth-child(6) { padding-top: .65rem; }
+    #tab-historial .missions-admin-table-wrap .btn-ver-historial { width: 100%; justify-content: center; }
+  }
+
+  /* ── Ruleta: secciones en tarjeta en móvil ── */
+  @media (max-width:767.98px) {
+    #tab-ruleta #rlt2SectionsTable thead { display: none; }
+
+    #tab-ruleta #rlt2SectionsTable tbody tr {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .35rem .6rem;
+      padding: .85rem;
+      border-bottom: 1px solid rgba(99,102,241,.15);
+      margin-bottom: .4rem;
+      background: rgba(255,255,255,.02);
+      border-radius: .6rem;
+    }
+    #tab-ruleta #rlt2SectionsTable tbody td { border: none; padding: 0; display: block; }
+
+    /* Número de sección */
+    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(1) {
+      grid-column: 1; align-self: center;
+      font-size: 1.1rem; font-weight: 700; color: #818cf8;
+    }
+    /* Checkbox activo */
+    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(2) {
+      grid-column: 2; text-align: right; align-self: center;
+    }
+    /* Emoji */
+    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(3) { grid-column: 1; }
+    /* Color */
+    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(4) { grid-column: 2; }
+    /* Tipo premio: fila completa */
+    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(5) { grid-column: 1 / -1; }
+    /* Etiqueta: fila completa */
+    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(6) { grid-column: 1 / -1; }
+    /* % Prob */
+    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(7) { grid-column: 1; }
+    /* WP */
+    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(8) { grid-column: 2; }
+    /* Cupón% */
+    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(9) { grid-column: 1; }
+    /* Inmunidad */
+    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(10) { grid-column: 2; }
+    /* Guardar */
+    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(11) { grid-column: 1; padding-top: .4rem; }
+    /* Mensaje */
+    #tab-ruleta #rlt2SectionsTable tbody td:nth-child(12) { grid-column: 2; align-self: center; padding-top: .4rem; }
+
+    /* Inputs y selects a ancho completo */
+    #tab-ruleta #rlt2SectionsTable .rlt2-inp[type="text"],
+    #tab-ruleta #rlt2SectionsTable .rlt2-inp[type="number"],
+    #tab-ruleta #rlt2SectionsTable select.rlt2-inp { width: 100% !important; }
+
+    /* Botón guardar a ancho completo */
+    #tab-ruleta #rlt2SectionsTable .rlt2-sect-btn { width: 100%; }
+
+    /* Labels inline antes de cada campo con data-label */
+    #tab-ruleta #rlt2SectionsTable td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      font-size: .64rem;
+      color: #6366f1;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      margin-bottom: .18rem;
+    }
   }
 
   /* ── Tareas y multiplicadores: tarjeta por tarea en móvil ── */
@@ -1533,21 +1616,21 @@ include __DIR__ . '/includes/header.php';
       const row = document.createElement('tr');
       row.dataset.order = ord;
       row.innerHTML = `
-        <td style="color:#818cf8;font-weight:700">${esc(ord)}</td>
-        <td><input type="checkbox" class="rlt2-sect-active" style="accent-color:#6366f1;cursor:pointer"${s.active?' checked':''}></td>
-        <td><input type="text" class="rlt2-inp rlt2-sect-emoji" value="${esc(s.icon_emoji||'🎁')}" maxlength="4" style="width:46px;text-align:center"></td>
-        <td>
+        <td style="color:#818cf8;font-weight:700">Sección ${esc(ord)}</td>
+        <td><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem;color:#c7d2fe;justify-content:flex-end"><input type="checkbox" class="rlt2-sect-active" style="accent-color:#6366f1;cursor:pointer"${s.active?' checked':''}> Activa</label></td>
+        <td data-label="Emoji"><input type="text" class="rlt2-inp rlt2-sect-emoji" value="${esc(s.icon_emoji||'🎁')}" maxlength="4" style="width:46px;text-align:center"></td>
+        <td data-label="Color">
           <div style="display:flex;align-items:center;gap:3px">
             <input type="color" class="rlt2-inp rlt2-sect-color" value="${esc(s.color||'#22d3ee')}">
             <input type="text" class="rlt2-inp rlt2-sect-color-hex" value="${esc(s.color||'#22d3ee')}" maxlength="7" style="width:70px">
           </div>
         </td>
-        <td><select class="rlt2-inp rlt2-sect-type" style="width:130px">${typeOpts}</select></td>
-        <td><input type="text" class="rlt2-inp rlt2-sect-label" value="${esc(s.prize_label||'')}" maxlength="60"></td>
-        <td><input type="number" class="rlt2-inp rlt2-sect-chance" value="${parseFloat(s.chance_percent||0).toFixed(1)}" min="0" max="100" step="0.5"></td>
-        <td><input type="number" class="rlt2-inp rlt2-sect-wp" value="${esc(s.points_amount||0)}" min="0"></td>
-        <td><input type="number" class="rlt2-inp rlt2-sect-coupon" value="${esc(s.coupon_discount_percent||0)}" min="0" max="100"></td>
-        <td><input type="number" class="rlt2-inp rlt2-sect-imm" value="${esc(s.immunity_days||0)}" min="0"></td>
+        <td data-label="Tipo premio"><select class="rlt2-inp rlt2-sect-type" style="width:130px">${typeOpts}</select></td>
+        <td data-label="Etiqueta"><input type="text" class="rlt2-inp rlt2-sect-label" value="${esc(s.prize_label||'')}" maxlength="60"></td>
+        <td data-label="% Prob."><input type="number" class="rlt2-inp rlt2-sect-chance" value="${parseFloat(s.chance_percent||0).toFixed(1)}" min="0" max="100" step="0.5"></td>
+        <td data-label="WP"><input type="number" class="rlt2-inp rlt2-sect-wp" value="${esc(s.points_amount||0)}" min="0"></td>
+        <td data-label="Cupón %"><input type="number" class="rlt2-inp rlt2-sect-coupon" value="${esc(s.coupon_discount_percent||0)}" min="0" max="100"></td>
+        <td data-label="Inmunidad días"><input type="number" class="rlt2-inp rlt2-sect-imm" value="${esc(s.immunity_days||0)}" min="0"></td>
         <td><button type="button" class="rlt2-sect-btn rlt2-sect-save">Guardar</button></td>
         <td><span class="rlt2-sect-msg"></span></td>
       `;
