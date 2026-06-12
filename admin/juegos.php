@@ -607,6 +607,17 @@ if ($gcatAssignResult instanceof mysqli_result) {
             <div class="mt-2">
                 <input type="text" id="gcatDescripcion" class="form-control form-control-sm" placeholder="Descripción opcional" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;">
             </div>
+            <div class="mt-2">
+                <label class="form-label" style="color:#00fff7;font-size:0.82rem;margin-bottom:0.3rem;">Mostrar en barra de menú del frontend</label>
+                <div class="d-flex flex-wrap gap-3">
+                    <?php foreach (['no' => 'No mostrar', 'imagen' => 'Solo imagen', 'texto' => 'Solo texto', 'imagen_texto' => 'Imagen + texto'] as $val => $lbl): ?>
+                    <label class="d-flex align-items-center gap-1" style="cursor:pointer;color:#8be9fd;font-size:0.82rem;">
+                        <input type="radio" name="gcatMostrarMenu" value="<?= $val ?>" <?= $val === 'no' ? 'checked' : '' ?> style="accent-color:#00fff7;">
+                        <?= $lbl ?>
+                    </label>
+                    <?php endforeach; ?>
+                </div>
+            </div>
             <div class="mt-2 d-flex align-items-center gap-3 flex-wrap">
                 <div style="flex:1;min-width:200px;">
                     <label class="form-label" style="color:#8be9fd;font-size:0.82rem;margin-bottom:0.2rem;">Imagen de categoría <span style="opacity:.6">(opcional)</span></label>
@@ -670,6 +681,17 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 </div>
                 <div class="mt-2">
                     <input type="text" class="form-control form-control-sm gcatEditDescripcion" value="<?= htmlspecialchars($gcat['descripcion'], ENT_QUOTES, 'UTF-8') ?>" placeholder="Descripción" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;">
+                </div>
+                <div class="mt-2">
+                    <label class="form-label" style="color:#00fff7;font-size:0.78rem;margin-bottom:0.25rem;">Mostrar en barra de menú</label>
+                    <div class="d-flex flex-wrap gap-3">
+                        <?php foreach (['no' => 'No', 'imagen' => 'Solo imagen', 'texto' => 'Solo texto', 'imagen_texto' => 'Imagen + texto'] as $mval => $mlbl): ?>
+                        <label class="d-flex align-items-center gap-1" style="cursor:pointer;color:#8be9fd;font-size:0.78rem;">
+                            <input type="radio" class="gcatEditMostrarMenu" name="gcatEditMostrarMenu_<?= (int) $gcat['id'] ?>" value="<?= $mval ?>" <?= ($gcat['mostrar_menu'] ?? 'no') === $mval ? 'checked' : '' ?> style="accent-color:#00fff7;">
+                            <?= $mlbl ?>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
                 </div>
                 <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
                     <?php if ($gcat['imagen'] !== ''): ?>
@@ -1449,14 +1471,15 @@ document.querySelectorAll('.js-refresh-discord-games').forEach((button) => {
         btn.disabled = true;
         try {
             await catsFetch('create', {
-                nombre:      document.getElementById('gcatNombre')?.value ?? '',
-                slug:        document.getElementById('gcatSlug')?.value ?? '',
-                descripcion: document.getElementById('gcatDescripcion')?.value ?? '',
-                icono:       document.getElementById('gcatIcono')?.value ?? '',
-                color:       document.getElementById('gcatColor')?.value ?? '#00fff7',
-                orden:       document.getElementById('gcatOrden')?.value ?? '0',
-                activa:      '1',
-                imagen:      document.getElementById('gcatImagen')?.files?.[0] ?? null,
+                nombre:        document.getElementById('gcatNombre')?.value ?? '',
+                slug:          document.getElementById('gcatSlug')?.value ?? '',
+                descripcion:   document.getElementById('gcatDescripcion')?.value ?? '',
+                icono:         document.getElementById('gcatIcono')?.value ?? '',
+                color:         document.getElementById('gcatColor')?.value ?? '#00fff7',
+                orden:         document.getElementById('gcatOrden')?.value ?? '0',
+                activa:        '1',
+                imagen:        document.getElementById('gcatImagen')?.files?.[0] ?? null,
+                mostrar_menu:  document.querySelector('input[name="gcatMostrarMenu"]:checked')?.value ?? 'no',
             });
             // Reload page so new category appears in PHP-rendered lists
             window.location.reload();
@@ -1506,6 +1529,7 @@ document.querySelectorAll('.js-refresh-discord-games').forEach((button) => {
                     orden:         editRow?.querySelector('.gcatEditOrden')?.value ?? '0',
                     imagen:        editRow?.querySelector('.gcatEditImagen')?.files?.[0] ?? null,
                     remove_imagen: editRow?.querySelector('.gcatEditRemoveImagen')?.value ?? '0',
+                    mostrar_menu:  editRow?.querySelector('.gcatEditMostrarMenu:checked')?.value ?? 'no',
                 });
                 window.location.reload();
             } catch (e) {

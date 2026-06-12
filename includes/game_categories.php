@@ -24,6 +24,10 @@ if (!function_exists('game_categories_ensure_schema')) {
         if ($cols instanceof mysqli_result && $cols->num_rows === 0) {
             $mysqli->query("ALTER TABLE juego_categorias ADD COLUMN imagen VARCHAR(500) NOT NULL DEFAULT '' AFTER color");
         }
+        $cols2 = $mysqli->query("SHOW COLUMNS FROM juego_categorias LIKE 'mostrar_menu'");
+        if ($cols2 instanceof mysqli_result && $cols2->num_rows === 0) {
+            $mysqli->query("ALTER TABLE juego_categorias ADD COLUMN mostrar_menu VARCHAR(20) NOT NULL DEFAULT 'no' AFTER imagen");
+        }
 
         $mysqli->query("CREATE TABLE IF NOT EXISTS juego_categoria_asignada (
             juego_id     INT NOT NULL,
@@ -81,8 +85,9 @@ if (!function_exists('game_category_normalize')) {
             'descripcion' => trim((string) ($row['descripcion'] ?? '')),
             'icono'       => trim((string) ($row['icono'] ?? '')),
             'color'       => trim((string) ($row['color'] ?? '')),
-            'imagen'      => trim((string) ($row['imagen'] ?? '')),
-            'orden'       => (int) ($row['orden'] ?? 0),
+            'imagen'       => trim((string) ($row['imagen'] ?? '')),
+            'mostrar_menu' => trim((string) ($row['mostrar_menu'] ?? 'no')),
+            'orden'        => (int) ($row['orden'] ?? 0),
             'activa'      => (int) ($row['activa'] ?? 1) === 1,
         ];
     }
@@ -140,17 +145,19 @@ if (!function_exists('game_category_create')) {
         $descripcion = trim((string) ($data['descripcion'] ?? ''));
         $icono       = trim((string) ($data['icono'] ?? ''));
         $color       = trim((string) ($data['color'] ?? ''));
-        $imagen      = trim((string) ($data['imagen'] ?? ''));
-        $orden       = max(0, (int) ($data['orden'] ?? 0));
-        $activa      = isset($data['activa']) && (int) $data['activa'] === 0 ? 0 : 1;
+        $imagen       = trim((string) ($data['imagen'] ?? ''));
+        $mostrarMenu  = in_array($data['mostrar_menu'] ?? '', ['imagen', 'texto', 'imagen_texto'], true)
+                        ? $data['mostrar_menu'] : 'no';
+        $orden        = max(0, (int) ($data['orden'] ?? 0));
+        $activa       = isset($data['activa']) && (int) $data['activa'] === 0 ? 0 : 1;
 
-        // ssssssii: nombre, slug, descripcion, icono, color, imagen (strings) + orden, activa (ints)
+        // sssssssii: nombre, slug, descripcion, icono, color, imagen, mostrar_menu (strings) + orden, activa (ints)
         $stmt = $mysqli->prepare(
-            'INSERT INTO juego_categorias (nombre, slug, descripcion, icono, color, imagen, orden, activa)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO juego_categorias (nombre, slug, descripcion, icono, color, imagen, mostrar_menu, orden, activa)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         if (!$stmt) return ['ok' => false, 'message' => 'Error interno de base de datos.'];
-        $stmt->bind_param('ssssssii', $nombre, $slug, $descripcion, $icono, $color, $imagen, $orden, $activa);
+        $stmt->bind_param('sssssssii', $nombre, $slug, $descripcion, $icono, $color, $imagen, $mostrarMenu, $orden, $activa);
         $ok         = $stmt->execute();
         $insertedId = (int) $mysqli->insert_id;
         $stmt->close();
@@ -185,18 +192,20 @@ if (!function_exists('game_category_update')) {
         $descripcion = trim((string) ($data['descripcion'] ?? $existing['descripcion']));
         $icono       = trim((string) ($data['icono'] ?? $existing['icono']));
         $color       = trim((string) ($data['color'] ?? $existing['color']));
-        $imagen      = array_key_exists('imagen', $data) ? trim((string) $data['imagen']) : $existing['imagen'];
-        $orden       = isset($data['orden']) ? max(0, (int) $data['orden']) : $existing['orden'];
-        $activa      = isset($data['activa']) ? ((int) $data['activa'] === 0 ? 0 : 1) : (int) $existing['activa'];
+        $imagen       = array_key_exists('imagen', $data) ? trim((string) $data['imagen']) : $existing['imagen'];
+        $mostrarMenu  = isset($data['mostrar_menu']) && in_array($data['mostrar_menu'], ['imagen', 'texto', 'imagen_texto'], true)
+                        ? $data['mostrar_menu'] : (isset($data['mostrar_menu']) ? 'no' : $existing['mostrar_menu']);
+        $orden        = isset($data['orden']) ? max(0, (int) $data['orden']) : $existing['orden'];
+        $activa       = isset($data['activa']) ? ((int) $data['activa'] === 0 ? 0 : 1) : (int) $existing['activa'];
 
-        // ssssssiii: nombre, slug, descripcion, icono, color, imagen (strings) + orden, activa, id (ints)
+        // sssssssiii: nombre, slug, descripcion, icono, color, imagen, mostrar_menu (strings) + orden, activa, id (ints)
         $stmt = $mysqli->prepare(
             'UPDATE juego_categorias
-             SET nombre=?, slug=?, descripcion=?, icono=?, color=?, imagen=?, orden=?, activa=?
+             SET nombre=?, slug=?, descripcion=?, icono=?, color=?, imagen=?, mostrar_menu=?, orden=?, activa=?
              WHERE id=?'
         );
         if (!$stmt) return ['ok' => false, 'message' => 'Error interno de base de datos.'];
-        $stmt->bind_param('ssssssiii', $nombre, $slug, $descripcion, $icono, $color, $imagen, $orden, $activa, $id);
+        $stmt->bind_param('sssssssiii', $nombre, $slug, $descripcion, $icono, $color, $imagen, $mostrarMenu, $orden, $activa, $id);
         $ok = $stmt->execute();
         $stmt->close();
 
@@ -388,6 +397,23 @@ if (!function_exists('games_list_with_categories')) {
                       $row['_cat_iconos'], $row['_cat_colores']);
                 $row['categories'] = $categories;
                 $rows[] = $row;
+            }
+        }
+        return $rows;
+    }
+}
+
+if (!function_exists('game_category_list_for_menu')) {
+    /** Retorna categorías activas que deben mostrarse en la barra de menú (mostrar_menu != 'no'). */
+    function game_category_list_for_menu(mysqli $mysqli): array {
+        game_categories_ensure_schema($mysqli);
+        $result = $mysqli->query(
+            "SELECT * FROM juego_categorias WHERE activa = 1 AND mostrar_menu != 'no' ORDER BY orden ASC, nombre ASC"
+        );
+        $rows = [];
+        if ($result instanceof mysqli_result) {
+            while ($row = $result->fetch_assoc()) {
+                $rows[] = game_category_normalize($row);
             }
         }
         return $rows;

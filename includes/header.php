@@ -242,7 +242,10 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       color: var(--theme-text);
     }
     body.site-topbar-enabled {
-      --site-topbar-height: 92px;
+      --site-topbar-height: 60px;
+    }
+    body.site-topbar-enabled.catbar-active {
+      --site-topbar-height: 100px;
     }
     body.site-media-background-active {
       background: var(--theme-bg-main);
@@ -297,16 +300,25 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       transform: none;
       width: 100%;
       z-index: 1045;
-      padding: 0.9rem 1.25rem;
+      padding: 0;
       border-radius: 0;
       border: 1px solid rgba(var(--theme-topbar-search-border-rgb), 0.28);
       background: rgba(var(--theme-topbar-bg-rgb), var(--site-topbar-opacity, 0.96));
       backdrop-filter: blur(16px);
       box-shadow: 0 16px 36px rgba(4, 10, 18, 0.28), 0 0 22px rgba(var(--theme-primary-rgb), 0.12);
       transition: background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-      flex-wrap: wrap;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+    }
+    .site-header-main-row {
+      display: flex;
       align-items: center;
-      gap: 0.85rem;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.5rem 1.1rem;
+      min-height: 60px;
+      flex-shrink: 0;
     }
     .site-topbar-enabled .site-brand {
       flex: 0 1 auto;
@@ -325,8 +337,8 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       opacity: 0.72;
     }
     .site-topbar-enabled .site-brand-logo {
-      width: 48px;
-      height: 48px;
+      width: 34px;
+      height: 34px;
       border-color: rgba(var(--theme-topbar-search-border-rgb), 0.42) !important;
       box-shadow: 0 0 18px rgba(var(--theme-primary-rgb), 0.16);
     }
@@ -342,8 +354,8 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     }
     .site-topbar-search-input {
       width: 100%;
-      min-height: 48px;
-      padding: 0.8rem 3rem 0.8rem 1rem;
+      min-height: 38px;
+      padding: 0.5rem 2.8rem 0.5rem 0.95rem;
       border-radius: 999px;
       border: 1px solid var(--theme-topbar-search-border);
       background: rgba(var(--theme-topbar-search-bg-rgb), 0.94);
@@ -494,9 +506,9 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     }
     .site-topbar-mobile-search-toggle {
       display: none;
-      width: 44px;
-      height: 44px;
-      flex: 0 0 44px;
+      width: 36px;
+      height: 36px;
+      flex: 0 0 36px;
       border-color: var(--theme-topbar-search-border) !important;
       background: rgba(var(--theme-topbar-search-bg-rgb), 0.92) !important;
       color: var(--theme-topbar-search-text) !important;
@@ -640,13 +652,18 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     }
     @media (max-width: 991.98px) {
       .site-topbar-enabled {
-        --site-topbar-height: 92px;
+        --site-topbar-height: 60px;
+      }
+      body.site-topbar-enabled.catbar-active {
+        --site-topbar-height: 100px;
       }
       .site-header-topbar {
-        padding: 0.85rem 0.9rem;
-        flex-wrap: nowrap;
-        gap: 0.75rem;
-        align-items: center;
+        padding: 0;
+      }
+      .site-header-main-row {
+        padding: 0.4rem 0.85rem;
+        gap: 0.6rem;
+        min-height: 56px;
         justify-content: flex-start !important;
       }
       .site-topbar-enabled #menu-toggle,
@@ -686,9 +703,12 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     }
     @media (max-width: 576px) {
       .site-header-topbar {
-        padding-left: 0.75rem;
-        padding-right: 0.75rem;
-        gap: 0.55rem;
+        padding: 0;
+      }
+      .site-header-main-row {
+        padding-left: 0.65rem;
+        padding-right: 0.65rem;
+        gap: 0.45rem;
         justify-content: flex-start !important;
       }
       .site-topbar-enabled .site-brand {
@@ -727,16 +747,24 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     }
     @media (max-width: 767.98px) {
       .site-topbar-enabled {
-        --site-topbar-height: 84px;
+        --site-topbar-height: 52px;
+      }
+      body.site-topbar-enabled.catbar-active {
+        --site-topbar-height: 92px;
       }
       .site-topbar-enabled .store-shell {
         padding-top: calc(var(--site-topbar-height) + 1rem) !important;
       }
       .site-header-topbar {
+        padding: 0;
+      }
+      .site-header-main-row {
         flex-wrap: nowrap;
-        gap: 0.7rem;
-        padding: 0.7rem 0.8rem;
+        gap: 0.55rem;
+        padding: 0.35rem 0.7rem;
         align-items: center;
+        min-height: 52px;
+        justify-content: flex-start !important;
       }
       .site-topbar-enabled .site-brand {
         flex: 1 1 auto;
@@ -744,8 +772,8 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         gap: 0.7rem !important;
       }
       .site-topbar-enabled .site-brand-logo {
-        width: 40px;
-        height: 40px;
+        width: 28px;
+        height: 28px;
       }
       .site-topbar-enabled .site-brand-copy {
         text-align: left !important;
@@ -831,8 +859,8 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         display: none !important;
       }
       body.site-topbar-enabled.site-user-authenticated .site-brand-logo {
-        width: 42px;
-        height: 42px;
+        width: 28px;
+        height: 28px;
       }
       body.site-topbar-enabled.site-user-authenticated #user-trigger {
         max-width: calc(100vw - 128px);
@@ -850,8 +878,8 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         display: none !important;
       }
       .site-topbar-enabled .site-brand-logo {
-        width: 42px;
-        height: 42px;
+        width: 28px;
+        height: 28px;
       }
       body.site-topbar-enabled.site-user-authenticated #user-trigger {
         max-width: calc(100vw - 118px);
@@ -866,10 +894,104 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         height: 32px !important;
       }
       body.site-topbar-enabled:not(.site-user-authenticated) .site-auth-trigger {
-        width: 42px;
-        height: 42px;
-        min-width: 42px !important;
+        width: 38px;
+        height: 38px;
+        min-width: 38px !important;
       }
+    }
+    /* ── Catbar (segunda fila dentro del header) ───────────────────────── */
+    .catbar-wrap {
+      display: none;
+      width: 100%;
+      border-top: 1px solid rgba(var(--theme-primary-rgb, 0 255 247), 0.12);
+    }
+    body.catbar-active .catbar-wrap { display: block; }
+    .catbar-inner {
+      display: flex;
+      align-items: center;
+      height: 40px;
+      padding: 0 0.4rem;
+      gap: 0.2rem;
+    }
+    .catbar-track-wrap { flex: 1; min-width: 0; overflow: hidden; }
+    .catbar-track {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      overflow-x: auto;
+      scroll-behavior: smooth;
+      scrollbar-width: none;
+      padding: 0.2rem 0.1rem;
+      transition: opacity 0.18s ease;
+    }
+    .catbar-track::-webkit-scrollbar { display: none; }
+    .catbar-track.is-fading { opacity: 0; pointer-events: none; }
+    .catbar-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.28rem;
+      white-space: nowrap;
+      padding: 0.15rem 0.6rem;
+      border-radius: 2rem;
+      border: 1px solid rgba(var(--theme-primary-rgb, 0 255 247), 0.22);
+      background: rgba(var(--theme-primary-rgb, 0 255 247), 0.06);
+      color: var(--theme-text, #e2e8f0);
+      font-size: 0.75rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      text-decoration: none;
+      flex-shrink: 0;
+      line-height: 1.3;
+    }
+    .catbar-item:hover,
+    .catbar-item:focus-visible {
+      background: rgba(var(--theme-primary-rgb, 0 255 247), 0.16);
+      border-color: rgba(var(--theme-primary-rgb, 0 255 247), 0.55);
+      color: var(--theme-primary, #00fff7);
+      outline: none;
+    }
+    .catbar-item img {
+      width: 18px;
+      height: 18px;
+      object-fit: cover;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+    .catbar-arrow {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      border: none;
+      color: rgba(var(--theme-primary-rgb, 0 255 247), 0.55);
+      padding: 0.2rem 0.3rem;
+      cursor: pointer;
+      font-size: 1.35rem;
+      line-height: 1;
+      transition: color 0.15s, opacity 0.15s;
+      flex-shrink: 0;
+    }
+    .catbar-arrow:hover { color: var(--theme-primary, #00fff7); }
+    .catbar-back-btn {
+      display: none;
+      align-items: center;
+      gap: 0.25rem;
+      background: transparent;
+      border: none;
+      color: rgba(var(--theme-primary-rgb, 0 255 247), 0.7);
+      font-size: 0.75rem;
+      padding: 0.2rem 0.45rem;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      border-right: 1px solid rgba(var(--theme-primary-rgb, 0 255 247), 0.15);
+      margin-right: 0.2rem;
+      transition: color 0.15s;
+    }
+    .catbar-back-btn:hover { color: var(--theme-primary, #00fff7); }
+    @media (min-width: 768px) {
+      .catbar-arrow { display: flex; }
     }
   </style>
   <script>
@@ -1207,15 +1329,16 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     <div class="position-absolute bottom-0 end-0 rounded-circle" style="height:16rem;width:16rem;background:rgba(var(--theme-success-rgb),0.10);filter:blur(48px);pointer-events:none;"></div>
 
     <div class="container-lg store-shell position-relative pb-5 pt-4" data-tenant="<?php echo htmlspecialchars($tenantSlugAttr, ENT_QUOTES, "UTF-8"); ?>">
-      <header class="site-header d-flex align-items-center justify-content-between gap-3<?php echo $topBarEnabled ? ' site-header-topbar' : ''; ?>"<?php echo $topBarEnabled ? ' data-site-topbar="1"' : ''; ?>>
+      <header class="site-header<?php echo $topBarEnabled ? ' d-flex flex-column site-header-topbar' : ' d-flex align-items-center justify-content-between gap-3'; ?>"<?php echo $topBarEnabled ? ' data-site-topbar="1"' : ''; ?>>
+        <?php if ($topBarEnabled): ?><div class="site-header-main-row"><?php endif; ?>
         <?php if ($showMenuToggle): ?>
-        <button id="menu-toggle" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center<?php echo $mobileOnlyMenuToggle ? ' site-mobile-only-toggle' : ''; ?>" style="width:44px;height:44px;" aria-label="Abrir menú">
+        <button id="menu-toggle" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center<?php echo $mobileOnlyMenuToggle ? ' site-mobile-only-toggle' : ''; ?>" style="width:38px;height:38px;" aria-label="Abrir menú">
           <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="currentColor" class="bi bi-list" viewBox="0 0 16 16">
             <path fill-rule="evenodd" d="M2.5 12.5a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1h-10a.5.5 0 0 1-.5-.5zm0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1h-10a.5.5 0 0 1-.5-.5zm0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1h-10a.5.5 0 0 1-.5-.5z"/>
           </svg>
         </button>
         <?php elseif ($topBarEnabled): ?>
-        <div aria-hidden="true" style="width:44px;height:44px;flex:0 0 44px;"></div>
+        <div aria-hidden="true" style="width:38px;height:38px;flex:0 0 38px;"></div>
         <?php endif; ?>
         <a href="<?php echo htmlspecialchars($homeUrl, ENT_QUOTES, 'UTF-8'); ?>" class="site-brand d-flex align-items-center justify-content-center gap-3 flex-grow-1 flex-sm-grow-0">
           <?php if ($brandLogo !== ''): ?>
@@ -1316,7 +1439,179 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
               <a href="<?php echo htmlspecialchars($logoutUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-danger w-100 rounded-3 border fw-semibold">Cerrar sesión</a>
             </div>
           <?php endif; ?>
+        </div><!-- /.site-auth-container -->
+        <?php if ($topBarEnabled): ?>
+        </div><!-- /.site-header-main-row -->
+        <?php
+        // ── Catbar (segunda fila dentro del header, solo frontend) ──────────
+        $catbarCategories = [];
+        if (!$headerIsAdminInterface && isset($mysqli) && function_exists('game_category_list_for_menu')) {
+            $catbarCategories = game_category_list_for_menu($mysqli);
+        } elseif (!$headerIsAdminInterface && isset($mysqli)) {
+            $gcatIncPath = __DIR__ . '/game_categories.php';
+            if (is_file($gcatIncPath)) {
+                require_once $gcatIncPath;
+                if (function_exists('game_category_list_for_menu')) {
+                    $catbarCategories = game_category_list_for_menu($mysqli);
+                }
+            }
+        }
+        if ($catbarCategories !== []):
+        ?>
+        <div class="catbar-wrap" id="siteCatbar" aria-label="Navegación por categorías">
+          <div class="catbar-inner">
+            <button class="catbar-back-btn" id="catbarBack" aria-label="Atrás">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+              </svg>
+              <span id="catbarBackLabel">Atrás</span>
+            </button>
+            <button class="catbar-arrow" id="catbarPrev" aria-label="Anterior" tabindex="-1">&#8249;</button>
+            <div class="catbar-track-wrap">
+              <div class="catbar-track" id="catbarTrack">
+                <?php foreach ($catbarCategories as $cbc):
+                  $cbMode    = $cbc['mostrar_menu'];
+                  $cbShowImg = in_array($cbMode, ['imagen', 'imagen_texto'], true);
+                  $cbShowTxt = in_array($cbMode, ['texto', 'imagen_texto'], true);
+                ?>
+                <button class="catbar-item" type="button"
+                        data-catbar-cat-id="<?= (int) $cbc['id'] ?>"
+                        aria-label="<?= htmlspecialchars($cbc['nombre'], ENT_QUOTES, 'UTF-8') ?>">
+                  <?php if ($cbShowImg && $cbc['imagen'] !== ''): ?>
+                    <img src="/<?= htmlspecialchars($cbc['imagen'], ENT_QUOTES, 'UTF-8') ?>"
+                         alt="<?= htmlspecialchars($cbc['nombre'], ENT_QUOTES, 'UTF-8') ?>">
+                  <?php elseif ($cbShowImg && $cbc['icono'] !== ''): ?>
+                    <span aria-hidden="true"><?= htmlspecialchars($cbc['icono'], ENT_QUOTES, 'UTF-8') ?></span>
+                  <?php endif; ?>
+                  <?php if ($cbShowTxt): ?>
+                    <span><?= ($cbc['icono'] !== '' && !$cbShowImg ? htmlspecialchars($cbc['icono'], ENT_QUOTES, 'UTF-8') . ' ' : '') . htmlspecialchars($cbc['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+                  <?php endif; ?>
+                </button>
+                <?php endforeach; ?>
+              </div>
+            </div>
+            <button class="catbar-arrow" id="catbarNext" aria-label="Siguiente" tabindex="-1">&#8250;</button>
+          </div>
         </div>
+        <script>
+        (function () {
+          'use strict';
+          var API     = <?= json_encode(app_path('/api/catbar.php'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+          var wrap    = document.getElementById('siteCatbar');
+          var track   = document.getElementById('catbarTrack');
+          var prev    = document.getElementById('catbarPrev');
+          var next    = document.getElementById('catbarNext');
+          var back    = document.getElementById('catbarBack');
+          var backLbl = document.getElementById('catbarBackLabel');
+          if (!wrap || !track) return;
+          document.body.classList.add('catbar-active');
+          var state      = 'cats';
+          var activeCatId = null;
+          var catsHtml   = track.innerHTML;
+          function updateArrows() {
+            var sl = track.scrollLeft, mw = track.scrollWidth - track.clientWidth;
+            if (prev) prev.style.opacity = sl > 4 ? '0.85' : '0.25';
+            if (next) next.style.opacity = sl < mw - 4 ? '0.85' : '0.25';
+          }
+          track.addEventListener('scroll', updateArrows, { passive: true });
+          if (prev) prev.addEventListener('click', function () { track.scrollBy({ left: -180, behavior: 'smooth' }); });
+          if (next) next.addEventListener('click', function () { track.scrollBy({ left: 180, behavior: 'smooth' }); });
+          if (back) back.addEventListener('click', function () {
+            if (state === 'games') showCats();
+            else if (state === 'packages') showGames(activeCatId);
+          });
+          function setBack(show, label) {
+            if (back) back.style.display = show ? 'flex' : 'none';
+            if (backLbl) backLbl.textContent = label || 'Atrás';
+          }
+          function fadeOut() {
+            track.classList.add('is-fading');
+            return new Promise(function (res) { setTimeout(res, 180); });
+          }
+          function fadeIn(html) {
+            track.innerHTML = html;
+            track.scrollLeft = 0;
+            bindItems();
+            return new Promise(function (res) {
+              requestAnimationFrame(function () {
+                track.classList.remove('is-fading');
+                updateArrows();
+                res();
+              });
+            });
+          }
+          function loadingHtml() {
+            return '<span style="opacity:.45;font-size:.75rem;padding:.15rem .55rem;">Cargando…</span>';
+          }
+          function emptyHtml(msg) {
+            return '<span style="opacity:.45;font-size:.75rem;padding:.15rem .55rem;">' + escHtml(msg) + '</span>';
+          }
+          function escHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          }
+          async function showCats() {
+            state = 'cats'; activeCatId = null;
+            setBack(false);
+            await fadeOut();
+            await fadeIn(catsHtml);
+          }
+          async function showGames(catId) {
+            state = 'games'; activeCatId = catId;
+            setBack(true, '← Categor\xedas');
+            await fadeOut();
+            await fadeIn(loadingHtml());
+            try {
+              var r = await fetch(API + '?action=games&cat_id=' + catId);
+              var j = await r.json();
+              if (!j.ok || !j.games || j.games.length === 0) {
+                await fadeIn(emptyHtml('Sin juegos en esta categor\xeda'));
+                return;
+              }
+              var html = j.games.map(function (g) {
+                var img = g.imagen ? '<img src="/' + escHtml(g.imagen) + '" alt="">' : '';
+                return '<button class="catbar-item" type="button" data-catbar-game-id="' + escHtml(g.id) + '" data-catbar-game-url="' + escHtml(g.url) + '">' + img + '<span>' + escHtml(g.nombre) + '</span></button>';
+              }).join('');
+              await fadeIn(html);
+            } catch (e) {
+              await fadeIn(emptyHtml('Error al cargar'));
+            }
+          }
+          async function showPackages(gameId, gameUrl) {
+            state = 'packages';
+            setBack(true, '← Juegos');
+            await fadeOut();
+            await fadeIn(loadingHtml());
+            try {
+              var r = await fetch(API + '?action=packages&game_id=' + gameId);
+              var j = await r.json();
+              if (!j.ok || !j.packages || j.packages.length === 0) {
+                if (gameUrl) window.location.href = gameUrl;
+                else await fadeIn(emptyHtml('Sin paquetes disponibles'));
+                return;
+              }
+              var html = j.packages.map(function (p) {
+                var img = p.imagen_icono ? '<img src="/' + escHtml(p.imagen_icono) + '" alt="">' : '';
+                return '<a class="catbar-item" href="' + escHtml(p.url) + '">' + img + '<span>' + escHtml(p.nombre) + '</span></a>';
+              }).join('');
+              await fadeIn(html);
+            } catch (e) {
+              await fadeIn(emptyHtml('Error al cargar'));
+            }
+          }
+          function bindItems() {
+            track.querySelectorAll('[data-catbar-cat-id]').forEach(function (btn) {
+              btn.addEventListener('click', function () { showGames(btn.dataset.catbarCatId); });
+            });
+            track.querySelectorAll('[data-catbar-game-id]').forEach(function (btn) {
+              btn.addEventListener('click', function () { showPackages(btn.dataset.catbarGameId, btn.dataset.catbarGameUrl); });
+            });
+          }
+          bindItems();
+          updateArrows();
+        })();
+        </script>
+        <?php endif; ?>
+        <?php endif; ?>
       </header>
 
       <?php
