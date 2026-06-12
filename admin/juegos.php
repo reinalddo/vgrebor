@@ -7,6 +7,7 @@ require_once '../includes/store_config.php';
 require_once '../includes/api_discord.php';
 require_once '../includes/game_entry_window_per_game.php';
 require_once '../includes/slugify.php';
+require_once '../includes/game_categories.php';
 
 function admin_games_is_ajax_request(): bool {
     if (isset($_REQUEST['ajax']) && (string) $_REQUEST['ajax'] === '1') {
@@ -353,6 +354,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
     $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_discord=?, activo=?, moneda_fija_id=? WHERE id=?");
     $stmt->bind_param('ssssssiissiii', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_discord, $edit_activo, $edit_moneda_fija_id, $edit_id);
     $stmt->execute();
+    $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
+    game_set_categories($mysqli, $edit_id, $catIds);
     admin_games_redirect($adminGamesUrl);
 }
 
@@ -379,6 +382,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $stmt->bind_param('ssssssiiissii', $nombre, $imagen, $imagen_hero, $imagen_paquete, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_discord, $activo, $orden);
     $stmt->execute();
     $juego_id = $mysqli->insert_id;
+    $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
+    game_set_categories($mysqli, (int) $juego_id, $catIds);
     // Características seleccionadas del select múltiple
     if (!empty($_POST['caracteristicas_select'])) {
         foreach ($_POST['caracteristicas_select'] as $car) {
@@ -423,6 +428,22 @@ if ($resPaquetes instanceof mysqli_result) {
         $paquetesPorJuego[(int) $row['juego_id']] = (int) $row['total'];
     }
 }
+// Categorías de juegos
+game_categories_ensure_schema($mysqli);
+$allCategories = game_category_list($mysqli);
+// Precargar categorías asignadas por juego
+$gameCategories = [];
+$gcatAssignResult = $mysqli->query(
+    "SELECT a.juego_id, c.id AS cat_id, c.nombre, c.icono, c.color
+     FROM juego_categoria_asignada a
+     INNER JOIN juego_categorias c ON c.id = a.categoria_id
+     ORDER BY c.orden ASC, c.nombre ASC"
+);
+if ($gcatAssignResult instanceof mysqli_result) {
+    while ($gcRow = $gcatAssignResult->fetch_assoc()) {
+        $gameCategories[(int) $gcRow['juego_id']][] = $gcRow;
+    }
+}
 ?>
 <?php include '../includes/header.php'; ?>
 <main class="container-lg mt-5 bg-dark bg-opacity-75 rounded-4 p-4 shadow">
@@ -439,6 +460,7 @@ if ($resPaquetes instanceof mysqli_result) {
             $res_edit->bind_param('i', $edit_id);
             $res_edit->execute();
             $juego_edit = $res_edit->get_result()->fetch_assoc();
+            $editGameCatIds = $juego_edit ? game_get_category_ids($mysqli, $edit_id) : [];
             if ($juego_edit):
     ?>
     <div class="fixed-top w-100 h-100 d-flex align-items-start justify-content-center" style="background:rgba(0,0,0,0.7);z-index:1050;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:1rem;">
@@ -524,12 +546,151 @@ if ($resPaquetes instanceof mysqli_result) {
                 <?php endif; ?>
                 <input type="file" name="edit_imagen_paquete" accept="image/*" class="form-control mt-2" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
             </div>
+            <?php if ($allCategories !== []): ?>
+            <div class="mb-3">
+                <label class="form-label text-neon">Categorías</label>
+                <div class="d-flex flex-wrap gap-2" style="max-height:160px;overflow-y:auto;background:#0f1a28;border:1px solid #1e3a5f;border-radius:8px;padding:0.6rem;">
+                    <?php foreach ($allCategories as $gcat): ?>
+                    <label class="d-flex align-items-center gap-2 px-2 py-1 rounded-2" style="cursor:pointer;background:#182030;border:1px solid #1e3a5f;user-select:none;">
+                        <input type="checkbox" name="cat_ids[]" value="<?= (int) $gcat['id'] ?>"
+                               <?= in_array((int) $gcat['id'], $editGameCatIds, true) ? 'checked' : '' ?>
+                               style="accent-color:#00fff7;width:1rem;height:1rem;">
+                        <?php if ($gcat['icono'] !== ''): ?><span><?= htmlspecialchars($gcat['icono'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                        <span style="color:#00fff7;font-size:0.9rem;"><?= htmlspecialchars($gcat['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+                    </label>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <?php else: ?>
+            <div class="mb-3">
+                <label class="form-label text-neon">Categorías</label>
+                <div class="small" style="color:#8be9fd;">Crea categorías en la sección «Categorías» para poder asignarlas.</div>
+            </div>
+            <?php endif; ?>
             <button type="submit" name="edit_juego_submit" class="btn neon-btn-info w-100 mt-3">Guardar cambios</button>
             <a href="<?= htmlspecialchars($adminGamesUrl, ENT_QUOTES, 'UTF-8') ?>" class="position-absolute top-0 end-0 m-3 text-neon fs-3" style="text-decoration:none;">&times;</a>
         </form>
     </div>
     <?php endif; }
     ?>
+    <!-- ═══ GESTIÓN DE CATEGORÍAS ════════════════════════════════════════ -->
+    <section class="mb-5" id="gcatSection">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+            <h3 style="color:#00fff7;margin:0;">Categorías de juegos</h3>
+            <button type="button" id="gcatToggleCreate" class="btn btn-sm" style="background:transparent;border:1px solid #00fff7;color:#00fff7;padding:0.3rem 0.9rem;">+ Nueva categoría</button>
+        </div>
+
+        <!-- Formulario crear categoría -->
+        <div id="gcatCreateForm" style="display:none;background:#182030;border:1px solid #00fff7;border-radius:10px;padding:1rem;margin-bottom:1rem;">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4 col-sm-6">
+                    <label class="form-label" style="color:#00fff7;font-size:0.85rem;margin-bottom:0.25rem;">Nombre *</label>
+                    <input type="text" id="gcatNombre" class="form-control form-control-sm" placeholder="ej. Battle Royale" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <label class="form-label" style="color:#8be9fd;font-size:0.85rem;margin-bottom:0.25rem;">Slug <span style="opacity:.6">(auto)</span></label>
+                    <input type="text" id="gcatSlug" class="form-control form-control-sm" placeholder="battle-royale" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;">
+                </div>
+                <div class="col-md-2 col-6">
+                    <label class="form-label" style="color:#00fff7;font-size:0.85rem;margin-bottom:0.25rem;">Icono / Emoji</label>
+                    <input type="text" id="gcatIcono" class="form-control form-control-sm text-center" placeholder="🎮" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;font-size:1.2rem;">
+                </div>
+                <div class="col-md-2 col-6">
+                    <label class="form-label" style="color:#00fff7;font-size:0.85rem;margin-bottom:0.25rem;">Color</label>
+                    <input type="color" id="gcatColor" value="#00fff7" class="form-control form-control-color form-control-sm" style="background:#222c3a;border:1px solid #00fff7;width:100%;height:34px;">
+                </div>
+                <div class="col-md-1 col-6">
+                    <label class="form-label" style="color:#8be9fd;font-size:0.85rem;margin-bottom:0.25rem;">Orden</label>
+                    <input type="number" id="gcatOrden" value="0" min="0" class="form-control form-control-sm" style="background:#222c3a;color:#00fff7;border:1px solid #1e3a5f;">
+                </div>
+            </div>
+            <div class="mt-2">
+                <input type="text" id="gcatDescripcion" class="form-control form-control-sm" placeholder="Descripción opcional" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;">
+            </div>
+            <div class="mt-2 d-flex align-items-center gap-3 flex-wrap">
+                <div style="flex:1;min-width:200px;">
+                    <label class="form-label" style="color:#8be9fd;font-size:0.82rem;margin-bottom:0.2rem;">Imagen de categoría <span style="opacity:.6">(opcional)</span></label>
+                    <input type="file" id="gcatImagen" accept="image/*" class="form-control form-control-sm" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;">
+                </div>
+                <div id="gcatImagenPreview" style="display:none;">
+                    <img id="gcatImagenPreviewImg" style="max-height:54px;border-radius:6px;border:1px solid #1e3a5f;" alt="preview">
+                </div>
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-3 flex-wrap">
+                <button type="button" id="gcatCreateBtn" class="btn btn-sm" style="background:#00fff7;color:#111;border:none;font-weight:600;">Crear categoría</button>
+                <button type="button" id="gcatCancelCreate" class="btn btn-sm" style="background:transparent;border:1px solid #555;color:#aaa;">Cancelar</button>
+                <span id="gcatCreateStatus" class="small" style="color:#ff5e8a;"></span>
+            </div>
+        </div>
+
+        <!-- Lista de categorías -->
+        <div id="gcatList">
+            <?php if ($allCategories === []): ?>
+            <p class="small" style="color:#8be9fd;">Aún no hay categorías. Crea la primera con el botón de arriba.</p>
+            <?php else: ?>
+            <?php foreach ($allCategories as $gcat): ?>
+            <div class="gcatRow d-flex align-items-center gap-3 p-2 rounded-3 mb-2 flex-wrap" data-id="<?= (int) $gcat['id'] ?>" style="background:#182030;border:1px solid #1e3a5f;">
+                <?php if ($gcat['imagen'] !== ''): ?>
+                <img src="/<?= htmlspecialchars($gcat['imagen'], ENT_QUOTES, 'UTF-8') ?>" style="width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid #1e3a5f;flex-shrink:0;" alt="">
+                <?php endif; ?>
+                <span style="font-size:1.3em;min-width:1.5rem;text-align:center;"><?= $gcat['icono'] !== '' ? htmlspecialchars($gcat['icono'], ENT_QUOTES, 'UTF-8') : '📁' ?></span>
+                <span style="width:12px;height:12px;border-radius:50%;background:<?= htmlspecialchars($gcat['color'] ?: '#00fff7', ENT_QUOTES, 'UTF-8') ?>;display:inline-block;flex-shrink:0;"></span>
+                <strong style="color:#00fff7;flex:1;min-width:100px;"><?= htmlspecialchars($gcat['nombre'], ENT_QUOTES, 'UTF-8') ?></strong>
+                <code style="color:#8be9fd;font-size:0.8rem;opacity:.8;"><?= htmlspecialchars($gcat['slug'], ENT_QUOTES, 'UTF-8') ?></code>
+                <?php if ($gcat['descripcion'] !== ''): ?>
+                <span style="color:#b2f6ff;font-size:0.82rem;opacity:.8;"><?= htmlspecialchars($gcat['descripcion'], ENT_QUOTES, 'UTF-8') ?></span>
+                <?php endif; ?>
+                <div class="d-flex gap-2 ms-auto flex-shrink-0">
+                    <button type="button" class="btn btn-sm gcatEditBtn" data-id="<?= (int) $gcat['id'] ?>" style="border:1px solid #00fff7;color:#00fff7;background:transparent;padding:0.1rem 0.55rem;font-size:0.82rem;">Editar</button>
+                    <button type="button" class="btn btn-sm gcatDeleteBtn" data-id="<?= (int) $gcat['id'] ?>" data-nombre="<?= htmlspecialchars($gcat['nombre'], ENT_QUOTES, 'UTF-8') ?>" style="border:1px solid #ff5e8a;color:#ff5e8a;background:transparent;padding:0.1rem 0.55rem;font-size:0.82rem;">Eliminar</button>
+                </div>
+            </div>
+            <div class="gcatEditRow" id="gcatEdit_<?= (int) $gcat['id'] ?>" style="display:none;background:#182030;border:1px solid #00fff7;border-radius:10px;padding:0.75rem;margin-bottom:0.5rem;">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-4 col-sm-6">
+                        <label class="form-label" style="color:#00fff7;font-size:0.8rem;margin-bottom:0.2rem;">Nombre *</label>
+                        <input type="text" class="form-control form-control-sm gcatEditNombre" value="<?= htmlspecialchars($gcat['nombre'], ENT_QUOTES, 'UTF-8') ?>" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <label class="form-label" style="color:#8be9fd;font-size:0.8rem;margin-bottom:0.2rem;">Slug</label>
+                        <input type="text" class="form-control form-control-sm gcatEditSlug" value="<?= htmlspecialchars($gcat['slug'], ENT_QUOTES, 'UTF-8') ?>" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;">
+                    </div>
+                    <div class="col-md-2 col-6">
+                        <label class="form-label" style="color:#00fff7;font-size:0.8rem;margin-bottom:0.2rem;">Icono</label>
+                        <input type="text" class="form-control form-control-sm gcatEditIcono text-center" value="<?= htmlspecialchars($gcat['icono'], ENT_QUOTES, 'UTF-8') ?>" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;font-size:1.1rem;">
+                    </div>
+                    <div class="col-md-2 col-6">
+                        <label class="form-label" style="color:#00fff7;font-size:0.8rem;margin-bottom:0.2rem;">Color</label>
+                        <input type="color" class="form-control form-control-color form-control-sm gcatEditColor" value="<?= htmlspecialchars($gcat['color'] ?: '#00fff7', ENT_QUOTES, 'UTF-8') ?>" style="background:#222c3a;border:1px solid #00fff7;width:100%;height:32px;">
+                    </div>
+                    <div class="col-md-1 col-6">
+                        <label class="form-label" style="color:#8be9fd;font-size:0.8rem;margin-bottom:0.2rem;">Orden</label>
+                        <input type="number" class="form-control form-control-sm gcatEditOrden" value="<?= (int) $gcat['orden'] ?>" min="0" style="background:#222c3a;color:#00fff7;border:1px solid #1e3a5f;">
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <input type="text" class="form-control form-control-sm gcatEditDescripcion" value="<?= htmlspecialchars($gcat['descripcion'], ENT_QUOTES, 'UTF-8') ?>" placeholder="Descripción" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;">
+                </div>
+                <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
+                    <?php if ($gcat['imagen'] !== ''): ?>
+                    <img src="/<?= htmlspecialchars($gcat['imagen'], ENT_QUOTES, 'UTF-8') ?>" class="gcatCurrentImgThumb" style="max-height:40px;border-radius:5px;border:1px solid #1e3a5f;" alt="">
+                    <button type="button" class="btn btn-sm gcatRemoveImgBtn" style="border:1px solid #ff5e8a;color:#ff5e8a;background:transparent;font-size:0.78rem;padding:0.1rem 0.5rem;">✕ Quitar imagen</button>
+                    <?php endif; ?>
+                    <input type="hidden" class="gcatEditRemoveImagen" value="0">
+                    <input type="file" class="gcatEditImagen form-control form-control-sm" accept="image/*" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;max-width:260px;">
+                </div>
+                <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                    <button type="button" class="btn btn-sm gcatSaveEditBtn" data-id="<?= (int) $gcat['id'] ?>" style="background:#00fff7;color:#111;border:none;font-weight:600;">Guardar</button>
+                    <button type="button" class="btn btn-sm gcatCancelEditBtn" data-id="<?= (int) $gcat['id'] ?>" style="border:1px solid #555;color:#aaa;background:transparent;">Cancelar</button>
+                    <span class="gcatEditStatus small" style="color:#ff5e8a;"></span>
+                </div>
+            </div>
+            <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </section>
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+
     <h2 class="text-center mb-4" style="color:#00fff7;">Gestión de Juegos</h2>
     <form method="post" enctype="multipart/form-data" class="row g-3 mb-4" style="background:#181f2a; border-radius:16px; border:2px solid #00fff7; box-shadow:0 0 24px #00fff733; padding:2rem;">
         <div class="col-md-6">
@@ -624,6 +785,20 @@ if ($resPaquetes instanceof mysqli_result) {
             </div>
             <button type="button" onclick="addCarField()" class="btn btn-outline-info btn-sm" style="border-color:#00fff7; color:#00fff7;">Agregar nueva característica</button>
         </div>
+        <?php if ($allCategories !== []): ?>
+        <div class="col-12">
+            <label class="form-label" style="color:#00fff7;">Categorías del juego</label>
+            <div class="d-flex flex-wrap gap-2 p-2 rounded-3" style="background:#0f1a28;border:1px solid #1e3a5f;min-height:2.5rem;">
+                <?php foreach ($allCategories as $gcat): ?>
+                <label class="d-flex align-items-center gap-2 px-2 py-1 rounded-2" style="cursor:pointer;background:#182030;border:1px solid #1e3a5f;user-select:none;">
+                    <input type="checkbox" name="cat_ids[]" value="<?= (int) $gcat['id'] ?>" style="accent-color:#00fff7;width:1rem;height:1rem;">
+                    <?php if ($gcat['icono'] !== ''): ?><span><?= htmlspecialchars($gcat['icono'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                    <span style="color:#00fff7;font-size:0.9rem;"><?= htmlspecialchars($gcat['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+                </label>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <?php endif; ?>
         <div class="col-12">
             <button type="submit" class="btn btn-info w-100" style="background:#00fff7; color:#222; border:none; box-shadow:0 0 8px #00fff7;">Agregar juego</button>
         </div>
@@ -665,6 +840,9 @@ if ($resPaquetes instanceof mysqli_result) {
                         <?php if ($discordApiEnabled && !empty($j['categoria_api_discord'])): ?>
                             <div class="small mt-1"><span style="display:inline-flex;align-items:center;gap:0.35rem;padding:0.2rem 0.55rem;border-radius:999px;border:1px solid rgba(192,132,252,0.7);background:rgba(168,85,247,0.12);color:#e9d5ff;font-weight:700;letter-spacing:0.04em;">API Discord: <?= htmlspecialchars((string) $j['categoria_api_discord'], ENT_QUOTES, 'UTF-8') ?></span></div>
                         <?php endif; ?>
+                        <?php foreach ($gameCategories[(int) $j['id']] ?? [] as $gc): ?>
+                            <div class="small mt-1"><span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.15rem 0.5rem;border-radius:999px;border:1px solid <?= htmlspecialchars($gc['color'] ?: '#00fff7', ENT_QUOTES, 'UTF-8') ?>55;background:<?= htmlspecialchars($gc['color'] ?: '#00fff7', ENT_QUOTES, 'UTF-8') ?>18;color:<?= htmlspecialchars($gc['color'] ?: '#00fff7', ENT_QUOTES, 'UTF-8') ?>;font-weight:600;font-size:0.78rem;"><?= $gc['icono'] !== '' ? htmlspecialchars($gc['icono'], ENT_QUOTES, 'UTF-8') . ' ' : '' ?><?= htmlspecialchars($gc['nombre'], ENT_QUOTES, 'UTF-8') ?></span></div>
+                        <?php endforeach; ?>
                     </td>
                     <td class="text-center" style="background:#181f2a;">
                         <form method="post" action="<?= htmlspecialchars($adminGamesUrl, ENT_QUOTES, 'UTF-8') ?>" class="d-inline-flex align-items-center gap-2 m-0 js-ajax-order-form">
@@ -757,6 +935,9 @@ if ($resPaquetes instanceof mysqli_result) {
                             <?php if ($discordApiEnabled && !empty($j['categoria_api_discord'])): ?>
                                 <div class="mt-1"><span style="display:inline-flex;align-items:center;gap:0.35rem;padding:0.2rem 0.55rem;border-radius:999px;border:1px solid rgba(192,132,252,0.7);background:rgba(168,85,247,0.12);color:#e9d5ff;font-weight:700;font-size:0.78rem;letter-spacing:0.04em;">API Discord: <?= htmlspecialchars((string) $j['categoria_api_discord'], ENT_QUOTES, 'UTF-8') ?></span></div>
                             <?php endif; ?>
+                            <?php foreach ($gameCategories[(int) $j['id']] ?? [] as $gc): ?>
+                                <div class="mt-1"><span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.15rem 0.5rem;border-radius:999px;border:1px solid <?= htmlspecialchars($gc['color'] ?: '#00fff7', ENT_QUOTES, 'UTF-8') ?>55;background:<?= htmlspecialchars($gc['color'] ?: '#00fff7', ENT_QUOTES, 'UTF-8') ?>18;color:<?= htmlspecialchars($gc['color'] ?: '#00fff7', ENT_QUOTES, 'UTF-8') ?>;font-weight:600;font-size:0.78rem;"><?= $gc['icono'] !== '' ? htmlspecialchars($gc['icono'], ENT_QUOTES, 'UTF-8') . ' ' : '' ?><?= htmlspecialchars($gc['nombre'], ENT_QUOTES, 'UTF-8') ?></span></div>
+                            <?php endforeach; ?>
                             <div style="font-size:0.85rem; color:#b2f6ff;">Orden: <?= max(1, (int) ($j['orden'] ?? 0)) ?></div>
                             <div class="text-muted" style="font-size:0.85rem; color:#b2f6ff;">ID: <?= $j['id'] ?></div>
                             <div class="mt-2">
@@ -1220,5 +1401,176 @@ document.querySelectorAll('.js-refresh-discord-games').forEach((button) => {
         }
     });
 });
+
+// ═══ CATEGORÍAS DE JUEGOS ════════════════════════════════════════════════
+(function () {
+    const CATS_URL = '<?= htmlspecialchars(app_path('/admin/juego-categorias'), ENT_QUOTES, 'UTF-8') ?>';
+
+    async function catsFetch(action, data) {
+        const fd = new FormData();
+        fd.append('action', action);
+        if (data) {
+            for (const [k, v] of Object.entries(data)) {
+                if (v == null) continue;
+                if (Array.isArray(v)) {
+                    v.forEach(item => fd.append(k + '[]', item instanceof File ? item : String(item)));
+                } else if (v instanceof File) {
+                    fd.append(k, v);
+                } else {
+                    fd.append(k, String(v));
+                }
+            }
+        }
+        const resp = await fetch(CATS_URL, {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: fd
+        });
+        const json = await resp.json().catch(() => null);
+        if (!resp.ok || !json || !json.ok) {
+            throw new Error((json && json.message) ? json.message : 'Error de red');
+        }
+        return json;
+    }
+
+    // Crear categoría
+    document.getElementById('gcatToggleCreate')?.addEventListener('click', () => {
+        const f = document.getElementById('gcatCreateForm');
+        if (f) f.style.display = f.style.display === 'none' ? '' : 'none';
+    });
+    document.getElementById('gcatCancelCreate')?.addEventListener('click', () => {
+        const f = document.getElementById('gcatCreateForm');
+        if (f) f.style.display = 'none';
+    });
+    document.getElementById('gcatCreateBtn')?.addEventListener('click', async () => {
+        const status = document.getElementById('gcatCreateStatus');
+        const btn = document.getElementById('gcatCreateBtn');
+        if (status) status.textContent = '';
+        btn.disabled = true;
+        try {
+            await catsFetch('create', {
+                nombre:      document.getElementById('gcatNombre')?.value ?? '',
+                slug:        document.getElementById('gcatSlug')?.value ?? '',
+                descripcion: document.getElementById('gcatDescripcion')?.value ?? '',
+                icono:       document.getElementById('gcatIcono')?.value ?? '',
+                color:       document.getElementById('gcatColor')?.value ?? '#00fff7',
+                orden:       document.getElementById('gcatOrden')?.value ?? '0',
+                activa:      '1',
+                imagen:      document.getElementById('gcatImagen')?.files?.[0] ?? null,
+            });
+            // Reload page so new category appears in PHP-rendered lists
+            window.location.reload();
+        } catch (e) {
+            if (status) { status.textContent = e.message; }
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    // Editar categoría (botones renderizados por PHP)
+    document.querySelectorAll('.gcatEditBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            const row = btn.closest('.gcatRow');
+            const editRow = document.getElementById('gcatEdit_' + id);
+            if (row) row.style.display = 'none';
+            if (editRow) editRow.style.display = '';
+        });
+    });
+
+    document.querySelectorAll('.gcatCancelEditBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            const row = document.querySelector('.gcatRow[data-id="' + id + '"]');
+            const editRow = document.getElementById('gcatEdit_' + id);
+            if (editRow) editRow.style.display = 'none';
+            if (row) row.style.display = '';
+        });
+    });
+
+    document.querySelectorAll('.gcatSaveEditBtn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const id = btn.dataset.id;
+            const editRow = document.getElementById('gcatEdit_' + id);
+            const status = editRow?.querySelector('.gcatEditStatus');
+            if (status) status.textContent = '';
+            btn.disabled = true;
+            try {
+                await catsFetch('update', {
+                    id,
+                    nombre:        editRow?.querySelector('.gcatEditNombre')?.value ?? '',
+                    slug:          editRow?.querySelector('.gcatEditSlug')?.value ?? '',
+                    descripcion:   editRow?.querySelector('.gcatEditDescripcion')?.value ?? '',
+                    icono:         editRow?.querySelector('.gcatEditIcono')?.value ?? '',
+                    color:         editRow?.querySelector('.gcatEditColor')?.value ?? '#00fff7',
+                    orden:         editRow?.querySelector('.gcatEditOrden')?.value ?? '0',
+                    imagen:        editRow?.querySelector('.gcatEditImagen')?.files?.[0] ?? null,
+                    remove_imagen: editRow?.querySelector('.gcatEditRemoveImagen')?.value ?? '0',
+                });
+                window.location.reload();
+            } catch (e) {
+                if (status) status.textContent = e.message;
+                btn.disabled = false;
+            }
+        });
+    });
+
+    document.querySelectorAll('.gcatDeleteBtn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!window.confirm('¿Eliminar la categoría "' + (btn.dataset.nombre || '') + '"?\nSe desvinculará de todos los juegos.')) return;
+            btn.disabled = true;
+            try {
+                await catsFetch('delete', { id: btn.dataset.id });
+                window.location.reload();
+            } catch (e) {
+                window.alert(e.message);
+                btn.disabled = false;
+            }
+        });
+    });
+
+    // Preview imagen en formulario de crear
+    document.getElementById('gcatImagen')?.addEventListener('change', function () {
+        const preview    = document.getElementById('gcatImagenPreview');
+        const previewImg = document.getElementById('gcatImagenPreviewImg');
+        if (this.files?.[0] && preview && previewImg) {
+            previewImg.src = URL.createObjectURL(this.files[0]);
+            preview.style.display = '';
+        } else if (preview) {
+            preview.style.display = 'none';
+        }
+    });
+
+    // Preview imagen nueva en filas de edición
+    document.querySelectorAll('.gcatEditImagen').forEach(input => {
+        input.addEventListener('change', function () {
+            if (!this.files?.[0]) return;
+            const editRow = this.closest('.gcatEditRow');
+            if (!editRow) return;
+            let thumb = editRow.querySelector('.gcatCurrentImgThumb');
+            if (!thumb) {
+                thumb = document.createElement('img');
+                thumb.className = 'gcatCurrentImgThumb';
+                thumb.style.cssText = 'max-height:40px;border-radius:5px;border:1px solid #1e3a5f;';
+                this.closest('.mt-2.d-flex').prepend(thumb);
+            }
+            thumb.src = URL.createObjectURL(this.files[0]);
+            thumb.style.display = '';
+        });
+    });
+
+    // Botón "Quitar imagen" en edición
+    document.querySelectorAll('.gcatRemoveImgBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const editRow = btn.closest('.gcatEditRow');
+            if (!editRow) return;
+            const thumb = editRow.querySelector('.gcatCurrentImgThumb');
+            if (thumb) thumb.style.display = 'none';
+            const removeInput = editRow.querySelector('.gcatEditRemoveImagen');
+            if (removeInput) removeInput.value = '1';
+            btn.style.display = 'none';
+        });
+    });
+})();
 </script>
 <?php include '../includes/footer.php'; ?>
