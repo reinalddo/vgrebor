@@ -2272,6 +2272,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           data-remaining-count="<?php echo $dailyMissionRemaining; ?>"
           data-streak="<?php echo $dailyMissionStreak; ?>"
           data-immunity="<?php echo $dailyMissionImmunity; ?>"
+          data-user-id="<?php echo $dailyMissionsUserId; ?>"
         >
           <div class="accordion" id="daily-missions-accordion">
             <div class="accordion-item daily-mission-panel">
@@ -3938,7 +3939,6 @@ SCRIPT,
     };
 
     const requestMissionUpdate = async (action, body) => {
-      console.log('[daily_missions] request:', action, body || {});
       const response = await fetch(missionApiUrl, {
         method: "POST",
         credentials: "same-origin",
@@ -3949,8 +3949,11 @@ SCRIPT,
         body: new URLSearchParams(Object.assign({ action: action }, body || {})).toString(),
       });
 
+      if (response.status === 401) {
+        throw new Error('unauthenticated');
+      }
+
       const data = await response.json().catch(() => ({}));
-      console.log('[daily_missions] response for', action, response.status, data);
       if (!response.ok || !data.ok) {
         throw new Error(data.message || "No se pudo actualizar la misión.");
       }
@@ -4042,7 +4045,6 @@ SCRIPT,
     const refreshMissionStatus = () => {
       requestMissionUpdate("status", {})
         .then((data) => {
-          console.log('[daily_missions] status payload:', data.payload || {});
           applyMissionPayload(data.payload || {});
         })
         .catch(() => {
@@ -4074,9 +4076,7 @@ SCRIPT,
       if (actionElement.hasAttribute("data-daily-mission-chest")) {
         event.preventDefault();
         const clickedChest = actionElement.closest('[data-daily-mission-chest]') || missionChestShell;
-        console.log('[daily_missions] chest click; clickedChest, missionShell datasets:', clickedChest ? clickedChest.dataset : null, missionShell ? missionShell.dataset : null);
         if (!clickedChest || clickedChest.disabled || missionShell.dataset.canOpenChest !== "1") {
-          console.log('[daily_missions] abort open: clickedChest?', !!clickedChest, 'disabled?', clickedChest ? clickedChest.disabled : 'n/a', 'canOpenChest?', missionShell.dataset.canOpenChest);
           return;
         }
 
@@ -4086,12 +4086,10 @@ SCRIPT,
 
         requestMissionUpdate("open_chest", {})
           .then((data) => {
-            console.log('[daily_missions] open_chest result:', data);
             applyMissionPayload(data.payload || {});
             showMissionModal(data.result || {}, data.payload || {});
           })
           .catch((error) => {
-            console.warn('[daily_missions] open_chest error:', error && error.message ? error.message : error);
             setText(missionStateDescription, error.message || "No se pudo abrir el cofre.");
           })
           .finally(() => {
@@ -4157,6 +4155,10 @@ SCRIPT,
         closeMissionModal();
       }
     });
+
+    if (!parseInt(missionShell.dataset.userId || '0', 10)) {
+      return;
+    }
 
     try {
       const _dmBc = new BroadcastChannel('vg_daily_missions');
