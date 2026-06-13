@@ -676,9 +676,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       .site-topbar-enabled .site-brand {
         order: 1;
         flex: 0 1 auto;
-        flex-grow: 0 !important;
         min-width: 0;
-        margin-right: auto;
         justify-content: flex-start !important;
       }
       .site-topbar-enabled .site-auth-container {
@@ -692,8 +690,10 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         align-items: center;
         justify-content: center;
         order: 2;
-        margin-left: 0 !important;
+        margin-left: auto !important;
         flex: 0 0 44px;
+        width: 44px;
+        height: 44px;
       }
       .site-topbar-enabled .site-auth-trigger,
       .site-topbar-enabled #user-trigger {
@@ -713,8 +713,6 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       }
       .site-topbar-enabled .site-brand {
         flex: 0 1 auto;
-        flex-grow: 0 !important;
-        margin-right: auto;
         justify-content: flex-start !important;
       }
       .site-topbar-enabled .site-auth-container {
@@ -722,8 +720,10 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         margin-left: 0 !important;
       }
       .site-topbar-mobile-search-toggle {
-        margin-left: 0 !important;
+        margin-left: auto !important;
         flex: 0 0 44px;
+        width: 44px;
+        height: 44px;
       }
       .site-topbar-search-input {
         min-height: 44px;
@@ -767,9 +767,10 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         justify-content: flex-start !important;
       }
       .site-topbar-enabled .site-brand {
-        flex: 1 1 auto;
+        flex: 0 1 auto;
         min-width: 0;
         gap: 0.7rem !important;
+        justify-content: flex-start !important;
       }
       .site-topbar-enabled .site-brand-logo {
         width: 28px;
@@ -795,30 +796,32 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       }
       body.site-topbar-enabled.site-user-authenticated .site-brand {
         display: inline-flex !important;
-        flex: 1 1 auto;
+        flex: 0 1 auto;
         min-width: 0;
       }
       body.site-topbar-enabled.site-user-authenticated .site-auth-container {
         display: block;
-        margin-left: auto;
-        flex: 0 1 auto;
+        margin-left: 0;
+        flex: 0 0 auto;
       }
       body.site-topbar-enabled.site-user-authenticated #user-trigger {
-        width: auto;
         min-width: 0 !important;
-        max-width: calc(100vw - 148px);
-        padding: 0.55rem 0.9rem !important;
-        gap: 0.7rem !important;
+        width: 44px;
+        height: 44px;
+        padding: 0.35rem !important;
+        gap: 0 !important;
+        border-radius: 50% !important;
+        justify-content: center;
       }
-      body.site-topbar-enabled.site-user-authenticated #user-trigger .small {
-        display: none;
+      body.site-topbar-enabled.site-user-authenticated #user-trigger-text {
+        display: none !important;
       }
-      body.site-topbar-enabled.site-user-authenticated #user-trigger-name {
-        max-width: 150px;
+      body.site-topbar-enabled.site-user-authenticated #user-trigger > svg {
+        display: none !important;
       }
       body.site-topbar-enabled.site-user-authenticated #user-trigger-initials {
-        width: 34px !important;
-        height: 34px !important;
+        width: 36px !important;
+        height: 36px !important;
       }
       .site-topbar-enabled .site-auth-trigger {
         padding: 0.55rem 0.78rem !important;
@@ -853,7 +856,6 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       }
       body.site-topbar-enabled.site-user-authenticated .site-brand {
         flex: 0 1 auto;
-        margin-right: auto;
       }
       body.site-topbar-enabled.site-user-authenticated .site-brand-copy {
         display: none !important;
@@ -861,13 +863,6 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       body.site-topbar-enabled.site-user-authenticated .site-brand-logo {
         width: 28px;
         height: 28px;
-      }
-      body.site-topbar-enabled.site-user-authenticated #user-trigger {
-        max-width: calc(100vw - 128px);
-        padding: 0.5rem 0.8rem !important;
-      }
-      body.site-topbar-enabled.site-user-authenticated #user-trigger-name {
-        max-width: 118px;
       }
     }
     @media (max-width: 399.98px) {
@@ -880,14 +875,6 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       .site-topbar-enabled .site-brand-logo {
         width: 28px;
         height: 28px;
-      }
-      body.site-topbar-enabled.site-user-authenticated #user-trigger {
-        max-width: calc(100vw - 118px);
-        gap: 0.55rem !important;
-        padding: 0.46rem 0.72rem !important;
-      }
-      body.site-topbar-enabled.site-user-authenticated #user-trigger-name {
-        max-width: 94px;
       }
       body.site-topbar-enabled.site-user-authenticated #user-trigger-initials {
         width: 32px !important;
@@ -1391,7 +1378,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                 <img id="user-trigger-avatar" src="<?php echo htmlspecialchars($authUserProfileImageUrl, ENT_QUOTES, 'UTF-8'); ?>" alt="Foto de perfil" class="w-100 h-100 object-fit-cover<?php echo $authUserProfileImageUrl === '' ? ' d-none' : ''; ?>">
                 <span id="user-trigger-initials-text" class="<?php echo $authUserProfileImageUrl !== '' ? 'd-none' : ''; ?>"><?php echo htmlspecialchars($authUserInitials, ENT_QUOTES, 'UTF-8'); ?></span>
               </span>
-              <span class="d-flex flex-column align-items-start text-start lh-sm flex-grow-1 overflow-hidden">
+              <span id="user-trigger-text" class="d-flex flex-column align-items-start text-start lh-sm flex-grow-1 overflow-hidden">
                 <span class="small text-uppercase fw-bold" style="letter-spacing:0.15em;opacity:0.7;">Mi cuenta</span>
                 <span id="user-trigger-name" class="fw-bold text-truncate w-100"><?php echo htmlspecialchars($authUserName, ENT_QUOTES, 'UTF-8'); ?></span>
               </span>
