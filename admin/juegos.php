@@ -8,6 +8,8 @@ require_once '../includes/api_discord.php';
 require_once '../includes/game_entry_window_per_game.php';
 require_once '../includes/slugify.php';
 require_once '../includes/game_categories.php';
+require_once '../includes/package_features.php';
+require_once '../includes/game_sticker.php';
 
 function admin_games_is_ajax_request(): bool {
     if (isset($_REQUEST['ajax']) && (string) $_REQUEST['ajax'] === '1') {
@@ -187,6 +189,7 @@ ensure_juegos_categoria_api_discord_column($mysqli);
 ensure_juegos_orden_column($mysqli);
 ensure_juegos_slug_column($mysqli);
 ensure_juegos_imagen_hero_column($mysqli);
+game_sticker_ensure_schema($mysqli);
 
 $adminGamesUrl = app_path('/admin/juegos');
 $adminPackagesBaseUrl = app_path('/admin/paquetes');
@@ -276,10 +279,10 @@ if (isset($_GET['eliminar'])) {
     $stmt->bind_param('i', $del_id);
     $stmt->execute();
     // Eliminar imagen del juego
-    $stmt_img = $mysqli->prepare("SELECT imagen, imagen_hero, imagen_paquete FROM juegos WHERE id=?");
+    $stmt_img = $mysqli->prepare("SELECT imagen, imagen_hero, imagen_paquete, sticker_imagen FROM juegos WHERE id=?");
     $stmt_img->bind_param('i', $del_id);
     $stmt_img->execute();
-    $stmt_img->bind_result($img_juego, $img_juego_hero, $img_juego_paquete);
+    $stmt_img->bind_result($img_juego, $img_juego_hero, $img_juego_paquete, $img_sticker);
     $stmt_img->fetch();
     $stmt_img->close();
     if ($img_juego) {
@@ -290,6 +293,9 @@ if (isset($_GET['eliminar'])) {
     }
     if ($img_juego_paquete) {
         admin_game_delete_upload((string) $img_juego_paquete);
+    }
+    if ($img_sticker) {
+        game_sticker_delete_image((string) $img_sticker);
     }
     // Eliminar el juego
     $stmt = $mysqli->prepare("DELETE FROM juegos WHERE id=?");
@@ -303,7 +309,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
     $edit_id = intval($_POST['edit_juego_id']);
     $currentGame = null;
     if ($edit_id > 0) {
-        $currentGameStmt = $mysqli->prepare("SELECT categoria_api_discord, imagen, imagen_paquete, imagen_hero FROM juegos WHERE id = ? LIMIT 1");
+        $currentGameStmt = $mysqli->prepare("SELECT categoria_api_discord, imagen, imagen_paquete, imagen_hero, sticker_imagen FROM juegos WHERE id = ? LIMIT 1");
         if ($currentGameStmt) {
             $currentGameStmt->bind_param('i', $edit_id);
             $currentGameStmt->execute();
@@ -351,8 +357,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
     $nextHeroImage = $remove_edit_imagen_hero ? '' : ($edit_imagen_hero ?? $currentHeroImage);
     $nextPackageImage = $edit_imagen_paquete ?? $currentPackageImage;
 
-    $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_discord=?, activo=?, moneda_fija_id=? WHERE id=?");
-    $stmt->bind_param('ssssssiissiii', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_discord, $edit_activo, $edit_moneda_fija_id, $edit_id);
+    $edit_sticker_ico_custom = trim((string) ($_POST['edit_sticker_icono_custom'] ?? ''));
+    $edit_sticker_ico_preset = trim((string) ($_POST['edit_sticker_icono_select'] ?? ''));
+    $edit_sticker_icono       = $edit_sticker_ico_custom !== '' ? $edit_sticker_ico_custom : $edit_sticker_ico_preset;
+    $edit_sticker_texto       = mb_substr(trim((string) ($_POST['edit_sticker_texto'] ?? '')), 0, 80, 'UTF-8');
+    $rawStickerColor          = trim((string) ($_POST['edit_sticker_color_fondo'] ?? ''));
+    $edit_sticker_color_fondo = preg_match('/^#[0-9a-fA-F]{3,6}$/', $rawStickerColor) ? $rawStickerColor : '#0f1a2e';
+    $currentStickerImage      = (string) ($currentGame['sticker_imagen'] ?? '');
+    $stickerUpload            = game_sticker_store_upload($_FILES['edit_sticker_imagen'] ?? []);
+    $removeStickerImg         = isset($_POST['remove_edit_sticker_imagen']);
+    if ($stickerUpload['ok'] && $stickerUpload['path'] !== '') {
+        if ($currentStickerImage !== '') {
+            game_sticker_delete_image($currentStickerImage);
+        }
+        $edit_sticker_imagen = $stickerUpload['path'];
+    } elseif ($removeStickerImg) {
+        if ($currentStickerImage !== '') {
+            game_sticker_delete_image($currentStickerImage);
+        }
+        $edit_sticker_imagen = '';
+    } else {
+        $edit_sticker_imagen = $currentStickerImage;
+    }
+
+    $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_discord=?, activo=?, moneda_fija_id=?, sticker_texto=?, sticker_icono=?, sticker_color_fondo=?, sticker_imagen=? WHERE id=?");
+    // Types: 6s(nombre..imagen_paquete) + 2i(popular,api_ff) + 2s(cat_api,cat_discord) + 2i(activo,moneda) + 4s(stickers) + 1i(WHERE id) = 17
+    $stmt->bind_param('ssssss'.'ii'.'ss'.'ii'.'ssss'.'i', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_discord, $edit_activo, $edit_moneda_fija_id, $edit_sticker_texto, $edit_sticker_icono, $edit_sticker_color_fondo, $edit_sticker_imagen, $edit_id);
     $stmt->execute();
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
     game_set_categories($mysqli, $edit_id, $catIds);
@@ -378,8 +408,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $imagen = admin_game_store_upload($_FILES['imagen'] ?? [], 'juego_');
     $imagen_hero = admin_game_store_upload($_FILES['imagen_hero'] ?? [], 'juegohero_');
     $imagen_paquete = admin_game_store_upload($_FILES['imagen_paquete'] ?? [], 'juegopaq_');
-    $stmt = $mysqli->prepare("INSERT INTO juegos (nombre, imagen, imagen_hero, imagen_paquete, descripcion, slug, moneda_fija_id, popular, api_free_fire, categoria_api, categoria_api_discord, activo, orden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('ssssssiiissii', $nombre, $imagen, $imagen_hero, $imagen_paquete, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_discord, $activo, $orden);
+    $sticker_ico_custom   = trim((string) ($_POST['sticker_icono_custom'] ?? ''));
+    $sticker_ico_preset   = trim((string) ($_POST['sticker_icono_select'] ?? ''));
+    $sticker_icono        = $sticker_ico_custom !== '' ? $sticker_ico_custom : $sticker_ico_preset;
+    $sticker_texto        = mb_substr(trim((string) ($_POST['sticker_texto'] ?? '')), 0, 80, 'UTF-8');
+    $rawStickerColorC     = trim((string) ($_POST['sticker_color_fondo'] ?? ''));
+    $sticker_color_fondo  = preg_match('/^#[0-9a-fA-F]{3,6}$/', $rawStickerColorC) ? $rawStickerColorC : '#0f1a2e';
+    $stickerUploadC       = game_sticker_store_upload($_FILES['sticker_imagen'] ?? []);
+    $sticker_imagen       = ($stickerUploadC['ok'] && $stickerUploadC['path'] !== '') ? $stickerUploadC['path'] : '';
+    $stmt = $mysqli->prepare("INSERT INTO juegos (nombre, imagen, imagen_hero, imagen_paquete, descripcion, slug, moneda_fija_id, popular, api_free_fire, categoria_api, categoria_api_discord, activo, orden, sticker_texto, sticker_icono, sticker_color_fondo, sticker_imagen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    // Types: 6s(nombre..slug) + 3i(moneda,popular,api_ff) + 2s(cat_api,cat_discord) + 2i(activo,orden) + 4s(stickers) = 17
+    $stmt->bind_param('ssssss'.'iii'.'ss'.'ii'.'ssss', $nombre, $imagen, $imagen_hero, $imagen_paquete, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_discord, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen);
     $stmt->execute();
     $juego_id = $mysqli->insert_id;
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
@@ -545,6 +584,57 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     <img src="/<?= htmlspecialchars($juego_edit['imagen_paquete']) ?>" alt="Imagen paquete actual" class="mb-2 rounded" style="max-width:80px;max-height:80px;border:2px solid #00fff7;background:#222c3a;box-shadow:0 0 8px #00fff7;">
                 <?php endif; ?>
                 <input type="file" name="edit_imagen_paquete" accept="image/*" class="form-control mt-2" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+            </div>
+            <!-- STICKER / BADGE -->
+            <?php
+            $editStickerSymbols     = game_sticker_icon_symbols();
+            $editStickerCurrentIcon = (string) ($juego_edit['sticker_icono'] ?? '');
+            $editStickerIsPreset    = isset($editStickerSymbols[$editStickerCurrentIcon]);
+            $editStickerPresetVal   = $editStickerIsPreset ? $editStickerCurrentIcon : '';
+            $editStickerCustomVal   = $editStickerIsPreset ? '' : $editStickerCurrentIcon;
+            ?>
+            <div class="mb-3 p-3" style="border:1px solid #7b2fff;border-radius:8px;background:#130828;">
+                <div class="mb-2 fw-bold" style="color:#c77dff;font-size:0.9rem;letter-spacing:0.04em;">STICKER / BADGE</div>
+                <div class="row g-2 mb-2">
+                    <div class="col-sm-6">
+                        <label class="form-label" style="color:#c77dff;font-size:0.85rem;">Icono predefinido</label>
+                        <select name="edit_sticker_icono_select" class="form-select" style="background:#1a0a30;color:#c77dff;border:1px solid #7b2fff;font-size:0.92rem;">
+                            <option value="">— Sin icono —</option>
+                            <?php foreach ($editStickerSymbols as $symKey => $symEmoji): ?>
+                                <option value="<?= htmlspecialchars($symKey, ENT_QUOTES, 'UTF-8') ?>" <?= $editStickerPresetVal === $symKey ? 'selected' : '' ?>>
+                                    <?= $symEmoji ?> <?= htmlspecialchars(ucwords(str_replace('_', ' ', $symKey)), ENT_QUOTES, 'UTF-8') ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-sm-6">
+                        <label class="form-label" style="color:#c77dff;font-size:0.85rem;">Emoji propio <span style="color:#8be9fd;font-weight:400;">(sobreescribe el predefinido)</span></label>
+                        <input type="text" name="edit_sticker_icono_custom" value="<?= htmlspecialchars($editStickerCustomVal, ENT_QUOTES, 'UTF-8') ?>" class="form-control" style="background:#1a0a30;color:#c77dff;border:1px solid #7b2fff;" placeholder="ej: 🔥 💎 ⚡">
+                    </div>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-sm-8">
+                        <label class="form-label" style="color:#c77dff;font-size:0.85rem;">Texto del sticker</label>
+                        <input type="text" name="edit_sticker_texto" value="<?= htmlspecialchars((string) ($juego_edit['sticker_texto'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" class="form-control" style="background:#1a0a30;color:#c77dff;border:1px solid #7b2fff;" placeholder="Más vendido, Oferta, Nuevo…" maxlength="80">
+                    </div>
+                    <div class="col-sm-4">
+                        <label class="form-label" style="color:#c77dff;font-size:0.85rem;">Color de fondo</label>
+                        <input type="color" name="edit_sticker_color_fondo" value="<?= htmlspecialchars(!empty($juego_edit['sticker_color_fondo']) ? $juego_edit['sticker_color_fondo'] : '#7b2fff', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-color w-100" style="background:#1a0a30;border:1px solid #7b2fff;height:38px;padding:2px 4px;">
+                    </div>
+                </div>
+                <div>
+                    <label class="form-label" style="color:#c77dff;font-size:0.85rem;">Imagen del sticker <span style="color:#8be9fd;font-weight:400;">PNG/WebP con transparencia · max 2 MB</span></label>
+                    <?php if (!empty($juego_edit['sticker_imagen'])): ?>
+                    <div class="mb-2 d-flex align-items-center gap-3">
+                        <img src="/<?= htmlspecialchars(ltrim((string) $juego_edit['sticker_imagen'], '/'), ENT_QUOTES, 'UTF-8') ?>" alt="Sticker actual" style="max-width:60px;max-height:60px;border:1px solid #7b2fff;border-radius:6px;background:#1a0a30;object-fit:contain;">
+                        <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;color:#ff6b6b;font-size:0.85rem;">
+                            <input type="checkbox" name="remove_edit_sticker_imagen" style="accent-color:#ff6b6b;width:1rem;height:1rem;">
+                            Eliminar imagen del sticker
+                        </label>
+                    </div>
+                    <?php endif; ?>
+                    <input type="file" name="edit_sticker_imagen" accept="image/*" class="form-control" style="background:#1a0a30;color:#c77dff;border:1px solid #7b2fff;">
+                </div>
             </div>
             <?php if ($allCategories !== []): ?>
             <div class="mb-3">
@@ -806,6 +896,43 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 <input type="text" name="caracteristicas[]" placeholder="Nueva característica" class="form-control mb-2" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;">
             </div>
             <button type="button" onclick="addCarField()" class="btn btn-outline-info btn-sm" style="border-color:#00fff7; color:#00fff7;">Agregar nueva característica</button>
+        </div>
+        <!-- STICKER / BADGE -->
+        <div class="col-12">
+            <div class="p-3" style="border:1px solid #7b2fff;border-radius:8px;background:#130828;">
+                <div class="mb-2 fw-bold" style="color:#c77dff;font-size:0.9rem;letter-spacing:0.04em;">STICKER / BADGE</div>
+                <div class="row g-2 mb-2">
+                    <div class="col-sm-6">
+                        <label class="form-label" style="color:#c77dff;font-size:0.85rem;">Icono predefinido</label>
+                        <select name="sticker_icono_select" class="form-select" style="background:#1a0a30;color:#c77dff;border:1px solid #7b2fff;font-size:0.92rem;">
+                            <option value="">— Sin icono —</option>
+                            <?php foreach (game_sticker_icon_symbols() as $symKey => $symEmoji): ?>
+                                <option value="<?= htmlspecialchars($symKey, ENT_QUOTES, 'UTF-8') ?>">
+                                    <?= $symEmoji ?> <?= htmlspecialchars(ucwords(str_replace('_', ' ', $symKey)), ENT_QUOTES, 'UTF-8') ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-sm-6">
+                        <label class="form-label" style="color:#c77dff;font-size:0.85rem;">Emoji propio <span style="color:#8be9fd;font-weight:400;">(sobreescribe el predefinido)</span></label>
+                        <input type="text" name="sticker_icono_custom" class="form-control" style="background:#1a0a30;color:#c77dff;border:1px solid #7b2fff;" placeholder="ej: 🔥 💎 ⚡">
+                    </div>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-sm-8">
+                        <label class="form-label" style="color:#c77dff;font-size:0.85rem;">Texto del sticker</label>
+                        <input type="text" name="sticker_texto" class="form-control" style="background:#1a0a30;color:#c77dff;border:1px solid #7b2fff;" placeholder="Más vendido, Oferta, Nuevo…" maxlength="80">
+                    </div>
+                    <div class="col-sm-4">
+                        <label class="form-label" style="color:#c77dff;font-size:0.85rem;">Color de fondo</label>
+                        <input type="color" name="sticker_color_fondo" value="#7b2fff" class="form-control form-control-color w-100" style="background:#1a0a30;border:1px solid #7b2fff;height:38px;padding:2px 4px;">
+                    </div>
+                </div>
+                <div>
+                    <label class="form-label" style="color:#c77dff;font-size:0.85rem;">Imagen del sticker <span style="color:#8be9fd;font-weight:400;">PNG/WebP con transparencia · max 2 MB</span></label>
+                    <input type="file" name="sticker_imagen" accept="image/*" class="form-control" style="background:#1a0a30;color:#c77dff;border:1px solid #7b2fff;">
+                </div>
+            </div>
         </div>
         <?php if ($allCategories !== []): ?>
         <div class="col-12">
