@@ -717,7 +717,7 @@ include __DIR__ . "/includes/header.php";
         <strong id="public-order-summary-total" class="payment-order-summary-total-value">-</strong>
       </div>
       <button type="submit" id="buy-button" form="order-form" class="payment-order-summary-buy-btn" disabled>
-        Comprar Ahora
+        Continuar con la Compra
       </button>
       <?php if ($winPointsEnabled && $loggedUserId <= 0): ?>
         <div id="win-points-guest-hint" class="win-points-guest-hint mt-3">
@@ -4473,7 +4473,7 @@ include __DIR__ . "/includes/header.php";
   const orderEmailInput = orderForm ? orderForm.querySelector('input[name="email"]') : null;
   const buyButton = document.getElementById("buy-button");
   const accountSaleNote = document.getElementById('account-sale-note');
-  const defaultBuyButtonLabel = 'Comprar Ahora';
+  const defaultBuyButtonLabel = 'Continuar con la Compra';
   const paymentDifferenceBlockedBuyButtonLabel = 'Selecciona un paquete mayor al saldo a favor';
   const defaultPaymentSubmitButtonLabel = 'Confirmar / Recargar';
   const completeRechargeButtonLabel = 'Completar Recarga';

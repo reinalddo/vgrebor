@@ -692,7 +692,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         .promo-slider-shell {
           position: relative;
           /* fixed responsive height so side and center share the same baseline */
-          height: clamp(240px, 30vw, 460px);
+          height: clamp(168px, 21vw, 322px);
           overflow: visible;
         }
         .promo-slider-track {
@@ -797,9 +797,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           text-shadow: 0 2px 8px rgba(3, 7, 18, 0.9), 0 0 14px rgba(3, 7, 18, 0.4);
         }
         .promo-dots {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
+          display: none;
         }
         .promo-dot {
           appearance: none;
@@ -841,7 +839,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             margin-right: calc(var(--bs-gutter-x, 1.5rem) * -0.5);
           }
           .promo-slider-shell {
-            height: min(66vw, 420px);
+            height: min(46vw, 294px);
           }
           .promo-slide-card {
             left: 0;

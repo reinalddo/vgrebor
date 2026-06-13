@@ -976,14 +976,12 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     .catbar-back-btn {
       display: none;
       align-items: center;
-      gap: 0.25rem;
+      justify-content: center;
       background: transparent;
       border: none;
       color: rgba(var(--theme-primary-rgb, 0 255 247), 0.7);
-      font-size: 0.75rem;
-      padding: 0.2rem 0.45rem;
+      padding: 0.2rem 0.5rem;
       cursor: pointer;
-      white-space: nowrap;
       flex-shrink: 0;
       border-right: 1px solid rgba(var(--theme-primary-rgb, 0 255 247), 0.15);
       margin-right: 0.2rem;
@@ -1461,10 +1459,9 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         <div class="catbar-wrap" id="siteCatbar" aria-label="Navegación por categorías">
           <div class="catbar-inner">
             <button class="catbar-back-btn" id="catbarBack" aria-label="Atrás">
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
               </svg>
-              <span id="catbarBackLabel">Atrás</span>
             </button>
             <button class="catbar-arrow" id="catbarPrev" aria-label="Anterior" tabindex="-1">&#8249;</button>
             <div class="catbar-track-wrap">
@@ -1502,7 +1499,6 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
           var prev    = document.getElementById('catbarPrev');
           var next    = document.getElementById('catbarNext');
           var back    = document.getElementById('catbarBack');
-          var backLbl = document.getElementById('catbarBackLabel');
           if (!wrap || !track) return;
           document.body.classList.add('catbar-active');
           var state      = 'cats';
@@ -1520,9 +1516,8 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
             if (state === 'games') showCats();
             else if (state === 'packages') showGames(activeCatId);
           });
-          function setBack(show, label) {
+          function setBack(show) {
             if (back) back.style.display = show ? 'flex' : 'none';
-            if (backLbl) backLbl.textContent = label || 'Atrás';
           }
           function fadeOut() {
             track.classList.add('is-fading');
@@ -1557,7 +1552,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
           }
           async function showGames(catId) {
             state = 'games'; activeCatId = catId;
-            setBack(true, '← Categor\xedas');
+            setBack(true);
             await fadeOut();
             await fadeIn(loadingHtml());
             try {
@@ -1578,7 +1573,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
           }
           async function showPackages(gameId, gameUrl) {
             state = 'packages';
-            setBack(true, '← Juegos');
+            setBack(true);
             await fadeOut();
             await fadeIn(loadingHtml());
             try {
