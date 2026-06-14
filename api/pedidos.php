@@ -8322,6 +8322,18 @@ if ($action === 'submit_payment') {
         $packageApiId = (int) ($updatedOrder['paquete_api'] ?? 0);
         $orderPlayerFields = order_player_fields_from_json((string) ($updatedOrder['player_fields_json'] ?? ''));
 
+        $claimStmt = $mysqli->prepare("UPDATE pedidos SET estado = 'pagado' WHERE id = ? AND estado = 'pendiente' LIMIT 1");
+        if (!$claimStmt) {
+            json_error('No se pudo iniciar el proceso de recarga.', 500);
+        }
+        $claimStmt->bind_param('i', $orderId);
+        $claimStmt->execute();
+        $claimStmt->close();
+        $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+        if (($updatedOrder['estado'] ?? '') !== 'pagado') {
+            json_error('El pedido ya está siendo procesado o no está disponible.', 409);
+        }
+
         try {
             $providerResult = execute_catalog_api_purchase($packageApiId, (string) ($updatedOrder['user_identifier'] ?? ''), $orderPlayerFields, order_purchase_quantity($updatedOrder));
         } catch (Throwable $e) {
@@ -8356,7 +8368,7 @@ if ($action === 'submit_payment') {
                     $providerCode
                 )
             );
-            $verifyStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pendiente'");
+            $verifyStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
             if (!$verifyStmt) {
                 json_error('No se pudo confirmar la recarga por premios.', 500);
             }
@@ -8393,7 +8405,7 @@ if ($action === 'submit_payment') {
                 $shortageResult = mark_order_inventory_shortage_review(
                     $mysqli,
                     $updatedOrder,
-                    'pendiente',
+                    'pagado',
                     '',
                     '',
                     $providerReference,
@@ -8478,7 +8490,7 @@ if ($action === 'submit_payment') {
                     $providerCode
                 )
             );
-            $paidStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pendiente'");
+            $paidStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
             if (!$paidStmt) {
                 json_error('No se pudo dejar el canje en seguimiento.', 500);
             }
@@ -8581,7 +8593,7 @@ if ($action === 'submit_payment') {
                 $providerCode
             )
         );
-        $cancelStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pendiente'");
+        $cancelStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
         if (!$cancelStmt) {
             json_error('No se pudo cerrar el canje fallido.', 500);
         }
@@ -8979,6 +8991,18 @@ if ($action === 'submit_payment') {
 
             $orderPlayerFields = order_player_fields_from_json((string) ($updatedOrder['player_fields_json'] ?? ''));
 
+            $claimStmt = $mysqli->prepare("UPDATE pedidos SET estado = 'pagado' WHERE id = ? AND estado = 'pendiente' LIMIT 1");
+            if (!$claimStmt) {
+                json_error('No se pudo iniciar el proceso de recarga.', 500);
+            }
+            $claimStmt->bind_param('i', $orderId);
+            $claimStmt->execute();
+            $claimStmt->close();
+            $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+            if (($updatedOrder['estado'] ?? '') !== 'pagado') {
+                json_error('El pedido ya está siendo procesado o no está disponible.', 409);
+            }
+
             try {
                 $freeFireResult = execute_catalog_api_purchase($packageApiId, (string) ($updatedOrder['user_identifier'] ?? ''), $orderPlayerFields, order_purchase_quantity($updatedOrder));
             } catch (Throwable $e) {
@@ -9015,7 +9039,7 @@ if ($action === 'submit_payment') {
                         $providerCode
                     )
                 );
-                $verifyStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pendiente'");
+                $verifyStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
                 if (!$verifyStmt) {
                     json_error('No se pudo confirmar la recarga automáticamente.', 500);
                 }
@@ -9052,7 +9076,7 @@ if ($action === 'submit_payment') {
                     $shortageResult = mark_order_inventory_shortage_review(
                         $mysqli,
                         $updatedOrder,
-                        'pendiente',
+                        'pagado',
                         $verifiedReference,
                         $phone,
                         $providerReference,
@@ -9105,7 +9129,7 @@ if ($action === 'submit_payment') {
                         $providerCode
                     )
                 );
-                $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pendiente'");
+                $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
                 if (!$paidStmt) {
                     json_error('No se pudo actualizar el pedido tras validar el pago.', 500);
                 }
@@ -9150,7 +9174,7 @@ if ($action === 'submit_payment') {
                         $providerCode
                     )
                 );
-                $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pendiente'");
+                $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
                 if (!$paidStmt) {
                     json_error('No se pudo actualizar el pedido tras validar el pago.', 500);
                 }
@@ -9235,7 +9259,7 @@ if ($action === 'submit_payment') {
                     $providerCode
                 )
             );
-            $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_codigo_entregado = ?, recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pendiente'");
+            $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_codigo_entregado = ?, recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
             if (!$paidStmt) {
                 json_error('No se pudo actualizar el pedido tras validar el pago.', 500);
             }
