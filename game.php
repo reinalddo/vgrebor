@@ -908,7 +908,7 @@ include __DIR__ . "/includes/header.php";
             </div>
           </div>
         </div>
-        <button type="button" id="payment-submit-btn" class="btn btn-info w-100 fw-bold text-uppercase py-3 payment-submit-btn-theme<?= $paymentWindowConfigEnabled ? ' payment-window-theme-enabled' : '' ?>">Confirmar / Recargar</button>
+        <button type="button" id="payment-submit-btn" class="btn btn-info w-100 fw-bold text-uppercase py-3 payment-submit-btn-theme<?= $paymentWindowConfigEnabled ? ' payment-window-theme-enabled' : '' ?>">Confirmar Compra</button>
         <?php if ($canSimulateDailyMissionPurchase): ?>
         <button type="button" id="daily-mission-simulate-purchase-btn" class="btn btn-warning w-100 fw-bold text-uppercase py-3 mt-3">
           <i class="fa-solid fa-vial-circle-check me-2" aria-hidden="true"></i>Simular compra
@@ -4475,7 +4475,11 @@ include __DIR__ . "/includes/header.php";
   const accountSaleNote = document.getElementById('account-sale-note');
   const defaultBuyButtonLabel = 'Continuar con la Compra';
   const paymentDifferenceBlockedBuyButtonLabel = 'Selecciona un paquete mayor al saldo a favor';
-  const defaultPaymentSubmitButtonLabel = 'Confirmar / Recargar';
+  const defaultPaymentSubmitButtonLabel = 'Confirmar Compra';
+  function buildConfirmButtonLabel(totalText) {
+    const t = String(totalText || '').trim();
+    return t ? 'Confirmar Compra - ' + t : defaultPaymentSubmitButtonLabel;
+  }
   const completeRechargeButtonLabel = 'Completar Recarga';
   const verifyUserBuyButtonLabel = 'Debe Verificar El usuario para poder comprar';
   const playerPrimaryField = document.getElementById('player-primary-field');
@@ -6773,7 +6777,7 @@ include __DIR__ . "/includes/header.php";
     if (paymentSubmitButton) {
       paymentSubmitButton.textContent = usingPoints
         ? `Canjear ${formatWinPointsAmount(activePaymentOrder.pointsRequired || 0)}`
-        : (usingBinance ? 'Continuar con Binance Pay' : (usingPayPal ? 'Continuar con PayPal' : defaultPaymentSubmitButtonLabel));
+        : (usingBinance ? 'Continuar con Binance Pay' : (usingPayPal ? 'Continuar con PayPal' : buildConfirmButtonLabel((activePaymentOrder && activePaymentOrder.confirmedTotalText) || '')));
     }
     activePaymentOrder.preferredMode = nextMode;
     storePreferredCheckoutPayment(nextMode, activePaymentOrder.selectedMethodId);
@@ -8435,7 +8439,7 @@ include __DIR__ . "/includes/header.php";
     }
     setPaymentStatusAcceptHidden(false);
     if (paymentSubmitButton) {
-      paymentSubmitButton.textContent = defaultPaymentSubmitButtonLabel;
+      paymentSubmitButton.textContent = buildConfirmButtonLabel((activePaymentOrder && activePaymentOrder.confirmedTotalText) || '');
     }
   }
 
@@ -9508,7 +9512,7 @@ include __DIR__ . "/includes/header.php";
         paymentWinPointsCard.classList.add('d-none');
       }
       if (paymentSubmitButton) {
-        paymentSubmitButton.textContent = defaultPaymentSubmitButtonLabel;
+        paymentSubmitButton.textContent = buildConfirmButtonLabel((activePaymentOrder && activePaymentOrder.confirmedTotalText) || '');
       }
     }
   }
@@ -9607,7 +9611,7 @@ include __DIR__ . "/includes/header.php";
     setPaymentAlert('', 'info');
     clearPaymentSupportUi();
     if (paymentSubmitButton) {
-      paymentSubmitButton.textContent = defaultPaymentSubmitButtonLabel;
+      paymentSubmitButton.textContent = buildConfirmButtonLabel(totalText);
     }
     renderWinPointsPaymentState(pack, currentMethod);
     setCancelOrderButtonMode('cancel');
