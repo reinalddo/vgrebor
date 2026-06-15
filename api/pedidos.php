@@ -4770,6 +4770,10 @@ function catalog_provider_payload_key(array $product, array $fieldMeta): string 
     $canonicalName = normalize_player_field_key((string) ($fieldMeta['name'] ?? ''));
 
     if ($providerName === 'input1' && $canonicalName === 'id_juego') {
+        $productName = mb_strtolower(trim((string) ($product['nombre'] ?? '')), 'UTF-8');
+        if (str_contains($productName, 'blood strike') || str_contains($productName, 'bloodstrike')) {
+            return 'player_id';
+        }
         return 'id_juego';
     }
 
