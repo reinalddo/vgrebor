@@ -977,6 +977,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     .catbar-back-btn:hover { color: var(--theme-primary, #00fff7); }
     @media (min-width: 768px) {
       .catbar-arrow { display: flex; }
+      .catbar-track { justify-content: center; }
     }
   </style>
   <script>
