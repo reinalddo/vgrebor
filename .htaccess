@@ -1,5 +1,8 @@
 RewriteEngine On
 
+# Redirect legacy tenant upload paths to flat uploads folder
+RewriteRule ^tenants/reborxstore/uploads/(.*)$ /uploads/$1 [R=301,L]
+
 # Allow direct access to real files and folders
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
