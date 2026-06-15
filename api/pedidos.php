@@ -5426,6 +5426,7 @@ function execute_catalog_api_purchase_once(int $productId, ?string $userIdentifi
     ];
 
     $normalizedFields = build_catalog_player_fields($product, $userIdentifier, $playerFields);
+    $mappedCanonicalNames = [];
     foreach (recargas_api_normalize_required_fields($product['campos_requeridos'] ?? []) as $fieldMeta) {
         $canonicalName = normalize_player_field_key((string) ($fieldMeta['name'] ?? ''));
         if ($canonicalName === '' || !isset($normalizedFields[$canonicalName])) {
@@ -5433,10 +5434,11 @@ function execute_catalog_api_purchase_once(int $productId, ?string $userIdentifi
         }
 
         $payload[catalog_provider_payload_key($product, $fieldMeta)] = $normalizedFields[$canonicalName];
+        $mappedCanonicalNames[$canonicalName] = true;
     }
 
     foreach ($normalizedFields as $fieldName => $fieldValue) {
-        if ($fieldValue === '' || isset($payload[$fieldName])) {
+        if ($fieldValue === '' || isset($payload[$fieldName]) || isset($mappedCanonicalNames[$fieldName])) {
             continue;
         }
 
@@ -5896,7 +5898,7 @@ function movement_reference_matches(string $fullReference, string $reportedRefer
     return $fullReference === $reportedReference;
 }
 
-function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference, int $requiredDigits, int $orderId): ?array {
+function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference, int $requiredDigits, int $orderId, float $orderAmount = 0.0): ?array {
     $mysqli = ensure_mysqli_connection($mysqli);
 
     if ($reportedReference === '') {
@@ -5912,11 +5914,12 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
                AND TRIM(numero_referencia) <> ''
                AND estado IN ('enviado', 'cancelado')
                AND RIGHT(TRIM(numero_referencia), ?) = ?
+               AND (? = 0 OR ABS(precio - ?) < 0.01)
              ORDER BY id DESC
              LIMIT 1"
         );
         if ($stmt) {
-            $stmt->bind_param('iis', $orderId, $requiredDigits, $reportedReference);
+            $stmt->bind_param('iisdd', $orderId, $requiredDigits, $reportedReference, $orderAmount, $orderAmount);
         }
     } else {
         $stmt = $mysqli->prepare(
@@ -5954,10 +5957,11 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
              FROM movimientos m
              LEFT JOIN pedidos p ON p.id = m.pedido_id
              WHERE RIGHT(TRIM(m.referencia), ?) = ?
+               AND (? = 0 OR ABS(m.monto - ?) < 0.01)
              ORDER BY m.id DESC"
         );
         if ($stmt) {
-            $stmt->bind_param('is', $requiredDigits, $reportedReference);
+            $stmt->bind_param('isdd', $requiredDigits, $reportedReference, $orderAmount, $orderAmount);
         }
     } else {
         $stmt = $mysqli->prepare(
@@ -8760,11 +8764,12 @@ if ($action === 'submit_payment') {
                 $mysqli,
                 (string) ($preselectedMatchingMovement['referencia'] ?? $referenceNumber),
                 0,
-                $orderId
+                $orderId,
+                (float) ($order['precio'] ?? 0)
             );
         }
     } else {
-        $referenceConflict = find_reference_reuse_conflict($mysqli, $referenceNumber, $referenceDigitsLimit, $orderId);
+        $referenceConflict = find_reference_reuse_conflict($mysqli, $referenceNumber, $referenceDigitsLimit, $orderId, (float) ($order['precio'] ?? 0));
     }
 
     if ($referenceConflict !== null) {
