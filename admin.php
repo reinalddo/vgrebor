@@ -4494,7 +4494,7 @@ require_once __DIR__ . '/includes/header.php';
                             </div>
                         <?php endforeach; ?>
                     </div>
-                <?php else: ?>
+                <?php elseif ($couponAdminTab === 'influencers'): ?>
                     <div style="background:#181f2a; border-radius:16px; border:2px solid #00fff7; box-shadow:0 0 24px #00fff733; padding:1.5rem;">
                         <div class="d-flex justify-content-between align-items-center gap-3 mb-3 flex-wrap">
                             <div>
