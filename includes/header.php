@@ -910,6 +910,8 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       scrollbar-width: none;
       padding: 0.2rem 0.1rem;
       transition: opacity 0.18s ease;
+      justify-content: center;
+      justify-content: safe center;
     }
     .catbar-track::-webkit-scrollbar { display: none; }
     .catbar-track.is-fading { opacity: 0; pointer-events: none; }
@@ -978,7 +980,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     @media (min-width: 768px) {
       .catbar-arrow { display: flex; }
     }
-    .catbar-track.catbar-track--root { justify-content: center; }
+
     @media (min-width: 992px) {
       .catbar-inner {
         max-width: 960px;
@@ -1466,7 +1468,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
             </button>
             <button class="catbar-arrow" id="catbarPrev" aria-label="Anterior" tabindex="-1">&#8249;</button>
             <div class="catbar-track-wrap">
-              <div class="catbar-track catbar-track--root" id="catbarTrack">
+              <div class="catbar-track" id="catbarTrack">
                 <?php foreach ($catbarCategories as $cbc):
                   $cbMode    = $cbc['mostrar_menu'];
                   $cbShowImg = in_array($cbMode, ['imagen', 'imagen_texto'], true);
@@ -1550,12 +1552,10 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
             setBack(false);
             await fadeOut();
             await fadeIn(catsHtml);
-            track.classList.add('catbar-track--root');
           }
           async function showGames(catId) {
             state = 'games'; activeCatId = catId;
             setBack(true);
-            track.classList.remove('catbar-track--root');
             await fadeOut();
             await fadeIn(loadingHtml());
             try {
@@ -1577,7 +1577,6 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
           async function showPackages(gameId, gameUrl) {
             state = 'packages';
             setBack(true);
-            track.classList.remove('catbar-track--root');
             await fadeOut();
             await fadeIn(loadingHtml());
             try {
