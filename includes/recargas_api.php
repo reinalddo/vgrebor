@@ -358,6 +358,9 @@ function recargas_api_canonical_field_name(string $rawName, string $rawDescripti
     }
 
     if (!in_array($name, ['input1', 'input2', 'input3', 'input4'], true)) {
+        if ($name === 'userid' || $name === 'user_id') {
+            return 'id_juego';
+        }
         return $name;
     }
 
