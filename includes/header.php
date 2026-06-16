@@ -979,6 +979,19 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       .catbar-arrow { display: flex; }
       .catbar-track { justify-content: center; }
     }
+    @media (min-width: 992px) {
+      .catbar-inner {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 0 0.75rem;
+      }
+    }
+    @media (min-width: 1200px) {
+      .catbar-inner { max-width: 1140px; }
+    }
+    @media (min-width: 1400px) {
+      .catbar-inner { max-width: 1320px; }
+    }
   </style>
   <script>
     window.__TVG_BASE_PATH = <?php echo json_encode(app_base_path(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
