@@ -347,7 +347,7 @@ include __DIR__ . "/includes/header.php";
 <section class="container mt-4">
   <div class="row mb-2 align-items-center">
     <div class="col">
-      <h2 class="page-step-title text-info mb-0">PASO 1: Seleccione su paquete</h2>
+      <h2 class="page-step-title text-info mb-0">PASO 1: Seleccione su producto</h2>
     </div>
     <div class="col-auto">
       <span class="text-uppercase text-secondary small">elige uno</span>
