@@ -136,6 +136,33 @@ if ($resCurrencies instanceof mysqli_result) {
   }
 }
 
+// GG Drops — migración de columnas y carga de paquetes destacados
+$ggDropsPackages = [];
+$_ggCheckDest = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'destacado'");
+if ($_ggCheckDest instanceof mysqli_result && $_ggCheckDest->num_rows === 0) {
+  $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN destacado TINYINT(1) DEFAULT 0 NULL");
+}
+$_ggCheckDesc = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'descuento_destacado'");
+if ($_ggCheckDesc instanceof mysqli_result && $_ggCheckDesc->num_rows === 0) {
+  $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN descuento_destacado TINYINT UNSIGNED DEFAULT 0 NULL AFTER destacado");
+}
+$_ggDropsRes = $mysqli->query(
+  "SELECT jp.id, jp.nombre, jp.precio, jp.imagen_icono, jp.juego_id,
+          COALESCE(jp.descuento_destacado, 0) AS descuento_destacado,
+          j.nombre AS juego_nombre, j.slug AS juego_slug, j.imagen AS juego_imagen,
+          j.id AS game_id, j.moneda_fija_id
+   FROM juego_paquetes jp
+   INNER JOIN juegos j ON j.id = jp.juego_id
+   WHERE jp.destacado = 1 AND COALESCE(jp.activo, 1) = 1 AND COALESCE(j.activo, 1) = 1
+   ORDER BY jp.orden ASC, jp.id ASC
+   LIMIT 20"
+);
+if ($_ggDropsRes instanceof mysqli_result) {
+  while ($dpkg = $_ggDropsRes->fetch_assoc()) {
+    $ggDropsPackages[] = $dpkg;
+  }
+}
+
 $gameCards = [];
 $resGames = $mysqli->query(
   "SELECT j.*, COUNT(jp.id) AS paquetes_total, MIN(jp.precio) AS precio_minimo\n"
@@ -2972,6 +2999,223 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             </div>
           </div>
         </div>
+      </section>
+      <?php endif; ?>
+
+      <?php if (!empty($ggDropsPackages)): ?>
+      <section class="mt-5 gg-drops-section">
+        <style>
+          .gg-drops-track {
+            display: flex;
+            gap: 0.6rem;
+            overflow-x: auto;
+            scroll-behavior: smooth;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            padding-bottom: 0.25rem;
+          }
+          .gg-drops-track::-webkit-scrollbar { display: none; }
+          .gg-drops-card {
+            flex: 0 0 auto;
+            width: 220px;
+            background: #0b1420;
+            border: 1px solid rgba(34,211,238,0.18);
+            border-radius: 10px;
+            overflow: hidden;
+            text-decoration: none;
+            color: inherit;
+            transition: border-color 0.18s, box-shadow 0.18s, transform 0.16s;
+            display: block;
+          }
+          .gg-drops-card:hover {
+            border-color: rgba(34,211,238,0.65);
+            box-shadow: 0 0 16px rgba(34,211,238,0.18);
+            transform: translateY(-2px);
+          }
+          .gg-drops-card-top {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            padding: 0.55rem 0.6rem 0.45rem;
+          }
+          .gg-drops-thumb {
+            width: 68px;
+            height: 68px;
+            flex-shrink: 0;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #111927;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+          .gg-drops-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+          }
+          .gg-drops-info {
+            flex: 1;
+            min-width: 0;
+          }
+          .gg-drops-game-label {
+            font-size: 0.58rem;
+            font-weight: 800;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: #22d3ee;
+            margin-bottom: 0.18rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .gg-drops-pkg-name {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: #f1f5f9;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.2;
+          }
+          .gg-drops-price-row {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.35rem 0.6rem 0.55rem;
+            border-top: 1px solid rgba(34,211,238,0.1);
+            flex-wrap: wrap;
+          }
+          .gg-drops-price-original {
+            font-size: 0.72rem;
+            color: #475569;
+            text-decoration: line-through;
+            white-space: nowrap;
+          }
+          .gg-drops-price-actual {
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: #22d3ee;
+            white-space: nowrap;
+          }
+          .gg-drops-badge {
+            font-size: 0.62rem;
+            font-weight: 800;
+            background: #dc2626;
+            color: #fff;
+            border-radius: 4px;
+            padding: 0.1rem 0.3rem;
+            margin-left: auto;
+            white-space: nowrap;
+          }
+          .gg-drops-nav-btn {
+            background: rgba(11,20,32,0.92);
+            border: 1px solid rgba(34,211,238,0.3);
+            color: #22d3ee;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            font-size: 1.1rem;
+            line-height: 1;
+            transition: background 0.15s, border-color 0.15s;
+            padding: 0;
+          }
+          .gg-drops-nav-btn:hover { background: rgba(34,211,238,0.12); border-color: rgba(34,211,238,0.6); }
+        </style>
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h2 class="fw-bold mb-0" style="font-family:'Oxanium',sans-serif;font-size:1.1rem;letter-spacing:0.04em;">
+            GG DROPS <span style="color:#22d3ee;">&#9889;</span>
+          </h2>
+          <div class="d-flex gap-2">
+            <button type="button" class="gg-drops-nav-btn" id="gg-drops-prev" aria-label="Anterior">&#8249;</button>
+            <button type="button" class="gg-drops-nav-btn" id="gg-drops-next" aria-label="Siguiente">&#8250;</button>
+          </div>
+        </div>
+        <div class="gg-drops-track" id="gg-drops-track">
+          <?php foreach ($ggDropsPackages as $dpkg):
+            $dpkgImgSrc = '';
+            $dpkgRawImg = trim((string) ($dpkg['imagen_icono'] ?? ''));
+            if ($dpkgRawImg === '') {
+              $dpkgRawImg = trim((string) ($dpkg['juego_imagen'] ?? ''));
+            }
+            if ($dpkgRawImg !== '') {
+              $dpkgImgSrc = app_path('/' . ltrim($dpkgRawImg, '/'));
+            }
+            $dpkgGameRow = ['id' => (int) ($dpkg['game_id'] ?? 0), 'slug' => (string) ($dpkg['juego_slug'] ?? '')];
+            $dpkgUrl = app_path(game_route_path($dpkgGameRow) . '?package_id=' . (int) ($dpkg['id'] ?? 0));
+            $dpkgDescuento = (int) ($dpkg['descuento_destacado'] ?? 0);
+            $dpkgPrecio = (float) ($dpkg['precio'] ?? 0);
+            $dpkgCurrencyId = (int) ($dpkg['moneda_fija_id'] ?? 0);
+            if ($dpkgCurrencyId > 0 && isset($gameCurrencyMap[$dpkgCurrencyId])) {
+              $dpkgCurrency = $gameCurrencyMap[$dpkgCurrencyId];
+              $dpkgConverted = currency_convert_from_base($dpkgPrecio, $dpkgCurrency);
+              $dpkgPriceLabel = strtoupper($dpkgCurrency['clave']) . ' ' . currency_format_amount($dpkgConverted, $dpkgCurrency);
+              if ($dpkgDescuento > 0 && $dpkgDescuento < 100) {
+                $dpkgOriginal = $dpkgPrecio / (1 - $dpkgDescuento / 100);
+                $dpkgOriginalConverted = currency_convert_from_base($dpkgOriginal, $dpkgCurrency);
+                $dpkgOriginalLabel = strtoupper($dpkgCurrency['clave']) . ' ' . currency_format_amount($dpkgOriginalConverted, $dpkgCurrency);
+              } else {
+                $dpkgOriginalLabel = '';
+              }
+            } else {
+              $dpkgPriceLabel = '$ ' . number_format($dpkgPrecio, 2);
+              if ($dpkgDescuento > 0 && $dpkgDescuento < 100) {
+                $dpkgOriginal = $dpkgPrecio / (1 - $dpkgDescuento / 100);
+                $dpkgOriginalLabel = '$ ' . number_format($dpkgOriginal, 2);
+              } else {
+                $dpkgOriginalLabel = '';
+              }
+            }
+          ?>
+            <a href="<?= htmlspecialchars($dpkgUrl, ENT_QUOTES, 'UTF-8') ?>" class="gg-drops-card">
+              <div class="gg-drops-card-top">
+                <div class="gg-drops-thumb">
+                  <?php if ($dpkgImgSrc !== ''): ?>
+                    <img src="<?= htmlspecialchars($dpkgImgSrc, ENT_QUOTES, 'UTF-8') ?>"
+                         alt="<?= htmlspecialchars((string) ($dpkg['nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
+                         loading="lazy">
+                  <?php else: ?>
+                    <span style="font-size:1.8rem;">&#127918;</span>
+                  <?php endif; ?>
+                </div>
+                <div class="gg-drops-info">
+                  <div class="gg-drops-game-label"><?= htmlspecialchars((string) ($dpkg['juego_nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?></div>
+                  <div class="gg-drops-pkg-name"><?= htmlspecialchars((string) ($dpkg['nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?></div>
+                </div>
+              </div>
+              <div class="gg-drops-price-row">
+                <?php if ($dpkgOriginalLabel !== ''): ?>
+                  <span class="gg-drops-price-original"><?= htmlspecialchars($dpkgOriginalLabel, ENT_QUOTES, 'UTF-8') ?></span>
+                <?php endif; ?>
+                <span class="gg-drops-price-actual"><?= htmlspecialchars($dpkgPriceLabel, ENT_QUOTES, 'UTF-8') ?></span>
+                <?php if ($dpkgDescuento > 0): ?>
+                  <span class="gg-drops-badge">-<?= $dpkgDescuento ?>%</span>
+                <?php endif; ?>
+              </div>
+            </a>
+          <?php endforeach; ?>
+        </div>
+        <script>
+        (function () {
+          var track = document.getElementById('gg-drops-track');
+          var btnPrev = document.getElementById('gg-drops-prev');
+          var btnNext = document.getElementById('gg-drops-next');
+          if (!track || !btnPrev || !btnNext) return;
+          var scrollAmount = 232;
+          btnPrev.addEventListener('click', function () {
+            track.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+          });
+          btnNext.addEventListener('click', function () {
+            track.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+          });
+        })();
+        </script>
       </section>
       <?php endif; ?>
 

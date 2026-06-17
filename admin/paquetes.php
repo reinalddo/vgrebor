@@ -218,6 +218,20 @@ function ensure_juego_paquetes_orden_column(mysqli $mysqli): void {
     }
 }
 
+function ensure_juego_paquetes_destacado_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'destacado'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN destacado TINYINT(1) DEFAULT 0 NULL AFTER orden");
+    }
+}
+
+function ensure_juego_paquetes_descuento_destacado_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'descuento_destacado'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN descuento_destacado TINYINT UNSIGNED DEFAULT 0 NULL AFTER destacado");
+    }
+}
+
 function ensure_juegos_api_discord_catalog_columns(mysqli $mysqli): void {
     $columns = [
         'api_discord_catalog_json' => "ALTER TABLE juegos ADD COLUMN api_discord_catalog_json LONGTEXT NULL AFTER categoria_api_discord",
@@ -535,6 +549,8 @@ ensure_juego_paquetes_paquete_api_column($mysqli);
 ensure_juego_paquetes_api_provider_column($mysqli);
 ensure_juego_paquetes_cantidad_text_column($mysqli);
 ensure_juego_paquetes_orden_column($mysqli);
+ensure_juego_paquetes_destacado_column($mysqli);
+ensure_juego_paquetes_descuento_destacado_column($mysqli);
 ensure_juegos_api_discord_catalog_columns($mysqli);
 package_account_sales_ensure_schema($mysqli);
 package_features_ensure_schema($mysqli);
@@ -715,6 +731,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['package_feature_catal
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_descuento_destacado'], $_POST['paquete_id'])) {
+    $packageId = intval($_POST['paquete_id']);
+    $descuento = max(0, min(99, (int) ($_POST['descuento_destacado'] ?? 0)));
+    if ($packageId > 0) {
+        $stmtDesc = $mysqli->prepare("UPDATE juego_paquetes SET descuento_destacado = ? WHERE id = ? AND juego_id = ?");
+        $stmtDesc->bind_param('iii', $descuento, $packageId, $juego_id);
+        $stmtDesc->execute();
+        $stmtDesc->close();
+        if (admin_packages_is_ajax_request()) {
+            admin_packages_json_response(['ok' => true, 'id' => $packageId, 'descuento_destacado' => $descuento]);
+        }
+    }
+    header('Location: ' . $adminPackageBaseUrl . '/' . $juego_id);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_paquete_destacado'], $_POST['paquete_id'], $_POST['destacado'])) {
+    $packageId = intval($_POST['paquete_id']);
+    $destValue = intval($_POST['destacado']) === 1 ? 1 : 0;
+    if ($packageId > 0) {
+        $stmtDest = $mysqli->prepare("UPDATE juego_paquetes SET destacado = ? WHERE id = ? AND juego_id = ?");
+        $stmtDest->bind_param('iii', $destValue, $packageId, $juego_id);
+        $stmtDest->execute();
+        $stmtDest->close();
+        if (admin_packages_is_ajax_request()) {
+            admin_packages_json_response(['ok' => true, 'id' => $packageId, 'destacado' => $destValue]);
+        }
+    }
+    header('Location: ' . $adminPackageBaseUrl . '/' . $juego_id);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_paquete_activo'], $_POST['paquete_id'], $_POST['activo'])) {
     $packageId = intval($_POST['paquete_id']);
     $activeValue = intval($_POST['activo']) === 1 ? 1 : 0;
@@ -806,6 +854,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $edit_precio = floatval($_POST['edit_precio'] ?? 0);
     $edit_win_points_reward = max(0, (int) ($_POST['edit_win_points_reward'] ?? 0));
     $edit_activo = isset($_POST['edit_activo']) ? 1 : 0;
+    $edit_destacado = isset($_POST['edit_destacado']) ? 1 : 0;
+    $edit_descuento_destacado = max(0, min(99, (int) ($_POST['edit_descuento_destacado'] ?? 0)));
     $edit_imagen_icono = admin_package_store_upload($_FILES['edit_imagen_icono'] ?? []);
     $editExistingGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['edit_existing_account_gallery_replace'] ?? []);
     $editNewGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['edit_new_account_gallery_image'] ?? []);
@@ -826,11 +876,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el monto de Free Fire para este paquete.']);
     }
     if ($edit_imagen_icono) {
-        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, imagen_icono=?, activo=? WHERE id=?");
-        $stmt->bind_param('sssssissdisii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_imagen_icono, $edit_activo, $edit_id);
+        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, imagen_icono=?, activo=?, destacado=?, descuento_destacado=? WHERE id=?");
+        $stmt->bind_param('sssssissdisiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_imagen_icono, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_id);
     } else {
-        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, activo=? WHERE id=?");
-        $stmt->bind_param('sssssissdiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_activo, $edit_id);
+        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, activo=?, destacado=?, descuento_destacado=? WHERE id=?");
+        $stmt->bind_param('sssssissdiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_id);
     }
     $stmt->execute();
     $stmt->close();
@@ -904,6 +954,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $precio = floatval($_POST['precio']);
     $win_points_reward = max(0, (int) ($_POST['win_points_reward'] ?? $defaultWinPointsReward));
     $activo = isset($_POST['activo']) ? 1 : 0;
+    $destacado = isset($_POST['destacado']) ? 1 : 0;
+    $descuento_destacado = max(0, min(99, (int) ($_POST['descuento_destacado'] ?? 0)));
     $orden = admin_package_next_order($mysqli, $juego_id);
     $imagen_icono = admin_package_store_upload($_FILES['imagen_icono'] ?? []);
     $newGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['new_account_gallery_image'] ?? []);
@@ -916,8 +968,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     if ($provider === 'free_fire' && $monto_ff === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el monto de Free Fire para este paquete.']);
     }
-    $stmt = $mysqli->prepare("INSERT INTO juego_paquetes (juego_id, nombre, clave, monto_ff, paquete_api, api_provider, vender_cuenta, cuenta_texto, cantidad, precio, win_points_reward, imagen_icono, activo, orden) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('isssssissdisii', $juego_id, $nombre, $clave, $monto_ff, $paquete_api, $provider, $vender_cuenta, $cuenta_texto, $cantidad, $precio, $win_points_reward, $imagen_icono, $activo, $orden);
+    $stmt = $mysqli->prepare("INSERT INTO juego_paquetes (juego_id, nombre, clave, monto_ff, paquete_api, api_provider, vender_cuenta, cuenta_texto, cantidad, precio, win_points_reward, imagen_icono, activo, orden, destacado, descuento_destacado) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('isssssissdisiiii', $juego_id, $nombre, $clave, $monto_ff, $paquete_api, $provider, $vender_cuenta, $cuenta_texto, $cantidad, $precio, $win_points_reward, $imagen_icono, $activo, $orden, $destacado, $descuento_destacado);
     $stmt->execute();
     $newPackageId = (int) $mysqli->insert_id;
     $stmt->close();
@@ -1217,6 +1269,15 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <input type="checkbox" name="activo" class="form-check-input" id="paqueteActivoCheck" checked>
                 <label class="form-check-label text-neon" for="paqueteActivoCheck">Paquete activo / publicado</label>
             </div>
+            <div class="form-check mt-2">
+                <input type="checkbox" name="destacado" class="form-check-input" id="paqueteDestacadoCheck">
+                <label class="form-check-label text-neon" for="paqueteDestacadoCheck">&#9889; Paquete destacado (GG Drops)</label>
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-2">
+                <label class="text-neon small mb-0" for="paqueteDescuentoDestacadoInput">Descuento GG Drops:</label>
+                <input type="number" name="descuento_destacado" id="paqueteDescuentoDestacadoInput" min="0" max="99" value="0" class="form-control form-control-sm" style="width:70px;background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                <span class="text-neon small">%</span>
+            </div>
         </div>
         <div class="col-12 text-center">
             <img id="preview-nuevo-paquete-img" src="#" alt="Previsualización" style="display:none;max-width:120px;max-height:120px;border-radius:0.75rem;box-shadow:0 0 0.5rem #22d3ee55;border:2px solid #22d3ee;background:#222c3a;" />
@@ -1321,6 +1382,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                         <th style="color:#22d3ee; background:#181f2a;">Monto FF</th>
                     <?php endif; ?>
                     <th style="color:#22d3ee; background:#181f2a;">Activo</th>
+                    <th style="color:#22d3ee; background:#181f2a;" title="Destacado en GG Drops">&#9889;</th>
                     <th style="color:#22d3ee; background:#181f2a;">Precio</th>
                     <th style="color:#22d3ee; background:#181f2a;"><?= htmlspecialchars($winPointsName, ENT_QUOTES, 'UTF-8') ?></th>
                     <th style="color:#22d3ee; background:#181f2a;">Acciones</th>
@@ -1384,6 +1446,28 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                                 <input class="form-check-input js-ajax-toggle-input" type="checkbox" <?= !isset($p['activo']) || !empty($p['activo']) ? 'checked' : '' ?> aria-label="Activar o desactivar paquete <?= htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8') ?>" onchange="window.adminPackageToggle(this)">
                             </div>
                         </form>
+                    </td>
+                    <td class="text-center" style="background:#181f2a;">
+                        <div class="d-flex flex-column align-items-center gap-1">
+                            <form method="post" action="<?= htmlspecialchars($adminPackageBaseUrl, ENT_QUOTES, 'UTF-8') ?>/<?= $juego_id ?>" class="m-0 d-inline-block js-ajax-toggle-dest-form">
+                                <input type="hidden" name="ajax" value="1">
+                                <input type="hidden" name="toggle_paquete_destacado" value="1">
+                                <input type="hidden" name="paquete_id" value="<?= (int) $p['id'] ?>">
+                                <input type="hidden" name="destacado" value="<?= !empty($p['destacado']) ? '1' : '0' ?>" class="js-ajax-toggle-dest-value">
+                                <div class="form-check form-switch d-inline-flex justify-content-center mb-0">
+                                    <input class="form-check-input js-ajax-toggle-dest-input" type="checkbox" <?= !empty($p['destacado']) ? 'checked' : '' ?> aria-label="Destacar paquete <?= htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8') ?>" onchange="window.adminPackageToggleDestacado(this)" style="<?= !empty($p['destacado']) ? 'background-color:#22d3ee;border-color:#22d3ee;' : '' ?>">
+                                </div>
+                            </form>
+                            <form method="post" action="<?= htmlspecialchars($adminPackageBaseUrl, ENT_QUOTES, 'UTF-8') ?>/<?= $juego_id ?>" class="m-0 js-ajax-dest-discount-form">
+                                <input type="hidden" name="ajax" value="1">
+                                <input type="hidden" name="update_descuento_destacado" value="1">
+                                <input type="hidden" name="paquete_id" value="<?= (int) $p['id'] ?>">
+                                <div class="d-flex align-items-center gap-1">
+                                    <input type="number" name="descuento_destacado" min="0" max="99" value="<?= (int) ($p['descuento_destacado'] ?? 0) ?>" class="form-control form-control-sm text-center js-dest-discount-input" style="width:48px;background:#222c3a;color:#22d3ee;border:1px solid rgba(34,211,238,0.4);font-size:0.7rem;padding:2px 4px;" onchange="window.adminPackageSaveDestDiscount(this)">
+                                    <span style="color:#8be9fd;font-size:0.7rem;">%</span>
+                                </div>
+                            </form>
+                        </div>
                     </td>
                     <td class="text-neon" style="background:#181f2a; color:#22d3ee;">$<?= number_format($p['precio'], 2) ?></td>
                     <td style="background:#181f2a; color:#fff;"><?= (int) ($p['win_points_reward'] ?? 0) ?></td>
@@ -1452,6 +1536,16 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                     <?php endif; ?>
                     <div class="text-neon" style="color:#22d3ee;"><span class="fw-semibold">Precio:</span> $<?= number_format($p['precio'], 2) ?></div>
                     <div style="color:#fff;"><span class="fw-semibold"><?= htmlspecialchars($winPointsName, ENT_QUOTES, 'UTF-8') ?>:</span> <?= (int) ($p['win_points_reward'] ?? 0) ?></div>
+                    <form method="post" action="<?= htmlspecialchars($adminPackageBaseUrl, ENT_QUOTES, 'UTF-8') ?>/<?= $juego_id ?>" class="mt-2 d-inline-flex align-items-center gap-2 js-ajax-toggle-dest-form">
+                        <input type="hidden" name="ajax" value="1">
+                        <input type="hidden" name="toggle_paquete_destacado" value="1">
+                        <input type="hidden" name="paquete_id" value="<?= (int) $p['id'] ?>">
+                        <input type="hidden" name="destacado" value="<?= !empty($p['destacado']) ? '1' : '0' ?>" class="js-ajax-toggle-dest-value">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input js-ajax-toggle-dest-input" type="checkbox" <?= !empty($p['destacado']) ? 'checked' : '' ?> aria-label="Destacar en GG Drops" onchange="window.adminPackageToggleDestacado(this)">
+                        </div>
+                        <span class="small" style="color:#22d3ee;">&#9889; GG Drops</span>
+                    </form>
                     <form method="post" action="<?= htmlspecialchars($adminPackageBaseUrl, ENT_QUOTES, 'UTF-8') ?>/<?= $juego_id ?>" class="mt-3 d-flex align-items-center gap-2 flex-wrap js-ajax-order-form">
                         <input type="hidden" name="ajax" value="1">
                         <input type="hidden" name="update_orden_paquete" value="1">
@@ -1604,9 +1698,18 @@ if (isset($_GET['editar'])) {
             <label class="form-label text-neon"><?= htmlspecialchars($winPointsName, ENT_QUOTES, 'UTF-8') ?> a ganar</label>
             <input type="number" min="0" name="edit_win_points_reward" value="<?= (int) ($paq_edit['win_points_reward'] ?? 0) ?>" class="form-control" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
         </div>
-        <div class="form-check mb-3">
+        <div class="form-check mb-2">
             <input type="checkbox" name="edit_activo" class="form-check-input" id="editPaqueteActivoCheck" <?= !isset($paq_edit['activo']) || !empty($paq_edit['activo']) ? 'checked' : '' ?>>
             <label class="form-check-label text-neon" for="editPaqueteActivoCheck">Paquete activo / publicado</label>
+        </div>
+        <div class="form-check mb-2">
+            <input type="checkbox" name="edit_destacado" class="form-check-input" id="editPaqueteDestacadoCheck" <?= !empty($paq_edit['destacado']) ? 'checked' : '' ?>>
+            <label class="form-check-label text-neon" for="editPaqueteDestacadoCheck">&#9889; Paquete destacado (GG Drops)</label>
+        </div>
+        <div class="d-flex align-items-center gap-2 mb-3">
+            <label class="text-neon small mb-0" for="editDescuentoDestacadoInput">Descuento GG Drops:</label>
+            <input type="number" name="edit_descuento_destacado" id="editDescuentoDestacadoInput" min="0" max="99" value="<?= (int) ($paq_edit['descuento_destacado'] ?? 0) ?>" class="form-control form-control-sm" style="width:70px;background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+            <span class="text-neon small">%</span>
         </div>
         <div class="mb-3">
             <label class="form-label text-neon">Icono actual:</label><br>
@@ -2657,6 +2760,63 @@ window.adminPackageToggle = async function(input) {
         }
         if (label) {
             label.textContent = input.checked ? 'Activo' : 'Inactivo';
+        }
+    } catch (error) {
+        input.checked = !input.checked;
+        if (valueInput) {
+            valueInput.value = input.checked ? '1' : '0';
+        }
+        window.alert(error.message);
+    } finally {
+        input.disabled = false;
+        input.dataset.busy = '0';
+    }
+};
+
+window.adminPackageSaveDestDiscount = async function(input) {
+    if (!input || input.dataset.busy === '1' || !input.form) {
+        return;
+    }
+    const form = input.form;
+    const val = Math.max(0, Math.min(99, parseInt(input.value || '0', 10) || 0));
+    input.value = val;
+    const requestData = new FormData(form);
+    input.dataset.busy = '1';
+    input.readOnly = true;
+    try {
+        await window.submitAjaxAdminForm(form, requestData);
+    } catch (error) {
+        window.alert(error.message);
+    } finally {
+        input.readOnly = false;
+        input.dataset.busy = '0';
+    }
+};
+
+window.adminPackageToggleDestacado = async function(input) {
+    if (!input || input.dataset.busy === '1' || !input.form) {
+        return;
+    }
+
+    const form = input.form;
+    const valueInput = form.querySelector('.js-ajax-toggle-dest-value');
+
+    if (valueInput) {
+        valueInput.value = input.checked ? '1' : '0';
+    }
+
+    const requestData = new FormData(form);
+    input.dataset.busy = '1';
+    input.disabled = true;
+
+    try {
+        const payload = await window.submitAjaxAdminForm(form, requestData);
+        const isChecked = String(payload.destacado || 0) === '1';
+        input.checked = isChecked;
+        input.style.backgroundColor = isChecked ? '#22d3ee' : '';
+        input.style.borderColor = isChecked ? '#22d3ee' : '';
+        if (valueInput) {
+            valueInput.value = isChecked ? '1' : '0';
         }
     } catch (error) {
         input.checked = !input.checked;
