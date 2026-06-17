@@ -2390,6 +2390,7 @@ switch ($seccion) {
                 $nombrePrefijo = trim((string) ($_POST['nombre_prefijo'] ?? ''));
                 $nombreTienda = trim((string) ($_POST['nombre_tienda'] ?? ''));
                 $nombreTiendaSubtitulo = trim((string) ($_POST['nombre_tienda_subtitulo'] ?? ''));
+                $ggDropsNombre = trim((string) ($_POST['gg_drops_nombre'] ?? ''));
                 $metaTitulo = trim((string) ($_POST['meta_titulo'] ?? ''));
                 $metaDescripcion = trim((string) ($_POST['meta_descripcion'] ?? ''));
                 $fondoAnimadoEnabled = store_config_public_background_enabled();
@@ -2459,6 +2460,7 @@ switch ($seccion) {
                 store_config_upsert('nombre_prefijo', $nombrePrefijo);
                 store_config_upsert('nombre_tienda', $nombreTienda);
                 store_config_upsert('nombre_tienda_subtitulo', $nombreTiendaSubtitulo);
+                store_config_upsert('gg_drops_nombre', $ggDropsNombre !== '' ? $ggDropsNombre : 'GG DROPS');
                 store_config_upsert('meta_titulo', $metaTitulo);
                 store_config_upsert('meta_descripcion', $metaDescripcion);
                 if ($fondoAnimadoEnabled) {

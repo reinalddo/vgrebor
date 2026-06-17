@@ -3130,7 +3130,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         </style>
         <div class="d-flex align-items-center justify-content-between mb-3">
           <h2 class="fw-bold mb-0" style="font-family:'Oxanium',sans-serif;font-size:1.1rem;letter-spacing:0.04em;">
-            GG DROPS <span style="color:#22d3ee;">&#9889;</span>
+            <?= htmlspecialchars(store_config_get('gg_drops_nombre', 'GG DROPS'), ENT_QUOTES, 'UTF-8') ?> <span style="color:#22d3ee;">&#9889;</span>
           </h2>
           <div class="d-flex gap-2">
             <button type="button" class="gg-drops-nav-btn" id="gg-drops-prev" aria-label="Anterior">&#8249;</button>

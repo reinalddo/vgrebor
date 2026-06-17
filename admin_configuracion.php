@@ -1223,6 +1223,11 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                     <div class="form-text mt-2">Este texto se usa en el título del inicio y puede aparecer en el aviso de instalar la app en el navegador.</div>
                   </div>
                   <div class="mb-3">
+                    <label class="form-label">Nombre sección paquetes destacados</label>
+                    <input type="text" name="gg_drops_nombre" value="<?= htmlspecialchars($cfg['gg_drops_nombre'] ?? 'GG DROPS') ?>" class="form-control" placeholder="GG DROPS">
+                    <div class="form-text mt-2">Nombre visible del bloque de paquetes destacados que aparece en el inicio. Por defecto: GG DROPS.</div>
+                  </div>
+                  <div class="mb-3">
                     <label class="form-label">Meta título SEO</label>
                     <input type="text" name="meta_titulo" value="<?= htmlspecialchars($cfg['meta_titulo'] ?? 'TVirtualGaming | Tienda de monedas digitales') ?>" required maxlength="160" class="form-control" placeholder="TVirtualGaming | Tienda de monedas digitales">
                     <div class="form-text mt-2">Este título se usa en la etiqueta title, en Google y al compartir en redes. Idealmente mantenlo entre 50 y 60 caracteres.</div>

@@ -1273,11 +1273,6 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <input type="checkbox" name="destacado" class="form-check-input" id="paqueteDestacadoCheck">
                 <label class="form-check-label text-neon" for="paqueteDestacadoCheck">&#9889; Paquete destacado (GG Drops)</label>
             </div>
-            <div class="d-flex align-items-center gap-2 mt-2">
-                <label class="text-neon small mb-0" for="paqueteDescuentoDestacadoInput">Descuento GG Drops:</label>
-                <input type="number" name="descuento_destacado" id="paqueteDescuentoDestacadoInput" min="0" max="99" value="0" class="form-control form-control-sm" style="width:70px;background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
-                <span class="text-neon small">%</span>
-            </div>
         </div>
         <div class="col-12 text-center">
             <img id="preview-nuevo-paquete-img" src="#" alt="Previsualización" style="display:none;max-width:120px;max-height:120px;border-radius:0.75rem;box-shadow:0 0 0.5rem #22d3ee55;border:2px solid #22d3ee;background:#222c3a;" />
@@ -1456,15 +1451,6 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                                 <input type="hidden" name="destacado" value="<?= !empty($p['destacado']) ? '1' : '0' ?>" class="js-ajax-toggle-dest-value">
                                 <div class="form-check form-switch d-inline-flex justify-content-center mb-0">
                                     <input class="form-check-input js-ajax-toggle-dest-input" type="checkbox" <?= !empty($p['destacado']) ? 'checked' : '' ?> aria-label="Destacar paquete <?= htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8') ?>" onchange="window.adminPackageToggleDestacado(this)" style="<?= !empty($p['destacado']) ? 'background-color:#22d3ee;border-color:#22d3ee;' : '' ?>">
-                                </div>
-                            </form>
-                            <form method="post" action="<?= htmlspecialchars($adminPackageBaseUrl, ENT_QUOTES, 'UTF-8') ?>/<?= $juego_id ?>" class="m-0 js-ajax-dest-discount-form">
-                                <input type="hidden" name="ajax" value="1">
-                                <input type="hidden" name="update_descuento_destacado" value="1">
-                                <input type="hidden" name="paquete_id" value="<?= (int) $p['id'] ?>">
-                                <div class="d-flex align-items-center gap-1">
-                                    <input type="number" name="descuento_destacado" min="0" max="99" value="<?= (int) ($p['descuento_destacado'] ?? 0) ?>" class="form-control form-control-sm text-center js-dest-discount-input" style="width:48px;background:#222c3a;color:#22d3ee;border:1px solid rgba(34,211,238,0.4);font-size:0.7rem;padding:2px 4px;" onchange="window.adminPackageSaveDestDiscount(this)">
-                                    <span style="color:#8be9fd;font-size:0.7rem;">%</span>
                                 </div>
                             </form>
                         </div>
@@ -1705,11 +1691,6 @@ if (isset($_GET['editar'])) {
         <div class="form-check mb-2">
             <input type="checkbox" name="edit_destacado" class="form-check-input" id="editPaqueteDestacadoCheck" <?= !empty($paq_edit['destacado']) ? 'checked' : '' ?>>
             <label class="form-check-label text-neon" for="editPaqueteDestacadoCheck">&#9889; Paquete destacado (GG Drops)</label>
-        </div>
-        <div class="d-flex align-items-center gap-2 mb-3">
-            <label class="text-neon small mb-0" for="editDescuentoDestacadoInput">Descuento GG Drops:</label>
-            <input type="number" name="edit_descuento_destacado" id="editDescuentoDestacadoInput" min="0" max="99" value="<?= (int) ($paq_edit['descuento_destacado'] ?? 0) ?>" class="form-control form-control-sm" style="width:70px;background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
-            <span class="text-neon small">%</span>
         </div>
         <div class="mb-3">
             <label class="form-label text-neon">Icono actual:</label><br>
