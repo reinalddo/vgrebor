@@ -92,6 +92,7 @@ $galleryForm = [
     'descuento_porcentaje' => $paymentMethodDiscountsEnabled && isset($paymentMethodEditItem['descuento_porcentaje']) ? (float) $paymentMethodEditItem['descuento_porcentaje'] : 0,
     'impuesto_porcentaje' => isset($paymentMethodEditItem['impuesto_porcentaje']) ? (float) $paymentMethodEditItem['impuesto_porcentaje'] : 0,
     'activo' => !array_key_exists('activo', $paymentMethodEditItem ?? []) ? true : !empty($paymentMethodEditItem['activo']),
+    'formulario_verificacion' => (int) ($paymentMethodEditItem['formulario_verificacion'] ?? 0),
   ];
 $themeDefinitions = store_theme_definitions();
 $themeBaseValues = store_theme_base_values();
@@ -3042,6 +3043,13 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                         <input class="form-check-input" type="checkbox" value="1" id="activoMetodoPago" name="activo_metodo_pago" <?= $paymentMethodForm['activo'] ? 'checked' : '' ?>>
                         <label class="form-check-label" for="activoMetodoPago">Método de pago activo</label>
                       </div>
+                    </div>
+                    <div class="col-12">
+                      <div class="form-check">
+                        <input class="form-check-input" type="checkbox" value="1" id="formularioVerificacionMetodoPago" name="formulario_verificacion_metodo_pago" <?= $paymentMethodForm['formulario_verificacion'] ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="formularioVerificacionMetodoPago">Activar formulario de verificación avanzado (cédula + comprobante por WhatsApp)</label>
+                      </div>
+                      <div class="form-text">Si está activo, el cliente verá un formulario con campos de cédula, referencia y un botón para enviar el comprobante al WhatsApp del admin, en lugar del formulario estándar.</div>
                     </div>
                   </div>
                 </div>

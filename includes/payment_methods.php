@@ -69,6 +69,9 @@ SQL;
     if (!isset($columns['impuesto_porcentaje'])) {
         $mysqli->query('ALTER TABLE payment_methods ADD COLUMN impuesto_porcentaje DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER descuento_porcentaje');
     }
+    if (!isset($columns['formulario_verificacion'])) {
+        $mysqli->query('ALTER TABLE payment_methods ADD COLUMN formulario_verificacion TINYINT(1) NOT NULL DEFAULT 0 AFTER activo');
+    }
 
     $hasCurrencyIndex = false;
     $indexResult = $mysqli->query("SHOW INDEX FROM payment_methods WHERE Key_name = 'idx_payment_methods_moneda_id'");
@@ -258,6 +261,7 @@ function payment_methods_all(): array {
             $row['referencia_digitos'] = isset($row['referencia_digitos']) ? max(0, (int) $row['referencia_digitos']) : 0;
             $row['descuento_porcentaje'] = payment_methods_normalize_discount_percentage($row['descuento_porcentaje'] ?? 0);
             $row['impuesto_porcentaje'] = payment_methods_normalize_discount_percentage($row['impuesto_porcentaje'] ?? 0);
+            $row['formulario_verificacion'] = (int) ($row['formulario_verificacion'] ?? 0);
             $items[] = $row;
         }
     }
@@ -297,6 +301,7 @@ function payment_methods_find(int $id): ?array {
     $item['referencia_digitos'] = isset($item['referencia_digitos']) ? max(0, (int) $item['referencia_digitos']) : 0;
     $item['descuento_porcentaje'] = payment_methods_normalize_discount_percentage($item['descuento_porcentaje'] ?? 0);
     $item['impuesto_porcentaje'] = payment_methods_normalize_discount_percentage($item['impuesto_porcentaje'] ?? 0);
+    $item['formulario_verificacion'] = (int) ($item['formulario_verificacion'] ?? 0);
     return $item;
 }
 
@@ -314,6 +319,7 @@ function payment_methods_validate_form(array $input): array {
         : 0.0;
     $impuestoPorcentaje = payment_methods_normalize_discount_percentage(trim((string) ($input['impuesto_metodo_pago_porcentaje'] ?? '0')));
     $activo = isset($input['activo_metodo_pago']) ? 1 : 0;
+    $formularioVerificacion = isset($input['formulario_verificacion_metodo_pago']) ? 1 : 0;
     $errors = [];
 
     if ($nombre === '') {
@@ -348,6 +354,7 @@ function payment_methods_validate_form(array $input): array {
             'descuento_porcentaje' => $descuentoPorcentaje,
             'impuesto_porcentaje' => $impuestoPorcentaje,
             'activo' => $activo,
+            'formulario_verificacion' => $formularioVerificacion,
         ],
     ];
 }
@@ -366,19 +373,20 @@ function payment_methods_save(array $data, ?int $id = null): bool {
     $descuentoPct = (float) ($data['descuento_porcentaje'] ?? 0);
     $impuestoPct = (float) ($data['impuesto_porcentaje'] ?? 0);
     $activo = (int) ($data['activo'] ?? 0);
+    $formularioVerificacion = (int) ($data['formulario_verificacion'] ?? 0);
 
     if ($id === null) {
-        $stmt = $mysqli->prepare('INSERT INTO payment_methods (nombre, datos, image_path, qr_image_path, corner_image_path, moneda_id, referencia_digitos, descuento_porcentaje, impuesto_porcentaje, activo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt = $mysqli->prepare('INSERT INTO payment_methods (nombre, datos, image_path, qr_image_path, corner_image_path, moneda_id, referencia_digitos, descuento_porcentaje, impuesto_porcentaje, activo, formulario_verificacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         if (!$stmt) {
             return false;
         }
-        $stmt->bind_param('sssssiiddi', $nombre, $datos, $imagePath, $qrImagePath, $cornerImagePath, $monedaId, $referenciaDigitos, $descuentoPct, $impuestoPct, $activo);
+        $stmt->bind_param('sssssiiddii', $nombre, $datos, $imagePath, $qrImagePath, $cornerImagePath, $monedaId, $referenciaDigitos, $descuentoPct, $impuestoPct, $activo, $formularioVerificacion);
     } else {
-        $stmt = $mysqli->prepare('UPDATE payment_methods SET nombre = ?, datos = ?, image_path = ?, qr_image_path = ?, corner_image_path = ?, moneda_id = ?, referencia_digitos = ?, descuento_porcentaje = ?, impuesto_porcentaje = ?, activo = ? WHERE id = ?');
+        $stmt = $mysqli->prepare('UPDATE payment_methods SET nombre = ?, datos = ?, image_path = ?, qr_image_path = ?, corner_image_path = ?, moneda_id = ?, referencia_digitos = ?, descuento_porcentaje = ?, impuesto_porcentaje = ?, activo = ?, formulario_verificacion = ? WHERE id = ?');
         if (!$stmt) {
             return false;
         }
-        $stmt->bind_param('sssssiiddii', $nombre, $datos, $imagePath, $qrImagePath, $cornerImagePath, $monedaId, $referenciaDigitos, $descuentoPct, $impuestoPct, $activo, $id);
+        $stmt->bind_param('sssssiiddiii', $nombre, $datos, $imagePath, $qrImagePath, $cornerImagePath, $monedaId, $referenciaDigitos, $descuentoPct, $impuestoPct, $activo, $formularioVerificacion, $id);
     }
 
     $ok = $stmt->execute();
@@ -431,7 +439,7 @@ function payment_methods_active_by_currency(): array {
 
     $mysqli = payment_methods_db();
     $items = [];
-    $res = $mysqli->query("SELECT pm.id, pm.nombre, pm.datos, pm.image_path, pm.qr_image_path, pm.corner_image_path, pm.moneda_id, pm.referencia_digitos, pm.descuento_porcentaje, pm.impuesto_porcentaje,
+    $res = $mysqli->query("SELECT pm.id, pm.nombre, pm.datos, pm.image_path, pm.qr_image_path, pm.corner_image_path, pm.moneda_id, pm.referencia_digitos, pm.descuento_porcentaje, pm.impuesto_porcentaje, pm.formulario_verificacion,
         m.nombre AS moneda_nombre, m.clave AS moneda_clave
         FROM payment_methods pm
         INNER JOIN monedas m ON m.id = pm.moneda_id
@@ -459,6 +467,7 @@ function payment_methods_active_by_currency(): array {
                 'referencia_digitos' => max(0, (int) ($row['referencia_digitos'] ?? 0)),
                 'descuento_porcentaje' => payment_methods_normalize_discount_percentage($row['descuento_porcentaje'] ?? 0),
                 'impuesto_porcentaje' => payment_methods_normalize_discount_percentage($row['impuesto_porcentaje'] ?? 0),
+                'formulario_verificacion' => (int) ($row['formulario_verificacion'] ?? 0),
             ];
         }
     }

@@ -905,6 +905,28 @@ include __DIR__ . "/includes/header.php";
                 <label for="payment-phone-input" class="form-label text-info">Número de teléfono real para contactarte</label>
                 <input type="tel" id="payment-phone-input" class="form-control bg-dark text-info border-info" autocomplete="tel" value="<?= htmlspecialchars($loggedUserLastPurchasePhone, ENT_QUOTES, 'UTF-8') ?>" placeholder="Ej: 04121234567">
               </div>
+              <!-- Formulario de verificación avanzado (activable por método de pago) -->
+              <div id="payment-advanced-form" class="d-none">
+                <div class="mb-3">
+                  <label for="payment-cedula-input" class="form-label text-info">Cédula</label>
+                  <input type="text" id="payment-cedula-input" class="form-control bg-dark text-info border-info" autocomplete="off" placeholder="Ej: V-12345678">
+                  <div class="form-text text-secondary">Ingresa tu número de cédula de identidad.</div>
+                </div>
+                <div id="payment-adv-reference-group" class="mb-3">
+                  <label for="payment-adv-reference-input" class="form-label text-info">Número de Referencia</label>
+                  <input type="text" id="payment-adv-reference-input" class="form-control bg-dark text-info border-info" inputmode="numeric" autocomplete="off" placeholder="Inserte los últimos dígitos de su referencia">
+                  <div id="payment-adv-reference-help" class="form-text text-secondary">Solo debes escribir los últimos dígitos de la referencia bancaria.</div>
+                </div>
+                <button type="button" id="payment-whatsapp-btn" class="btn btn-success w-100 fw-bold py-2 mb-3">
+                  <i class="fa-brands fa-whatsapp me-2" aria-hidden="true"></i>Enviar Comprobante al Admin
+                </button>
+                <div class="d-flex gap-2 align-items-start p-3 rounded-3 mb-2" style="background:rgba(220,53,69,.13);border:1px solid rgba(220,53,69,.38);">
+                  <i class="fa-solid fa-shield-halved text-danger flex-shrink-0 mt-1" aria-hidden="true"></i>
+                  <div class="small" style="color:#f8a0a8;">
+                    <strong>Aviso legal:</strong> Subir comprobantes falsos o manipulados constituye <strong>fraude electrónico</strong> y será penalizado conforme a la ley. Nos reservamos el derecho de reportar ante las autoridades.
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -928,6 +950,21 @@ include __DIR__ . "/includes/header.php";
         <div class="d-flex gap-2 justify-content-end flex-wrap">
           <button type="button" id="payment-cancel-dismiss-btn" class="btn btn-outline-info">Volver</button>
           <button type="button" id="payment-cancel-confirm-btn" class="btn btn-danger">Sí, cancelar orden</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="payment-whatsapp-confirm-modal" class="modal fade app-overlay-modal payment-confirm-overlay" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content bg-dark text-light p-4 rounded-4" style="border:1px solid rgba(37,211,102,.5);">
+        <h4 class="fw-bold mb-3" style="color:#25d366;"><i class="fa-solid fa-triangle-exclamation me-2" aria-hidden="true"></i>Envío de comprobante</h4>
+        <p class="text-light mb-4">Serás redirigido al WhatsApp del administrador. <strong>Recuerda adjuntar la captura de tu pago</strong> en el chat y verifica que los datos enviados sean correctos antes de enviar.</p>
+        <div class="d-flex gap-2 justify-content-end flex-wrap">
+          <button type="button" id="payment-whatsapp-modal-cancel-btn" class="btn btn-outline-secondary">Cancelar</button>
+          <button type="button" id="payment-whatsapp-modal-confirm-btn" class="btn fw-bold" style="background:#25d366;color:#000;">
+            <i class="fa-brands fa-whatsapp me-2" aria-hidden="true"></i>Ir a WhatsApp
+          </button>
         </div>
       </div>
     </div>
@@ -2384,7 +2421,7 @@ include __DIR__ . "/includes/header.php";
   }
 
   .payment-confirm-overlay {
-    z-index: 1115;
+    z-index: 13300;
     background: rgba(5, 10, 20, 0.38);
     backdrop-filter: blur(2px);
   }
@@ -4595,6 +4632,16 @@ include __DIR__ . "/includes/header.php";
   const paymentCancelConfirmModal = document.getElementById('payment-cancel-confirm-modal');
   const paymentCancelDismissButton = document.getElementById('payment-cancel-dismiss-btn');
   const paymentCancelConfirmButton = document.getElementById('payment-cancel-confirm-btn');
+  const paymentAdvancedForm = document.getElementById('payment-advanced-form');
+  const paymentCedulaInput = document.getElementById('payment-cedula-input');
+  const paymentAdvReferenceGroup = document.getElementById('payment-adv-reference-group');
+  const paymentAdvReferenceInput = document.getElementById('payment-adv-reference-input');
+  const paymentAdvReferenceHelp = document.getElementById('payment-adv-reference-help');
+  const paymentWhatsappBtn = document.getElementById('payment-whatsapp-btn');
+  const paymentWhatsappConfirmModal = document.getElementById('payment-whatsapp-confirm-modal');
+  const paymentWhatsappModalCancelBtn = document.getElementById('payment-whatsapp-modal-cancel-btn');
+  const paymentWhatsappModalConfirmBtn = document.getElementById('payment-whatsapp-modal-confirm-btn');
+  let pendingWhatsappUrl = '';
   let lastFocusedElement = null;
   let activePack = null;
   let activeAccountGalleryPreview = { pack: null, index: 0 };
@@ -6765,11 +6812,12 @@ include __DIR__ . "/includes/header.php";
       button.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
       button.disabled = buttonMode === 'points' ? !canUsePoints : (buttonMode === 'binance_pagonorte' ? !canUseBinancePagonorte : (buttonMode === 'binance' ? !canUseBinance : (buttonMode === 'paypal' ? !canUsePayPal : !canUseMoney)));
     });
+    const isAdvancedFormActive = !!(selectedMethod && selectedMethod.formulario_verificacion);
     if (paymentReferenceGroup) {
-      paymentReferenceGroup.classList.toggle('d-none', usingPoints || usingBinance || usingPayPal);
+      paymentReferenceGroup.classList.toggle('d-none', usingPoints || usingBinance || usingPayPal || isAdvancedFormActive);
     }
     if (paymentPhoneGroup) {
-      paymentPhoneGroup.classList.toggle('d-none', usingPoints || usingBinance || usingPayPal);
+      paymentPhoneGroup.classList.toggle('d-none', usingPoints || usingBinance || usingPayPal || isAdvancedFormActive);
     }
     if (paymentMoneyPanel) {
       paymentMoneyPanel.classList.toggle('is-active', !usingPoints && (canUseMoney || canUseBinancePagonorte || canUseBinance || canUsePayPal));
@@ -9300,9 +9348,84 @@ include __DIR__ . "/includes/header.php";
   }
 
   function setPaymentFormDisabled(disabled) {
-    [paymentMethodSelect, paymentReferenceInput, paymentPhoneInput, paymentSubmitButton, ...getPaymentModeButtons()].forEach((field) => {
+    [paymentMethodSelect, paymentReferenceInput, paymentPhoneInput, paymentSubmitButton,
+      paymentCedulaInput, paymentAdvReferenceInput, paymentWhatsappBtn,
+      ...getPaymentModeButtons()].forEach((field) => {
       if (field) {
         field.disabled = disabled;
+      }
+    });
+  }
+
+  function updateAdvancedFormVisibility(method) {
+    const isAdvanced = !!(method && method.formulario_verificacion);
+    if (paymentReferenceGroup) paymentReferenceGroup.classList.toggle('d-none', isAdvanced);
+    if (paymentPhoneGroup) paymentPhoneGroup.classList.toggle('d-none', isAdvanced);
+    if (paymentAdvancedForm) paymentAdvancedForm.classList.toggle('d-none', !isAdvanced);
+    if (isAdvanced && paymentAdvReferenceInput) {
+      const digits = Number(method.referencia_digitos || 0);
+      paymentAdvReferenceInput.placeholder = paymentReferencePlaceholder(method);
+      if (paymentAdvReferenceHelp) paymentAdvReferenceHelp.textContent = paymentReferenceHelpText(method);
+      paymentAdvReferenceInput.maxLength = 120;
+      paymentAdvReferenceInput.dataset.requiredDigits = String(digits > 0 ? digits : 0);
+    }
+  }
+
+  function buildAdvancedVerificationWhatsappUrl() {
+    if (!paymentSupportWhatsappBase) return '';
+    const orderId = activePaymentOrder ? activePaymentOrder.orderId : '';
+    const productName = paymentSummaryProduct ? paymentSummaryProduct.textContent : '';
+    const userIdentifier = paymentSummaryUser ? paymentSummaryUser.textContent : '';
+    const totalText = paymentSummaryTotal ? paymentSummaryTotal.textContent : '';
+    const cedula = paymentCedulaInput ? paymentCedulaInput.value.trim() : '';
+    const referencia = paymentAdvReferenceInput ? paymentAdvReferenceInput.value.trim() : '';
+    const message = [
+      'Hola, envío comprobante de pago para verificación.',
+      `Pedido: #${orderId || '-'}`,
+      `Juego: ${currentGameName || '-'}`,
+      `Producto: ${productName || '-'}`,
+      `ID Jugador: ${userIdentifier || '-'}`,
+      `Cédula: ${cedula || '-'}`,
+      `Referencia: ${referencia || '-'}`,
+      `Monto: ${totalText || '-'}`,
+      '(Adjunto captura del comprobante de pago)'
+    ].join('\n');
+    return `${paymentSupportWhatsappBase}?text=${encodeURIComponent(message)}`;
+  }
+
+  if (paymentWhatsappBtn) {
+    paymentWhatsappBtn.addEventListener('click', () => {
+      const url = buildAdvancedVerificationWhatsappUrl();
+      if (!url) {
+        showToast('No hay número de WhatsApp configurado.', 'error');
+        return;
+      }
+      pendingWhatsappUrl = url;
+      setOverlayVisible(paymentWhatsappConfirmModal, true);
+    });
+  }
+
+  if (paymentWhatsappModalCancelBtn) {
+    paymentWhatsappModalCancelBtn.addEventListener('click', () => {
+      pendingWhatsappUrl = '';
+      setOverlayVisible(paymentWhatsappConfirmModal, false);
+    });
+  }
+
+  if (paymentWhatsappModalConfirmBtn) {
+    paymentWhatsappModalConfirmBtn.addEventListener('click', () => {
+      setOverlayVisible(paymentWhatsappConfirmModal, false);
+      if (pendingWhatsappUrl) {
+        window.open(pendingWhatsappUrl, '_blank', 'noopener');
+        pendingWhatsappUrl = '';
+      }
+    });
+  }
+
+  if (paymentAdvReferenceInput) {
+    paymentAdvReferenceInput.addEventListener('input', () => {
+      if (paymentReferenceInput) {
+        paymentReferenceInput.value = paymentAdvReferenceInput.value;
       }
     });
   }
@@ -9332,6 +9455,7 @@ include __DIR__ . "/includes/header.php";
     setPaymentMethodQrState('', 'QR del método de pago');
 
     if (mode === 'points') {
+      updateAdvancedFormVisibility(null);
       const requiredPoints = Number(activePaymentOrder && activePaymentOrder.pointsRequired ? activePaymentOrder.pointsRequired : 0);
       const fallbackCopy = winPointsState.loggedIn
         ? `Saldo disponible: ${formatWinPointsAmount(winPointsState.balance || 0)}`
@@ -9352,6 +9476,7 @@ include __DIR__ . "/includes/header.php";
     }
 
     if (mode === 'binance_pagonorte') {
+      updateAdvancedFormVisibility(null);
       const pricing = resolvePaymentPricing('binance_pagonorte', null);
       paymentMethodTitle.textContent = String(binancePagonorteButtonLabel || 'Binance');
       paymentMethodCurrency.textContent = pricing.totalText ? `Total esperado en USDT: ${pricing.totalText}` : 'Pago en USDT con verificación automática';
@@ -9378,6 +9503,7 @@ include __DIR__ . "/includes/header.php";
     }
 
     if (mode === 'binance') {
+      updateAdvancedFormVisibility(null);
       const pricing = resolvePaymentPricing('binance', null);
       const binanceMoney = resolveBinanceDisplayMoney(activePaymentOrder && activePaymentOrder.pack ? activePaymentOrder.pack : null, pricing.totalAmount);
       const totalLabel = String((binanceMoney && binanceMoney.text) || pricing.totalText || '').trim();
@@ -9402,6 +9528,7 @@ include __DIR__ . "/includes/header.php";
     }
 
     if (mode === 'paypal') {
+      updateAdvancedFormVisibility(null);
       const pricing = resolvePaymentPricing('paypal', null);
       const payPalInfoLines = [
         'Te enviaremos al checkout oficial de PayPal para que autorices el pago con saldo, tarjeta o cuenta vinculada.',
@@ -9425,6 +9552,7 @@ include __DIR__ . "/includes/header.php";
     }
 
     if (!method) {
+      updateAdvancedFormVisibility(null);
       paymentMethodTitle.textContent = 'Datos de pago';
       paymentMethodCurrency.textContent = '';
       paymentMethodDetails.innerHTML = 'No hay datos de pago disponibles.';
@@ -9448,6 +9576,7 @@ include __DIR__ . "/includes/header.php";
     paymentReferenceHelp.textContent = paymentReferenceHelpText(method);
     paymentReferenceInput.maxLength = 120;
     paymentReferenceInput.dataset.requiredDigits = String(digits > 0 ? digits : 0);
+    updateAdvancedFormVisibility(method);
   }
 
   function renderPaymentMethodsByCurrency(currencyCode) {
@@ -9495,6 +9624,10 @@ include __DIR__ . "/includes/header.php";
     updateResumenCompra(null);
     refreshPaymentDifferenceBanner(null);
     updateButtonState();
+    updateAdvancedFormVisibility(null);
+    if (paymentCedulaInput) paymentCedulaInput.value = '';
+    if (paymentAdvReferenceInput) paymentAdvReferenceInput.value = '';
+    pendingWhatsappUrl = '';
   }
 
   function closePaymentModal(resetState) {
@@ -10091,6 +10224,12 @@ include __DIR__ . "/includes/header.php";
                   }
                   if (paymentMode === 'paypal' && !activePaymentOrder.canUsePayPal) {
                     setPaymentAlert('PayPal no está disponible para esta orden.', 'danger');
+                    return;
+                  }
+                  const isAdvancedForm = !!(selectedMethod && selectedMethod.formulario_verificacion);
+                  if (isAdvancedForm && paymentCedulaInput && !paymentCedulaInput.value.trim()) {
+                    setPaymentAlert('Debes ingresar tu número de cédula.', 'danger');
+                    if (paymentCedulaInput) paymentCedulaInput.focus();
                     return;
                   }
                   if (requiresManualConfirmation && !reference) {
