@@ -28,6 +28,14 @@ if (!function_exists('game_categories_ensure_schema')) {
         if ($cols2 instanceof mysqli_result && $cols2->num_rows === 0) {
             $mysqli->query("ALTER TABLE juego_categorias ADD COLUMN mostrar_menu VARCHAR(20) NOT NULL DEFAULT 'no' AFTER imagen");
         }
+        $cols3 = $mysqli->query("SHOW COLUMNS FROM juego_categorias LIKE 'destacada'");
+        if ($cols3 instanceof mysqli_result && $cols3->num_rows === 0) {
+            $mysqli->query("ALTER TABLE juego_categorias ADD COLUMN destacada TINYINT(1) NOT NULL DEFAULT 0 AFTER mostrar_menu");
+        }
+        $cols4 = $mysqli->query("SHOW COLUMNS FROM juego_categorias LIKE 'es_todos'");
+        if ($cols4 instanceof mysqli_result && $cols4->num_rows === 0) {
+            $mysqli->query("ALTER TABLE juego_categorias ADD COLUMN es_todos TINYINT(1) NOT NULL DEFAULT 0 AFTER destacada");
+        }
 
         $mysqli->query("CREATE TABLE IF NOT EXISTS juego_categoria_asignada (
             juego_id     INT NOT NULL,
@@ -87,6 +95,8 @@ if (!function_exists('game_category_normalize')) {
             'color'       => trim((string) ($row['color'] ?? '')),
             'imagen'       => trim((string) ($row['imagen'] ?? '')),
             'mostrar_menu' => trim((string) ($row['mostrar_menu'] ?? 'no')),
+            'destacada'    => (int) ($row['destacada'] ?? 0) === 1,
+            'es_todos'     => (int) ($row['es_todos'] ?? 0) === 1,
             'orden'        => (int) ($row['orden'] ?? 0),
             'activa'      => (int) ($row['activa'] ?? 1) === 1,
         ];
@@ -150,14 +160,15 @@ if (!function_exists('game_category_create')) {
                         ? $data['mostrar_menu'] : 'no';
         $orden        = max(0, (int) ($data['orden'] ?? 0));
         $activa       = isset($data['activa']) && (int) $data['activa'] === 0 ? 0 : 1;
+        $destacada    = isset($data['destacada']) && ((int) $data['destacada'] === 1 || $data['destacada'] === 'true') ? 1 : 0;
 
-        // sssssssii: nombre, slug, descripcion, icono, color, imagen, mostrar_menu (strings) + orden, activa (ints)
+        // sssssssiii: nombre, slug, descripcion, icono, color, imagen, mostrar_menu (strings) + orden, activa, destacada (ints)
         $stmt = $mysqli->prepare(
-            'INSERT INTO juego_categorias (nombre, slug, descripcion, icono, color, imagen, mostrar_menu, orden, activa)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO juego_categorias (nombre, slug, descripcion, icono, color, imagen, mostrar_menu, orden, activa, destacada)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         if (!$stmt) return ['ok' => false, 'message' => 'Error interno de base de datos.'];
-        $stmt->bind_param('sssssssii', $nombre, $slug, $descripcion, $icono, $color, $imagen, $mostrarMenu, $orden, $activa);
+        $stmt->bind_param('sssssssiii', $nombre, $slug, $descripcion, $icono, $color, $imagen, $mostrarMenu, $orden, $activa, $destacada);
         $ok         = $stmt->execute();
         $insertedId = (int) $mysqli->insert_id;
         $stmt->close();
@@ -197,15 +208,19 @@ if (!function_exists('game_category_update')) {
                         ? $data['mostrar_menu'] : (isset($data['mostrar_menu']) ? 'no' : $existing['mostrar_menu']);
         $orden        = isset($data['orden']) ? max(0, (int) $data['orden']) : $existing['orden'];
         $activa       = isset($data['activa']) ? ((int) $data['activa'] === 0 ? 0 : 1) : (int) $existing['activa'];
+        $destacada    = isset($data['destacada']) ? ((int) $data['destacada'] === 1 || $data['destacada'] === 'true' ? 1 : 0) : (int) $existing['destacada'];
+        if (!empty($existing['es_todos'])) {
+            $destacada = 1;
+        }
 
-        // sssssssiii: nombre, slug, descripcion, icono, color, imagen, mostrar_menu (strings) + orden, activa, id (ints)
+        // sssssssiiii: nombre, slug, descripcion, icono, color, imagen, mostrar_menu (strings) + orden, activa, destacada, id (ints)
         $stmt = $mysqli->prepare(
             'UPDATE juego_categorias
-             SET nombre=?, slug=?, descripcion=?, icono=?, color=?, imagen=?, mostrar_menu=?, orden=?, activa=?
+             SET nombre=?, slug=?, descripcion=?, icono=?, color=?, imagen=?, mostrar_menu=?, orden=?, activa=?, destacada=?
              WHERE id=?'
         );
         if (!$stmt) return ['ok' => false, 'message' => 'Error interno de base de datos.'];
-        $stmt->bind_param('sssssssiii', $nombre, $slug, $descripcion, $icono, $color, $imagen, $mostrarMenu, $orden, $activa, $id);
+        $stmt->bind_param('sssssssiiii', $nombre, $slug, $descripcion, $icono, $color, $imagen, $mostrarMenu, $orden, $activa, $destacada, $id);
         $ok = $stmt->execute();
         $stmt->close();
 
@@ -221,6 +236,9 @@ if (!function_exists('game_category_delete')) {
         if ($id <= 0) return ['ok' => false, 'message' => 'ID inválido.'];
 
         $toDelete = game_category_get($mysqli, $id);
+        if ($toDelete && !empty($toDelete['es_todos'])) {
+            return ['ok' => false, 'message' => 'La categoría "Todos" es del sistema y no puede eliminarse.'];
+        }
 
         $stmtCheck = $mysqli->prepare('SELECT COUNT(*) FROM juego_categoria_asignada WHERE categoria_id = ?');
         if ($stmtCheck) {
@@ -403,12 +421,66 @@ if (!function_exists('games_list_with_categories')) {
     }
 }
 
+if (!function_exists('game_category_get_or_create_todos')) {
+    /** Retorna (o crea si no existe) la categoría especial "Todos" del sistema (es_todos=1). */
+    function game_category_get_or_create_todos(mysqli $mysqli): array {
+        game_categories_ensure_schema($mysqli);
+        $result = $mysqli->query("SELECT * FROM juego_categorias WHERE COALESCE(es_todos, 0) = 1 LIMIT 1");
+        if ($result instanceof mysqli_result) {
+            $row = $result->fetch_assoc();
+            if ($row) return game_category_normalize($row);
+        }
+        $slug = game_category_unique_slug($mysqli, 'Todos');
+        $stmt = $mysqli->prepare(
+            'INSERT INTO juego_categorias (nombre, slug, icono, mostrar_menu, orden, activa, destacada, es_todos)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        if (!$stmt) {
+            return ['id' => 0, 'nombre' => 'Todos', 'slug' => $slug, 'descripcion' => '', 'icono' => '🎮',
+                    'color' => '', 'imagen' => '', 'mostrar_menu' => 'texto', 'destacada' => true,
+                    'es_todos' => true, 'orden' => -1, 'activa' => true];
+        }
+        $nombre  = 'Todos';
+        $icono   = '🎮';
+        $mostrar = 'texto';
+        $orden   = -1;
+        $activa  = 1;
+        $dest    = 1;
+        $esTodos = 1;
+        $stmt->bind_param('ssssiiii', $nombre, $slug, $icono, $mostrar, $orden, $activa, $dest, $esTodos);
+        $stmt->execute();
+        $newId = (int) $mysqli->insert_id;
+        $stmt->close();
+        $newRow = game_category_get($mysqli, $newId);
+        return $newRow ?? ['id' => $newId, 'nombre' => 'Todos', 'slug' => $slug, 'descripcion' => '', 'icono' => '🎮',
+                           'color' => '', 'imagen' => '', 'mostrar_menu' => 'texto', 'destacada' => true,
+                           'es_todos' => true, 'orden' => -1, 'activa' => true];
+    }
+}
+
+if (!function_exists('game_category_list_destacadas')) {
+    /** Retorna categorías activas marcadas como destacadas, excluyendo la especial "Todos". */
+    function game_category_list_destacadas(mysqli $mysqli): array {
+        game_categories_ensure_schema($mysqli);
+        $result = $mysqli->query(
+            "SELECT * FROM juego_categorias WHERE activa = 1 AND COALESCE(destacada, 0) = 1 AND COALESCE(es_todos, 0) = 0 ORDER BY orden ASC, nombre ASC"
+        );
+        $rows = [];
+        if ($result instanceof mysqli_result) {
+            while ($row = $result->fetch_assoc()) {
+                $rows[] = game_category_normalize($row);
+            }
+        }
+        return $rows;
+    }
+}
+
 if (!function_exists('game_category_list_for_menu')) {
-    /** Retorna categorías activas que deben mostrarse en la barra de menú (mostrar_menu != 'no'). */
+    /** Retorna categorías activas que deben mostrarse en la barra de menú (mostrar_menu != 'no', no destacadas). */
     function game_category_list_for_menu(mysqli $mysqli): array {
         game_categories_ensure_schema($mysqli);
         $result = $mysqli->query(
-            "SELECT * FROM juego_categorias WHERE activa = 1 AND mostrar_menu != 'no' ORDER BY orden ASC, nombre ASC"
+            "SELECT * FROM juego_categorias WHERE activa = 1 AND mostrar_menu != 'no' AND COALESCE(destacada, 0) = 0 ORDER BY orden ASC, nombre ASC"
         );
         $rows = [];
         if ($result instanceof mysqli_result) {

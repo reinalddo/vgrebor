@@ -469,6 +469,9 @@ if ($resPaquetes instanceof mysqli_result) {
 }
 // Categorías de juegos
 game_categories_ensure_schema($mysqli);
+if (function_exists('game_category_get_or_create_todos')) {
+    game_category_get_or_create_todos($mysqli);
+}
 $allCategories = game_category_list($mysqli);
 // Precargar categorías asignadas por juego
 $gameCategories = [];
@@ -708,6 +711,12 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     <?php endforeach; ?>
                 </div>
             </div>
+            <div class="mt-2">
+                <label class="d-flex align-items-center gap-2" style="cursor:pointer;color:#00fff7;font-size:0.82rem;">
+                    <input type="checkbox" id="gcatDestacada" style="accent-color:#00fff7;">
+                    <span>Categoría Destacada <small style="color:#8be9fd;font-size:0.78rem;">(aparece en la sección inferior de la tienda, no en la barra de menú)</small></span>
+                </label>
+            </div>
             <div class="mt-2 d-flex align-items-center gap-3 flex-wrap">
                 <div style="flex:1;min-width:200px;">
                     <label class="form-label" style="color:#8be9fd;font-size:0.82rem;margin-bottom:0.2rem;">Imagen de categoría <span style="opacity:.6">(opcional)</span></label>
@@ -741,9 +750,16 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 <?php if ($gcat['descripcion'] !== ''): ?>
                 <span style="color:#b2f6ff;font-size:0.82rem;opacity:.8;"><?= htmlspecialchars($gcat['descripcion'], ENT_QUOTES, 'UTF-8') ?></span>
                 <?php endif; ?>
+                <?php if (!empty($gcat['es_todos'])): ?>
+                <span style="font-size:0.72rem;background:#1a1a3b;border:1px solid #8be9fd;color:#8be9fd;border-radius:12px;padding:0.1rem 0.55rem;flex-shrink:0;">Sistema</span>
+                <?php elseif (!empty($gcat['destacada'])): ?>
+                <span style="font-size:0.72rem;background:#152b1a;border:1px solid #00ff88;color:#00ff88;border-radius:12px;padding:0.1rem 0.55rem;flex-shrink:0;">Destacada</span>
+                <?php endif; ?>
                 <div class="d-flex gap-2 ms-auto flex-shrink-0">
                     <button type="button" class="btn btn-sm gcatEditBtn" data-id="<?= (int) $gcat['id'] ?>" style="border:1px solid #00fff7;color:#00fff7;background:transparent;padding:0.1rem 0.55rem;font-size:0.82rem;">Editar</button>
+                    <?php if (empty($gcat['es_todos'])): ?>
                     <button type="button" class="btn btn-sm gcatDeleteBtn" data-id="<?= (int) $gcat['id'] ?>" data-nombre="<?= htmlspecialchars($gcat['nombre'], ENT_QUOTES, 'UTF-8') ?>" style="border:1px solid #ff5e8a;color:#ff5e8a;background:transparent;padding:0.1rem 0.55rem;font-size:0.82rem;">Eliminar</button>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="gcatEditRow" id="gcatEdit_<?= (int) $gcat['id'] ?>" style="display:none;background:#182030;border:1px solid #00fff7;border-radius:10px;padding:0.75rem;margin-bottom:0.5rem;">
@@ -773,9 +789,13 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     <input type="text" class="form-control form-control-sm gcatEditDescripcion" value="<?= htmlspecialchars($gcat['descripcion'], ENT_QUOTES, 'UTF-8') ?>" placeholder="Descripción" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;">
                 </div>
                 <div class="mt-2">
+                    <?php if (!empty($gcat['es_todos'])): ?>
+                    <label class="form-label" style="color:#00fff7;font-size:0.78rem;margin-bottom:0.25rem;">Apariencia del tab en el inicio <small style="color:#8be9fd;">(esta categoría nunca va al menú superior)</small></label>
+                    <?php else: ?>
                     <label class="form-label" style="color:#00fff7;font-size:0.78rem;margin-bottom:0.25rem;">Mostrar en barra de menú</label>
+                    <?php endif; ?>
                     <div class="d-flex flex-wrap gap-3">
-                        <?php foreach (['no' => 'No', 'imagen' => 'Solo imagen', 'texto' => 'Solo texto', 'imagen_texto' => 'Imagen + texto'] as $mval => $mlbl): ?>
+                        <?php foreach (['no' => (!empty($gcat['es_todos']) ? 'Solo icono / texto' : 'No'), 'imagen' => 'Solo imagen', 'texto' => 'Solo texto', 'imagen_texto' => 'Imagen + texto'] as $mval => $mlbl): ?>
                         <label class="d-flex align-items-center gap-1" style="cursor:pointer;color:#8be9fd;font-size:0.78rem;">
                             <input type="radio" class="gcatEditMostrarMenu" name="gcatEditMostrarMenu_<?= (int) $gcat['id'] ?>" value="<?= $mval ?>" <?= ($gcat['mostrar_menu'] ?? 'no') === $mval ? 'checked' : '' ?> style="accent-color:#00fff7;">
                             <?= $mlbl ?>
@@ -783,6 +803,27 @@ if ($gcatAssignResult instanceof mysqli_result) {
                         <?php endforeach; ?>
                     </div>
                 </div>
+                <div class="mt-2">
+                    <?php if (!empty($gcat['es_todos'])): ?>
+                    <label class="d-flex align-items-center gap-2" style="color:#8be9fd;font-size:0.78rem;opacity:.7;cursor:default;">
+                        <input type="checkbox" class="gcatEditDestacada" value="1" checked disabled style="accent-color:#00fff7;">
+                        <span>Categoría Destacada <small style="color:#8be9fd;font-size:0.75rem;">(siempre activa para la categoría "Todos")</small></span>
+                    </label>
+                    <?php else: ?>
+                    <label class="d-flex align-items-center gap-2" style="cursor:pointer;color:#00fff7;font-size:0.78rem;">
+                        <input type="checkbox" class="gcatEditDestacada" value="1" <?= !empty($gcat['destacada']) ? 'checked' : '' ?> style="accent-color:#00fff7;">
+                        <span>Categoría Destacada <small style="color:#8be9fd;font-size:0.75rem;">(en sección inferior, no en barra de menú)</small></span>
+                    </label>
+                    <?php endif; ?>
+                </div>
+                <?php if (!empty($gcat['es_todos'])): ?>
+                <div class="mt-2">
+                    <label class="d-flex align-items-center gap-2" style="cursor:pointer;color:#00fff7;font-size:0.78rem;">
+                        <input type="checkbox" class="gcatEditActiva" value="1" <?= !empty($gcat['activa']) ? 'checked' : '' ?> style="accent-color:#00fff7;">
+                        <span>Visible en el inicio <small style="color:#8be9fd;font-size:0.75rem;">(si se desactiva, la primera categoría destacada toma el relevo)</small></span>
+                    </label>
+                </div>
+                <?php endif; ?>
                 <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
                     <?php if ($gcat['imagen'] !== ''): ?>
                     <img src="/<?= htmlspecialchars($gcat['imagen'], ENT_QUOTES, 'UTF-8') ?>" class="gcatCurrentImgThumb" style="max-height:40px;border-radius:5px;border:1px solid #1e3a5f;" alt="">
@@ -1607,6 +1648,7 @@ document.querySelectorAll('.js-refresh-discord-games').forEach((button) => {
                 activa:        '1',
                 imagen:        document.getElementById('gcatImagen')?.files?.[0] ?? null,
                 mostrar_menu:  document.querySelector('input[name="gcatMostrarMenu"]:checked')?.value ?? 'no',
+                destacada:     document.getElementById('gcatDestacada')?.checked ? '1' : '0',
             });
             // Reload page so new category appears in PHP-rendered lists
             window.location.reload();
@@ -1646,7 +1688,7 @@ document.querySelectorAll('.js-refresh-discord-games').forEach((button) => {
             if (status) status.textContent = '';
             btn.disabled = true;
             try {
-                await catsFetch('update', {
+                const gcatUpdatePayload = {
                     id,
                     nombre:        editRow?.querySelector('.gcatEditNombre')?.value ?? '',
                     slug:          editRow?.querySelector('.gcatEditSlug')?.value ?? '',
@@ -1657,7 +1699,11 @@ document.querySelectorAll('.js-refresh-discord-games').forEach((button) => {
                     imagen:        editRow?.querySelector('.gcatEditImagen')?.files?.[0] ?? null,
                     remove_imagen: editRow?.querySelector('.gcatEditRemoveImagen')?.value ?? '0',
                     mostrar_menu:  editRow?.querySelector('.gcatEditMostrarMenu:checked')?.value ?? 'no',
-                });
+                    destacada:     editRow?.querySelector('.gcatEditDestacada')?.checked ? '1' : '0',
+                };
+                const gcatActivaEl = editRow?.querySelector('.gcatEditActiva');
+                if (gcatActivaEl) gcatUpdatePayload.activa = gcatActivaEl.checked ? '1' : '0';
+                await catsFetch('update', gcatUpdatePayload);
                 window.location.reload();
             } catch (e) {
                 if (status) status.textContent = e.message;

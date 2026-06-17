@@ -191,6 +191,42 @@ if ($resGames instanceof mysqli_result) {
 
 $popularGames = array_values(array_filter($gameCards, static fn ($game) => !empty($game['popular'])));
 $moreGames = $gameCards;
+
+// Destacada categories: tabbed section that replaces "Más Juegos"
+$todosCategory       = function_exists('game_category_get_or_create_todos') ? game_category_get_or_create_todos($mysqli) : null;
+$destacadaCategories = function_exists('game_category_list_destacadas') ? game_category_list_destacadas($mysqli) : [];
+$catGameIdMap = [];
+if ($destacadaCategories !== []) {
+  $destCatIds = implode(',', array_map(fn($c) => (int)$c['id'], $destacadaCategories));
+  $destAssignRes = $mysqli->query("SELECT categoria_id, juego_id FROM juego_categoria_asignada WHERE categoria_id IN ($destCatIds)");
+  if ($destAssignRes instanceof mysqli_result) {
+    while ($ar = $destAssignRes->fetch_assoc()) {
+      $catGameIdMap[(int)$ar['categoria_id']][] = (int)$ar['juego_id'];
+    }
+  }
+  // Quitar categorías sin juegos asignados
+  $destacadaCategories = array_values(array_filter(
+    $destacadaCategories,
+    fn($cat) => !empty($catGameIdMap[$cat['id']])
+  ));
+}
+$todosActivo      = $todosCategory !== null && !empty($todosCategory['activa']);
+$showDestSection  = $todosActivo || $destacadaCategories !== [];
+$destDefaultCat   = $todosActivo ? 'all' : (!empty($destacadaCategories) ? (string)(int)$destacadaCategories[0]['id'] : 'all');
+$gameCardsForJs = array_values(array_map(function ($gc) {
+  $sticker = game_sticker_from_row($gc);
+  return [
+    'id'                 => (int)$gc['id'],
+    'nombre'             => (string)($gc['nombre'] ?? ''),
+    'url'                => app_path(game_route_path($gc)),
+    'imagen_url'         => app_path('/' . ltrim((string)($gc['imagen'] ?? ''), '/')),
+    'imagen_paquete_url' => !empty($gc['imagen_paquete']) ? app_path('/' . ltrim((string)$gc['imagen_paquete'], '/')) : '',
+    'popular'            => !empty($gc['popular']),
+    'min_price_label'    => (string)($gc['min_price_label'] ?? ''),
+    'sticker_html'       => game_sticker_render($sticker),
+  ];
+}, $gameCards));
+
 $accentMap = [
   "cyan" => [
     "label" => "text-cyan-300/70",
@@ -3273,6 +3309,142 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         </section>
       <?php endif; ?>
 
+      <?php if ($showDestSection): ?>
+      <style>
+        .dest-tabs { display:flex; gap:0.5rem; overflow-x:auto; padding-bottom:0.4rem; scrollbar-width:none; }
+        .dest-tabs::-webkit-scrollbar { display:none; }
+        .dest-tab { position:relative; overflow:hidden; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.2rem; background:#182030; border:2px solid #1e3a5f; border-radius:10px; padding:0.5rem 0.8rem; cursor:pointer; color:#8be9fd; font-size:0.76rem; transition:border-color 0.18s, color 0.18s, background 0.18s; min-width:64px; height:64px; flex-shrink:0; }
+        .dest-tab--img { padding:0; min-width:84px; width:84px; }
+        .dest-tab:hover, .dest-tab.active { border-color:#00fff7; color:#00fff7; }
+        .dest-tab.active { background:#0f1a28; }
+        .dest-tab-icon { font-size:1.4rem; display:inline-block; transition:transform 0.2s ease; line-height:1; }
+        .dest-tab-img  { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transition:transform 0.22s ease; display:block; }
+        .dest-tab:hover .dest-tab-icon,
+        .dest-tab:hover .dest-tab-img  { transform:scale(1.2); }
+        .dest-tab-text { line-height:1.15; text-align:center; white-space:nowrap; }
+        .dest-tab-overlay { position:absolute; bottom:0; left:0; right:0; padding:5px 4px 4px; background:linear-gradient(transparent, rgba(0,0,0,0.78)); font-size:0.7rem; font-weight:700; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,1),0 0 6px rgba(0,0,0,0.9); text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        @keyframes dest-fadein { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:translateY(0); } }
+        .dest-game-col { animation:dest-fadein 0.28s ease both; }
+      </style>
+      <section class="mt-5">
+        <div class="dest-tabs" id="destTabs">
+          <?php if ($todosActivo):
+            $dtTodosImg = $todosCategory['imagen'] !== '' && in_array($todosCategory['mostrar_menu'], ['imagen', 'imagen_texto'], true);
+          ?>
+          <button class="dest-tab<?= $dtTodosImg ? ' dest-tab--img' : '' ?><?= $destDefaultCat === 'all' ? ' active' : '' ?>" data-cat="all" type="button"
+                  aria-label="<?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?>">
+            <?php if ($dtTodosImg): ?>
+              <img class="dest-tab-img" src="/<?= htmlspecialchars($todosCategory['imagen'], ENT_QUOTES, 'UTF-8') ?>" alt="">
+              <span class="dest-tab-overlay"><?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+            <?php else: ?>
+              <?php if ($todosCategory['icono'] !== ''): ?>
+                <span class="dest-tab-icon"><?= htmlspecialchars($todosCategory['icono'], ENT_QUOTES, 'UTF-8') ?></span>
+              <?php endif; ?>
+              <span class="dest-tab-text"><?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+            <?php endif; ?>
+          </button>
+          <?php endif; ?>
+          <?php foreach ($destacadaCategories as $dcat):
+            $dtUsaImagen = $dcat['imagen'] !== '' && in_array($dcat['mostrar_menu'], ['imagen', 'imagen_texto'], true);
+            $dtIsDefault = $destDefaultCat !== 'all' && $destDefaultCat === (string)(int)$dcat['id'];
+          ?>
+          <button class="dest-tab<?= $dtUsaImagen ? ' dest-tab--img' : '' ?><?= $dtIsDefault ? ' active' : '' ?>" data-cat="<?= (int)$dcat['id'] ?>" type="button"
+                  aria-label="<?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?>">
+            <?php if ($dtUsaImagen): ?>
+              <img class="dest-tab-img" src="/<?= htmlspecialchars($dcat['imagen'], ENT_QUOTES, 'UTF-8') ?>" alt="">
+              <span class="dest-tab-overlay"><?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+            <?php else: ?>
+              <?php if ($dcat['icono'] !== ''): ?>
+                <span class="dest-tab-icon"><?= htmlspecialchars($dcat['icono'], ENT_QUOTES, 'UTF-8') ?></span>
+              <?php endif; ?>
+              <span class="dest-tab-text"><?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+            <?php endif; ?>
+          </button>
+          <?php endforeach; ?>
+        </div>
+        <div class="mt-3 row row-cols-2 row-cols-sm-3 row-cols-lg-4 g-3" id="destGrid"></div>
+        <div class="text-center mt-3" id="destVerMasWrap" style="display:none;">
+          <button class="btn" id="destVerMas" type="button" style="border:1px solid #00fff7;color:#00fff7;background:transparent;min-width:130px;border-radius:8px;">Ver más</button>
+        </div>
+      </section>
+      <script>
+      (function () {
+        var PAGE = 6;
+        var allGames = <?= json_encode($gameCardsForJs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+        var catMap   = <?= json_encode($catGameIdMap,   JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+
+        var gById = {};
+        allGames.forEach(function (g) { gById[g.id] = g; });
+
+        var grid    = document.getElementById('destGrid');
+        var wrapBtn = document.getElementById('destVerMasWrap');
+        var verMas  = document.getElementById('destVerMas');
+        var curCat  = 'all';
+        var curList = [];
+        var page    = 0;
+
+        function esc(s) {
+          return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function cardHtml(g, idx) {
+          var delay = (idx * 0.04).toFixed(2) + 's';
+          var h = '<div class="col dest-game-col" style="animation-delay:' + delay + '">';
+          h += '<a href="' + esc(g.url) + '" class="store-game-card d-block rounded-4 border bg-dark p-2 h-100 text-decoration-none">';
+          h += '<div class="position-relative rounded-3" style="aspect-ratio:1/1;overflow:visible;">';
+          h += '<div class="overflow-hidden rounded-3 w-100 h-100" style="position:absolute;inset:0;">';
+          h += '<img src="' + esc(g.imagen_url) + '" alt="' + esc(g.nombre) + '" class="img-fluid w-100 h-100 object-fit-cover" style="aspect-ratio:1/1;">';
+          h += '</div>';
+          if (g.popular) h += '<span title="Popular" class="position-absolute top-0 end-0 text-success fs-4" style="text-shadow:0 0 4px #000;z-index:4;">★</span>';
+          h += (g.sticker_html || '');
+          h += '</div><div class="mt-2">';
+          h += '<p class="store-game-title fw-semibold d-flex align-items-center mb-1" style="font-size:1rem;">' + esc(g.nombre) + '</p>';
+          h += '<p class="store-game-price-prefix small mb-0">';
+          if (g.imagen_paquete_url) h += '<img src="' + esc(g.imagen_paquete_url) + '" alt="Paquete" class="img-fluid rounded me-1 align-middle" style="height:20px;width:20px;display:inline-block;">';
+          if (g.min_price_label) h += 'Desde <span class="store-game-price">' + esc(g.min_price_label) + '</span>';
+          h += '</p></div></a></div>';
+          return h;
+        }
+
+        function gamesForCat(cat) {
+          if (cat === 'all') return allGames;
+          var ids = new Set(catMap[cat] || []);
+          return allGames.filter(function (g) { return ids.has(g.id); });
+        }
+
+        function showMore() {
+          var slice = curList.slice(page * PAGE, (page + 1) * PAGE);
+          var html = '';
+          slice.forEach(function (g, i) { html += cardHtml(g, i); });
+          grid.insertAdjacentHTML('beforeend', html);
+          page++;
+          wrapBtn.style.display = (page * PAGE < curList.length) ? '' : 'none';
+        }
+
+        function setCategory(cat) {
+          curCat  = cat;
+          page    = 0;
+          curList = gamesForCat(cat);
+          grid.innerHTML = '';
+          showMore();
+          document.querySelectorAll('#destTabs .dest-tab').forEach(function (t) {
+            t.classList.toggle('active', t.dataset.cat === String(cat));
+          });
+        }
+
+        document.querySelectorAll('#destTabs .dest-tab').forEach(function (t) {
+          t.addEventListener('click', function () {
+            var cat = this.dataset.cat === 'all' ? 'all' : parseInt(this.dataset.cat, 10);
+            setCategory(cat);
+          });
+        });
+
+        if (verMas) verMas.addEventListener('click', showMore);
+
+        setCategory(<?= $destDefaultCat === 'all' ? "'all'" : (int)$destDefaultCat ?>);
+      })();
+      </script>
+      <?php else: ?>
       <section class="mt-5">
         <div class="d-flex align-items-center justify-content-between">
           <h2 class="fw-bold" style="font-family:'Oxanium',sans-serif;font-size:1.1rem;">Más juegos</h2>
@@ -3310,6 +3482,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           <?php endforeach; ?>
         </div>
       </section>
+      <?php endif; ?>
 
 <?php
 $pageScripts = [
