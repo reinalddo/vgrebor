@@ -362,6 +362,13 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         .store-game-card:hover {
           transform: translateY(-6px);
         }
+        @media (max-width: 575.98px) {
+          .store-game-card { padding: 0.3rem !important; border-radius: 0.65rem !important; }
+          .store-game-card .store-game-title { font-size: 0.72rem !important; margin-bottom: 0.15rem !important; min-height: 0; }
+          .store-game-card .store-game-price-prefix { font-size: 0.65rem !important; }
+          .store-game-card .store-game-price-prefix img { height: 14px !important; width: 14px !important; }
+          .store-game-card .mt-2 { margin-top: 0.3rem !important; }
+        }
         .game-sticker {
           position: absolute;
           top: -0.5rem;
@@ -3260,7 +3267,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           <h2 class="fw-bold" style="font-family:'Oxanium',sans-serif;font-size:1.1rem;">Juegos populares</h2>
           <a href="<?= htmlspecialchars(app_path('/populares'), ENT_QUOTES, 'UTF-8') ?>" class="small fw-semibold text-info text-uppercase">Ver todo</a>
         </div>
-        <div class="mt-4 row row-cols-2 row-cols-sm-3 row-cols-lg-4 g-3">
+        <div class="mt-4 row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3">
           <?php foreach ($popularGames as $game): ?>
             <?php $gameSticker = game_sticker_from_row($game); ?>
             <div class="col">
@@ -3374,7 +3381,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           </button>
           <?php endforeach; ?>
         </div>
-        <div class="mt-3 row row-cols-2 row-cols-sm-3 row-cols-lg-4 g-3" id="destGrid"></div>
+        <div class="mt-3 row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3" id="destGrid"></div>
         <div class="text-center mt-3" id="destVerMasWrap" style="display:none;">
           <button class="btn" id="destVerMas" type="button" style="border:1px solid #00fff7;color:#00fff7;background:transparent;min-width:130px;border-radius:8px;">Ver más</button>
         </div>
@@ -3462,7 +3469,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           <h2 class="fw-bold" style="font-family:'Oxanium',sans-serif;font-size:1.1rem;">Más juegos</h2>
           <a href="<?= htmlspecialchars(app_path('/juegos'), ENT_QUOTES, 'UTF-8') ?>" class="small fw-semibold text-info text-uppercase">Explorar</a>
         </div>
-        <div class="mt-4 row row-cols-2 row-cols-sm-3 row-cols-lg-4 g-3">
+        <div class="mt-4 row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3">
           <?php foreach ($moreGames as $game): ?>
             <?php $gameSticker = game_sticker_from_row($game); ?>
             <div class="col">

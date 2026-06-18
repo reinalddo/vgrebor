@@ -405,7 +405,7 @@ include __DIR__ . "/includes/header.php";
       : [];
     $packageFeaturesByPackage = package_features_for_packages($mysqli, array_map(static fn (array $package): int => (int) ($package['id'] ?? 0), $paquetes));
   ?>
-  <div class="row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-3 mb-4" id="pack-grid">
+  <div class="row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3 mb-4" id="pack-grid">
     <?php foreach ($paquetes as $pack):
         $precio_base = floatval($pack['precio']);
         $precio_mostrar = $moneda_actual ? currency_convert_from_base($precio_base, $moneda_actual) : currency_apply_amount_rule($precio_base, null);
@@ -3967,6 +3967,57 @@ include __DIR__ . "/includes/header.php";
 
   .neon-selected .pack-card-footer {
     border-top-color: rgba(var(--theme-button-secondary-rgb), 0.48);
+  }
+
+  @media (max-width: 575.98px) {
+    .pack-card {
+      min-height: 0;
+      border-radius: 0.75rem;
+    }
+    .pack-card-media {
+      aspect-ratio: 1 / 1;
+      min-height: 0;
+      border-radius: calc(0.75rem - 1px) calc(0.75rem - 1px) 0 0;
+    }
+    .pack-card-content {
+      padding: 0.4rem 0.5rem 0.5rem;
+      gap: 0.35rem;
+    }
+    .pack-card-name {
+      font-size: 0.72rem;
+      min-height: 0;
+      line-height: 1.2;
+    }
+    .pack-card-footer {
+      padding-top: 0.35rem;
+      gap: 0.25rem;
+    }
+    .moneda-label {
+      font-size: 0.6rem;
+      letter-spacing: 0.08em;
+    }
+    .precio-label {
+      font-size: 0.82rem;
+    }
+    .pack-card-feature-badge {
+      padding: 0.18rem 0.38rem;
+      min-height: 1.3rem;
+      gap: 0.22rem;
+    }
+    .pack-card-feature-text {
+      font-size: 0.6rem;
+    }
+    .pack-card:hover,
+    .pack-card:focus-visible {
+      transform: translateY(-4px) scale(1.01);
+    }
+    .neon-selected {
+      transform: translateY(-4px) scale(1.012);
+    }
+    .neon-selected:hover,
+    .neon-selected:focus-visible {
+      transform: translateY(-6px) scale(1.016);
+    }
   }
 
   @media (max-width: 575.98px) {
