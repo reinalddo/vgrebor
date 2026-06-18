@@ -1434,6 +1434,7 @@ function persist_api_discord_dispatch_result(mysqli $mysqli, array $order, array
     $responseBody = trim((string) ($dispatch['response_body'] ?? ''));
     $requiresReview = !empty($dispatch['requires_review']) ? 1 : 0;
 
+    $mysqli = ensure_mysqli_connection($mysqli);
     $stmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, api_discord_status = ?, api_discord_message_id = ?, api_discord_http_status = ?, api_discord_response_body = ?, api_discord_attempts = ?, api_discord_requires_review = ?, api_discord_last_attempt_at = ?, api_discord_sent_at = ?, estado = ? WHERE id = ? AND estado = ? LIMIT 1");
     if (!$stmt) {
         return false;
@@ -1441,9 +1442,14 @@ function persist_api_discord_dispatch_result(mysqli $mysqli, array $order, array
 
     $stmt->bind_param('ssssisiisssis', $referenceToStore, $phoneToStore, $status, $messageId, $httpStatus, $responseBody, $attemptsTotal, $requiresReview, $lastAttemptAt, $sentAt, $targetState, $orderId, $expectedState);
     $ok = $stmt->execute();
+    $affected = $stmt->affected_rows;
     $stmt->close();
 
-    return $ok;
+    if ($ok && $affected === 0) {
+        error_log('TVG persist_api_discord_dispatch_result: 0 rows affected for order #' . $orderId . ' (expectedState=' . $expectedState . ', targetState=' . $targetState . ')');
+    }
+
+    return $ok && $affected > 0;
 }
 
 function api_discord_listener_payload_from_request(): array {
@@ -3679,7 +3685,7 @@ function sync_local_order_with_binance_payload(mysqli $mysqli, array $order, arr
     if (order_uses_api_discord($updatedOrder)) {
         $dispatchResult = execute_api_discord_order_dispatch($updatedOrder);
         $discordTargetState = (!empty($dispatchResult['sent']) && ($dispatchResult['provider_status'] ?? '') === 'sent') ? 'enviado' : 'pagado';
-        persist_api_discord_dispatch_result($mysqli, $updatedOrder, $dispatchResult, 'pagado', $discordTargetState, $verifiedReference, $phone);
+        persist_api_discord_dispatch_result($mysqli, $updatedOrder, $dispatchResult, 'pendiente', $discordTargetState, $verifiedReference, $phone);
 
         $paidOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
         recharge_notifications_emit_for_order($mysqli, $paidOrder);
@@ -4077,7 +4083,7 @@ function sync_local_order_with_paypal_payload(mysqli $mysqli, array $order, arra
     if (order_uses_api_discord($updatedOrder)) {
         $dispatchResult = execute_api_discord_order_dispatch($updatedOrder);
         $discordTargetState = (!empty($dispatchResult['sent']) && ($dispatchResult['provider_status'] ?? '') === 'sent') ? 'enviado' : 'pagado';
-        persist_api_discord_dispatch_result($mysqli, $updatedOrder, $dispatchResult, 'pagado', $discordTargetState, $verifiedReference, $phone);
+        persist_api_discord_dispatch_result($mysqli, $updatedOrder, $dispatchResult, 'pendiente', $discordTargetState, $verifiedReference, $phone);
 
         $paidOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
         recharge_notifications_emit_for_order($mysqli, $paidOrder);
