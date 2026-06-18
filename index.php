@@ -2369,7 +2369,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         ?>
         <section
           id="daily-missions-shell"
-          class="daily-mission-shell mt-5"
+          class="daily-mission-shell mt-5" data-aos="fade-up"
           style="--daily-accent:<?php echo htmlspecialchars((string) ($dailyMissionsPalette['accent'] ?? '#22d3ee'), ENT_QUOTES, 'UTF-8'); ?>;--daily-glow:<?php echo htmlspecialchars((string) ($dailyMissionsPalette['glow'] ?? 'rgba(34,211,238,0.28)'), ENT_QUOTES, 'UTF-8'); ?>;--daily-border:<?php echo htmlspecialchars((string) ($dailyMissionsPalette['border'] ?? 'rgba(34,211,238,0.38)'), ENT_QUOTES, 'UTF-8'); ?>;--daily-surface:<?php echo htmlspecialchars((string) ($dailyMissionsPalette['surface'] ?? 'rgba(8,14,24,0.96)'), ENT_QUOTES, 'UTF-8'); ?>;"
           data-api-url="<?php echo htmlspecialchars((string) $dailyMissionsScriptPayload['api_url'], ENT_QUOTES, 'UTF-8'); ?>"
           data-progress="<?php echo (int) $dailyMissionsProgressPercent; ?>"
@@ -2964,7 +2964,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         }
       </style>
 
-      <section class="mt-5 roulette-shell" id="roulette-shell">
+      <section class="mt-5 roulette-shell" id="roulette-shell" data-aos="fade-up">
         <div class="roulette-banner">
           <!-- Wheel side -->
           <div class="roulette-wheel-side">
@@ -3046,7 +3046,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
       <?php endif; ?>
 
       <?php if (!empty($ggDropsPackages)): ?>
-      <section class="mt-5 gg-drops-section">
+      <section class="mt-5 gg-drops-section" data-aos="fade-up">
         <style>
           .gg-drops-track {
             display: flex;
@@ -3262,7 +3262,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
       </section>
       <?php endif; ?>
 
-      <section class="mt-5">
+      <section class="mt-5" data-aos="fade-up">
         <div class="d-flex align-items-center justify-content-between">
           <h2 class="fw-bold" style="font-family:'Oxanium',sans-serif;font-size:1.1rem;">Juegos populares</h2>
           <a href="<?= htmlspecialchars(app_path('/populares'), ENT_QUOTES, 'UTF-8') ?>" class="small fw-semibold text-info text-uppercase">Ver todo</a>
@@ -3299,7 +3299,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
       </section>
 
       <?php if (!empty($featured)): ?>
-        <section class="mt-5 featured-section-mobile">
+        <section class="mt-5 featured-section-mobile" data-aos="fade-up">
           <?php
             $featuredUrl = trim((string) ($featured['url'] ?? ''));
             $featuredTarget = !empty($featured['open_in_new_tab']) ? '_blank' : '_self';
@@ -3332,7 +3332,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         <?php if ($todosActivo):
           $dtTodosImg = $todosCategory['imagen'] !== '' && in_array($todosCategory['mostrar_menu'], ['imagen', 'imagen_texto'], true);
         ?>
-        <section class="dest-category-section mt-0 mb-5" data-sect-cat="all">
+        <section class="dest-category-section mt-0 mb-5" data-sect-cat="all" data-aos="fade-up">
           <div class="dest-section-header">
             <?php if ($dtTodosImg): ?>
               <h2 class="dest-section-title"><?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
@@ -3353,7 +3353,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         <?php foreach ($destacadaCategories as $dcat):
           $dtUsaImagen = $dcat['imagen'] !== '' && in_array($dcat['mostrar_menu'], ['imagen', 'imagen_texto'], true);
         ?>
-        <section class="dest-category-section mb-5" data-sect-cat="<?= (int)$dcat['id'] ?>">
+        <section class="dest-category-section mb-5" data-sect-cat="<?= (int)$dcat['id'] ?>" data-aos="fade-up">
           <div class="dest-section-header">
             <?php if ($dtUsaImagen): ?>
               <h2 class="dest-section-title"><?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
@@ -3431,7 +3431,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
       })();
       </script>
       <?php else: ?>
-      <section class="mt-5">
+      <section class="mt-5" data-aos="fade-up">
         <div class="d-flex align-items-center justify-content-between">
           <h2 class="fw-bold" style="font-family:'Oxanium',sans-serif;font-size:1.1rem;">Más juegos</h2>
           <a href="<?= htmlspecialchars(app_path('/juegos'), ENT_QUOTES, 'UTF-8') ?>" class="small fw-semibold text-info text-uppercase">Explorar</a>
@@ -5047,5 +5047,9 @@ if ($rouletteEnabled) {
 </script>
 RLTSCRIPT;
 }
+?>
+<script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+<script>AOS.init({duration:750,easing:'ease-out-cubic',once:true,offset:60});</script>
+<?php
 include __DIR__ . "/includes/footer.php";
 ?>

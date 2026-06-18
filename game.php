@@ -326,7 +326,7 @@ include __DIR__ . "/includes/header.php";
 ?>
 
 
-<section class="container mt-5 mb-4">
+<section class="container mt-5 mb-4" data-aos="fade-up">
   <div class="game-hero-card shadow">
     <div class="game-hero-media" aria-hidden="true">
       <?php if ($gameHeroImageUrl !== ''): ?>
@@ -356,7 +356,7 @@ include __DIR__ . "/includes/header.php";
   </div>
 </section>
 
-<section class="container mt-4">
+<section class="container mt-4" data-aos="fade-up">
   <div class="row mb-2 align-items-center">
     <div class="col">
       <h2 class="page-step-title text-info mb-0">PASO 1: Seleccione su producto</h2>
@@ -651,12 +651,12 @@ include __DIR__ . "/includes/header.php";
 </section>
 
 
-<section class="container mt-4 mb-3">
+<section class="container mt-4 mb-3" data-aos="fade-up">
   <h2 class="page-step-title text-info mb-0">PASO 2: Ingrese su información de jugador</h2>
 </section>
 
 
-<section class="container mt-5 mb-5 p-4 bg-dark bg-opacity-75 rounded-4 shadow">
+<section class="container mt-5 mb-5 p-4 bg-dark bg-opacity-75 rounded-4 shadow" data-aos="fade-up">
   <form class="row g-3" id="order-form">
     <div class="col-12">
       <div class="row g-3" id="player-fields-row">
@@ -691,7 +691,7 @@ include __DIR__ . "/includes/header.php";
   </form>
 </section>
 
-<section class="container mt-3 mb-5">
+<section class="container mt-3 mb-5" data-aos="fade-up">
   <h2 class="page-step-title text-info mb-0">PASO 3: Configure su pago y continúe con la compra</h2>
   <div class="payment-coupon-shell mt-4">
     <div class="payment-coupon-panel">
@@ -10888,6 +10888,8 @@ include __DIR__ . "/includes/header.php";
               });
               </script>
             </section>
+<script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+<script>AOS.init({duration:750,easing:'ease-out-cubic',once:true,offset:60});</script>
 <?php
 include __DIR__ . "/includes/footer.php";
 ?>

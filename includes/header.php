@@ -232,6 +232,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <!--<link rel="stylesheet" href="/assets/css/estilos.css" />-->
   <link rel="stylesheet" href="/assets/css/estilos.css?v=<?php echo htmlspecialchars($mainStylesVersion, ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="https://unpkg.com/aos@2.3.1/dist/aos.css" />
   <style>
     :root {
 <?php echo $themeVariablesCss; ?>
