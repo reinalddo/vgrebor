@@ -291,6 +291,9 @@ $winPointsGuestMessage = (string) ($winPointsConfig['guest_message'] ?? '');
 $winPointsUserSummary = $winPointsEnabled && $loggedUserId > 0
   ? win_points_fetch_user_summary($mysqli, $loggedUserId)
   : win_points_empty_user_summary();
+$winPointsMonthlyStatus = $winPointsEnabled && $loggedUserId > 0
+  ? win_points_user_monthly_minimum_status($mysqli, $loggedUserId)
+  : ['met' => true, 'spent' => 0.0, 'required' => 0.0, 'restricted' => false];
 $winPointsPackageRewards = $winPointsEnabled
   ? win_points_fetch_game_package_rewards($mysqli, (int) ($game['id'] ?? 0))
   : [];
@@ -475,6 +478,7 @@ include __DIR__ . "/includes/header.php";
           data-win-points-reward="<?= $packWinPointsReward ?>"
           data-win-points-required="<?= $packWinPointsRequired ?>"
           data-win-points-active="<?= $packWinPointsRuleActive ? '1' : '0' ?>"
+          data-drop-percent="<?= max(0, min(99, (int) ($pack['descuento_destacado'] ?? 0))) ?>"
           data-package-image="<?= htmlspecialchars($packImageUrl, ENT_QUOTES, 'UTF-8') ?>"
           data-package-features="<?= htmlspecialchars(json_encode($packFeatures, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8') ?>"
           data-account-sale="<?= $packIsAccountSale ? '1' : '0' ?>"
@@ -3509,6 +3513,33 @@ include __DIR__ . "/includes/header.php";
     text-shadow: 0 0 12px rgba(34, 197, 94, 0.16);
   }
 
+  .discount-winner-banner {
+    margin: 0.5rem 0 0;
+    padding: 0.55rem 1rem;
+    background: rgba(34, 211, 238, 0.08);
+    border: 1px solid rgba(34, 211, 238, 0.28);
+    border-radius: 0.75rem;
+    color: #22d3ee;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    text-align: center;
+  }
+
+  .win-points-restriction-badge {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding: 0.55rem 0.8rem;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 0.65rem;
+    color: #fca5a5;
+    font-size: 0.78rem;
+    line-height: 1.4;
+  }
+
   .payment-order-summary-total-wrap {
     margin-top: 1rem;
     padding: 1rem 1rem 0;
@@ -4583,6 +4614,9 @@ include __DIR__ . "/includes/header.php";
     'notificationPosition' => $winPointsNotificationPosition,
     'guestMessage' => $winPointsGuestMessage,
     'balance' => (int) ($winPointsUserSummary['balance'] ?? 0),
+    'monthlyMinimumMet' => (bool) ($winPointsMonthlyStatus['met'] ?? true),
+    'monthlyMinimumSpent' => (float) ($winPointsMonthlyStatus['spent'] ?? 0.0),
+    'monthlyMinimumRequired' => (float) ($winPointsMonthlyStatus['required'] ?? 0.0),
   ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const gameUsesCatalogApi = <?= $usesCatalogApi ? 'true' : 'false' ?>;
   const paymentHeaderMinimalEnabled = <?= $paymentHeaderMinimalEnabled ? 'true' : 'false' ?>;
@@ -5836,7 +5870,8 @@ include __DIR__ . "/includes/header.php";
       imageUrl: String(card.dataset.packageImage || ''),
       features: parsePackageFeatures(card.dataset.packageFeatures),
       accountSale: card.dataset.accountSale === '1',
-      accountGallery: parseAccountSaleGallery(card.dataset.accountGallery)
+      accountGallery: parseAccountSaleGallery(card.dataset.accountGallery),
+      dropPercent: Math.max(0, Math.min(99, Number(card.dataset.dropPercent || 0))),
     };
   }
 
@@ -6070,6 +6105,23 @@ include __DIR__ . "/includes/header.php";
     publicOrderSummaryTotal.textContent = pricing.totalText;
     publicOrderSummaryShell.classList.remove('d-none');
     restartPublicCheckoutSummaryAnimation(`${selection.mode}:${selection.methodId || methodLabel}:${pricing.totalText}:${couponCode}:${couponDiscountText}`);
+
+    // Mostrar mensaje del descuento ganador si hay competencia entre descuentos
+    let discountBanner = document.getElementById('discount-winner-banner');
+    if (pricing.discountWinnerMessage) {
+      if (!discountBanner) {
+        discountBanner = document.createElement('div');
+        discountBanner.id = 'discount-winner-banner';
+        discountBanner.className = 'discount-winner-banner';
+        if (publicOrderSummaryShell && publicOrderSummaryShell.parentNode) {
+          publicOrderSummaryShell.parentNode.insertBefore(discountBanner, publicOrderSummaryShell.nextSibling);
+        }
+      }
+      discountBanner.textContent = pricing.discountWinnerMessage;
+      discountBanner.style.display = '';
+    } else if (discountBanner) {
+      discountBanner.style.display = 'none';
+    }
   }
 
   function formatWinPointsExpirationText(summary, includeDate = false) {
@@ -6287,20 +6339,37 @@ include __DIR__ . "/includes/header.php";
     let baseAmount = normalizeCurrencyAmount(Number(activePaymentOrder && activePaymentOrder.baseAmount !== undefined ? activePaymentOrder.baseAmount : selectedTotalValue), showDecimals);
     let discountPercentage = resolvePaymentModeDiscountPercentage(resolvedMode, method);
 
-    // Regla descuento máximo: cupón vs método de pago, solo se aplica el mayor.
+    // Regla descuento máximo: Drop, Cupón y método de pago compiten; solo el mayor aplica.
     let couponSuppressedByPayment = false;
+    let dropSuppressedByPayment = false;
+    const pack = activePack;
+    const dropPercent = pack ? Number(pack.dropPercent || 0) : 0;
+    // Precio antes del drop (precio de lista real)
+    const priceBeforeDrop = dropPercent > 0 && baseAmount > 0
+      ? normalizeCurrencyAmount(baseAmount / (1 - dropPercent / 100), showDecimals)
+      : baseAmount;
+    const dropSavingsAmt = normalizeCurrencyAmount(Math.max(0, priceBeforeDrop - baseAmount), showDecimals);
     const couponIsActive = couponApplied && Number(appliedCouponSummary.discountAmount || 0) > 0;
-    if (couponIsActive && discountPercentage > 0) {
-      const originalPackAmount = normalizeCurrencyAmount(Number(appliedCouponSummary.originalAmount || 0), showDecimals);
-      if (originalPackAmount > 0) {
-        const couponDiscountAmt = normalizeCurrencyAmount(Number(appliedCouponSummary.discountAmount), showDecimals);
-        const paymentDiscountAmt = normalizeCurrencyAmount((originalPackAmount * discountPercentage) / 100, showDecimals);
-        if (couponDiscountAmt >= paymentDiscountAmt) {
-          discountPercentage = 0; // cupón gana: se suprime el descuento del método de pago
-        } else {
-          baseAmount = originalPackAmount; // método de pago gana: precio base = precio original sin cupón
-          couponSuppressedByPayment = true;
-        }
+    // Ahorro del cupón calculado desde precio sin drop (para comparación justa)
+    const couponDiscountAmtFromOriginal = couponIsActive
+      ? normalizeCurrencyAmount(
+          appliedCouponSummary.discountType === 'porcentaje'
+            ? (priceBeforeDrop * Number(appliedCouponSummary.discountValue || 0)) / 100
+            : Number(appliedCouponSummary.discountValue || 0),
+          showDecimals
+        )
+      : 0;
+    // Mejor descuento pre-existente (el mayor entre drop y cupón)
+    const bestExistingDiscount = Math.max(dropSavingsAmt, couponDiscountAmtFromOriginal);
+    if (discountPercentage > 0 && priceBeforeDrop > 0) {
+      const paymentDiscountAmt = normalizeCurrencyAmount((priceBeforeDrop * discountPercentage) / 100, showDecimals);
+      if (paymentDiscountAmt > bestExistingDiscount) {
+        // Método de pago gana: usar precio sin drop como base
+        baseAmount = priceBeforeDrop;
+        couponSuppressedByPayment = couponIsActive;
+        dropSuppressedByPayment = dropSavingsAmt > 0;
+      } else {
+        discountPercentage = 0; // el descuento existente gana
       }
     }
 
@@ -6314,6 +6383,28 @@ include __DIR__ . "/includes/header.php";
       : 0;
     const totalAmount = normalizeCurrencyAmount(subtotalAmount + taxAmount, showDecimals);
 
+    // Mensaje informativo sobre el descuento ganador
+    let discountWinnerMessage = '';
+    if (discountPercentage > 0 && (couponSuppressedByPayment || dropSuppressedByPayment)) {
+      const methodLabel = resolvedMode === 'binance' ? 'Binance Pay' : (resolvedMode === 'binance_pagonorte' ? 'Binance' : 'el método de pago');
+      if (couponSuppressedByPayment && dropSuppressedByPayment) {
+        discountWinnerMessage = `El descuento de ${methodLabel} es mayor. Se aplicó el descuento de mayor valor.`;
+      } else if (couponSuppressedByPayment) {
+        discountWinnerMessage = `El descuento de ${methodLabel} supera tu cupón. Se aplicó el descuento de mayor valor.`;
+      } else {
+        discountWinnerMessage = `El descuento de ${methodLabel} supera el descuento del producto. Se aplicó el descuento de mayor valor.`;
+      }
+    } else if (discountPercentage === 0 && bestExistingDiscount > 0 && (couponIsActive || dropSavingsAmt > 0)) {
+      if (couponIsActive && dropSavingsAmt > 0) {
+        const label = couponDiscountAmtFromOriginal >= dropSavingsAmt ? 'tu cupón' : 'el descuento del producto';
+        discountWinnerMessage = `Ya tienes el descuento de mayor valor aplicado (${label}).`;
+      } else if (couponIsActive) {
+        discountWinnerMessage = 'Tu cupón ya es el mejor descuento disponible.';
+      } else if (dropSavingsAmt > 0) {
+        discountWinnerMessage = 'El descuento del producto ya es el mejor precio disponible.';
+      }
+    }
+
     return {
       currencyCode,
       showDecimals,
@@ -6324,6 +6415,8 @@ include __DIR__ . "/includes/header.php";
       taxAmount,
       totalAmount,
       couponSuppressedByPayment,
+      dropSavingsAmt,
+      discountWinnerMessage,
       baseText: formatPaymentDifferenceMoney(currencyCode, baseAmount, showDecimals),
       discountText: formatPaymentDifferenceMoney(currencyCode, discountAmount, showDecimals),
       taxText: formatPaymentDifferenceMoney(currencyCode, taxAmount, showDecimals),
@@ -7153,7 +7246,8 @@ include __DIR__ . "/includes/header.php";
     const requiredPoints = getPackRequiredPoints(pack, quantity);
     const hasRule = !!pack.redeemActive && requiredPoints > 0;
     const currentBalance = Number(winPointsState.balance || 0);
-    const canUsePoints = hasRule && currentBalance >= requiredPoints;
+    const monthlyMinimumMet = winPointsState.monthlyMinimumMet !== false;
+    const canUsePoints = hasRule && currentBalance >= requiredPoints && monthlyMinimumMet;
     const canUseBinancePagonorte = canUseBinancePagonorteCheckout(pack);
     const canUseBinance = canUseBinanceCheckout(pack);
     const canUsePayPal = canUsePayPalCheckout(pack);
@@ -7207,6 +7301,10 @@ include __DIR__ . "/includes/header.php";
       activePaymentOrder.pointsMessage = quantity > 1
         ? `Puedes canjear ${quantity} recargas usando ${formatWinPointsAmount(requiredPoints)}.`
         : `Puedes canjear este paquete usando ${formatWinPointsAmount(requiredPoints)}.`;
+    } else if (showRewardsState && hasRule && !monthlyMinimumMet) {
+      const spent = Number(winPointsState.monthlyMinimumSpent || 0).toFixed(2);
+      const required = Number(winPointsState.monthlyMinimumRequired || 5).toFixed(2);
+      activePaymentOrder.pointsMessage = `🔒 Beneficio restringido. Para canjear ${winPointsState.name || 'puntos'} en recargas gratis necesitas haber recargado un mínimo de $${required} en los últimos 30 días. Llevas $${spent} recargados.`;
     } else if (showRewardsState && hasRule) {
       activePaymentOrder.pointsMessage = `Necesitas ${formatWinPointsAmount(requiredPoints)} para canjear este paquete. Tu saldo actual es ${formatWinPointsAmount(currentBalance)}.`;
     } else {

@@ -117,10 +117,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               $nextPaymentCornerImage = '';
             }
 
+            $minMonthlySpend = max(0.0, round((float) str_replace(',', '.', (string) ($_POST['win_points_min_monthly_spend'] ?? '5.00')), 2));
+
             store_config_upsert('win_points_name', $programName);
             store_config_upsert('win_points_badge_background_color', $badgeBackgroundColor);
             store_config_upsert('win_points_badge_text_color', $badgeTextColor);
             store_config_upsert('win_points_expiration_days', (string) $expirationDays);
+            store_config_upsert('win_points_min_monthly_spend', number_format($minMonthlySpend, 2, '.', ''));
             store_config_delete('win_points_default_award');
 
             if ($nextIcon === '') {
@@ -194,6 +197,7 @@ $winPointsConfig = win_points_config();
 $winPointsBadgeBackgroundColor = (string) ($winPointsConfig['badge_background_color'] ?? '#3E2D07');
 $winPointsBadgeTextColor = (string) ($winPointsConfig['badge_text_color'] ?? '#FCD34D');
 $winPointsExpirationDays = (int) ($winPointsConfig['expiration_days'] ?? 180);
+$winPointsMinMonthlySpend = number_format(max(0.0, round((float) str_replace(',', '.', (string) store_config_get('win_points_min_monthly_spend', '5.00')), 2)), 2, '.', '');
 $winPointsBadgeBorderColor = win_points_hex_to_rgba($winPointsBadgeTextColor, 0.28);
 $winPointsBadgeInsetColor = win_points_hex_to_rgba($winPointsBadgeTextColor, 0.08);
 $packageOptions = win_points_fetch_admin_package_options($mysqli);
@@ -892,6 +896,11 @@ include __DIR__ . '/includes/header.php';
               <label class="form-label text-info">Dias de vencimiento</label>
               <input type="number" min="1" max="3650" name="win_points_expiration_days" value="<?= $winPointsExpirationDays ?>" class="form-control bg-dark text-info border-info" required>
               <div class="form-text mt-2">Cada nueva recarga que otorgue premios reinicia este contador para el saldo del usuario.</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label text-info">Mínimo mensual para canje gratis ($)</label>
+              <input type="number" min="0" step="0.01" name="win_points_min_monthly_spend" value="<?= htmlspecialchars($winPointsMinMonthlySpend, ENT_QUOTES, 'UTF-8') ?>" class="form-control bg-dark text-info border-info">
+              <div class="form-text mt-2">Monto mínimo en recargas pagadas (últimos 30 días) para poder canjear <?= htmlspecialchars((string) ($winPointsConfig['name'] ?? 'puntos'), ENT_QUOTES, 'UTF-8') ?> en recargas gratis. Pon 0 para desactivar el requisito. La ruleta no está sujeta a este límite.</div>
             </div>
             <div class="col-md-5">
               <label class="form-label text-info">Vista previa</label>

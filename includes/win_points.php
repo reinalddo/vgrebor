@@ -1143,6 +1143,19 @@ if (!function_exists('win_points_assign_pending_order_redemption')) {
                 throw new RuntimeException('No tienes saldo suficiente para canjear este paquete.');
             }
 
+            // Regla: mínimo mensual de recarga para usar puntos en recargas gratis
+            $minMonthlySpend = win_points_monthly_min_spend();
+            if ($minMonthlySpend > 0.0) {
+                $monthlySpent = win_points_user_monthly_spent($mysqli, $userId);
+                if ($monthlySpent < $minMonthlySpend) {
+                    throw new RuntimeException(
+                        'Para canjear ' . win_points_program_name() . ' en recargas gratis, necesitas haber recargado un mínimo de $' .
+                        number_format($minMonthlySpend, 2) . ' en los últimos 30 días. Llevas $' .
+                        number_format($monthlySpent, 2) . ' recargados.'
+                    );
+                }
+            }
+
             win_points_record_transaction(
                 $mysqli,
                 $userId,
@@ -1601,5 +1614,53 @@ if (!function_exists('win_points_fetch_admin_transactions')) {
             }
         }
         return $rows;
+    }
+}
+
+if (!function_exists('win_points_monthly_min_spend')) {
+    function win_points_monthly_min_spend(): float {
+        return max(0.0, round((float) str_replace(',', '.', (string) store_config_get('win_points_min_monthly_spend', '5.00')), 2));
+    }
+}
+
+if (!function_exists('win_points_user_monthly_spent')) {
+    function win_points_user_monthly_spent(mysqli $mysqli, int $userId): float {
+        if ($userId <= 0) {
+            return 0.0;
+        }
+        $stmt = $mysqli->prepare(
+            "SELECT COALESCE(SUM(precio), 0) AS total_spent
+             FROM pedidos
+             WHERE cliente_usuario_id = ?
+               AND estado IN ('enviado', 'pagado')
+               AND win_points_payment_mode != 'points'
+               AND creado_en >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+        );
+        if (!$stmt) {
+            return 0.0;
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result instanceof mysqli_result ? $result->fetch_assoc() : null;
+        $stmt->close();
+        return max(0.0, round((float) ($row['total_spent'] ?? 0), 2));
+    }
+}
+
+if (!function_exists('win_points_user_monthly_minimum_status')) {
+    function win_points_user_monthly_minimum_status(mysqli $mysqli, int $userId): array {
+        $minSpend = win_points_monthly_min_spend();
+        if ($minSpend <= 0.0 || $userId <= 0) {
+            return ['met' => true, 'spent' => 0.0, 'required' => 0.0, 'restricted' => false];
+        }
+        $spent = win_points_user_monthly_spent($mysqli, $userId);
+        $met = $spent >= $minSpend;
+        return [
+            'met'        => $met,
+            'spent'      => $spent,
+            'required'   => $minSpend,
+            'restricted' => !$met,
+        ];
     }
 }

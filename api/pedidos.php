@@ -247,7 +247,10 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         'estado' => "ALTER TABLE pedidos ADD COLUMN estado ENUM('pendiente','pagado','enviado','cancelado') NOT NULL DEFAULT 'pendiente' AFTER cupon",
         'creado_en' => "ALTER TABLE pedidos ADD COLUMN creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER estado",
         'pago_expira_en' => "ALTER TABLE pedidos ADD COLUMN pago_expira_en DATETIME NULL AFTER creado_en",
-        'actualizado_en' => "ALTER TABLE pedidos ADD COLUMN actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER creado_en"
+        'actualizado_en' => "ALTER TABLE pedidos ADD COLUMN actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER creado_en",
+        'precio_sin_drop' => "ALTER TABLE pedidos ADD COLUMN precio_sin_drop DECIMAL(12,2) NULL AFTER precio_original",
+        'descuento_drop_porcentaje' => "ALTER TABLE pedidos ADD COLUMN descuento_drop_porcentaje DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER precio_sin_drop",
+        'descuento_drop_monto' => "ALTER TABLE pedidos ADD COLUMN descuento_drop_monto DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER descuento_drop_porcentaje",
     ];
     $colResult = $mysqli->query("SHOW COLUMNS FROM pedidos");
     $existing = [];
@@ -2634,23 +2637,40 @@ function resolve_order_payment_discount_snapshot(array $order, string $paymentMo
         $taxPercentage = payment_method_paypal_tax_percentage();
     }
 
-    // Regla descuento máximo: cuando hay cupón Y descuento de método de pago,
-    // solo se aplica el mayor; si son iguales gana el cupón.
-    $couponDiscountedPrice = null;
-    if (!empty(trim((string) ($order['cupon'] ?? '')))) {
-        $rawCoupon = (float) ($order['precio_original'] ?? 0);
-        $couponDiscountedPrice = payment_difference_normalize_amount($rawCoupon > 0 ? $rawCoupon : (float) ($order['precio'] ?? 0));
+    // Regla descuento máximo: Drop, Cupón y método de pago compiten; solo el mayor aplica.
+    // precio_sin_drop es la base real (precio original antes de cualquier descuento).
+    $priceBeforeDropStored = payment_difference_normalize_amount((float) ($order['precio_sin_drop'] ?? 0));
+    $dropMontoStored = payment_difference_normalize_amount((float) ($order['descuento_drop_monto'] ?? 0));
+    // Si la orden no tiene precio_sin_drop (pedidos previos a esta versión), usamos baseAmount
+    if ($priceBeforeDropStored <= 0.0) {
+        $priceBeforeDropStored = $baseAmount;
     }
 
-    if ($couponDiscountedPrice !== null && $percentage > 0.0) {
-        $couponDiscountAmount = max(0.0, $baseAmount - $couponDiscountedPrice);
-        $paymentDiscountAmount = payment_difference_normalize_amount(($baseAmount * $percentage) / 100);
-        if ($couponDiscountAmount >= $paymentDiscountAmount) {
-            $percentage = 0.0; // cupón gana: se suprime el descuento del método de pago
+    $existingDiscountedPrice = null;
+    $existingDiscountLabel = '';
+    if (!empty(trim((string) ($order['cupon'] ?? '')))) {
+        // Cupón aplicado: precio post-cupón está en precio_original
+        $rawCouponPrice = (float) ($order['precio_original'] ?? 0);
+        $existingDiscountedPrice = payment_difference_normalize_amount($rawCouponPrice > 0 ? $rawCouponPrice : (float) ($order['precio'] ?? 0));
+        $existingDiscountLabel = 'coupon';
+    } elseif ($dropMontoStored > 0.0) {
+        // Drop aplicado sin cupón
+        $existingDiscountedPrice = payment_difference_normalize_amount(max(0.0, $priceBeforeDropStored - $dropMontoStored));
+        $existingDiscountLabel = 'drop';
+    }
+
+    $paymentDiscountWins = false;
+    if ($existingDiscountedPrice !== null && $percentage > 0.0) {
+        $existingDiscountAmount = max(0.0, $priceBeforeDropStored - $existingDiscountedPrice);
+        $paymentDiscountAmount = payment_difference_normalize_amount(($priceBeforeDropStored * $percentage) / 100);
+        if ($existingDiscountAmount >= $paymentDiscountAmount) {
+            $percentage = 0.0; // drop/cupón gana: se suprime el descuento del método de pago
         } else {
-            $couponDiscountedPrice = null; // método de pago gana: se ignora el cupón
+            $existingDiscountedPrice = null; // método de pago gana: se ignora drop/cupón
+            $paymentDiscountWins = true;
         }
     }
+    $couponDiscountedPrice = $existingDiscountedPrice;
 
     $discountAmount = payment_difference_normalize_amount(($baseAmount * $percentage) / 100);
     if ($discountAmount > $baseAmount) {
@@ -2662,6 +2682,27 @@ function resolve_order_payment_discount_snapshot(array $order, string $paymentMo
         : payment_difference_normalize_amount(max(0.0, $baseAmount - $discountAmount));
     $taxAmount = payment_difference_normalize_amount(($subtotalAmount * $taxPercentage) / 100);
 
+    // Determinar ganador del descuento para notificar al cliente
+    $discountWinner = 'none';
+    $discountWinnerMessage = '';
+    if ($paymentDiscountWins && $percentage > 0.0) {
+        $discountWinner = 'payment_method';
+        if ($existingDiscountLabel === 'coupon') {
+            $discountWinnerMessage = 'El descuento de ' . $methodName . ' es mayor que tu cupón. Se aplicó el descuento de mayor valor.';
+        } elseif ($existingDiscountLabel === 'drop') {
+            $discountWinnerMessage = 'El descuento de ' . $methodName . ' es mayor que el descuento del producto. Se aplicó el descuento de mayor valor.';
+        } else {
+            $discountWinnerMessage = 'Se aplicó el descuento de ' . $methodName . ' como el mayor descuento disponible.';
+        }
+    } elseif ($existingDiscountedPrice !== null) {
+        $discountWinner = $existingDiscountLabel ?: 'existing';
+        if ($percentage > 0.0 && $existingDiscountLabel === 'coupon') {
+            $discountWinnerMessage = 'Tu cupón tiene un descuento mayor. Se aplicó el descuento de mayor valor.';
+        } elseif ($percentage > 0.0 && $existingDiscountLabel === 'drop') {
+            $discountWinnerMessage = 'El descuento del producto es mayor que el de ' . $methodName . '. Se aplicó el descuento de mayor valor.';
+        }
+    }
+
     return [
         'base_amount' => $baseAmount,
         'discount_percentage' => $percentage,
@@ -2671,6 +2712,8 @@ function resolve_order_payment_discount_snapshot(array $order, string $paymentMo
         'final_amount' => payment_difference_normalize_amount($subtotalAmount + $taxAmount),
         'method_name' => $methodName,
         'payment_method_id' => $paymentMethodId,
+        'discount_winner' => $discountWinner,
+        'discount_winner_message' => $discountWinnerMessage,
     ];
 }
 
@@ -7859,32 +7902,65 @@ if ($action === 'create') {
         json_error('Faltan datos obligatorios del pedido: ' . implode(', ', $missing));
     }
 
-    $priceBeforeCoupon = $price; // precio original del paquete antes del cupón
+    // ── Descuento máximo: Drop vs Cupón ────────────────────────────────────────
+    // El precio en BD ya trae el drop aplicado (descuento_destacado).
+    // Calculamos precio sin drop para comparar los tres descuentos (drop, cupón, método pago).
+    $packageDropPercent = 0;
+    {
+        $dpStmt = $mysqli->prepare('SELECT COALESCE(descuento_destacado, 0) FROM juego_paquetes WHERE id = ? LIMIT 1');
+        if ($dpStmt) {
+            $dpStmt->bind_param('i', $package_id);
+            $dpStmt->execute();
+            $dpResult = $dpStmt->get_result();
+            $dpRow = $dpResult instanceof mysqli_result ? $dpResult->fetch_row() : null;
+            $dpStmt->close();
+            $packageDropPercent = max(0, min(99, (int) ($dpRow[0] ?? 0)));
+        }
+    }
+    // Precio original antes del drop (precio de lista sin ningún descuento)
+    $priceBeforeDrop = $packageDropPercent > 0
+        ? currency_apply_amount_rule(round($price / (1 - $packageDropPercent / 100), 4), $selectedCurrency)
+        : $price;
+    $dropSavings = max(0.0, round($priceBeforeDrop - $price, 4));
 
-    // Validar y aplicar cupón si existe
+    // Comparar drop vs cupón: solo el mayor aplica
+    $discountWinner = $dropSavings > 0 ? 'drop' : 'none';
     if ($cupon) {
         $couponData = fetch_valid_coupon($mysqli, $cupon, (int) $game_id);
         if (!$couponData) {
             json_error('Cupón inválido o vencido');
         }
-        if (!coupon_allows_points_accumulation($couponData)) {
-            $winPointsAllowedForOrder = false;
-            $winPointsAward = 0;
-        }
-        $price = currency_apply_amount_rule(apply_coupon_to_price($price, $couponData), $selectedCurrency);
-        // Registrar uso del cupón (best effort)
-        if (isset($couponData['id'])) {
-            $upd = $mysqli->prepare("UPDATE cupones SET usos_actuales = COALESCE(usos_actuales,0) + 1 WHERE id = ?");
-            if ($upd) {
-                $upd->bind_param('i', $couponData['id']);
-                $upd->execute();
+        // Calcular ahorro del cupón desde precio original (sin drop)
+        $priceAfterCouponFromOriginal = currency_apply_amount_rule(
+            apply_coupon_to_price($priceBeforeDrop, $couponData),
+            $selectedCurrency
+        );
+        $couponSavingsFromOriginal = max(0.0, round($priceBeforeDrop - $priceAfterCouponFromOriginal, 4));
+
+        if ($couponSavingsFromOriginal > $dropSavings) {
+            // Cupón gana: usar precio original como base y aplicar cupón desde ahí
+            $price = $priceBeforeDrop;
+            $discountWinner = 'coupon';
+            if (!coupon_allows_points_accumulation($couponData)) {
+                $winPointsAllowedForOrder = false;
+                $winPointsAward = 0;
             }
+            $price = currency_apply_amount_rule(apply_coupon_to_price($price, $couponData), $selectedCurrency);
+            if (isset($couponData['id'])) {
+                $upd = $mysqli->prepare("UPDATE cupones SET usos_actuales = COALESCE(usos_actuales,0) + 1 WHERE id = ?");
+                if ($upd) { $upd->bind_param('i', $couponData['id']); $upd->execute(); }
+            }
+            $cupon = $couponData['codigo'];
+        } else {
+            // Drop gana (o empate: drop tiene prioridad): suprimir cupón
+            $cupon = null;
         }
-        // Aseguramos que el cupón se inserte como string, no como null
-        $cupon = $couponData['codigo'];
     } else {
         $cupon = null;
     }
+
+    // Base para comparar descuento de método de pago: siempre desde precio sin drop
+    $priceBeforeCoupon = $priceBeforeDrop;
 
     $priceBeforeDifferenceCredit = payment_difference_normalize_amount($price);
     $paymentDifferenceCredit = payment_difference_get_credit();
@@ -7920,6 +7996,9 @@ if ($action === 'create') {
             'descuento_metodo_pago_porcentaje' => 0,
             'descuento_metodo_pago_monto' => 0,
             'precio_original' => $priceBeforeDifferenceCredit,
+            'precio_sin_drop' => $priceBeforeDrop,
+            'descuento_drop_porcentaje' => $packageDropPercent,
+            'descuento_drop_monto' => round($dropSavings, 2),
             'diferencia_pago_credito_aplicado' => $paymentDifferenceCreditApplied,
             'diferencia_pago_credito_origen_pedido_id' => $paymentDifferenceCreditSourceOrderId > 0 ? $paymentDifferenceCreditSourceOrderId : null,
             'user_identifier' => $user_identifier,
