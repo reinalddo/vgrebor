@@ -3338,10 +3338,10 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
               <h2 class="dest-section-title"><?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
               <img class="dest-section-img" src="/<?= htmlspecialchars($todosCategory['imagen'], ENT_QUOTES, 'UTF-8') ?>" alt="">
             <?php else: ?>
+              <h2 class="dest-section-title"><?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
               <?php if ($todosCategory['icono'] !== ''): ?>
                 <span class="dest-section-icon-emoji"><?= htmlspecialchars($todosCategory['icono'], ENT_QUOTES, 'UTF-8') ?></span>
               <?php endif; ?>
-              <h2 class="dest-section-title"><?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
             <?php endif; ?>
           </div>
           <div class="row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3 dest-sect-grid"></div>
@@ -3359,10 +3359,10 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
               <h2 class="dest-section-title"><?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
               <img class="dest-section-img" src="/<?= htmlspecialchars($dcat['imagen'], ENT_QUOTES, 'UTF-8') ?>" alt="">
             <?php else: ?>
+              <h2 class="dest-section-title"><?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
               <?php if ($dcat['icono'] !== ''): ?>
                 <span class="dest-section-icon-emoji"><?= htmlspecialchars($dcat['icono'], ENT_QUOTES, 'UTF-8') ?></span>
               <?php endif; ?>
-              <h2 class="dest-section-title"><?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
             <?php endif; ?>
           </div>
           <div class="row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3 dest-sect-grid"></div>
