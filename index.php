@@ -3315,13 +3315,17 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         .dest-tabs::-webkit-scrollbar { display:none; }
         .dest-tab { position:relative; overflow:hidden; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.2rem; background:#182030; border:2px solid #1e3a5f; border-radius:10px; padding:0.5rem 0.8rem; cursor:pointer; color:#8be9fd; font-size:0.76rem; transition:border-color 0.18s, color 0.18s, background 0.18s; min-width:64px; height:64px; flex-shrink:0; }
         .dest-tab--img { padding:0; min-width:84px; width:84px; }
+        .dest-tab--img-txt { overflow:visible; flex-direction:row; align-items:center; gap:0.55rem; padding:0.35rem 0.9rem 0.35rem 0.45rem; width:auto; min-width:0; }
         .dest-tab:hover, .dest-tab.active { border-color:#00fff7; color:#00fff7; }
         .dest-tab.active { background:#0f1a28; }
         .dest-tab-icon { font-size:1.4rem; display:inline-block; transition:transform 0.2s ease; line-height:1; }
         .dest-tab-img  { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transition:transform 0.22s ease; display:block; }
+        .dest-tab-side-img { width:46px; height:46px; object-fit:cover; border-radius:8px; flex-shrink:0; transition:transform 0.22s ease; display:block; }
         .dest-tab:hover .dest-tab-icon,
-        .dest-tab:hover .dest-tab-img  { transform:scale(1.2); }
+        .dest-tab:hover .dest-tab-img,
+        .dest-tab:hover .dest-tab-side-img { transform:scale(1.1); }
         .dest-tab-text { line-height:1.15; text-align:center; white-space:nowrap; }
+        .dest-tab--img-txt .dest-tab-text { font-size:0.95rem; font-weight:700; text-align:left; }
         .dest-tab-overlay { position:absolute; bottom:0; left:0; right:0; padding:5px 4px 4px; background:linear-gradient(transparent, rgba(0,0,0,0.78)); font-size:0.7rem; font-weight:700; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,1),0 0 6px rgba(0,0,0,0.9); text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         @keyframes dest-fadein { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:translateY(0); } }
         .dest-game-col { animation:dest-fadein 0.28s ease both; }
@@ -3329,11 +3333,15 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
       <section class="mt-5">
         <div class="dest-tabs" id="destTabs">
           <?php if ($todosActivo):
-            $dtTodosImg = $todosCategory['imagen'] !== '' && in_array($todosCategory['mostrar_menu'], ['imagen', 'imagen_texto'], true);
+            $dtTodosImg    = $todosCategory['imagen'] !== '' && in_array($todosCategory['mostrar_menu'], ['imagen', 'imagen_texto'], true);
+            $dtTodosImgTxt = $dtTodosImg && $todosCategory['mostrar_menu'] === 'imagen_texto';
           ?>
-          <button class="dest-tab<?= $dtTodosImg ? ' dest-tab--img' : '' ?><?= $destDefaultCat === 'all' ? ' active' : '' ?>" data-cat="all" type="button"
+          <button class="dest-tab<?= $dtTodosImgTxt ? ' dest-tab--img-txt' : ($dtTodosImg ? ' dest-tab--img' : '') ?><?= $destDefaultCat === 'all' ? ' active' : '' ?>" data-cat="all" type="button"
                   aria-label="<?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?>">
-            <?php if ($dtTodosImg): ?>
+            <?php if ($dtTodosImgTxt): ?>
+              <img class="dest-tab-side-img" src="/<?= htmlspecialchars($todosCategory['imagen'], ENT_QUOTES, 'UTF-8') ?>" alt="">
+              <span class="dest-tab-text"><?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+            <?php elseif ($dtTodosImg): ?>
               <img class="dest-tab-img" src="/<?= htmlspecialchars($todosCategory['imagen'], ENT_QUOTES, 'UTF-8') ?>" alt="">
               <span class="dest-tab-overlay"><?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
             <?php else: ?>
@@ -3346,11 +3354,15 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           <?php endif; ?>
           <?php foreach ($destacadaCategories as $dcat):
             $dtUsaImagen = $dcat['imagen'] !== '' && in_array($dcat['mostrar_menu'], ['imagen', 'imagen_texto'], true);
+            $dtImgTxt    = $dtUsaImagen && $dcat['mostrar_menu'] === 'imagen_texto';
             $dtIsDefault = $destDefaultCat !== 'all' && $destDefaultCat === (string)(int)$dcat['id'];
           ?>
-          <button class="dest-tab<?= $dtUsaImagen ? ' dest-tab--img' : '' ?><?= $dtIsDefault ? ' active' : '' ?>" data-cat="<?= (int)$dcat['id'] ?>" type="button"
+          <button class="dest-tab<?= $dtImgTxt ? ' dest-tab--img-txt' : ($dtUsaImagen ? ' dest-tab--img' : '') ?><?= $dtIsDefault ? ' active' : '' ?>" data-cat="<?= (int)$dcat['id'] ?>" type="button"
                   aria-label="<?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?>">
-            <?php if ($dtUsaImagen): ?>
+            <?php if ($dtImgTxt): ?>
+              <img class="dest-tab-side-img" src="/<?= htmlspecialchars($dcat['imagen'], ENT_QUOTES, 'UTF-8') ?>" alt="">
+              <span class="dest-tab-text"><?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+            <?php elseif ($dtUsaImagen): ?>
               <img class="dest-tab-img" src="/<?= htmlspecialchars($dcat['imagen'], ENT_QUOTES, 'UTF-8') ?>" alt="">
               <span class="dest-tab-overlay"><?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
             <?php else: ?>
@@ -3369,7 +3381,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
       </section>
       <script>
       (function () {
-        var PAGE = 6;
+        var PAGE = window.innerWidth < 768 ? 6 : 8;
         var allGames = <?= json_encode($gameCardsForJs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
         var catMap   = <?= json_encode($catGameIdMap,   JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 
