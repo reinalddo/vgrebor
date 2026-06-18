@@ -4018,6 +4018,31 @@ include __DIR__ . "/includes/header.php";
     .neon-selected:focus-visible {
       transform: translateY(-6px) scale(1.016);
     }
+    .pack-account-sale-meta {
+      flex-direction: column;
+      gap: 0.3rem;
+      align-items: stretch;
+    }
+    .pack-account-sale-badge {
+      font-size: 0.6rem;
+      padding: 0.2rem 0.5rem;
+      align-self: flex-start;
+    }
+    .pack-account-preview-btn {
+      width: 100%;
+      padding: 0.28rem 0.5rem;
+      font-size: 0.65rem;
+      letter-spacing: 0.04em;
+    }
+    .pack-win-points-badge {
+      padding: 0.28rem 0.45rem;
+      gap: 0.28rem;
+      font-size: 0.62rem;
+    }
+    .pack-win-points-icon {
+      width: 1.2rem;
+      height: 1.2rem;
+    }
   }
 
   @media (max-width: 575.98px) {
