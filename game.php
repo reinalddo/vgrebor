@@ -934,8 +934,7 @@ include __DIR__ . "/includes/header.php";
                 <div class="d-flex gap-2 align-items-start p-3 rounded-3 mb-2" style="background:rgba(220,53,69,.13);border:1px solid rgba(220,53,69,.38);">
                   <i class="fa-solid fa-shield-halved text-danger flex-shrink-0 mt-1" aria-hidden="true"></i>
                   <div class="small" style="color:#f8a0a8;">
-                    <strong>Suministrar comprobante y datos</strong><br>
-                    <strong>Aviso legal:</strong> Subir comprobantes falsos o manipulados constituye <strong>fraude electrónico</strong> y será penalizado conforme a la ley. Nos reservamos el derecho de reportar ante las autoridades.
+                    <strong>Aviso legal:</strong> Suministrar comprobantes y datos falsos o manipulados constituye fraude electrónico y puede ser penalizado conforme a la ley. Nos reservamos el derecho de reportar ante las autoridades competentes.
                   </div>
                 </div>
               </div>
