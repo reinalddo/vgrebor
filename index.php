@@ -2446,10 +2446,10 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
               <h2 class="accordion-header" id="daily-missions-heading">
                 <button class="accordion-button collapsed daily-mission-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#daily-missions-collapse" aria-expanded="false" aria-controls="daily-missions-collapse">
                   <div class="daily-mission-header-copy">
+                    <h3 class="daily-mission-header-title mb-0"><?php echo htmlspecialchars((string) ($dailyMissionsSettings['title'] ?? 'Mision diaria'), ENT_QUOTES, 'UTF-8'); ?></h3>
                     <?php if (trim((string) ($dailyMissionsSettings['subtitle'] ?? '')) !== ''): ?>
                     <span class="daily-mission-header-eyebrow"><?php echo htmlspecialchars(trim((string) $dailyMissionsSettings['subtitle']), ENT_QUOTES, 'UTF-8'); ?></span>
                     <?php endif; ?>
-                    <h3 class="daily-mission-header-title mb-0"><?php echo htmlspecialchars((string) ($dailyMissionsSettings['title'] ?? 'Mision diaria'), ENT_QUOTES, 'UTF-8'); ?></h3>
                   </div>
                   <span class="daily-mission-pill text-end">
                     <small>Progreso</small>
