@@ -3335,11 +3335,14 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         <section class="dest-category-section mt-0 mb-5" data-sect-cat="all">
           <div class="dest-section-header">
             <?php if ($dtTodosImg): ?>
+              <h2 class="dest-section-title"><?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
               <img class="dest-section-img" src="/<?= htmlspecialchars($todosCategory['imagen'], ENT_QUOTES, 'UTF-8') ?>" alt="">
-            <?php elseif ($todosCategory['icono'] !== ''): ?>
-              <span class="dest-section-icon-emoji"><?= htmlspecialchars($todosCategory['icono'], ENT_QUOTES, 'UTF-8') ?></span>
+            <?php else: ?>
+              <?php if ($todosCategory['icono'] !== ''): ?>
+                <span class="dest-section-icon-emoji"><?= htmlspecialchars($todosCategory['icono'], ENT_QUOTES, 'UTF-8') ?></span>
+              <?php endif; ?>
+              <h2 class="dest-section-title"><?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
             <?php endif; ?>
-            <h2 class="dest-section-title"><?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
           </div>
           <div class="row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3 dest-sect-grid"></div>
           <div class="text-center mt-3 dest-sect-vermas-wrap" style="display:none;">
@@ -3353,11 +3356,14 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         <section class="dest-category-section mb-5" data-sect-cat="<?= (int)$dcat['id'] ?>">
           <div class="dest-section-header">
             <?php if ($dtUsaImagen): ?>
+              <h2 class="dest-section-title"><?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
               <img class="dest-section-img" src="/<?= htmlspecialchars($dcat['imagen'], ENT_QUOTES, 'UTF-8') ?>" alt="">
-            <?php elseif ($dcat['icono'] !== ''): ?>
-              <span class="dest-section-icon-emoji"><?= htmlspecialchars($dcat['icono'], ENT_QUOTES, 'UTF-8') ?></span>
+            <?php else: ?>
+              <?php if ($dcat['icono'] !== ''): ?>
+                <span class="dest-section-icon-emoji"><?= htmlspecialchars($dcat['icono'], ENT_QUOTES, 'UTF-8') ?></span>
+              <?php endif; ?>
+              <h2 class="dest-section-title"><?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
             <?php endif; ?>
-            <h2 class="dest-section-title"><?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
           </div>
           <div class="row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3 dest-sect-grid"></div>
           <div class="text-center mt-3 dest-sect-vermas-wrap" style="display:none;">
