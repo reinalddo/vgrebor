@@ -3322,8 +3322,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         .dest-section-icon-emoji { font-size:2.6rem; line-height:1; flex-shrink:0; }
         .dest-section-img { width:60px; height:60px; object-fit:cover; border-radius:12px; flex-shrink:0; }
         .dest-section-title { font-family:'Oxanium',sans-serif; font-size:1.8rem; font-weight:800; color:#fff; margin:0; line-height:1.15; }
-        .dest-category-section { padding-bottom:2rem; border-bottom:1px solid #1a2d45; }
-        .dest-category-section:last-child { border-bottom:none; padding-bottom:0; }
+        .dest-category-section { padding-bottom:2rem; }
         .dest-sect-vermas-btn { border:1px solid #00fff7; color:#00fff7; background:transparent; min-width:130px; border-radius:8px; }
         @keyframes dest-fadein { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:translateY(0); } }
         .dest-game-col { animation:dest-fadein 0.28s ease both; }
