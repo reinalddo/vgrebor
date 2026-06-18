@@ -427,13 +427,14 @@ function recargas_api_extract_required_field_meta($field): ?array {
     if ($name === '') {
         return null;
     }
-    // Generic input placeholders (input1-4): use the raw name as payload key so
-    // TiendaGiftVen receives exactly what they defined in campos_requeridos.
-    // Semantic names (e.g. "User ID" → canonical "id_juego"): use the canonical
-    // name — TiendaGiftVen's purchase API validates by that semantic key.
-    $providerName = in_array($rawNameNorm, ['input1', 'input2', 'input3', 'input4'], true)
-        ? $rawNameNorm
-        : $name;
+    // Docs: input1 (Player ID) must be sent as "id_juego"; input2/3/4 keep their raw key.
+    if ($name === 'id_juego') {
+        $providerName = 'id_juego';
+    } elseif (in_array($rawNameNorm, ['input1', 'input2', 'input3', 'input4'], true)) {
+        $providerName = $rawNameNorm;
+    } else {
+        $providerName = $name;
+    }
 
     if (!is_array($options)) {
         $options = [];
