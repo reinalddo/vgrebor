@@ -3313,19 +3313,19 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
       <style>
         .dest-tabs { display:flex; gap:0.5rem; overflow-x:auto; padding-bottom:0.4rem; scrollbar-width:none; }
         .dest-tabs::-webkit-scrollbar { display:none; }
-        .dest-tab { position:relative; overflow:hidden; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.2rem; background:#182030; border:2px solid #1e3a5f; border-radius:10px; padding:0.5rem 0.8rem; cursor:pointer; color:#8be9fd; font-size:0.76rem; transition:border-color 0.18s, color 0.18s, background 0.18s; min-width:64px; height:64px; flex-shrink:0; }
+        .dest-tab { position:relative; overflow:hidden; display:flex; flex-direction:row; align-items:center; justify-content:center; gap:0.45rem; background:#182030; border:2px solid #1e3a5f; border-radius:10px; padding:0.5rem 0.85rem; cursor:pointer; color:#8be9fd; font-size:0.76rem; transition:border-color 0.18s, color 0.18s, background 0.18s; min-width:64px; height:64px; flex-shrink:0; }
         .dest-tab--img { padding:0; min-width:84px; width:84px; }
-        .dest-tab--img-txt { overflow:visible; flex-direction:row; align-items:center; gap:0.55rem; padding:0.35rem 0.9rem 0.35rem 0.45rem; width:auto; min-width:0; }
+        .dest-tab--img-txt { overflow:visible; gap:0.55rem; padding:0.35rem 0.9rem 0.35rem 0.45rem; width:auto; min-width:0; }
         .dest-tab:hover, .dest-tab.active { border-color:#00fff7; color:#00fff7; }
         .dest-tab.active { background:#0f1a28; }
-        .dest-tab-icon { font-size:1.4rem; display:inline-block; transition:transform 0.2s ease; line-height:1; }
+        .dest-tab-icon { font-size:1.6rem; display:inline-block; transition:transform 0.2s ease; line-height:1; flex-shrink:0; }
         .dest-tab-img  { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transition:transform 0.22s ease; display:block; }
         .dest-tab-side-img { width:46px; height:46px; object-fit:cover; border-radius:8px; flex-shrink:0; transition:transform 0.22s ease; display:block; }
         .dest-tab:hover .dest-tab-icon,
         .dest-tab:hover .dest-tab-img,
         .dest-tab:hover .dest-tab-side-img { transform:scale(1.1); }
-        .dest-tab-text { line-height:1.15; text-align:center; white-space:nowrap; }
-        .dest-tab--img-txt .dest-tab-text { font-size:0.95rem; font-weight:700; text-align:left; }
+        .dest-tab-text { line-height:1.15; text-align:left; white-space:nowrap; font-size:0.92rem; font-weight:700; }
+        .dest-tab--img-txt .dest-tab-text { font-size:0.95rem; }
         .dest-tab-overlay { position:absolute; bottom:0; left:0; right:0; padding:5px 4px 4px; background:linear-gradient(transparent, rgba(0,0,0,0.78)); font-size:0.7rem; font-weight:700; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,1),0 0 6px rgba(0,0,0,0.9); text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         @keyframes dest-fadein { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:translateY(0); } }
         .dest-game-col { animation:dest-fadein 0.28s ease both; }
