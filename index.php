@@ -1008,12 +1008,22 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           align-items: flex-start;
           padding: 1rem 1.1rem;
           border: 0;
+          border-radius: 1.5rem 1.5rem 0 0;
           background: var(--daily-base-gradient, linear-gradient(180deg, rgba(8, 15, 24, 0.96), rgba(4, 9, 16, 0.98)));
           color: #fff;
-          box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.12);
+          box-shadow:
+            inset 0 0 0 var(--daily-base-border-width, 0px) var(--daily-base-border-color, transparent),
+            inset 0 0 calc(var(--daily-base-border-width, 0px) * 6) var(--daily-base-border-color, transparent),
+            inset 0 0 0 1px rgba(34, 211, 238, 0.12);
         }
         .daily-mission-body {
+          border-radius: 0 0 1.5rem 1.5rem;
           background: var(--daily-bg-gradient, transparent);
+          box-shadow:
+            inset var(--daily-bg-border-width, 0px) 0 0 0 var(--daily-bg-border-color, transparent),
+            inset calc(-1 * var(--daily-bg-border-width, 0px)) 0 0 0 var(--daily-bg-border-color, transparent),
+            inset 0 calc(-1 * var(--daily-bg-border-width, 0px)) 0 0 var(--daily-bg-border-color, transparent),
+            inset 0 0 calc(var(--daily-bg-border-width, 0px) * 6) var(--daily-bg-border-color, transparent);
         }
         .daily-mission-toggle::after {
           margin-top: 0.25rem;
@@ -1767,12 +1777,22 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           align-items: flex-start;
           padding: 1rem 1.1rem;
           border: 0;
+          border-radius: 1.5rem 1.5rem 0 0;
           background: var(--daily-base-gradient, linear-gradient(180deg, rgba(8, 15, 24, 0.96), rgba(4, 9, 16, 0.98)));
           color: #fff;
-          box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.12);
+          box-shadow:
+            inset 0 0 0 var(--daily-base-border-width, 0px) var(--daily-base-border-color, transparent),
+            inset 0 0 calc(var(--daily-base-border-width, 0px) * 6) var(--daily-base-border-color, transparent),
+            inset 0 0 0 1px rgba(34, 211, 238, 0.12);
         }
         #daily-missions-shell .daily-mission-body {
+          border-radius: 0 0 1.5rem 1.5rem;
           background: var(--daily-bg-gradient, transparent);
+          box-shadow:
+            inset var(--daily-bg-border-width, 0px) 0 0 0 var(--daily-bg-border-color, transparent),
+            inset calc(-1 * var(--daily-bg-border-width, 0px)) 0 0 0 var(--daily-bg-border-color, transparent),
+            inset 0 calc(-1 * var(--daily-bg-border-width, 0px)) 0 0 var(--daily-bg-border-color, transparent),
+            inset 0 0 calc(var(--daily-bg-border-width, 0px) * 6) var(--daily-bg-border-color, transparent);
         }
         #daily-missions-shell .daily-mission-toggle::after {
           margin-top: 0.25rem;
@@ -2382,10 +2402,26 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
                   $dmBg1   = trim((string) ($dailyMissionsSettings['accordion_bg_color1'] ?? ''));
                   $dmBg2   = trim((string) ($dailyMissionsSettings['accordion_bg_color2'] ?? ''));
                   if ($dmBase1 !== '' && $dmBase2 !== '') {
-                      echo ';--daily-base-gradient:linear-gradient(135deg,' . htmlspecialchars($dmBase1, ENT_QUOTES, 'UTF-8') . ',' . htmlspecialchars($dmBase2, ENT_QUOTES, 'UTF-8') . ')';
+                      echo ';--daily-base-gradient:linear-gradient(180deg,' . htmlspecialchars($dmBase1, ENT_QUOTES, 'UTF-8') . ',' . htmlspecialchars($dmBase2, ENT_QUOTES, 'UTF-8') . ')';
                   }
                   if ($dmBg1 !== '' && $dmBg2 !== '') {
                       echo ';--daily-bg-gradient:linear-gradient(180deg,' . htmlspecialchars($dmBg1, ENT_QUOTES, 'UTF-8') . ',' . htmlspecialchars($dmBg2, ENT_QUOTES, 'UTF-8') . ')';
+                  }
+                  if (!empty($dailyMissionsSettings['accordion_base_border_enabled'])) {
+                      $dmBaseBorderColor = trim((string) ($dailyMissionsSettings['accordion_base_border_color'] ?? ''));
+                      if ($dmBaseBorderColor !== '') {
+                          $dmBaseBorderW = max(1, min(12, (int) ($dailyMissionsSettings['accordion_base_border_width'] ?? 2)));
+                          echo ';--daily-base-border-color:' . htmlspecialchars($dmBaseBorderColor, ENT_QUOTES, 'UTF-8');
+                          echo ';--daily-base-border-width:' . $dmBaseBorderW . 'px';
+                      }
+                  }
+                  if (!empty($dailyMissionsSettings['accordion_bg_border_enabled'])) {
+                      $dmBgBorderColor = trim((string) ($dailyMissionsSettings['accordion_bg_border_color'] ?? ''));
+                      if ($dmBgBorderColor !== '') {
+                          $dmBgBorderW = max(1, min(12, (int) ($dailyMissionsSettings['accordion_bg_border_width'] ?? 2)));
+                          echo ';--daily-bg-border-color:' . htmlspecialchars($dmBgBorderColor, ENT_QUOTES, 'UTF-8');
+                          echo ';--daily-bg-border-width:' . $dmBgBorderW . 'px';
+                      }
                   }
                 ?>"
           data-api-url="<?php echo htmlspecialchars((string) $dailyMissionsScriptPayload['api_url'], ENT_QUOTES, 'UTF-8'); ?>"

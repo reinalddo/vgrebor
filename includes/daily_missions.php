@@ -47,6 +47,12 @@ if (!function_exists('daily_missions_default_settings')) {
             'accordion_base_color2' => '',
             'accordion_bg_color1' => '',
             'accordion_bg_color2' => '',
+            'accordion_base_border_enabled' => 0,
+            'accordion_base_border_color' => '',
+            'accordion_base_border_width' => 2,
+            'accordion_bg_border_enabled' => 0,
+            'accordion_bg_border_color' => '',
+            'accordion_bg_border_width' => 2,
         ];
     }
 }
@@ -301,6 +307,12 @@ if (!function_exists('daily_missions_fetch_settings')) {
             $settings['accordion_base_color2'] = (string) ($row['accordion_base_color2'] ?? '');
             $settings['accordion_bg_color1'] = (string) ($row['accordion_bg_color1'] ?? '');
             $settings['accordion_bg_color2'] = (string) ($row['accordion_bg_color2'] ?? '');
+            $settings['accordion_base_border_enabled'] = (int) ($row['accordion_base_border_enabled'] ?? 0);
+            $settings['accordion_base_border_color'] = (string) ($row['accordion_base_border_color'] ?? '');
+            $settings['accordion_base_border_width'] = max(1, min(12, (int) ($row['accordion_base_border_width'] ?? 2)));
+            $settings['accordion_bg_border_enabled'] = (int) ($row['accordion_bg_border_enabled'] ?? 0);
+            $settings['accordion_bg_border_color'] = (string) ($row['accordion_bg_border_color'] ?? '');
+            $settings['accordion_bg_border_width'] = max(1, min(12, (int) ($row['accordion_bg_border_width'] ?? 2)));
             $settings['created_at'] = (string) ($row['created_at'] ?? '');
             $settings['updated_at'] = (string) ($row['updated_at'] ?? '');
         }
@@ -764,6 +776,29 @@ if (!function_exists('daily_missions_ensure_schema')) {
         }
         if (!in_array('accordion_bg_color2', $existingSettingsCols)) {
             $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN accordion_bg_color2 VARCHAR(30) NULL DEFAULT NULL");
+        }
+
+        // Neon border columns for win_points_daily_mission_settings
+        $borderColCheck = $mysqli->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='$dbName' AND TABLE_NAME='win_points_daily_mission_settings' AND COLUMN_NAME IN ('accordion_base_border_enabled','accordion_base_border_color','accordion_base_border_width','accordion_bg_border_enabled','accordion_bg_border_color','accordion_bg_border_width')");
+        $existingBorderCols = [];
+        while ($bColRow = $borderColCheck->fetch_row()) { $existingBorderCols[] = $bColRow[0]; }
+        if (!in_array('accordion_base_border_enabled', $existingBorderCols)) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN accordion_base_border_enabled TINYINT(1) NOT NULL DEFAULT 0");
+        }
+        if (!in_array('accordion_base_border_color', $existingBorderCols)) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN accordion_base_border_color VARCHAR(30) NULL DEFAULT NULL");
+        }
+        if (!in_array('accordion_base_border_width', $existingBorderCols)) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN accordion_base_border_width TINYINT NOT NULL DEFAULT 2");
+        }
+        if (!in_array('accordion_bg_border_enabled', $existingBorderCols)) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN accordion_bg_border_enabled TINYINT(1) NOT NULL DEFAULT 0");
+        }
+        if (!in_array('accordion_bg_border_color', $existingBorderCols)) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN accordion_bg_border_color VARCHAR(30) NULL DEFAULT NULL");
+        }
+        if (!in_array('accordion_bg_border_width', $existingBorderCols)) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN accordion_bg_border_width TINYINT NOT NULL DEFAULT 2");
         }
 
         $colCheck = $mysqli->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='$dbName' AND TABLE_NAME='win_points_daily_mission_tasks' AND COLUMN_NAME IN ('day20_multiplier','month_end_multiplier')");

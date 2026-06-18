@@ -34,10 +34,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $immunityDays     = max(0, (int) ($_POST['immunity_days'] ?? 1));
             $couponDiscount   = max(0, min(100, (int) ($_POST['coupon_discount_percent'] ?? 10)));
             $couponExpiration = max(1, (int) ($_POST['coupon_expiration_days'] ?? 30));
-            $accBase1         = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_base_color1'] ?? '')), 0, 30);
-            $accBase2         = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_base_color2'] ?? '')), 0, 30);
-            $accBg1           = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_bg_color1'] ?? '')), 0, 30);
-            $accBg2           = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_bg_color2'] ?? '')), 0, 30);
+            $accBase1             = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_base_color1'] ?? '')), 0, 30);
+            $accBase2             = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_base_color2'] ?? '')), 0, 30);
+            $accBg1               = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_bg_color1'] ?? '')), 0, 30);
+            $accBg2               = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_bg_color2'] ?? '')), 0, 30);
+            $accBaseBorderOn      = isset($_POST['accordion_base_border_enabled']) ? 1 : 0;
+            $accBaseBorderColor   = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_base_border_color'] ?? '')), 0, 30);
+            $accBaseBorderWidth   = max(1, min(12, (int) ($_POST['accordion_base_border_width'] ?? 2)));
+            $accBgBorderOn        = isset($_POST['accordion_bg_border_enabled']) ? 1 : 0;
+            $accBgBorderColor     = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_bg_border_color'] ?? '')), 0, 30);
+            $accBgBorderWidth     = max(1, min(12, (int) ($_POST['accordion_bg_border_width'] ?? 2)));
 
             $stmt = $mysqli->prepare(
                 'UPDATE win_points_daily_mission_settings SET
@@ -47,14 +53,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     immunity_days=?, coupon_discount_percent=?,
                     coupon_expiration_days=?,
                     accordion_base_color1=?, accordion_base_color2=?,
-                    accordion_bg_color1=?, accordion_bg_color2=?
+                    accordion_bg_color1=?, accordion_bg_color2=?,
+                    accordion_base_border_enabled=?, accordion_base_border_color=?, accordion_base_border_width=?,
+                    accordion_bg_border_enabled=?, accordion_bg_border_color=?, accordion_bg_border_width=?
                  WHERE id=1'
             );
             if (!$stmt) { echo json_encode(['ok' => false, 'error' => $mysqli->error]); exit; }
-            $stmt->bind_param('issddiiiiissss', $enabled, $title, $subtitle,
+            $stmt->bind_param('issddiiiiissssisiisi', $enabled, $title, $subtitle,
                 $day20Mult, $monthEndMult, $exploreTimer, $shareTimer,
                 $immunityDays, $couponDiscount, $couponExpiration,
-                $accBase1, $accBase2, $accBg1, $accBg2
+                $accBase1, $accBase2, $accBg1, $accBg2,
+                $accBaseBorderOn, $accBaseBorderColor, $accBaseBorderWidth,
+                $accBgBorderOn, $accBgBorderColor, $accBgBorderWidth
             );
             $stmt->execute();
             $stmt->close();
@@ -1070,7 +1080,7 @@ include __DIR__ . '/includes/header.php';
                 <!-- Base del acordeón = botón que se hace clic (toggle) -->
                 <div class="col-12 col-md-4">
                   <label class="missions-admin-label mb-2 d-block">Base del acordeón <small class="text-secondary fw-normal normal-case">(botón de apertura)</small></label>
-                  <div class="d-flex gap-3 align-items-center">
+                  <div class="d-flex gap-3 align-items-center mb-2">
                     <div>
                       <div class="text-secondary" style="font-size:.75rem;margin-bottom:2px">Color 1</div>
                       <input type="color" name="accordion_base_color1" id="accBase1"
@@ -1084,11 +1094,33 @@ include __DIR__ . '/includes/header.php';
                              class="missions-color-input">
                     </div>
                   </div>
+                  <div class="d-flex align-items-center gap-2 flex-wrap" style="padding-top:.5rem;border-top:1px solid rgba(255,255,255,.07)">
+                    <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer">
+                      <input type="checkbox" class="form-check-input mt-0" name="accordion_base_border_enabled" id="accBaseBorderOn" value="1"
+                             <?php echo !empty($settings['accordion_base_border_enabled']) ? 'checked' : ''; ?>>
+                      <span style="font-size:.76rem;color:rgba(226,232,240,.68);letter-spacing:.05em">Borde neon</span>
+                    </label>
+                    <div>
+                      <div class="text-secondary" style="font-size:.7rem;margin-bottom:2px">Color</div>
+                      <input type="color" name="accordion_base_border_color" id="accBaseBorderColor"
+                             value="<?php echo htmlspecialchars($settings['accordion_base_border_color'] ?: '#22d3ee', ENT_QUOTES, 'UTF-8'); ?>"
+                             class="missions-color-input">
+                    </div>
+                    <div class="flex-fill" style="min-width:80px">
+                      <div class="d-flex justify-content-between" style="font-size:.7rem;color:rgba(226,232,240,.5);margin-bottom:2px">
+                        <span>Grosor</span><span id="accBaseBorderWidthVal"><?php echo (int)($settings['accordion_base_border_width'] ?? 2); ?>px</span>
+                      </div>
+                      <input type="range" name="accordion_base_border_width" id="accBaseBorderWidth"
+                             min="1" max="12" step="1"
+                             value="<?php echo (int)($settings['accordion_base_border_width'] ?? 2); ?>"
+                             class="form-range" style="height:4px">
+                    </div>
+                  </div>
                 </div>
                 <!-- Fondo del acordeón = contenido expandido -->
                 <div class="col-12 col-md-4">
                   <label class="missions-admin-label mb-2 d-block">Fondo del acordeón <small class="text-secondary fw-normal normal-case">(contenido expandido)</small></label>
-                  <div class="d-flex gap-3 align-items-center">
+                  <div class="d-flex gap-3 align-items-center mb-2">
                     <div>
                       <div class="text-secondary" style="font-size:.75rem;margin-bottom:2px">Color 1</div>
                       <input type="color" name="accordion_bg_color1" id="accBg1"
@@ -1100,6 +1132,28 @@ include __DIR__ . '/includes/header.php';
                       <input type="color" name="accordion_bg_color2" id="accBg2"
                              value="<?php echo htmlspecialchars($settings['accordion_bg_color2'] ?: '#040910', ENT_QUOTES, 'UTF-8'); ?>"
                              class="missions-color-input">
+                    </div>
+                  </div>
+                  <div class="d-flex align-items-center gap-2 flex-wrap" style="padding-top:.5rem;border-top:1px solid rgba(255,255,255,.07)">
+                    <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer">
+                      <input type="checkbox" class="form-check-input mt-0" name="accordion_bg_border_enabled" id="accBgBorderOn" value="1"
+                             <?php echo !empty($settings['accordion_bg_border_enabled']) ? 'checked' : ''; ?>>
+                      <span style="font-size:.76rem;color:rgba(226,232,240,.68);letter-spacing:.05em">Borde neon</span>
+                    </label>
+                    <div>
+                      <div class="text-secondary" style="font-size:.7rem;margin-bottom:2px">Color</div>
+                      <input type="color" name="accordion_bg_border_color" id="accBgBorderColor"
+                             value="<?php echo htmlspecialchars($settings['accordion_bg_border_color'] ?: '#22d3ee', ENT_QUOTES, 'UTF-8'); ?>"
+                             class="missions-color-input">
+                    </div>
+                    <div class="flex-fill" style="min-width:80px">
+                      <div class="d-flex justify-content-between" style="font-size:.7rem;color:rgba(226,232,240,.5);margin-bottom:2px">
+                        <span>Grosor</span><span id="accBgBorderWidthVal"><?php echo (int)($settings['accordion_bg_border_width'] ?? 2); ?>px</span>
+                      </div>
+                      <input type="range" name="accordion_bg_border_width" id="accBgBorderWidth"
+                             min="1" max="12" step="1"
+                             value="<?php echo (int)($settings['accordion_bg_border_width'] ?? 2); ?>"
+                             class="form-range" style="height:4px">
                     </div>
                   </div>
                 </div>
@@ -1678,21 +1732,56 @@ include __DIR__ . '/includes/header.php';
   // ─── Guardar Configuración ────────────────────────────────────────
   // Live preview for accordion color pickers
   (function () {
-    const base1 = document.getElementById('accBase1');
-    const base2 = document.getElementById('accBase2');
-    const bg1   = document.getElementById('accBg1');
-    const bg2   = document.getElementById('accBg2');
-    const previewBase = document.getElementById('accPreviewBase');
-    const previewBg   = document.getElementById('accPreviewBg');
+    const base1                = document.getElementById('accBase1');
+    const base2                = document.getElementById('accBase2');
+    const bg1                  = document.getElementById('accBg1');
+    const bg2                  = document.getElementById('accBg2');
+    const baseBorderOn         = document.getElementById('accBaseBorderOn');
+    const baseBorderColor      = document.getElementById('accBaseBorderColor');
+    const baseBorderWidth      = document.getElementById('accBaseBorderWidth');
+    const baseBorderWidthVal   = document.getElementById('accBaseBorderWidthVal');
+    const bgBorderOn           = document.getElementById('accBgBorderOn');
+    const bgBorderColor        = document.getElementById('accBgBorderColor');
+    const bgBorderWidth        = document.getElementById('accBgBorderWidth');
+    const bgBorderWidthVal     = document.getElementById('accBgBorderWidthVal');
+    const previewBase          = document.getElementById('accPreviewBase');
+    const previewBg            = document.getElementById('accPreviewBg');
+
+    if (baseBorderWidth) baseBorderWidth.addEventListener('input', function() {
+      if (baseBorderWidthVal) baseBorderWidthVal.textContent = this.value + 'px';
+    });
+    if (bgBorderWidth) bgBorderWidth.addEventListener('input', function() {
+      if (bgBorderWidthVal) bgBorderWidthVal.textContent = this.value + 'px';
+    });
 
     function updateAccPreview() {
-      if (previewBase) previewBase.style.background = 'linear-gradient(180deg,' + base1.value + ',' + base2.value + ')';
-      if (previewBg)   previewBg.style.background   = 'linear-gradient(180deg,' + bg1.value + ',' + bg2.value + ')';
+      if (previewBase) {
+        previewBase.style.background = 'linear-gradient(180deg,' + base1.value + ',' + base2.value + ')';
+        if (baseBorderOn && baseBorderOn.checked) {
+          var bw = baseBorderWidth ? parseInt(baseBorderWidth.value) : 2;
+          var bc = baseBorderColor.value;
+          previewBase.style.boxShadow = 'inset 0 0 0 ' + bw + 'px ' + bc + ', inset 0 0 ' + (bw * 5) + 'px ' + bc;
+        } else {
+          previewBase.style.boxShadow = '';
+        }
+      }
+      if (previewBg) {
+        previewBg.style.background = 'linear-gradient(180deg,' + bg1.value + ',' + bg2.value + ')';
+        if (bgBorderOn && bgBorderOn.checked) {
+          var bw2 = bgBorderWidth ? parseInt(bgBorderWidth.value) : 2;
+          var bc2 = bgBorderColor.value;
+          previewBg.style.boxShadow = 'inset ' + bw2 + 'px 0 0 0 ' + bc2 + ', inset -' + bw2 + 'px 0 0 0 ' + bc2 + ', inset 0 -' + bw2 + 'px 0 0 ' + bc2 + ', inset 0 0 ' + (bw2 * 5) + 'px ' + bc2;
+        } else {
+          previewBg.style.boxShadow = '';
+        }
+      }
     }
     window._updateAccPreview = updateAccPreview;
 
-    [base1, base2, bg1, bg2].forEach(function(el) {
+    [base1, base2, bg1, bg2, baseBorderOn, baseBorderColor, baseBorderWidth,
+     bgBorderOn, bgBorderColor, bgBorderWidth].forEach(function(el) {
       if (el) el.addEventListener('input', updateAccPreview);
+      if (el) el.addEventListener('change', updateAccPreview);
     });
 
     // Reset to default button
@@ -1705,19 +1794,29 @@ include __DIR__ . '/includes/header.php';
         fd.set('accordion_base_color2', '');
         fd.set('accordion_bg_color1', '');
         fd.set('accordion_bg_color2', '');
+        fd.delete('accordion_base_border_enabled');
+        fd.set('accordion_base_border_color', '');
+        fd.set('accordion_base_border_width', '2');
+        fd.delete('accordion_bg_border_enabled');
+        fd.set('accordion_bg_border_color', '');
+        fd.set('accordion_bg_border_width', '2');
         btnReset.disabled = true;
         fetch(ajaxBase, { method: 'POST', body: fd })
           .then(function(r) { return r.json(); })
           .then(function(data) {
             btnReset.disabled = false;
             if (data.ok) {
-              base1.value = '#080f18';
-              base2.value = '#040910';
-              bg1.value   = '#080f18';
-              bg2.value   = '#040910';
+              base1.value = '#080f18'; base2.value = '#040910';
+              bg1.value   = '#080f18'; bg2.value   = '#040910';
+              if (baseBorderOn) baseBorderOn.checked = false;
+              if (baseBorderColor) baseBorderColor.value = '#22d3ee';
+              if (baseBorderWidth) { baseBorderWidth.value = 2; if (baseBorderWidthVal) baseBorderWidthVal.textContent = '2px'; }
+              if (bgBorderOn) bgBorderOn.checked = false;
+              if (bgBorderColor) bgBorderColor.value = '#22d3ee';
+              if (bgBorderWidth) { bgBorderWidth.value = 2; if (bgBorderWidthVal) bgBorderWidthVal.textContent = '2px'; }
               updateAccPreview();
               const fb = document.getElementById('settingsFeedback');
-              fb.textContent = '✓ Colores restaurados al default';
+              fb.textContent = '✓ Restaurado al default';
               fb.className   = 'save-feedback ok';
               fb.style.display = 'inline';
               setTimeout(function() { fb.style.display = 'none'; }, 3000);
