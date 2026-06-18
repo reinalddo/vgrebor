@@ -896,14 +896,11 @@ include __DIR__ . "/includes/header.php";
                 </div>
                 <div id="payment-method-discount" class="payment-method-discount d-none"></div>
               </div>
-              <div id="payment-reference-group" class="mb-3">
-                <label for="payment-reference-input" class="form-label text-info">Número de Referencia</label>
-                <input type="text" id="payment-reference-input" class="form-control bg-dark text-info border-info" inputmode="numeric" autocomplete="off" placeholder="Inserte su número de referencia para comprobar el pago">
-                <div id="payment-reference-help" class="form-text text-secondary">Inserte su número de referencia para comprobar el pago.</div>
+              <div id="payment-reference-group" class="mb-3" style="display:none;">
+                <input type="text" id="payment-reference-input" inputmode="numeric" autocomplete="off">
               </div>
-              <div id="payment-phone-group">
-                <label for="payment-phone-input" class="form-label text-info">Número de teléfono real para contactarte</label>
-                <input type="tel" id="payment-phone-input" class="form-control bg-dark text-info border-info" autocomplete="tel" value="<?= htmlspecialchars($loggedUserLastPurchasePhone, ENT_QUOTES, 'UTF-8') ?>" placeholder="Ej: 04121234567">
+              <div id="payment-phone-group" style="display:none;">
+                <input type="tel" id="payment-phone-input" autocomplete="tel" value="<?= htmlspecialchars($loggedUserLastPurchasePhone, ENT_QUOTES, 'UTF-8') ?>">
               </div>
               <!-- Formulario de verificación avanzado -->
               <div id="payment-advanced-form">
@@ -9451,8 +9448,6 @@ include __DIR__ . "/includes/header.php";
 
   function updateAdvancedFormVisibility(method) {
     const isAdvanced = !!(method && method.formulario_verificacion);
-    if (paymentReferenceGroup) paymentReferenceGroup.classList.toggle('d-none', isAdvanced);
-    if (paymentPhoneGroup) paymentPhoneGroup.classList.toggle('d-none', isAdvanced);
     if (paymentWhatsappWrap) paymentWhatsappWrap.classList.toggle('d-none', !isAdvanced);
     if (isAdvanced && paymentAdvReferenceInput) {
       const digits = Number(method.referencia_digitos || 0);
