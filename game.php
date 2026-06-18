@@ -905,8 +905,8 @@ include __DIR__ . "/includes/header.php";
                 <label for="payment-phone-input" class="form-label text-info">Número de teléfono real para contactarte</label>
                 <input type="tel" id="payment-phone-input" class="form-control bg-dark text-info border-info" autocomplete="tel" value="<?= htmlspecialchars($loggedUserLastPurchasePhone, ENT_QUOTES, 'UTF-8') ?>" placeholder="Ej: 04121234567">
               </div>
-              <!-- Formulario de verificación avanzado (activable por método de pago) -->
-              <div id="payment-advanced-form" class="d-none">
+              <!-- Formulario de verificación avanzado -->
+              <div id="payment-advanced-form">
                 <div class="row g-2 mb-3">
                   <div class="col-6">
                     <label for="payment-nombre-input" class="form-label text-info">Nombre (TITULAR)</label>
@@ -928,9 +928,11 @@ include __DIR__ . "/includes/header.php";
                     <div id="payment-adv-reference-help" class="form-text text-secondary">Solo debes escribir los últimos dígitos de la referencia bancaria.</div>
                   </div>
                 </div>
-                <button type="button" id="payment-whatsapp-btn" class="btn btn-success w-100 fw-bold py-2 mb-3">
-                  <i class="fa-brands fa-whatsapp me-2" aria-hidden="true"></i>Enviar Comprobante al Admin
-                </button>
+                <div id="payment-whatsapp-wrap" class="d-none">
+                  <button type="button" id="payment-whatsapp-btn" class="btn btn-success w-100 fw-bold py-2 mb-3">
+                    <i class="fa-brands fa-whatsapp me-2" aria-hidden="true"></i>Enviar Comprobante al Admin
+                  </button>
+                </div>
                 <div class="d-flex gap-2 align-items-start p-3 rounded-3 mb-2" style="background:rgba(220,53,69,.13);border:1px solid rgba(220,53,69,.38);">
                   <i class="fa-solid fa-shield-halved text-danger flex-shrink-0 mt-1" aria-hidden="true"></i>
                   <div class="small" style="color:#f8a0a8;">
@@ -4726,6 +4728,7 @@ include __DIR__ . "/includes/header.php";
   const paymentAdvReferenceGroup = document.getElementById('payment-adv-reference-group');
   const paymentAdvReferenceInput = document.getElementById('payment-adv-reference-input');
   const paymentAdvReferenceHelp = document.getElementById('payment-adv-reference-help');
+  const paymentWhatsappWrap = document.getElementById('payment-whatsapp-wrap');
   const paymentWhatsappBtn = document.getElementById('payment-whatsapp-btn');
   const paymentWhatsappConfirmModal = document.getElementById('payment-whatsapp-confirm-modal');
   const paymentWhatsappModalCancelBtn = document.getElementById('payment-whatsapp-modal-cancel-btn');
@@ -9450,7 +9453,7 @@ include __DIR__ . "/includes/header.php";
     const isAdvanced = !!(method && method.formulario_verificacion);
     if (paymentReferenceGroup) paymentReferenceGroup.classList.toggle('d-none', isAdvanced);
     if (paymentPhoneGroup) paymentPhoneGroup.classList.toggle('d-none', isAdvanced);
-    if (paymentAdvancedForm) paymentAdvancedForm.classList.toggle('d-none', !isAdvanced);
+    if (paymentWhatsappWrap) paymentWhatsappWrap.classList.toggle('d-none', !isAdvanced);
     if (isAdvanced && paymentAdvReferenceInput) {
       const digits = Number(method.referencia_digitos || 0);
       paymentAdvReferenceInput.placeholder = paymentReferencePlaceholder(method);
