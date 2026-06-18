@@ -898,6 +898,7 @@ include __DIR__ . "/includes/header.php";
               </div>
               <div id="payment-reference-group" class="mb-3" style="display:none;">
                 <input type="text" id="payment-reference-input" inputmode="numeric" autocomplete="off">
+                <div id="payment-reference-help"></div>
               </div>
               <div id="payment-phone-group" style="display:none;">
                 <input type="tel" id="payment-phone-input" autocomplete="tel" value="<?= htmlspecialchars($loggedUserLastPurchasePhone, ENT_QUOTES, 'UTF-8') ?>">
