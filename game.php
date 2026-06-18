@@ -907,15 +907,26 @@ include __DIR__ . "/includes/header.php";
               </div>
               <!-- Formulario de verificación avanzado (activable por método de pago) -->
               <div id="payment-advanced-form" class="d-none">
-                <div class="mb-3">
-                  <label for="payment-cedula-input" class="form-label text-info">Cédula</label>
-                  <input type="text" id="payment-cedula-input" class="form-control bg-dark text-info border-info" autocomplete="off" placeholder="Ej: V-12345678">
-                  <div class="form-text text-secondary">Ingresa tu número de cédula de identidad.</div>
+                <div class="row g-2 mb-3">
+                  <div class="col-6">
+                    <label for="payment-nombre-input" class="form-label text-info">Nombre (TITULAR)</label>
+                    <input type="text" id="payment-nombre-input" class="form-control bg-dark text-info border-info" autocomplete="off" placeholder="Ej: Juan Pérez">
+                  </div>
+                  <div class="col-6">
+                    <label for="payment-cedula-input" class="form-label text-info">Cédula (TITULAR)</label>
+                    <input type="text" id="payment-cedula-input" class="form-control bg-dark text-info border-info" autocomplete="off" placeholder="Ej: V-12345678">
+                  </div>
                 </div>
-                <div id="payment-adv-reference-group" class="mb-3">
-                  <label for="payment-adv-reference-input" class="form-label text-info">Número de Referencia</label>
-                  <input type="text" id="payment-adv-reference-input" class="form-control bg-dark text-info border-info" inputmode="numeric" autocomplete="off" placeholder="Inserte los últimos dígitos de su referencia">
-                  <div id="payment-adv-reference-help" class="form-text text-secondary">Solo debes escribir los últimos dígitos de la referencia bancaria.</div>
+                <div class="row g-2 mb-3">
+                  <div class="col-6">
+                    <label for="payment-phone-adv-input" class="form-label text-info">Número de Teléfono (TITULAR)</label>
+                    <input type="tel" id="payment-phone-adv-input" class="form-control bg-dark text-info border-info" inputmode="numeric" autocomplete="off" placeholder="Ej: 0414-1234567">
+                  </div>
+                  <div id="payment-adv-reference-group" class="col-6">
+                    <label for="payment-adv-reference-input" class="form-label text-info">Número de referencia del pago</label>
+                    <input type="text" id="payment-adv-reference-input" class="form-control bg-dark text-info border-info" inputmode="numeric" autocomplete="off" placeholder="Inserte los últimos dígitos de su referencia">
+                    <div id="payment-adv-reference-help" class="form-text text-secondary">Solo debes escribir los últimos dígitos de la referencia bancaria.</div>
+                  </div>
                 </div>
                 <button type="button" id="payment-whatsapp-btn" class="btn btn-success w-100 fw-bold py-2 mb-3">
                   <i class="fa-brands fa-whatsapp me-2" aria-hidden="true"></i>Enviar Comprobante al Admin
@@ -923,6 +934,7 @@ include __DIR__ . "/includes/header.php";
                 <div class="d-flex gap-2 align-items-start p-3 rounded-3 mb-2" style="background:rgba(220,53,69,.13);border:1px solid rgba(220,53,69,.38);">
                   <i class="fa-solid fa-shield-halved text-danger flex-shrink-0 mt-1" aria-hidden="true"></i>
                   <div class="small" style="color:#f8a0a8;">
+                    <strong>Suministrar comprobante y datos</strong><br>
                     <strong>Aviso legal:</strong> Subir comprobantes falsos o manipulados constituye <strong>fraude electrónico</strong> y será penalizado conforme a la ley. Nos reservamos el derecho de reportar ante las autoridades.
                   </div>
                 </div>
@@ -4633,7 +4645,9 @@ include __DIR__ . "/includes/header.php";
   const paymentCancelDismissButton = document.getElementById('payment-cancel-dismiss-btn');
   const paymentCancelConfirmButton = document.getElementById('payment-cancel-confirm-btn');
   const paymentAdvancedForm = document.getElementById('payment-advanced-form');
+  const paymentNombreInput = document.getElementById('payment-nombre-input');
   const paymentCedulaInput = document.getElementById('payment-cedula-input');
+  const paymentPhoneAdvInput = document.getElementById('payment-phone-adv-input');
   const paymentAdvReferenceGroup = document.getElementById('payment-adv-reference-group');
   const paymentAdvReferenceInput = document.getElementById('payment-adv-reference-input');
   const paymentAdvReferenceHelp = document.getElementById('payment-adv-reference-help');
@@ -9349,7 +9363,7 @@ include __DIR__ . "/includes/header.php";
 
   function setPaymentFormDisabled(disabled) {
     [paymentMethodSelect, paymentReferenceInput, paymentPhoneInput, paymentSubmitButton,
-      paymentCedulaInput, paymentAdvReferenceInput, paymentWhatsappBtn,
+      paymentNombreInput, paymentCedulaInput, paymentPhoneAdvInput, paymentAdvReferenceInput, paymentWhatsappBtn,
       ...getPaymentModeButtons()].forEach((field) => {
       if (field) {
         field.disabled = disabled;
@@ -9377,7 +9391,9 @@ include __DIR__ . "/includes/header.php";
     const productName = paymentSummaryProduct ? paymentSummaryProduct.textContent : '';
     const userIdentifier = paymentSummaryUser ? paymentSummaryUser.textContent : '';
     const totalText = paymentSummaryTotal ? paymentSummaryTotal.textContent : '';
+    const nombre = paymentNombreInput ? paymentNombreInput.value.trim() : '';
     const cedula = paymentCedulaInput ? paymentCedulaInput.value.trim() : '';
+    const telefono = paymentPhoneAdvInput ? paymentPhoneAdvInput.value.trim() : '';
     const referencia = paymentAdvReferenceInput ? paymentAdvReferenceInput.value.trim() : '';
     const message = [
       'Hola, envío comprobante de pago para verificación.',
@@ -9385,7 +9401,9 @@ include __DIR__ . "/includes/header.php";
       `Juego: ${currentGameName || '-'}`,
       `Producto: ${productName || '-'}`,
       `ID Jugador: ${userIdentifier || '-'}`,
+      `Nombre: ${nombre || '-'}`,
       `Cédula: ${cedula || '-'}`,
+      `Teléfono: ${telefono || '-'}`,
       `Referencia: ${referencia || '-'}`,
       `Monto: ${totalText || '-'}`,
       '(Adjunto captura del comprobante de pago)'
@@ -9426,6 +9444,14 @@ include __DIR__ . "/includes/header.php";
     paymentAdvReferenceInput.addEventListener('input', () => {
       if (paymentReferenceInput) {
         paymentReferenceInput.value = paymentAdvReferenceInput.value;
+      }
+    });
+  }
+
+  if (paymentPhoneAdvInput) {
+    paymentPhoneAdvInput.addEventListener('input', () => {
+      if (paymentPhoneInput) {
+        paymentPhoneInput.value = paymentPhoneAdvInput.value;
       }
     });
   }
@@ -9625,7 +9651,9 @@ include __DIR__ . "/includes/header.php";
     refreshPaymentDifferenceBanner(null);
     updateButtonState();
     updateAdvancedFormVisibility(null);
+    if (paymentNombreInput) paymentNombreInput.value = '';
     if (paymentCedulaInput) paymentCedulaInput.value = '';
+    if (paymentPhoneAdvInput) paymentPhoneAdvInput.value = '';
     if (paymentAdvReferenceInput) paymentAdvReferenceInput.value = '';
     pendingWhatsappUrl = '';
   }
@@ -10227,9 +10255,19 @@ include __DIR__ . "/includes/header.php";
                     return;
                   }
                   const isAdvancedForm = !!(selectedMethod && selectedMethod.formulario_verificacion);
+                  if (isAdvancedForm && paymentNombreInput && !paymentNombreInput.value.trim()) {
+                    setPaymentAlert('Debes ingresar el nombre del titular.', 'danger');
+                    paymentNombreInput.focus();
+                    return;
+                  }
                   if (isAdvancedForm && paymentCedulaInput && !paymentCedulaInput.value.trim()) {
                     setPaymentAlert('Debes ingresar tu número de cédula.', 'danger');
                     if (paymentCedulaInput) paymentCedulaInput.focus();
+                    return;
+                  }
+                  if (isAdvancedForm && paymentPhoneAdvInput && !paymentPhoneAdvInput.value.trim()) {
+                    setPaymentAlert('Debes ingresar el número de teléfono del titular.', 'danger');
+                    paymentPhoneAdvInput.focus();
                     return;
                   }
                   if (requiresManualConfirmation && !reference) {
