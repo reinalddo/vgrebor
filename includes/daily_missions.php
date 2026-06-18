@@ -43,6 +43,10 @@ if (!function_exists('daily_missions_default_settings')) {
             'coupon_discount_percent' => 10,
             'coupon_expiration_days' => 30,
             'streaming_user_id' => null,
+            'accordion_base_color1' => '',
+            'accordion_base_color2' => '',
+            'accordion_bg_color1' => '',
+            'accordion_bg_color2' => '',
         ];
     }
 }
@@ -293,6 +297,10 @@ if (!function_exists('daily_missions_fetch_settings')) {
             $settings['coupon_discount_percent'] = max(0, min(100, (int) ($row['coupon_discount_percent'] ?? $settings['coupon_discount_percent'])));
             $settings['coupon_expiration_days'] = max(1, (int) ($row['coupon_expiration_days'] ?? $settings['coupon_expiration_days']));
             $settings['streaming_user_id'] = (int) ($row['streaming_user_id'] ?? 0) > 0 ? (int) $row['streaming_user_id'] : null;
+            $settings['accordion_base_color1'] = (string) ($row['accordion_base_color1'] ?? '');
+            $settings['accordion_base_color2'] = (string) ($row['accordion_base_color2'] ?? '');
+            $settings['accordion_bg_color1'] = (string) ($row['accordion_bg_color1'] ?? '');
+            $settings['accordion_bg_color2'] = (string) ($row['accordion_bg_color2'] ?? '');
             $settings['created_at'] = (string) ($row['created_at'] ?? '');
             $settings['updated_at'] = (string) ($row['updated_at'] ?? '');
         }
@@ -740,6 +748,24 @@ if (!function_exists('daily_missions_ensure_schema')) {
 
         // ADD COLUMN IF NOT EXISTS no está disponible en MySQL 5.x — verificar via INFORMATION_SCHEMA
         $dbName = $mysqli->query("SELECT DATABASE()")->fetch_row()[0];
+
+        // Accordion color columns for win_points_daily_mission_settings
+        $settingsColCheck = $mysqli->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='$dbName' AND TABLE_NAME='win_points_daily_mission_settings' AND COLUMN_NAME IN ('accordion_base_color1','accordion_base_color2','accordion_bg_color1','accordion_bg_color2')");
+        $existingSettingsCols = [];
+        while ($sColRow = $settingsColCheck->fetch_row()) { $existingSettingsCols[] = $sColRow[0]; }
+        if (!in_array('accordion_base_color1', $existingSettingsCols)) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN accordion_base_color1 VARCHAR(30) NULL DEFAULT NULL");
+        }
+        if (!in_array('accordion_base_color2', $existingSettingsCols)) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN accordion_base_color2 VARCHAR(30) NULL DEFAULT NULL");
+        }
+        if (!in_array('accordion_bg_color1', $existingSettingsCols)) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN accordion_bg_color1 VARCHAR(30) NULL DEFAULT NULL");
+        }
+        if (!in_array('accordion_bg_color2', $existingSettingsCols)) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN accordion_bg_color2 VARCHAR(30) NULL DEFAULT NULL");
+        }
+
         $colCheck = $mysqli->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='$dbName' AND TABLE_NAME='win_points_daily_mission_tasks' AND COLUMN_NAME IN ('day20_multiplier','month_end_multiplier')");
         $existingCols = [];
         while ($colRow = $colCheck->fetch_row()) { $existingCols[] = $colRow[0]; }

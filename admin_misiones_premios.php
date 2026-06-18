@@ -34,6 +34,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $immunityDays     = max(0, (int) ($_POST['immunity_days'] ?? 1));
             $couponDiscount   = max(0, min(100, (int) ($_POST['coupon_discount_percent'] ?? 10)));
             $couponExpiration = max(1, (int) ($_POST['coupon_expiration_days'] ?? 30));
+            $accBase1         = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_base_color1'] ?? '')), 0, 30);
+            $accBase2         = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_base_color2'] ?? '')), 0, 30);
+            $accBg1           = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_bg_color1'] ?? '')), 0, 30);
+            $accBg2           = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_bg_color2'] ?? '')), 0, 30);
 
             $stmt = $mysqli->prepare(
                 'UPDATE win_points_daily_mission_settings SET
@@ -41,13 +45,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     day20_multiplier=?, month_end_multiplier=?,
                     explore_timer_seconds=?, share_timer_seconds=?,
                     immunity_days=?, coupon_discount_percent=?,
-                    coupon_expiration_days=?
+                    coupon_expiration_days=?,
+                    accordion_base_color1=?, accordion_base_color2=?,
+                    accordion_bg_color1=?, accordion_bg_color2=?
                  WHERE id=1'
             );
             if (!$stmt) { echo json_encode(['ok' => false, 'error' => $mysqli->error]); exit; }
-            $stmt->bind_param('issddiiiii', $enabled, $title, $subtitle,
+            $stmt->bind_param('issddiiiiissss', $enabled, $title, $subtitle,
                 $day20Mult, $monthEndMult, $exploreTimer, $shareTimer,
-                $immunityDays, $couponDiscount, $couponExpiration
+                $immunityDays, $couponDiscount, $couponExpiration,
+                $accBase1, $accBase2, $accBg1, $accBg2
             );
             $stmt->execute();
             $stmt->close();
@@ -586,6 +593,13 @@ include __DIR__ . '/includes/header.php';
   .missions-form-input:focus { outline: none; border-color: rgba(34,211,238,.6); box-shadow: 0 0 0 3px rgba(34,211,238,.1); }
   .missions-form-input::placeholder { color: rgba(226,232,240,.3); }
   select.missions-form-input option { background: #0a0f1e; color: #e5f6ff; }
+  .missions-color-input {
+    width: 48px; height: 36px; padding: 2px; border-radius: .5rem;
+    border: 1px solid rgba(34,211,238,.3); background: rgba(8,15,28,.86);
+    cursor: pointer;
+  }
+  .missions-color-input::-webkit-color-swatch-wrapper { padding: 2px; }
+  .missions-color-input::-webkit-color-swatch { border-radius: .3rem; border: none; }
   /* Prize level cards */
   .prize-level-card {
     border-radius: 1.25rem; border: 1px solid rgba(255,255,255,.1);
@@ -1045,6 +1059,74 @@ include __DIR__ . '/includes/header.php';
               </div>
             </div>
           </div>
+          <!-- ── Colores del acordeón ── -->
+          <div class="col-12">
+            <div class="missions-admin-prize-card p-3">
+              <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <p class="missions-admin-label mb-0">Colores del acordeón de misiones diarias</p>
+                <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" id="btnResetAccColors" style="font-size:.75rem;">Restaurar default</button>
+              </div>
+              <div class="row g-3 align-items-end">
+                <!-- Base del acordeón = botón que se hace clic (toggle) -->
+                <div class="col-12 col-md-4">
+                  <label class="missions-admin-label mb-2 d-block">Base del acordeón <small class="text-secondary fw-normal normal-case">(botón de apertura)</small></label>
+                  <div class="d-flex gap-3 align-items-center">
+                    <div>
+                      <div class="text-secondary" style="font-size:.75rem;margin-bottom:2px">Color 1</div>
+                      <input type="color" name="accordion_base_color1" id="accBase1"
+                             value="<?php echo htmlspecialchars($settings['accordion_base_color1'] ?: '#080f18', ENT_QUOTES, 'UTF-8'); ?>"
+                             class="missions-color-input">
+                    </div>
+                    <div>
+                      <div class="text-secondary" style="font-size:.75rem;margin-bottom:2px">Color 2</div>
+                      <input type="color" name="accordion_base_color2" id="accBase2"
+                             value="<?php echo htmlspecialchars($settings['accordion_base_color2'] ?: '#040910', ENT_QUOTES, 'UTF-8'); ?>"
+                             class="missions-color-input">
+                    </div>
+                  </div>
+                </div>
+                <!-- Fondo del acordeón = contenido expandido -->
+                <div class="col-12 col-md-4">
+                  <label class="missions-admin-label mb-2 d-block">Fondo del acordeón <small class="text-secondary fw-normal normal-case">(contenido expandido)</small></label>
+                  <div class="d-flex gap-3 align-items-center">
+                    <div>
+                      <div class="text-secondary" style="font-size:.75rem;margin-bottom:2px">Color 1</div>
+                      <input type="color" name="accordion_bg_color1" id="accBg1"
+                             value="<?php echo htmlspecialchars($settings['accordion_bg_color1'] ?: '#080f18', ENT_QUOTES, 'UTF-8'); ?>"
+                             class="missions-color-input">
+                    </div>
+                    <div>
+                      <div class="text-secondary" style="font-size:.75rem;margin-bottom:2px">Color 2</div>
+                      <input type="color" name="accordion_bg_color2" id="accBg2"
+                             value="<?php echo htmlspecialchars($settings['accordion_bg_color2'] ?: '#040910', ENT_QUOTES, 'UTF-8'); ?>"
+                             class="missions-color-input">
+                    </div>
+                  </div>
+                </div>
+                <!-- Vista previa -->
+                <div class="col-12 col-md-4">
+                  <div class="text-secondary mb-2" style="font-size:.75rem">Vista previa</div>
+                  <div style="border-radius:10px;overflow:hidden;border:1px solid rgba(34,211,238,.18);max-width:280px;box-shadow:0 4px 16px #0005">
+                    <!-- Header = base del acordeón -->
+                    <div id="accPreviewBase" style="padding:11px 14px;background:linear-gradient(180deg,#080f18,#040910)">
+                      <div style="font-size:.65rem;color:#22d3ee;font-weight:800;letter-spacing:.15em;margin-bottom:3px;text-transform:uppercase">Misión diaria</div>
+                      <div style="font-size:.72rem;color:#dde4ef;font-weight:600">Completa las tareas y gana puntos</div>
+                    </div>
+                    <!-- Body = fondo del acordeón -->
+                    <div id="accPreviewBg" style="padding:10px 14px;background:transparent;border-top:1px solid rgba(34,211,238,.1)">
+                      <div style="font-size:.6rem;color:#5f7a94;margin-bottom:6px;text-transform:uppercase;letter-spacing:.1em">Tareas del día</div>
+                      <div style="display:flex;flex-direction:column;gap:5px">
+                        <div style="height:7px;border-radius:4px;background:rgba(255,255,255,.09)"></div>
+                        <div style="height:7px;border-radius:4px;background:rgba(255,255,255,.07);width:75%"></div>
+                        <div style="height:7px;border-radius:4px;background:rgba(255,255,255,.05);width:55%"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="col-12">
             <button type="submit" class="btn btn-info rounded-pill fw-bold px-5">Guardar configuración</button>
             <span class="save-feedback" id="settingsFeedback"></span>
@@ -1594,6 +1676,58 @@ include __DIR__ . '/includes/header.php';
   });
 
   // ─── Guardar Configuración ────────────────────────────────────────
+  // Live preview for accordion color pickers
+  (function () {
+    const base1 = document.getElementById('accBase1');
+    const base2 = document.getElementById('accBase2');
+    const bg1   = document.getElementById('accBg1');
+    const bg2   = document.getElementById('accBg2');
+    const previewBase = document.getElementById('accPreviewBase');
+    const previewBg   = document.getElementById('accPreviewBg');
+
+    function updateAccPreview() {
+      if (previewBase) previewBase.style.background = 'linear-gradient(180deg,' + base1.value + ',' + base2.value + ')';
+      if (previewBg)   previewBg.style.background   = 'linear-gradient(180deg,' + bg1.value + ',' + bg2.value + ')';
+    }
+    window._updateAccPreview = updateAccPreview;
+
+    [base1, base2, bg1, bg2].forEach(function(el) {
+      if (el) el.addEventListener('input', updateAccPreview);
+    });
+
+    // Reset to default button
+    const btnReset = document.getElementById('btnResetAccColors');
+    if (btnReset) {
+      btnReset.addEventListener('click', function () {
+        const fd = new FormData(document.getElementById('formSettings'));
+        fd.set('action', 'save_settings');
+        fd.set('accordion_base_color1', '');
+        fd.set('accordion_base_color2', '');
+        fd.set('accordion_bg_color1', '');
+        fd.set('accordion_bg_color2', '');
+        btnReset.disabled = true;
+        fetch(ajaxBase, { method: 'POST', body: fd })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            btnReset.disabled = false;
+            if (data.ok) {
+              base1.value = '#080f18';
+              base2.value = '#040910';
+              bg1.value   = '#080f18';
+              bg2.value   = '#040910';
+              updateAccPreview();
+              const fb = document.getElementById('settingsFeedback');
+              fb.textContent = '✓ Colores restaurados al default';
+              fb.className   = 'save-feedback ok';
+              fb.style.display = 'inline';
+              setTimeout(function() { fb.style.display = 'none'; }, 3000);
+            }
+          })
+          .catch(function() { btnReset.disabled = false; });
+      });
+    }
+  })();
+
   const formSettings = document.getElementById('formSettings');
   if (formSettings) {
     formSettings.addEventListener('submit', function (e) {

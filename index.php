@@ -1008,9 +1008,12 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           align-items: flex-start;
           padding: 1rem 1.1rem;
           border: 0;
-          background: linear-gradient(180deg, rgba(8, 15, 24, 0.96), rgba(4, 9, 16, 0.98));
+          background: var(--daily-base-gradient, linear-gradient(180deg, rgba(8, 15, 24, 0.96), rgba(4, 9, 16, 0.98)));
           color: #fff;
           box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.12);
+        }
+        .daily-mission-body {
+          background: var(--daily-bg-gradient, transparent);
         }
         .daily-mission-toggle::after {
           margin-top: 0.25rem;
@@ -1764,9 +1767,12 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           align-items: flex-start;
           padding: 1rem 1.1rem;
           border: 0;
-          background: linear-gradient(180deg, rgba(8, 15, 24, 0.96), rgba(4, 9, 16, 0.98));
+          background: var(--daily-base-gradient, linear-gradient(180deg, rgba(8, 15, 24, 0.96), rgba(4, 9, 16, 0.98)));
           color: #fff;
           box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.12);
+        }
+        #daily-missions-shell .daily-mission-body {
+          background: var(--daily-bg-gradient, transparent);
         }
         #daily-missions-shell .daily-mission-toggle::after {
           margin-top: 0.25rem;
@@ -2370,7 +2376,18 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         <section
           id="daily-missions-shell"
           class="daily-mission-shell mt-5" data-aos="fade-up"
-          style="--daily-accent:<?php echo htmlspecialchars((string) ($dailyMissionsPalette['accent'] ?? '#22d3ee'), ENT_QUOTES, 'UTF-8'); ?>;--daily-glow:<?php echo htmlspecialchars((string) ($dailyMissionsPalette['glow'] ?? 'rgba(34,211,238,0.28)'), ENT_QUOTES, 'UTF-8'); ?>;--daily-border:<?php echo htmlspecialchars((string) ($dailyMissionsPalette['border'] ?? 'rgba(34,211,238,0.38)'), ENT_QUOTES, 'UTF-8'); ?>;--daily-surface:<?php echo htmlspecialchars((string) ($dailyMissionsPalette['surface'] ?? 'rgba(8,14,24,0.96)'), ENT_QUOTES, 'UTF-8'); ?>;"
+          style="--daily-accent:<?php echo htmlspecialchars((string) ($dailyMissionsPalette['accent'] ?? '#22d3ee'), ENT_QUOTES, 'UTF-8'); ?>;--daily-glow:<?php echo htmlspecialchars((string) ($dailyMissionsPalette['glow'] ?? 'rgba(34,211,238,0.28)'), ENT_QUOTES, 'UTF-8'); ?>;--daily-border:<?php echo htmlspecialchars((string) ($dailyMissionsPalette['border'] ?? 'rgba(34,211,238,0.38)'), ENT_QUOTES, 'UTF-8'); ?>;--daily-surface:<?php echo htmlspecialchars((string) ($dailyMissionsPalette['surface'] ?? 'rgba(8,14,24,0.96)'), ENT_QUOTES, 'UTF-8'); ?><?php
+                  $dmBase1 = trim((string) ($dailyMissionsSettings['accordion_base_color1'] ?? ''));
+                  $dmBase2 = trim((string) ($dailyMissionsSettings['accordion_base_color2'] ?? ''));
+                  $dmBg1   = trim((string) ($dailyMissionsSettings['accordion_bg_color1'] ?? ''));
+                  $dmBg2   = trim((string) ($dailyMissionsSettings['accordion_bg_color2'] ?? ''));
+                  if ($dmBase1 !== '' && $dmBase2 !== '') {
+                      echo ';--daily-base-gradient:linear-gradient(135deg,' . htmlspecialchars($dmBase1, ENT_QUOTES, 'UTF-8') . ',' . htmlspecialchars($dmBase2, ENT_QUOTES, 'UTF-8') . ')';
+                  }
+                  if ($dmBg1 !== '' && $dmBg2 !== '') {
+                      echo ';--daily-bg-gradient:linear-gradient(180deg,' . htmlspecialchars($dmBg1, ENT_QUOTES, 'UTF-8') . ',' . htmlspecialchars($dmBg2, ENT_QUOTES, 'UTF-8') . ')';
+                  }
+                ?>"
           data-api-url="<?php echo htmlspecialchars((string) $dailyMissionsScriptPayload['api_url'], ENT_QUOTES, 'UTF-8'); ?>"
           data-progress="<?php echo (int) $dailyMissionsProgressPercent; ?>"
           data-can-open-chest="<?php echo $dailyMissionsCanOpenChest ? '1' : '0'; ?>"
