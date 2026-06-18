@@ -95,6 +95,30 @@ if ($lastPurchasePhoneColumnResult instanceof mysqli_result) {
         $mysqli->query("ALTER TABLE usuarios ADD COLUMN last_purchase_phone VARCHAR(50) NULL AFTER last_purchase_user_identifier");
     }
 }
+$lastPurchaseNombreColumnResult = $mysqli->query("SHOW COLUMNS FROM usuarios LIKE 'last_purchase_nombre'");
+if ($lastPurchaseNombreColumnResult instanceof mysqli_result) {
+    $lastPurchaseNombreColumnExists = $lastPurchaseNombreColumnResult->fetch_assoc();
+    $lastPurchaseNombreColumnResult->free();
+    if (!$lastPurchaseNombreColumnExists) {
+        $mysqli->query("ALTER TABLE usuarios ADD COLUMN last_purchase_nombre VARCHAR(120) NULL AFTER last_purchase_phone");
+    }
+}
+$lastPurchaseCedulaColumnResult = $mysqli->query("SHOW COLUMNS FROM usuarios LIKE 'last_purchase_cedula'");
+if ($lastPurchaseCedulaColumnResult instanceof mysqli_result) {
+    $lastPurchaseCedulaColumnExists = $lastPurchaseCedulaColumnResult->fetch_assoc();
+    $lastPurchaseCedulaColumnResult->free();
+    if (!$lastPurchaseCedulaColumnExists) {
+        $mysqli->query("ALTER TABLE usuarios ADD COLUMN last_purchase_cedula VARCHAR(60) NULL AFTER last_purchase_nombre");
+    }
+}
+$lastPurchaseZoneIdColumnResult = $mysqli->query("SHOW COLUMNS FROM usuarios LIKE 'last_purchase_zone_id'");
+if ($lastPurchaseZoneIdColumnResult instanceof mysqli_result) {
+    $lastPurchaseZoneIdColumnExists = $lastPurchaseZoneIdColumnResult->fetch_assoc();
+    $lastPurchaseZoneIdColumnResult->free();
+    if (!$lastPurchaseZoneIdColumnExists) {
+        $mysqli->query("ALTER TABLE usuarios ADD COLUMN last_purchase_zone_id VARCHAR(80) NULL AFTER last_purchase_cedula");
+    }
+}
 
 $extraFeatureColumns = [
     'mostrar_a_cliente' => "ALTER TABLE configuracion_general ADD COLUMN mostrar_a_cliente TINYINT(1) DEFAULT 0 NULL AFTER actualizado_en",

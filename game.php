@@ -34,13 +34,16 @@ function fetch_user_legacy_purchase_defaults(mysqli $mysqli, int $userId): array
   $defaults = [
     'user_identifier' => '',
     'phone' => '',
+    'nombre' => '',
+    'cedula' => '',
+    'zone_id' => '',
   ];
 
   if ($userId <= 0) {
     return $defaults;
   }
 
-  $stmt = $mysqli->prepare('SELECT last_purchase_user_identifier, last_purchase_phone FROM usuarios WHERE id = ? LIMIT 1');
+  $stmt = $mysqli->prepare('SELECT last_purchase_user_identifier, last_purchase_phone, last_purchase_nombre, last_purchase_cedula, last_purchase_zone_id FROM usuarios WHERE id = ? LIMIT 1');
   if (!$stmt) {
     return $defaults;
   }
@@ -57,6 +60,9 @@ function fetch_user_legacy_purchase_defaults(mysqli $mysqli, int $userId): array
 
   $defaults['user_identifier'] = trim((string) ($row['last_purchase_user_identifier'] ?? ''));
   $defaults['phone'] = trim((string) ($row['last_purchase_phone'] ?? ''));
+  $defaults['nombre'] = trim((string) ($row['last_purchase_nombre'] ?? ''));
+  $defaults['cedula'] = trim((string) ($row['last_purchase_cedula'] ?? ''));
+  $defaults['zone_id'] = trim((string) ($row['last_purchase_zone_id'] ?? ''));
 
   return $defaults;
 }
@@ -131,6 +137,9 @@ $loggedUserId = 0;
 $loggedUserEmail = '';
 $loggedUserLastPurchaseIdentifier = '';
 $loggedUserLastPurchasePhone = '';
+$loggedUserLastPurchaseNombre = '';
+$loggedUserLastPurchaseCedula = '';
+$loggedUserLastPurchaseZoneId = '';
 $loggedUserRole = '';
 $canSimulateDailyMissionPurchase = false;
 $paymentDifferenceEnabled = false;
@@ -190,6 +199,9 @@ if ($loggedUserId > 0) {
   $legacyPurchaseDefaults = fetch_user_legacy_purchase_defaults($mysqli, $loggedUserId);
   if ($rememberLastPurchaseIdentifierEnabled) {
     $loggedUserLastPurchaseIdentifier = $legacyPurchaseDefaults['user_identifier'];
+    $loggedUserLastPurchaseNombre = $legacyPurchaseDefaults['nombre'];
+    $loggedUserLastPurchaseCedula = $legacyPurchaseDefaults['cedula'];
+    $loggedUserLastPurchaseZoneId = $legacyPurchaseDefaults['zone_id'];
   }
   $loggedUserLastPurchasePhone = $legacyPurchaseDefaults['phone'];
 
@@ -908,17 +920,17 @@ include __DIR__ . "/includes/header.php";
                 <div class="row g-2 mb-3">
                   <div class="col-6">
                     <label for="payment-nombre-input" class="form-label text-info">Nombre (TITULAR)</label>
-                    <input type="text" id="payment-nombre-input" class="form-control bg-dark text-info border-info" autocomplete="off" placeholder="Ej: Juan Pérez">
+                    <input type="text" id="payment-nombre-input" class="form-control bg-dark text-info border-info" autocomplete="off" placeholder="Ej: Juan Pérez" value="<?= htmlspecialchars($loggedUserLastPurchaseNombre, ENT_QUOTES, 'UTF-8') ?>">
                   </div>
                   <div class="col-6">
                     <label for="payment-cedula-input" class="form-label text-info">Cédula (TITULAR)</label>
-                    <input type="text" id="payment-cedula-input" class="form-control bg-dark text-info border-info" autocomplete="off" placeholder="Ej: V-12345678">
+                    <input type="text" id="payment-cedula-input" class="form-control bg-dark text-info border-info" autocomplete="off" placeholder="Ej: V-12345678" value="<?= htmlspecialchars($loggedUserLastPurchaseCedula, ENT_QUOTES, 'UTF-8') ?>">
                   </div>
                 </div>
                 <div class="row g-2 mb-3">
                   <div class="col-6">
                     <label for="payment-phone-adv-input" class="form-label text-info">Número de Teléfono (TITULAR)</label>
-                    <input type="tel" id="payment-phone-adv-input" class="form-control bg-dark text-info border-info" inputmode="numeric" autocomplete="off" placeholder="Ej: 0414-1234567">
+                    <input type="tel" id="payment-phone-adv-input" class="form-control bg-dark text-info border-info" inputmode="numeric" autocomplete="off" placeholder="Ej: 0414-1234567" value="<?= htmlspecialchars($loggedUserLastPurchasePhone, ENT_QUOTES, 'UTF-8') ?>">
                   </div>
                   <div id="payment-adv-reference-group" class="col-6">
                     <label for="payment-adv-reference-input" class="form-label text-info">Número de referencia del pago</label>
@@ -4533,6 +4545,9 @@ include __DIR__ . "/includes/header.php";
   const defaultOrderEmail = <?= json_encode($loggedUserEmail, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   let defaultOrderUserIdentifier = <?= json_encode($loggedUserLastPurchaseIdentifier, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   let defaultPaymentPhone = <?= json_encode($loggedUserLastPurchasePhone, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+  let defaultPaymentNombre = <?= json_encode($loggedUserLastPurchaseNombre, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+  let defaultPaymentCedula = <?= json_encode($loggedUserLastPurchaseCedula, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+  let defaultPlayerZoneId = <?= json_encode($loggedUserLastPurchaseZoneId, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const paymentMethodsByCurrency = <?= json_encode($paymentMethodsByCurrency, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const binancePayCheckoutEnabled = <?= $binancePayCheckoutEnabled ? 'true' : 'false' ?>;
   const binancePagonorteCheckoutEnabled = <?= $binancePagonorteCheckoutEnabled ? 'true' : 'false' ?>;
@@ -7419,7 +7434,8 @@ include __DIR__ . "/includes/header.php";
       label.textContent = fieldConfig.label || 'Dato adicional';
 
       const input = createDynamicFieldControl(fieldConfig, 'player_field_');
-      input.value = existingValues[fieldConfig.name || ''] || '';
+      const isZoneField = ['input2', 'zone_id', 'zoneid', 'zone', 'server_id', 'serverid', 'server'].includes(fieldConfig.name || '');
+      input.value = existingValues[fieldConfig.name || ''] || (isZoneField && rememberLastPurchaseIdentifierEnabled ? defaultPlayerZoneId : '') || '';
 
       wrapper.appendChild(label);
       wrapper.appendChild(input);
@@ -9842,6 +9858,9 @@ include __DIR__ . "/includes/header.php";
     renderPaymentSummary(pack, userId, totalText);
     paymentReferenceInput.value = '';
     paymentPhoneInput.value = defaultPaymentPhone || '';
+    if (paymentNombreInput && paymentNombreInput.value.trim() === '') paymentNombreInput.value = defaultPaymentNombre || '';
+    if (paymentCedulaInput && paymentCedulaInput.value.trim() === '') paymentCedulaInput.value = defaultPaymentCedula || '';
+    if (paymentPhoneAdvInput && paymentPhoneAdvInput.value.trim() === '') paymentPhoneAdvInput.value = defaultPaymentPhone || '';
     setPaymentFormDisabled(false);
     setPaymentAlert('', 'info');
     clearPaymentSupportUi();
@@ -10383,7 +10402,9 @@ include __DIR__ . "/includes/header.php";
                       `payment_mode=${encodeURIComponent(paymentMode)}`,
                       `payment_method_id=${encodeURIComponent(selectedMethod ? selectedMethod.id : '')}`,
                       `reference_number=${encodeURIComponent(reference)}`,
-                      `phone=${encodeURIComponent(phone)}`
+                      `phone=${encodeURIComponent(phone)}`,
+                      `nombre_titular=${encodeURIComponent(isAdvancedForm && paymentNombreInput ? paymentNombreInput.value.trim() : '')}`,
+                      `cedula_titular=${encodeURIComponent(isAdvancedForm && paymentCedulaInput ? paymentCedulaInput.value.trim() : '')}`
                     ].join('&')
                   })
                   .then(async (response) => {
@@ -10398,6 +10419,12 @@ include __DIR__ . "/includes/header.php";
                     }
                     if (paymentMode === 'money' && phone) {
                       defaultPaymentPhone = phone;
+                    }
+                    if (isAdvancedForm) {
+                      const nombreVal = paymentNombreInput ? paymentNombreInput.value.trim() : '';
+                      const cedulaVal = paymentCedulaInput ? paymentCedulaInput.value.trim() : '';
+                      if (nombreVal) defaultPaymentNombre = nombreVal;
+                      if (cedulaVal) defaultPaymentCedula = cedulaVal;
                     }
 
                     setOverlayVisible(loadingModal, false);

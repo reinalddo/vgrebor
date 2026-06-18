@@ -2084,46 +2084,70 @@ function should_store_last_purchase_identifier(): bool {
     return $enabled;
 }
 
-function update_user_last_purchase_details(mysqli $mysqli, int $userId, ?string $userIdentifier = null, ?string $phone = null): void {
+function update_user_last_purchase_details(mysqli $mysqli, int $userId, ?string $userIdentifier = null, ?string $phone = null, ?string $nombre = null, ?string $cedula = null, ?string $zoneId = null): void {
     if ($userId <= 0) {
         return;
     }
 
+    $sets = [];
+    $types = '';
+    $values = [];
+    $sessionUpdates = [];
+
     $normalizedIdentifier = sanitize_str($userIdentifier, 150);
+    if ($normalizedIdentifier !== null) {
+        $sets[] = 'last_purchase_user_identifier = ?';
+        $types .= 's';
+        $values[] = $normalizedIdentifier;
+        $sessionUpdates['last_purchase_user_identifier'] = $normalizedIdentifier;
+    }
     $normalizedPhone = sanitize_str($phone, 50);
-    if ($normalizedIdentifier === null && $normalizedPhone === null) {
+    if ($normalizedPhone !== null) {
+        $sets[] = 'last_purchase_phone = ?';
+        $types .= 's';
+        $values[] = $normalizedPhone;
+        $sessionUpdates['last_purchase_phone'] = $normalizedPhone;
+    }
+    $normalizedNombre = sanitize_str($nombre, 120);
+    if ($normalizedNombre !== null) {
+        $sets[] = 'last_purchase_nombre = ?';
+        $types .= 's';
+        $values[] = $normalizedNombre;
+        $sessionUpdates['last_purchase_nombre'] = $normalizedNombre;
+    }
+    $normalizedCedula = sanitize_str($cedula, 60);
+    if ($normalizedCedula !== null) {
+        $sets[] = 'last_purchase_cedula = ?';
+        $types .= 's';
+        $values[] = $normalizedCedula;
+        $sessionUpdates['last_purchase_cedula'] = $normalizedCedula;
+    }
+    $normalizedZoneId = sanitize_str($zoneId, 80);
+    if ($normalizedZoneId !== null) {
+        $sets[] = 'last_purchase_zone_id = ?';
+        $types .= 's';
+        $values[] = $normalizedZoneId;
+        $sessionUpdates['last_purchase_zone_id'] = $normalizedZoneId;
+    }
+
+    if (empty($sets)) {
         return;
     }
 
-    if ($normalizedIdentifier !== null && $normalizedPhone !== null) {
-        $stmt = $mysqli->prepare('UPDATE usuarios SET last_purchase_user_identifier = ?, last_purchase_phone = ? WHERE id = ? LIMIT 1');
-        if (!$stmt) {
-            return;
-        }
-        $stmt->bind_param('ssi', $normalizedIdentifier, $normalizedPhone, $userId);
-    } elseif ($normalizedIdentifier !== null) {
-        $stmt = $mysqli->prepare('UPDATE usuarios SET last_purchase_user_identifier = ? WHERE id = ? LIMIT 1');
-        if (!$stmt) {
-            return;
-        }
-        $stmt->bind_param('si', $normalizedIdentifier, $userId);
-    } else {
-        $stmt = $mysqli->prepare('UPDATE usuarios SET last_purchase_phone = ? WHERE id = ? LIMIT 1');
-        if (!$stmt) {
-            return;
-        }
-        $stmt->bind_param('si', $normalizedPhone, $userId);
-    }
+    $types .= 'i';
+    $values[] = $userId;
 
+    $stmt = $mysqli->prepare('UPDATE usuarios SET ' . implode(', ', $sets) . ' WHERE id = ? LIMIT 1');
+    if (!$stmt) {
+        return;
+    }
+    $stmt->bind_param($types, ...$values);
     $stmt->execute();
     $stmt->close();
 
     if (!empty($_SESSION['auth_user']) && (int) ($_SESSION['auth_user']['id'] ?? 0) === $userId) {
-        if ($normalizedIdentifier !== null) {
-            $_SESSION['auth_user']['last_purchase_user_identifier'] = $normalizedIdentifier;
-        }
-        if ($normalizedPhone !== null) {
-            $_SESSION['auth_user']['last_purchase_phone'] = $normalizedPhone;
+        foreach ($sessionUpdates as $key => $val) {
+            $_SESSION['auth_user'][$key] = $val;
         }
     }
 }
@@ -7919,11 +7943,25 @@ if ($action === 'create') {
     if ($paymentDifferenceCreditApplied > 0) {
         payment_difference_consume_credit();
     }
+    $zoneCandidates = ['input2', 'zone_id', 'zoneid', 'zone', 'server_id', 'serverid', 'server'];
+    $zoneIdToSave = null;
+    if (should_store_last_purchase_identifier() && is_array($player_fields)) {
+        foreach ($zoneCandidates as $candidate) {
+            $candidateVal = trim((string) ($player_fields[$candidate] ?? ''));
+            if ($candidateVal !== '') {
+                $zoneIdToSave = $candidateVal;
+                break;
+            }
+        }
+    }
     update_user_last_purchase_details(
         $mysqli,
         (int) ($cliente_usuario_id ?? 0),
         should_store_last_purchase_identifier() ? $user_identifier : null,
-        null
+        null,
+        null,
+        null,
+        $zoneIdToSave
     );
     sync_coupon_usage_counts_safe($mysqli);
     $storedOrder = fetch_order_by_id($mysqli, $order_id);
@@ -8010,6 +8048,8 @@ if ($action === 'submit_payment') {
     $paymentMethodId = intval($_POST['payment_method_id'] ?? 0);
     $referenceNumberRaw = trim((string) ($_POST['reference_number'] ?? ''));
     $phoneRaw = trim((string) ($_POST['phone'] ?? ''));
+    $nombreTitularRaw = trim((string) ($_POST['nombre_titular'] ?? ''));
+    $cedulaTitularRaw = trim((string) ($_POST['cedula_titular'] ?? ''));
 
     if ($orderId <= 0) {
         json_error('Pedido inválido.');
@@ -8786,11 +8826,15 @@ if ($action === 'submit_payment') {
         json_error('No se pudieron guardar los datos del pago.', 500);
     }
     $stmt->close();
+    $storeIdentifier = should_store_last_purchase_identifier();
     update_user_last_purchase_details(
         $mysqli,
         (int) ($order['cliente_usuario_id'] ?? 0),
-        should_store_last_purchase_identifier() ? (string) ($order['user_identifier'] ?? '') : null,
-        $phone
+        $storeIdentifier ? (string) ($order['user_identifier'] ?? '') : null,
+        $phone,
+        $storeIdentifier ? $nombreTitularRaw : null,
+        $storeIdentifier ? $cedulaTitularRaw : null,
+        null
     );
 
     $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
