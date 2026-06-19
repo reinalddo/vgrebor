@@ -364,6 +364,11 @@ function recargas_api_canonical_field_name(string $rawName, string $rawDescripti
         return $name;
     }
 
+    // Per TiendaGiftVen docs: input1 is always the Player ID, always sent as id_juego.
+    if ($name === 'input1') {
+        return 'id_juego';
+    }
+
     $description = mb_strtolower(trim($rawDescription), 'UTF-8');
     $description = preg_replace('/\s+/u', ' ', $description) ?? $description;
 
