@@ -6342,7 +6342,6 @@ include __DIR__ . "/includes/header.php";
     // Regla descuento máximo: Drop, Cupón y método de pago compiten; solo el mayor aplica.
     let couponSuppressedByPayment = false;
     let dropSuppressedByPayment = false;
-    const pack = activePack;
     const dropPercent = pack ? Number(pack.dropPercent || 0) : 0;
     // Precio antes del drop (precio de lista real)
     const priceBeforeDrop = dropPercent > 0 && baseAmount > 0
