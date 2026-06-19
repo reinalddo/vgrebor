@@ -1270,8 +1270,13 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <label class="form-check-label text-neon" for="paqueteActivoCheck">Paquete activo / publicado</label>
             </div>
             <div class="form-check mt-2">
-                <input type="checkbox" name="destacado" class="form-check-input" id="paqueteDestacadoCheck">
+                <input type="checkbox" name="destacado" class="form-check-input" id="paqueteDestacadoCheck" onchange="toggleDescuentoDestacado('descuentoDestacadoWrap', this.checked)">
                 <label class="form-check-label text-neon" for="paqueteDestacadoCheck">&#9889; Paquete destacado (GG Drops)</label>
+            </div>
+            <div id="descuentoDestacadoWrap" class="mt-2" style="display:none;">
+                <label class="form-label text-neon small mb-1" for="descuentoDestacadoInput">Descuento GG Drops (%)</label>
+                <input type="number" min="0" max="99" name="descuento_destacado" id="descuentoDestacadoInput" value="0" class="form-control form-control-sm" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;max-width:120px;">
+                <div class="form-text" style="color:#8be9fd;">Porcentaje mostrado en la tarjeta (0 = sin descuento).</div>
             </div>
         </div>
         <div class="col-12 text-center">
@@ -1689,8 +1694,13 @@ if (isset($_GET['editar'])) {
             <label class="form-check-label text-neon" for="editPaqueteActivoCheck">Paquete activo / publicado</label>
         </div>
         <div class="form-check mb-2">
-            <input type="checkbox" name="edit_destacado" class="form-check-input" id="editPaqueteDestacadoCheck" <?= !empty($paq_edit['destacado']) ? 'checked' : '' ?>>
+            <input type="checkbox" name="edit_destacado" class="form-check-input" id="editPaqueteDestacadoCheck" <?= !empty($paq_edit['destacado']) ? 'checked' : '' ?> onchange="toggleDescuentoDestacado('editDescuentoDestacadoWrap', this.checked)">
             <label class="form-check-label text-neon" for="editPaqueteDestacadoCheck">&#9889; Paquete destacado (GG Drops)</label>
+        </div>
+        <div id="editDescuentoDestacadoWrap" class="mb-3" style="<?= !empty($paq_edit['destacado']) ? '' : 'display:none;' ?>">
+            <label class="form-label text-neon small mb-1" for="editDescuentoDestacadoInput">Descuento GG Drops (%)</label>
+            <input type="number" min="0" max="99" name="edit_descuento_destacado" id="editDescuentoDestacadoInput" value="<?= (int) ($paq_edit['descuento_destacado'] ?? 0) ?>" class="form-control form-control-sm" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;max-width:120px;">
+            <div class="form-text" style="color:#8be9fd;">Porcentaje mostrado en la tarjeta (0 = sin descuento).</div>
         </div>
         <div class="mb-3">
             <label class="form-label text-neon">Icono actual:</label><br>
@@ -2771,6 +2781,17 @@ window.adminPackageSaveDestDiscount = async function(input) {
     } finally {
         input.readOnly = false;
         input.dataset.busy = '0';
+    }
+};
+
+window.toggleDescuentoDestacado = function(wrapId, show) {
+    const wrap = document.getElementById(wrapId);
+    if (wrap) {
+        wrap.style.display = show ? '' : 'none';
+        if (!show) {
+            const input = wrap.querySelector('input[type="number"]');
+            if (input) input.value = '0';
+        }
     }
 };
 
