@@ -6251,6 +6251,7 @@ include __DIR__ . "/includes/header.php";
     return Boolean(
       winPointsState.enabled
       && winPointsState.loggedIn
+      && winPointsState.monthlyMinimumMet !== false
       && pack
       && pack.redeemActive
       && getPackRequiredPoints(pack) > 0
@@ -6631,6 +6632,10 @@ include __DIR__ . "/includes/header.php";
       nextMode = '';
     }
 
+    if (nextMode === 'points' && !canUsePointsNow) {
+      nextMode = '';
+    }
+
     return {
       mode: nextMode,
       methodId: nextMode === 'money' ? nextMethodId : '',
@@ -6757,13 +6762,17 @@ include __DIR__ . "/includes/header.php";
     }
 
     if (selection.showPointsOption) {
-      const pointsDisabled = !selection.hasPointsRule;
+      const pointsDisabled = !selection.canUsePointsNow;
       const pointsNeedText = `Necesitas ${formatWinPointsAmount(selection.requiredPoints || 0)}`;
       let pointsMeta = pointsNeedText;
       if (!winPointsState.loggedIn) {
         pointsMeta = `${pointsNeedText} · Inicia sesión para usarlo`;
       } else if (!selection.hasPointsRule) {
         pointsMeta = 'Este paquete no admite canje';
+      } else if (winPointsState.monthlyMinimumMet === false) {
+        const required = Number(winPointsState.monthlyMinimumRequired || 5).toFixed(2);
+        const spent = Number(winPointsState.monthlyMinimumSpent || 0).toFixed(2);
+        pointsMeta = `Restringido · Recarga mínima $${required}/mes (llevas $${spent})`;
       } else if (selection.canUsePointsNow) {
         pointsMeta = `${pointsNeedText} · Saldo actual ${formatWinPointsAmount(winPointsState.balance || 0)}`;
       } else {
@@ -6823,12 +6832,16 @@ include __DIR__ . "/includes/header.php";
       return;
     }
 
-    if (selection.showPointsOption) {
-      paymentMethodCatalogCopy.textContent = selection.canUsePointsNow
-        ? `Seleccionado: ${winPointsState.name || 'Win Points'}. El sistema intentará el canje con tu saldo disponible.`
-        : (!winPointsState.loggedIn
-          ? `${winPointsState.name || 'Win Points'} está activo para este paquete. Inicia sesión para usarlo como método de pago.`
-          : `${winPointsState.name || 'Win Points'} está activo para este paquete, pero necesitas ${formatWinPointsAmount(selection.requiredPoints || 0)} para usarlo.`);
+    if (selection.showPointsOption && !selection.canUsePointsNow) {
+      if (!winPointsState.loggedIn) {
+        paymentMethodCatalogCopy.textContent = `${winPointsState.name || 'Win Points'} está activo para este paquete. Inicia sesión para usarlo como método de pago.`;
+      } else if (winPointsState.monthlyMinimumMet === false) {
+        const required = Number(winPointsState.monthlyMinimumRequired || 5).toFixed(2);
+        const spent = Number(winPointsState.monthlyMinimumSpent || 0).toFixed(2);
+        paymentMethodCatalogCopy.textContent = `${winPointsState.name || 'Win Points'} no disponible este mes. Necesitas haber recargado $${required} en los últimos 30 días (llevas $${spent}).`;
+      } else {
+        paymentMethodCatalogCopy.textContent = `${winPointsState.name || 'Win Points'} está activo para este paquete, pero necesitas ${formatWinPointsAmount(selection.requiredPoints || 0)} para usarlo.`;
+      }
       return;
     }
 
