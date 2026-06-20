@@ -199,11 +199,11 @@ if ($loggedUserId > 0) {
   $legacyPurchaseDefaults = fetch_user_legacy_purchase_defaults($mysqli, $loggedUserId);
   if ($rememberLastPurchaseIdentifierEnabled) {
     $loggedUserLastPurchaseIdentifier = $legacyPurchaseDefaults['user_identifier'];
-    $loggedUserLastPurchaseNombre = $legacyPurchaseDefaults['nombre'];
-    $loggedUserLastPurchaseCedula = $legacyPurchaseDefaults['cedula'];
     $loggedUserLastPurchaseZoneId = $legacyPurchaseDefaults['zone_id'];
   }
   $loggedUserLastPurchasePhone = $legacyPurchaseDefaults['phone'];
+  $loggedUserLastPurchaseNombre = $legacyPurchaseDefaults['nombre'];
+  $loggedUserLastPurchaseCedula = $legacyPurchaseDefaults['cedula'];
 
   $gamePurchaseDefaults = fetch_user_game_purchase_defaults($mysqli, $loggedUserId, (int) ($game['id'] ?? 0));
   if (!empty($gamePurchaseDefaults['has_history'])) {
