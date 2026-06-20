@@ -8807,8 +8807,8 @@ if ($action === 'submit_payment') {
     if ($binancePagonorteMode && $referenceDigitsLimit > 0 && strlen($referenceNumberRaw) < $referenceDigitsLimit) {
         json_error('Debes escribir la referencia completa o al menos los últimos ' . $referenceDigitsLimit . ' dígitos.');
     }
-    if (!$binancePagonorteMode && $referenceDigitsLimit > 0 && strlen($referenceNumberRaw) !== $referenceDigitsLimit) {
-        json_error('La referencia debe contener exactamente ' . $referenceDigitsLimit . ' dígitos.');
+    if (!$binancePagonorteMode && $referenceDigitsLimit > 0 && strlen($referenceNumberRaw) < $referenceDigitsLimit) {
+        json_error('Debes ingresar al menos ' . $referenceDigitsLimit . ' dígitos en la referencia.');
     }
 
     $discountSync = persist_order_payment_selection($mysqli, $order, $binancePagonorteMode ? 'binance_pagonorte' : 'money', $binancePagonorteMode ? null : $method);
