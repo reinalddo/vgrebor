@@ -958,7 +958,7 @@ include __DIR__ . "/includes/header.php";
             </div>
           </div>
         </div>
-        <button type="button" id="payment-submit-btn" class="btn btn-info w-100 fw-bold text-uppercase py-3 payment-submit-btn-theme<?= $paymentWindowConfigEnabled ? ' payment-window-theme-enabled' : '' ?>">Confirmar Compra</button>
+        <button type="button" id="payment-submit-btn" class="btn btn-info w-100 fw-bold text-uppercase py-3 payment-submit-btn-theme<?= $paymentWindowConfigEnabled ? ' payment-window-theme-enabled' : '' ?>">Realizar Compra</button>
         <?php if ($canSimulateDailyMissionPurchase): ?>
         <button type="button" id="daily-mission-simulate-purchase-btn" class="btn btn-warning w-100 fw-bold text-uppercase py-3 mt-3">
           <i class="fa-solid fa-vial-circle-check me-2" aria-hidden="true"></i>Simular compra
@@ -4649,10 +4649,10 @@ include __DIR__ . "/includes/header.php";
   const accountSaleNote = document.getElementById('account-sale-note');
   const defaultBuyButtonLabel = 'Continuar con la Compra';
   const paymentDifferenceBlockedBuyButtonLabel = 'Selecciona un paquete mayor al saldo a favor';
-  const defaultPaymentSubmitButtonLabel = 'Confirmar Compra';
+  const defaultPaymentSubmitButtonLabel = 'Realizar Compra';
   function buildConfirmButtonLabel(totalText) {
     const t = String(totalText || '').trim();
-    return t ? 'Confirmar Compra - ' + t : defaultPaymentSubmitButtonLabel;
+    return t ? 'Realizar Compra - ' + t : defaultPaymentSubmitButtonLabel;
   }
   const completeRechargeButtonLabel = 'Completar Recarga';
   const verifyUserBuyButtonLabel = 'Debe Verificar El usuario para poder comprar';
@@ -10368,14 +10368,12 @@ include __DIR__ . "/includes/header.php";
                   e.preventDefault();
                   const pasted = (e.clipboardData || window.clipboardData).getData('text');
                   const digitsOnly = pasted.replace(/\D+/g, '');
-                  paymentReferenceInput.value = digitsOnly.length > requiredDigits
-                    ? digitsOnly.slice(-requiredDigits)
-                    : digitsOnly;
+                  paymentReferenceInput.value = digitsOnly.slice(0, 120);
                 });
                 paymentReferenceInput.addEventListener('input', function() {
                   const digitsOnly = paymentReferenceInput.value.replace(/\D+/g, '');
                   const requiredDigits = Number(paymentReferenceInput.dataset.requiredDigits || '0');
-                  paymentReferenceInput.value = requiredDigits > 0 ? digitsOnly.slice(0, requiredDigits) : digitsOnly.slice(0, 120);
+                  paymentReferenceInput.value = digitsOnly.slice(0, 120);
                 });
               }
 
@@ -10490,8 +10488,8 @@ include __DIR__ . "/includes/header.php";
                     setPaymentAlert('Debes ingresar el número de referencia.', 'danger');
                     return;
                   }
-                  if (paymentMode === 'money' && requiredDigits > 0 && reference.length !== requiredDigits) {
-                    setPaymentAlert(`La referencia debe contener exactamente ${requiredDigits} dígitos.`, 'danger');
+                  if (paymentMode === 'money' && requiredDigits > 0 && reference.length < requiredDigits) {
+                    setPaymentAlert(`La referencia debe contener al menos ${requiredDigits} dígitos.`, 'danger');
                     return;
                   }
                   if (paymentMode === 'binance_pagonorte' && Number(binancePagonorteReferenceDigits || 0) > 0 && reference.length < Number(binancePagonorteReferenceDigits || 0)) {
