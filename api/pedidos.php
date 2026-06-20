@@ -8911,8 +8911,8 @@ if ($action === 'submit_payment') {
         (int) ($order['cliente_usuario_id'] ?? 0),
         $storeIdentifier ? (string) ($order['user_identifier'] ?? '') : null,
         $phone,
-        $storeIdentifier ? $nombreTitularRaw : null,
-        $storeIdentifier ? $cedulaTitularRaw : null,
+        $nombreTitularRaw !== '' ? $nombreTitularRaw : null,
+        $cedulaTitularRaw !== '' ? $cedulaTitularRaw : null,
         null
     );
 
