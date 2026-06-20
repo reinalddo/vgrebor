@@ -913,6 +913,7 @@ include __DIR__ . "/includes/header.php";
                 <div id="payment-method-discount" class="payment-method-discount d-none"></div>
               </div>
               <div id="payment-reference-group" class="mb-3" style="display:none;">
+                <label id="payment-reference-label" class="form-label small mb-1" style="color:#22d3ee;">Número de referencia del pago</label>
                 <input type="text" id="payment-reference-input" inputmode="numeric" autocomplete="off">
                 <div id="payment-reference-help"></div>
               </div>
@@ -937,9 +938,9 @@ include __DIR__ . "/includes/header.php";
                     <input type="tel" id="payment-phone-adv-input" class="form-control bg-dark text-info border-info" inputmode="numeric" autocomplete="off" placeholder="Ej: 0414-1234567" value="<?= htmlspecialchars($loggedUserLastPurchasePhone, ENT_QUOTES, 'UTF-8') ?>">
                   </div>
                   <div id="payment-adv-reference-group" class="col-6">
-                    <label for="payment-adv-reference-input" class="form-label text-info">Número de referencia del pago</label>
-                    <input type="text" id="payment-adv-reference-input" class="form-control bg-dark text-info border-info" inputmode="numeric" autocomplete="off" placeholder="Inserte los últimos dígitos de su referencia">
-                    <div id="payment-adv-reference-help" class="form-text text-secondary">Solo debes escribir los últimos dígitos de la referencia bancaria.</div>
+                    <label for="payment-adv-reference-input" id="payment-adv-reference-label" class="form-label text-info">Número de referencia del pago</label>
+                    <input type="text" id="payment-adv-reference-input" class="form-control bg-dark text-info border-info" inputmode="numeric" autocomplete="off" placeholder="Número de referencia">
+                    <div id="payment-adv-reference-help" class="form-text text-secondary">Ingresa el número de referencia de tu pago.</div>
                   </div>
                 </div>
                 <div id="payment-whatsapp-wrap" class="d-none">
@@ -8601,17 +8602,17 @@ include __DIR__ . "/includes/header.php";
   function paymentReferencePlaceholder(method) {
     const digits = Number(method && method.referencia_digitos ? method.referencia_digitos : 0);
     if (digits > 0) {
-      return `Inserte los últimos ${digits} dígitos de su referencia`;
+      return `Últimos ${digits} dígitos de la referencia`;
     }
-    return 'Inserte su número de referencia para comprobar el pago';
+    return 'Número de referencia del pago';
   }
 
   function paymentReferenceHelpText(method) {
     const digits = Number(method && method.referencia_digitos ? method.referencia_digitos : 0);
     if (digits > 0) {
-      return `Solo debes escribir los últimos ${digits} dígitos de la referencia bancaria.`;
+      return `Ingresa los últimos ${digits} dígitos de tu número de referencia bancaria.`;
     }
-    return 'Inserte su número de referencia para comprobar el pago.';
+    return 'Ingresa el número de referencia de tu transferencia o pago.';
   }
   function binancePagonorteReferencePlaceholder() {
     const digits = Number(binancePagonorteReferenceDigits || 0);
@@ -9576,10 +9577,16 @@ include __DIR__ . "/includes/header.php";
   function updateAdvancedFormVisibility(method) {
     const isAdvanced = !!(method && method.formulario_verificacion);
     if (paymentWhatsappWrap) paymentWhatsappWrap.classList.toggle('d-none', !isAdvanced);
-    if (isAdvanced && paymentAdvReferenceInput) {
-      const digits = Number(method.referencia_digitos || 0);
+    if (paymentAdvReferenceInput) {
+      const digits = Number(method && method.referencia_digitos ? method.referencia_digitos : 0);
       paymentAdvReferenceInput.placeholder = paymentReferencePlaceholder(method);
       if (paymentAdvReferenceHelp) paymentAdvReferenceHelp.textContent = paymentReferenceHelpText(method);
+      const advLabel = document.getElementById('payment-adv-reference-label');
+      if (advLabel) {
+        advLabel.textContent = digits > 0
+          ? `Número de referencia (últimos ${digits} dígitos)`
+          : 'Número de referencia del pago';
+      }
       paymentAdvReferenceInput.maxLength = 120;
       paymentAdvReferenceInput.dataset.requiredDigits = String(digits > 0 ? digits : 0);
     }
@@ -9800,6 +9807,12 @@ include __DIR__ . "/includes/header.php";
     const digits = Number(method.referencia_digitos || 0);
     paymentReferenceInput.placeholder = paymentReferencePlaceholder(method);
     paymentReferenceHelp.textContent = paymentReferenceHelpText(method);
+    const refLabel = document.getElementById('payment-reference-label');
+    if (refLabel) {
+      refLabel.textContent = digits > 0
+        ? `Número de referencia (últimos ${digits} dígitos)`
+        : 'Número de referencia del pago';
+    }
     paymentReferenceInput.maxLength = 120;
     paymentReferenceInput.dataset.requiredDigits = String(digits > 0 ? digits : 0);
     updateAdvancedFormVisibility(method);
