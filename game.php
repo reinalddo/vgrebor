@@ -10524,8 +10524,8 @@ include __DIR__ . "/includes/header.php";
                       `payment_method_id=${encodeURIComponent(selectedMethod ? selectedMethod.id : '')}`,
                       `reference_number=${encodeURIComponent(reference)}`,
                       `phone=${encodeURIComponent(phone)}`,
-                      `nombre_titular=${encodeURIComponent(isAdvancedForm && paymentNombreInput ? paymentNombreInput.value.trim() : '')}`,
-                      `cedula_titular=${encodeURIComponent(isAdvancedForm && paymentCedulaInput ? paymentCedulaInput.value.trim() : '')}`
+                      `nombre_titular=${encodeURIComponent(paymentNombreInput ? paymentNombreInput.value.trim() : '')}`,
+                      `cedula_titular=${encodeURIComponent(paymentCedulaInput ? paymentCedulaInput.value.trim() : '')}`
                     ].join('&')
                   })
                   .then(async (response) => {
@@ -10541,12 +10541,10 @@ include __DIR__ . "/includes/header.php";
                     if (paymentMode === 'money' && phone) {
                       defaultPaymentPhone = phone;
                     }
-                    if (isAdvancedForm) {
-                      const nombreVal = paymentNombreInput ? paymentNombreInput.value.trim() : '';
-                      const cedulaVal = paymentCedulaInput ? paymentCedulaInput.value.trim() : '';
-                      if (nombreVal) defaultPaymentNombre = nombreVal;
-                      if (cedulaVal) defaultPaymentCedula = cedulaVal;
-                    }
+                    const nombreVal = paymentNombreInput ? paymentNombreInput.value.trim() : '';
+                    const cedulaVal = paymentCedulaInput ? paymentCedulaInput.value.trim() : '';
+                    if (nombreVal) defaultPaymentNombre = nombreVal;
+                    if (cedulaVal) defaultPaymentCedula = cedulaVal;
 
                     setOverlayVisible(loadingModal, false);
 
