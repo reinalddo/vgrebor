@@ -998,6 +998,40 @@ include __DIR__ . "/includes/header.php";
     </div>
   </div>
 
+  <div id="payment-pre-confirm-modal" class="modal fade app-overlay-modal payment-confirm-overlay" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" style="max-width:420px;">
+      <div class="modal-content bg-dark text-light rounded-4 p-0" style="border:1px solid #22d3ee;">
+        <div class="p-4 pb-3">
+          <!-- Card de recordatorios -->
+          <div class="rounded-3 p-3 mb-3" style="background:rgba(250,204,21,.08);border:1.5px solid #facc15;">
+            <div class="fw-bold mb-2" style="color:#facc15;font-size:1rem;">⚠ Recordatorios Importantes antes de Pagar</div>
+            <div class="small mb-1" style="color:#e2e8f0;">🟢 Debe pagar el <strong>monto exacto</strong> indicado para el producto seleccionado. No transfiera sin verificar el monto en pantalla.</div>
+            <div class="small mb-1" style="color:#e2e8f0;">🕐 <strong>Registre su pago al momento de realizarlo.</strong> Los pagos de días anteriores <strong>NO son válidos</strong> y no serán procesados.</div>
+            <div class="small" style="color:#e2e8f0;">🚫 <strong>No se realizan devoluciones ni se aceptan reclamos por errores del cliente.</strong> Verifique minuciosamente el ID de jugador y el producto antes de confirmar.</div>
+          </div>
+          <!-- Card legal fondos -->
+          <div class="rounded-3 p-3 mb-3 text-center small" style="background:rgba(34,197,94,.08);border:1.5px solid rgba(34,197,94,.5);color:#d1fae5;">
+            Al confirmar esta compra, declaras que tus fondos son <strong>de origen lícito, de tu propiedad exclusiva</strong> (no de terceros). Asimismo, confirmas que has leído y aceptas
+          </div>
+          <!-- Checkbox aceptar condiciones -->
+          <div class="d-flex align-items-center gap-3 rounded-3 px-3 py-2 mb-4" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);">
+            <div class="form-check form-switch m-0">
+              <input class="form-check-input" type="checkbox" role="switch" id="pre-confirm-tos-check" style="width:2.5em;height:1.4em;cursor:pointer;">
+            </div>
+            <label for="pre-confirm-tos-check" class="small mb-0" style="color:#e2e8f0;cursor:pointer;">He leído y acepto las condiciones del servicio.</label>
+          </div>
+          <!-- Botones -->
+          <div class="d-flex gap-2 flex-column">
+            <button type="button" id="pre-confirm-proceed-btn" class="btn btn-info w-100 fw-bold text-uppercase py-2 payment-submit-btn-theme<?= $paymentWindowConfigEnabled ? ' payment-window-theme-enabled' : '' ?>" disabled>
+              CONFIRMAR COMPRA
+            </button>
+            <button type="button" id="pre-confirm-cancel-btn" class="btn btn-outline-secondary w-100 py-2">Volver</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 <style>
   .app-overlay-modal {
     display: none;
@@ -4781,7 +4815,12 @@ include __DIR__ . "/includes/header.php";
   const paymentWhatsappConfirmModal = document.getElementById('payment-whatsapp-confirm-modal');
   const paymentWhatsappModalCancelBtn = document.getElementById('payment-whatsapp-modal-cancel-btn');
   const paymentWhatsappModalConfirmBtn = document.getElementById('payment-whatsapp-modal-confirm-btn');
+  const paymentPreConfirmModal = document.getElementById('payment-pre-confirm-modal');
+  const preConfirmTosCheck = document.getElementById('pre-confirm-tos-check');
+  const preConfirmProceedBtn = document.getElementById('pre-confirm-proceed-btn');
+  const preConfirmCancelBtn = document.getElementById('pre-confirm-cancel-btn');
   let pendingWhatsappUrl = '';
+  let pendingPaymentExecution = null;
   let lastFocusedElement = null;
   let activePack = null;
   let activeAccountGalleryPreview = { pack: null, index: 0 };
@@ -10501,6 +10540,7 @@ include __DIR__ . "/includes/header.php";
                     return;
                   }
 
+                  pendingPaymentExecution = function() {
                   setPaymentFormDisabled(true);
                   setPaymentAlert('', 'info');
                   let checkoutWindow = null;
@@ -10702,6 +10742,34 @@ include __DIR__ . "/includes/header.php";
                       expireActiveOrder();
                     }
                   });
+                  }; // end pendingPaymentExecution
+                  if (preConfirmTosCheck) preConfirmTosCheck.checked = false;
+                  if (preConfirmProceedBtn) {
+                    preConfirmProceedBtn.disabled = true;
+                    preConfirmProceedBtn.textContent = buildConfirmButtonLabel((activePaymentOrder && activePaymentOrder.confirmedTotalText) || '');
+                  }
+                  setOverlayVisible(paymentPreConfirmModal, true);
+                });
+              }
+
+              if (preConfirmTosCheck && preConfirmProceedBtn) {
+                preConfirmTosCheck.addEventListener('change', function() {
+                  preConfirmProceedBtn.disabled = !preConfirmTosCheck.checked;
+                });
+              }
+              if (preConfirmCancelBtn) {
+                preConfirmCancelBtn.addEventListener('click', function() {
+                  setOverlayVisible(paymentPreConfirmModal, false);
+                  pendingPaymentExecution = null;
+                });
+              }
+              if (preConfirmProceedBtn) {
+                preConfirmProceedBtn.addEventListener('click', function() {
+                  if (!pendingPaymentExecution) return;
+                  setOverlayVisible(paymentPreConfirmModal, false);
+                  const exec = pendingPaymentExecution;
+                  pendingPaymentExecution = null;
+                  exec();
                 });
               }
 
