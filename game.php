@@ -4603,6 +4603,51 @@ include __DIR__ . "/includes/header.php";
       width: 100%;
     }
   }
+
+  /* Pre-confirm modal: layout compacto en pantallas con poca altura */
+  @media (max-height: 680px) {
+    #payment-pre-confirm-modal .modal-content > div {
+      padding: 0.65rem !important;
+    }
+    #payment-pre-confirm-modal .modal-content > div > div:first-child {
+      padding: 0.55rem 0.65rem !important;
+      margin-bottom: 0.45rem !important;
+    }
+    #payment-pre-confirm-modal .modal-content > div > div:nth-child(2) {
+      padding: 0.45rem 0.65rem !important;
+      margin-bottom: 0.45rem !important;
+    }
+    #payment-pre-confirm-modal .modal-content > div > div:nth-child(3) {
+      padding: 0.3rem 0.65rem !important;
+      margin-bottom: 0.55rem !important;
+    }
+    #payment-pre-confirm-modal .modal-content > div > div:nth-child(4) {
+      gap: 0.3rem !important;
+    }
+    #payment-pre-confirm-modal .modal-content .btn {
+      padding-top: 0.3rem !important;
+      padding-bottom: 0.3rem !important;
+      font-size: 0.85rem !important;
+    }
+    #payment-pre-confirm-modal #pre-confirm-tos-check {
+      width: 2em !important;
+      height: 1.15em !important;
+    }
+    #payment-pre-confirm-modal .fw-bold[style*="font-size:1rem"] {
+      font-size: 0.85rem !important;
+    }
+    #payment-pre-confirm-modal .small {
+      font-size: 0.76rem !important;
+    }
+  }
+
+  /* En pantallas muy pequeñas: anclar al top para que el overlay permita scroll si es necesario */
+  @media (max-height: 520px) {
+    .payment-confirm-overlay {
+      align-items: flex-start;
+      padding: 0.4rem 0.75rem;
+    }
+  }
 </style>
 <script>
   // Todas las variables y lógica JS en un solo bloque
