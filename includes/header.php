@@ -676,7 +676,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       }
       .site-topbar-enabled .site-brand {
         order: 1;
-        flex: 0 1 auto;
+        flex: 1 1 auto;
         min-width: 0;
         justify-content: flex-start !important;
       }
@@ -691,7 +691,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         align-items: center;
         justify-content: center;
         order: 2;
-        margin-left: auto !important;
+        margin-left: 0;
         flex: 0 0 44px;
         width: 44px;
         height: 44px;
@@ -713,7 +713,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         justify-content: flex-start !important;
       }
       .site-topbar-enabled .site-brand {
-        flex: 0 1 auto;
+        flex: 1 1 auto;
         justify-content: flex-start !important;
       }
       .site-topbar-enabled .site-auth-container {
@@ -721,7 +721,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         margin-left: 0 !important;
       }
       .site-topbar-mobile-search-toggle {
-        margin-left: auto !important;
+        margin-left: 0;
         flex: 0 0 44px;
         width: 44px;
         height: 44px;
@@ -768,7 +768,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         justify-content: flex-start !important;
       }
       .site-topbar-enabled .site-brand {
-        flex: 0 1 auto;
+        flex: 1 1 auto;
         min-width: 0;
         gap: 0.7rem !important;
         justify-content: flex-start !important;
@@ -793,11 +793,11 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       .site-topbar-enabled .site-auth-container {
         display: block;
         margin-left: 0;
-        flex: 0 1 auto;
+        flex: 0 0 auto;
       }
       body.site-topbar-enabled.site-user-authenticated .site-brand {
         display: inline-flex !important;
-        flex: 0 1 auto;
+        flex: 1 1 auto;
         min-width: 0;
       }
       body.site-topbar-enabled.site-user-authenticated .site-auth-container {
@@ -856,7 +856,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         display: none !important;
       }
       body.site-topbar-enabled.site-user-authenticated .site-brand {
-        flex: 0 1 auto;
+        flex: 1 1 auto;
       }
       body.site-topbar-enabled.site-user-authenticated .site-brand-copy {
         display: none !important;
@@ -868,7 +868,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     }
     @media (max-width: 399.98px) {
       .site-topbar-enabled .site-brand {
-        flex: 0 1 auto;
+        flex: 1 1 auto;
       }
       .site-topbar-enabled .site-brand-copy {
         display: none !important;
