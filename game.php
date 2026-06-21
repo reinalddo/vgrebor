@@ -1011,7 +1011,7 @@ include __DIR__ . "/includes/header.php";
           </div>
           <!-- Card legal fondos -->
           <div class="rounded-3 p-3 mb-3 text-center small" style="background:rgba(34,197,94,.08);border:1.5px solid rgba(34,197,94,.5);color:#d1fae5;">
-            Al confirmar esta compra, declaras que tus fondos son <strong>de origen lícito, de tu propiedad exclusiva</strong> (no de terceros). Asimismo, confirmas que has leído y aceptas
+            Al confirmar esta compra, declaras que tus fondos son <strong>de origen lícito, de tu propiedad exclusiva</strong> (no de terceros).
           </div>
           <!-- Checkbox aceptar condiciones -->
           <div class="d-flex align-items-center gap-3 rounded-3 px-3 py-2 mb-4" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);">
@@ -4641,12 +4641,14 @@ include __DIR__ . "/includes/header.php";
     }
   }
 
-  /* En pantallas muy pequeñas: anclar al top para que el overlay permita scroll si es necesario */
-  @media (max-height: 520px) {
-    .payment-confirm-overlay {
-      align-items: flex-start;
-      padding: 0.4rem 0.75rem;
-    }
+  /* Pre-confirm modal: display:block en lugar de flex para que overflow-y:auto haga scroll real */
+  #payment-pre-confirm-modal.is-visible {
+    display: block !important;
+  }
+  #payment-pre-confirm-modal .modal-dialog {
+    margin: max(0.75rem, calc(50vh - 210px)) auto 0.75rem;
+    width: calc(100% - 2rem);
+    max-width: 420px;
   }
 </style>
 <script>
@@ -10791,15 +10793,22 @@ include __DIR__ . "/includes/header.php";
                   if (preConfirmTosCheck) preConfirmTosCheck.checked = false;
                   if (preConfirmProceedBtn) {
                     preConfirmProceedBtn.disabled = true;
-                    preConfirmProceedBtn.textContent = buildConfirmButtonLabel((activePaymentOrder && activePaymentOrder.confirmedTotalText) || '');
+                    const _pcTotal = String((activePaymentOrder && activePaymentOrder.confirmedTotalText) || '').trim();
+                    preConfirmProceedBtn.textContent = _pcTotal ? 'Confirmar Compra - ' + _pcTotal : 'Confirmar Compra';
                   }
                   setOverlayVisible(paymentPreConfirmModal, true);
+                  if (paymentPreConfirmModal) paymentPreConfirmModal.scrollTop = 0;
                 });
               }
 
               if (preConfirmTosCheck && preConfirmProceedBtn) {
                 preConfirmTosCheck.addEventListener('change', function() {
                   preConfirmProceedBtn.disabled = !preConfirmTosCheck.checked;
+                  if (preConfirmTosCheck.checked) {
+                    setTimeout(function() {
+                      preConfirmProceedBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }, 80);
+                  }
                 });
               }
               if (preConfirmCancelBtn) {
