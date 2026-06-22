@@ -880,6 +880,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_orden_paquete'
     exit;
 }
 
+// Ajuste masivo de precios
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_price_adjust'])) {
+    $rawPct = trim((string) ($_POST['bulk_price_adjust_pct'] ?? ''));
+    if (!is_numeric($rawPct)) {
+        admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'El porcentaje debe ser un número válido.']);
+    }
+    $pct = floatval($rawPct);
+    if ($pct <= -100 || $pct > 1000) {
+        admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Porcentaje fuera de rango. Usa entre -99.9 y 1000.']);
+    }
+    $multiplier = 1 + ($pct / 100);
+    $allPackages = $mysqli->query("SELECT id, precio FROM juego_paquetes WHERE juego_id=" . intval($juego_id));
+    if ($allPackages) {
+        $stmtBulk = $mysqli->prepare("UPDATE juego_paquetes SET precio=? WHERE id=?");
+        if ($stmtBulk) {
+            while ($pkgRow = $allPackages->fetch_assoc()) {
+                $newPrice = round(floatval($pkgRow['precio']) * $multiplier, 2);
+                if ($newPrice < 0) {
+                    $newPrice = 0.00;
+                }
+                $stmtBulk->bind_param('di', $newPrice, $pkgRow['id']);
+                $stmtBulk->execute();
+            }
+            $stmtBulk->close();
+        }
+    }
+    $sign = $pct >= 0 ? '+' : '';
+    admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['discord_catalog_notice' => 'Precios actualizados: ' . $sign . number_format($pct, 1, '.', '') . '% aplicado a todos los paquetes.']);
+}
+
 // Procesar eliminación de paquete (antes de cualquier salida)
 if (isset($_GET['eliminar'])) {
     $del_id = intval($_GET['eliminar']);
@@ -1496,6 +1526,16 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
     <?php if ($hasDiscordCatalog && $discordCatalogStatus === 'pending' && $discordCatalogNotice === ''): ?>
         <div class="alert alert-warning mb-4">La consulta de precios sigue pendiente. Cuando el relay llame a <code>action=discord_catalog_listener</code>, el catálogo se actualizará aquí.</div>
     <?php endif; ?>
+    <form method="post" class="mb-4 rounded-4 p-3 d-flex flex-wrap align-items-center gap-3" style="background:#101826;border:1px solid rgba(34,211,238,0.22);">
+        <input type="hidden" name="bulk_price_adjust" value="1">
+        <div class="text-neon fw-semibold" style="white-space:nowrap;">Ajuste masivo de precios</div>
+        <div class="input-group" style="max-width:200px;">
+            <input type="number" name="bulk_price_adjust_pct" step="0.1" min="-99.9" max="1000" placeholder="Ej: 10 o -5" class="form-control" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;" required>
+            <span class="input-group-text" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">%</span>
+        </div>
+        <button type="submit" class="btn btn-outline-info btn-sm" onclick="return confirm('¿Aplicar este porcentaje al precio de todos los paquetes de este juego?')">Aplicar a todos</button>
+        <div class="small" style="color:#8be9fd;">Modifica el precio de todos los paquetes del juego en el porcentaje indicado. Usa valores negativos para reducir.</div>
+    </form>
     <div class="d-flex flex-wrap gap-2 mb-3">
         <button type="button" class="btn <?= $currentPackageTab === 'active' ? 'btn-info' : 'btn-outline-info' ?> fw-bold js-package-tab-btn" data-package-tab="active" onclick="window.filterAdminPackagesByClass('activo'); return false;">Activos <span data-package-tab-count="active"><?= $activePackageCount ?></span></button>
         <button type="button" class="btn <?= $currentPackageTab === 'inactive' ? 'btn-info' : 'btn-outline-info' ?> fw-bold js-package-tab-btn" data-package-tab="inactive" onclick="window.filterAdminPackagesByClass('inactivo'); return false;">Inactivos <span data-package-tab-count="inactive"><?= $inactivePackageCount ?></span></button>
