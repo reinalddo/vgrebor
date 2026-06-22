@@ -439,13 +439,17 @@ include __DIR__ . "/includes/header.php";
       : [];
     $packageFeaturesByPackage = package_features_for_packages($mysqli, array_map(static fn (array $package): int => (int) ($package['id'] ?? 0), $paquetes));
   ?>
+  <?php $gameMarkupPct = floatval($game['precio_markup_pct'] ?? 0); ?>
   <div class="row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3 mb-4" id="pack-grid">
     <?php foreach ($paquetes as $pack):
-        $precio_base = floatval($pack['precio']);
+        $packApiId = (int) ($pack['paquete_api'] ?? 0);
+        $packApiRawPrice = ($packApiId > 0 && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
+        $precio_base = ($packApiRawPrice !== null)
+            ? max(0.0, round($packApiRawPrice * (1 + $gameMarkupPct / 100), 2))
+            : floatval($pack['precio']);
         $precio_mostrar = $moneda_actual ? currency_convert_from_base($precio_base, $moneda_actual) : currency_apply_amount_rule($precio_base, null);
         $clave_moneda = $moneda_actual['clave'] ?? 'USD';
         $mostrarDecimales = $moneda_actual ? currency_should_show_decimals($moneda_actual) : true;
-        $packApiId = (int) ($pack['paquete_api'] ?? 0);
         $packId = (int) ($pack['id'] ?? 0);
         $packWinPointsReward = (int) ($winPointsPackageRewards[$packId] ?? 0);
         $packWinPointsRule = $winPointsRedemptionRules[$packId] ?? null;

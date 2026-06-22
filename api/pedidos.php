@@ -7811,6 +7811,18 @@ if ($action === 'create') {
         $winPointsAward = win_points_package_reward($selectedPackage) * $purchaseQuantity;
     }
 
+    $gameMarkupPct = 0.0;
+    if ($game_id) {
+        $stmtMarkup = $mysqli->prepare('SELECT COALESCE(precio_markup_pct, 0) AS precio_markup_pct FROM juegos WHERE id = ? LIMIT 1');
+        if ($stmtMarkup) {
+            $stmtMarkup->bind_param('i', $game_id);
+            $stmtMarkup->execute();
+            $resMarkup = $stmtMarkup->get_result()->fetch_assoc();
+            $gameMarkupPct = floatval($resMarkup['precio_markup_pct'] ?? 0);
+            $stmtMarkup->close();
+        }
+    }
+
     $selectedCurrency = currency_find_by_code((string) $currency);
     if (!$selectedCurrency) {
         json_error('La moneda seleccionada no es válida.');
@@ -7843,6 +7855,14 @@ if ($action === 'create') {
 
         if ($catalogProduct === null) {
             json_error('El producto API configurado ya no está disponible en el catálogo remoto.');
+        }
+
+        // Recompute price from live API price + game markup (overrides stored price)
+        $apiProductPrice = floatval($catalogProduct['precio'] ?? 0);
+        if ($apiProductPrice > 0) {
+            $apiComputedBase = max(0.0, round($apiProductPrice * (1 + $gameMarkupPct / 100), 2));
+            $unitPrice = currency_convert_from_base($apiComputedBase, $selectedCurrency);
+            $price = currency_apply_amount_rule($unitPrice * $purchaseQuantity, $selectedCurrency);
         }
 
         try {

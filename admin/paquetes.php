@@ -585,6 +585,7 @@ $res_juego = $mysqli->prepare("SELECT * FROM juegos WHERE id=?");
 $res_juego->bind_param('i', $juego_id);
 $res_juego->execute();
 $juego = $res_juego->get_result()->fetch_assoc();
+$adminPackageMarkupPct = floatval($juego['precio_markup_pct'] ?? 0);
 $freeFireApiOptions = free_fire_api_amount_options();
 $discordApiEnabled = trim((string) store_config_get('api_discord', '0')) === '1';
 $unionApisEnabled = $discordApiEnabled && trim((string) store_config_get('union_apis_discord_giftven', '0')) === '1';
@@ -1364,6 +1365,9 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
         <div class="col-md-4">
             <label class="form-label text-neon">Precio USD</label>
             <input type="number" step="0.01" min="0" name="precio" placeholder="Precio" required class="form-control" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;" data-discord-catalog-field="price">
+            <?php if ($adminPackageMarkupPct > 0): ?>
+                <div class="form-text mt-1" style="color:#8be9fd;">Para paquetes TiendaGiftVen el precio se calcula automáticamente: precio API × <?= number_format(1 + $adminPackageMarkupPct / 100, 4) ?> (margen <?= number_format($adminPackageMarkupPct, 2) ?>%). Este campo se usa como respaldo si la API no responde.</div>
+            <?php endif; ?>
         </div>
         <div class="col-md-4">
             <label class="form-label text-neon"><?= htmlspecialchars($winPointsName, ENT_QUOTES, 'UTF-8') ?> a ganar</label>
@@ -1635,7 +1639,19 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                             </form>
                         </div>
                     </td>
-                    <td class="text-neon" style="background:#181f2a; color:#22d3ee;">$<?= number_format($p['precio'], 2) ?></td>
+                    <td class="text-neon" style="background:#181f2a; color:#22d3ee;">
+                        <?php
+                        $pAdminApiId = (int) ($p['paquete_api'] ?? 0);
+                        $pAdminApiRaw = ($pAdminApiId > 0 && isset($apiProductsById[$pAdminApiId])) ? floatval($apiProductsById[$pAdminApiId]['precio']) : null;
+                        $pAdminDisplayPrice = ($pAdminApiRaw !== null)
+                            ? max(0.0, round($pAdminApiRaw * (1 + $adminPackageMarkupPct / 100), 2))
+                            : floatval($p['precio']);
+                        ?>
+                        $<?= number_format($pAdminDisplayPrice, 2) ?>
+                        <?php if ($pAdminApiRaw !== null): ?>
+                            <div class="small" style="color:#8be9fd;font-size:0.7rem;">API: $<?= number_format($pAdminApiRaw, 4) ?></div>
+                        <?php endif; ?>
+                    </td>
                     <td style="background:#181f2a; color:#fff;"><?= (int) ($p['win_points_reward'] ?? 0) ?></td>
                     <td style="background:#181f2a;" class="text-nowrap">
                         <a href="<?= htmlspecialchars($adminPackageBaseUrl, ENT_QUOTES, 'UTF-8') ?>/<?= $juego_id ?>?editar=<?= $p['id'] ?>" class="btn neon-btn-info btn-sm me-2">Editar</a>
@@ -1700,7 +1716,14 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                     <?php elseif ($usesLegacyFreeFire): ?>
                         <div style="color:#fff;"><span class="fw-semibold">Monto FF:</span> <?= htmlspecialchars($packageProviderReference, ENT_QUOTES, 'UTF-8') ?></div>
                     <?php endif; ?>
-                    <div class="text-neon" style="color:#22d3ee;"><span class="fw-semibold">Precio:</span> $<?= number_format($p['precio'], 2) ?></div>
+                    <?php
+                    $pCardApiId = (int) ($p['paquete_api'] ?? 0);
+                    $pCardApiRaw = ($pCardApiId > 0 && isset($apiProductsById[$pCardApiId])) ? floatval($apiProductsById[$pCardApiId]['precio']) : null;
+                    $pCardDisplayPrice = ($pCardApiRaw !== null)
+                        ? max(0.0, round($pCardApiRaw * (1 + $adminPackageMarkupPct / 100), 2))
+                        : floatval($p['precio']);
+                    ?>
+                    <div class="text-neon" style="color:#22d3ee;"><span class="fw-semibold">Precio:</span> $<?= number_format($pCardDisplayPrice, 2) ?><?php if ($pCardApiRaw !== null): ?> <span class="small" style="color:#8be9fd;">(API: $<?= number_format($pCardApiRaw, 4) ?>)</span><?php endif; ?></div>
                     <div style="color:#fff;"><span class="fw-semibold"><?= htmlspecialchars($winPointsName, ENT_QUOTES, 'UTF-8') ?>:</span> <?= (int) ($p['win_points_reward'] ?? 0) ?></div>
                     <form method="post" action="<?= htmlspecialchars($adminPackageBaseUrl, ENT_QUOTES, 'UTF-8') ?>/<?= $juego_id ?>" class="mt-2 d-inline-flex align-items-center gap-2 js-ajax-toggle-dest-form">
                         <input type="hidden" name="ajax" value="1">
@@ -1944,6 +1967,18 @@ if (isset($_GET['editar'])) {
         <div class="mb-3">
             <label class="form-label text-neon">Precio USD</label>
             <input type="number" step="0.01" name="edit_precio" value="<?= htmlspecialchars($paq_edit['precio']) ?>" required class="form-control" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;" data-discord-catalog-field="price">
+            <?php if ($adminPackageMarkupPct > 0 && $paqEditProvider === 'giftven'): ?>
+                <?php
+                $paqEditApiId = (int) ($paq_edit['paquete_api'] ?? 0);
+                $paqEditApiRaw = ($paqEditApiId > 0 && isset($apiProductsById[$paqEditApiId])) ? floatval($apiProductsById[$paqEditApiId]['precio']) : null;
+                $paqEditComputedPrice = $paqEditApiRaw !== null ? max(0.0, round($paqEditApiRaw * (1 + $adminPackageMarkupPct / 100), 2)) : null;
+                ?>
+                <?php if ($paqEditComputedPrice !== null): ?>
+                    <div class="form-text mt-1" style="color:#22d3ee;">Precio vigente (API + margen): <strong>$<?= number_format($paqEditComputedPrice, 2) ?></strong> — API base: $<?= number_format($paqEditApiRaw, 4) ?> × <?= number_format(1 + $adminPackageMarkupPct / 100, 4) ?></div>
+                <?php else: ?>
+                    <div class="form-text mt-1" style="color:#8be9fd;">Margen configurado: <?= number_format($adminPackageMarkupPct, 2) ?>%. El precio real se calculará desde la API cuando el cliente abra el juego.</div>
+                <?php endif; ?>
+            <?php endif; ?>
         </div>
         <div class="mb-3">
             <label class="form-label text-neon"><?= htmlspecialchars($winPointsName, ENT_QUOTES, 'UTF-8') ?> a ganar</label>
