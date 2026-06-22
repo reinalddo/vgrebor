@@ -307,6 +307,13 @@ function ensure_juego_paquetes_api_provider_column(mysqli $mysqli): void {
     }
 }
 
+function ensure_juego_paquetes_api_source_key_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'api_source_key'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN api_source_key VARCHAR(120) NULL AFTER api_provider");
+    }
+}
+
 function ensure_movimientos_table(mysqli $mysqli): void {
     $create = "CREATE TABLE IF NOT EXISTS movimientos (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -7671,6 +7678,11 @@ try {
     error_log('TVG ensure_juego_paquetes_api_provider_column skipped: ' . $e->getMessage());
 }
 try {
+    ensure_juego_paquetes_api_source_key_column($mysqli);
+} catch (Throwable $e) {
+    error_log('TVG ensure_juego_paquetes_api_source_key_column skipped: ' . $e->getMessage());
+}
+try {
     influencer_coupon_ensure_sales_table_mysqli($mysqli);
 } catch (Throwable $e) {
     error_log('TVG influencer_coupon_ensure_sales_table_mysqli skipped: ' . $e->getMessage());
@@ -7761,7 +7773,10 @@ if ($action === 'create') {
             $usesCatalogApi = $packageApiProvider === 'giftven';
             $usesDiscordApi = $packageApiProvider === 'discord';
             $usesFreeFireApi = $packageApiProvider === 'free_fire';
-            $discordCommandKey = $usesDiscordApi ? game_discord_api_command($mysqli, (int) $game_id) : '';
+            if ($usesDiscordApi) {
+                $packApiSourceKey = trim((string) ($selectedPackage['api_source_key'] ?? ''));
+                $discordCommandKey = $packApiSourceKey !== '' ? $packApiSourceKey : game_discord_api_command($mysqli, (int) $game_id);
+            }
             $discordCheckoutRequiredFields = $discordCommandKey !== '' ? api_discord_checkout_required_fields($discordCommandKey) : [];
             if ($pack_amount_text !== null && is_numeric($pack_amount_text)) {
                 $pack_amount_num = intval($pack_amount_text);

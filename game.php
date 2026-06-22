@@ -398,7 +398,6 @@ include __DIR__ . "/includes/header.php";
   <?php endif; ?>
   <?php
     $usesCatalogApi = trim((string) ($game['categoria_api'] ?? '')) !== '';
-    $discordCheckoutRequiredFields = api_discord_checkout_required_fields((string) ($game['categoria_api_discord'] ?? ''));
     $apiProductsById = [];
     if ($usesCatalogApi && recargas_api_is_configured()) {
       try {
@@ -407,6 +406,16 @@ include __DIR__ . "/includes/header.php";
         }
       } catch (Throwable $e) {
         $apiProductsById = [];
+      }
+      $juegoCategoriaApi2Game = trim((string) ($game['categoria_api_2'] ?? ''));
+      if ($juegoCategoriaApi2Game !== '') {
+        try {
+          foreach (recargas_api_fetch_products_by_category($juegoCategoriaApi2Game) as $apiProduct) {
+            $apiProductsById[(int) ($apiProduct['id'] ?? 0)] = $apiProduct;
+          }
+        } catch (Throwable $e) {
+          // keep existing products
+        }
       }
     }
 
@@ -458,8 +467,13 @@ include __DIR__ . "/includes/header.php";
         })));
         if ($packApiProvider === 'giftven' && $packApiId > 0 && isset($apiProductsById[$packApiId])) {
           $apiRequiredFields = recargas_api_describe_required_fields($apiProductsById[$packApiId]);
-        } elseif ($packApiProvider === 'discord' && !empty($discordCheckoutRequiredFields)) {
-          $apiRequiredFields = $discordCheckoutRequiredFields;
+        } elseif ($packApiProvider === 'discord') {
+          $packApiSourceKey = trim((string) ($pack['api_source_key'] ?? ''));
+          $discordCmdKeyForPack = $packApiSourceKey !== '' ? $packApiSourceKey : (string) ($game['categoria_api_discord'] ?? '');
+          $packDiscordFields = api_discord_checkout_required_fields($discordCmdKeyForPack);
+          if (!empty($packDiscordFields)) {
+            $apiRequiredFields = $packDiscordFields;
+          }
         }
         $img_paquete = !empty($pack['imagen_icono']) ? $pack['imagen_icono'] : (!empty($game['imagen_paquete']) ? $game['imagen_paquete'] : null);
         $packImageUrl = package_feature_public_asset_url($img_paquete);
