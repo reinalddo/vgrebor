@@ -19,7 +19,7 @@ try {
 }
 
 function normalize_coupon_code(string $value): string {
-    return strtoupper(trim($value));
+    return strtoupper(trim(str_replace('-', '', $value)));
 }
 
 function is_valid_coupon_code(string $value): bool {
@@ -114,7 +114,7 @@ if (!is_valid_coupon_code($codeInput)) {
 // LOG TEMPORAL PARA DEPURAR
 file_put_contents(__DIR__ . '/log_cupon.txt', date('Y-m-d H:i:s') . " | code: $code | pack_price: $pack_price\n", FILE_APPEND);
 
-$stmt = $mysqli->prepare('SELECT * FROM cupones WHERE codigo = ? LIMIT 1');
+$stmt = $mysqli->prepare("SELECT * FROM cupones WHERE REPLACE(codigo, '-', '') = ? LIMIT 1");
 $stmt->bind_param('s', $code);
 $stmt->execute();
 $res = $stmt->get_result();

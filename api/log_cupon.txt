@@ -60,3 +60,8 @@
 2026-05-18 19:04:16 | code: CUPON01 | pack_price: 5040
 2026-05-18 19:04:30 | code: CUPON01 | pack_price: 5040
 2026-05-18 19:09:33 | code: CUPON01 | pack_price: 5040
+2026-06-22 19:48:06 | code: CPN2606094DC3F2C7 | pack_price: 1417
+2026-06-22 19:48:06 | ERROR: Cupón inexistente.
+2026-06-22 19:48:39 | code: CPN2606094DC3F2C7 | pack_price: 1417
+2026-06-22 19:48:39 | ERROR: Cupón inexistente.
+2026-06-22 19:52:37 | code: CPN2606094DC3F2C7 | pack_price: 1417
