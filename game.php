@@ -443,7 +443,8 @@ include __DIR__ . "/includes/header.php";
   <div class="row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3 mb-4" id="pack-grid">
     <?php foreach ($paquetes as $pack):
         $packApiId = (int) ($pack['paquete_api'] ?? 0);
-        $packApiRawPrice = ($packApiId > 0 && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
+        $packManualOverride = !empty($pack['precio_manual_override']);
+        $packApiRawPrice = (!$packManualOverride && $packApiId > 0 && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
         $precio_base = ($packApiRawPrice !== null)
             ? max(0.0, round($packApiRawPrice * (1 + $gameMarkupPct / 100), 2))
             : floatval($pack['precio']);

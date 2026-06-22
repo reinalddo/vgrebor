@@ -7857,9 +7857,9 @@ if ($action === 'create') {
             json_error('El producto API configurado ya no está disponible en el catálogo remoto.');
         }
 
-        // Recompute price from live API price + game markup (overrides stored price)
+        // Recompute price from live API price + game markup (only when not in manual override mode)
         $apiProductPrice = floatval($catalogProduct['precio'] ?? 0);
-        if ($apiProductPrice > 0) {
+        if ($apiProductPrice > 0 && empty($selectedPackage['precio_manual_override'])) {
             $apiComputedBase = max(0.0, round($apiProductPrice * (1 + $gameMarkupPct / 100), 2));
             $unitPrice = currency_convert_from_base($apiComputedBase, $selectedCurrency);
             $price = currency_apply_amount_rule($unitPrice * $purchaseQuantity, $selectedCurrency);

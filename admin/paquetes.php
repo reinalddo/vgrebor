@@ -239,6 +239,13 @@ function ensure_juego_paquetes_descuento_destacado_column(mysqli $mysqli): void 
     }
 }
 
+function ensure_juego_paquetes_precio_manual_override_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'precio_manual_override'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN precio_manual_override TINYINT(1) NOT NULL DEFAULT 0 AFTER descuento_destacado");
+    }
+}
+
 function ensure_juegos_api_discord_catalog_columns(mysqli $mysqli): void {
     $columns = [
         'api_discord_catalog_json' => "ALTER TABLE juegos ADD COLUMN api_discord_catalog_json LONGTEXT NULL AFTER categoria_api_discord",
@@ -559,6 +566,7 @@ ensure_juego_paquetes_cantidad_text_column($mysqli);
 ensure_juego_paquetes_orden_column($mysqli);
 ensure_juego_paquetes_destacado_column($mysqli);
 ensure_juego_paquetes_descuento_destacado_column($mysqli);
+ensure_juego_paquetes_precio_manual_override_column($mysqli);
 ensure_juegos_api_discord_catalog_columns($mysqli);
 package_account_sales_ensure_schema($mysqli);
 package_features_ensure_schema($mysqli);
@@ -964,6 +972,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $edit_activo = isset($_POST['edit_activo']) ? 1 : 0;
     $edit_destacado = isset($_POST['edit_destacado']) ? 1 : 0;
     $edit_descuento_destacado = max(0, min(99, (int) ($_POST['edit_descuento_destacado'] ?? 0)));
+    $edit_precio_manual_override = isset($_POST['edit_precio_manual_override']) ? 1 : 0;
     $edit_imagen_icono = admin_package_store_upload($_FILES['edit_imagen_icono'] ?? []);
     $editExistingGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['edit_existing_account_gallery_replace'] ?? []);
     $editNewGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['edit_new_account_gallery_image'] ?? []);
@@ -984,11 +993,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el monto de Free Fire para este paquete.']);
     }
     if ($edit_imagen_icono) {
-        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, imagen_icono=?, activo=?, destacado=?, descuento_destacado=? WHERE id=?");
-        $stmt->bind_param('ssssssissdisiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_imagen_icono, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_id);
+        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, imagen_icono=?, activo=?, destacado=?, descuento_destacado=?, precio_manual_override=? WHERE id=?");
+        $stmt->bind_param('ssssssissdisiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_imagen_icono, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_precio_manual_override, $edit_id);
     } else {
-        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, activo=?, destacado=?, descuento_destacado=? WHERE id=?");
-        $stmt->bind_param('ssssssissdiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_id);
+        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, activo=?, destacado=?, descuento_destacado=?, precio_manual_override=? WHERE id=?");
+        $stmt->bind_param('ssssssissdiiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_precio_manual_override, $edit_id);
     }
     $stmt->execute();
     $stmt->close();
@@ -1066,6 +1075,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $activo = isset($_POST['activo']) ? 1 : 0;
     $destacado = isset($_POST['destacado']) ? 1 : 0;
     $descuento_destacado = max(0, min(99, (int) ($_POST['descuento_destacado'] ?? 0)));
+    $precio_manual_override = isset($_POST['precio_manual_override']) ? 1 : 0;
     $orden = admin_package_next_order($mysqli, $juego_id);
     $imagen_icono = admin_package_store_upload($_FILES['imagen_icono'] ?? []);
     $newGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['new_account_gallery_image'] ?? []);
@@ -1078,8 +1088,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     if ($provider === 'free_fire' && $monto_ff === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el monto de Free Fire para este paquete.']);
     }
-    $stmt = $mysqli->prepare("INSERT INTO juego_paquetes (juego_id, nombre, clave, monto_ff, paquete_api, api_provider, api_source_key, vender_cuenta, cuenta_texto, cantidad, precio, win_points_reward, imagen_icono, activo, orden, destacado, descuento_destacado) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('issssssissdisiiii', $juego_id, $nombre, $clave, $monto_ff, $paquete_api, $provider, $api_source_key, $vender_cuenta, $cuenta_texto, $cantidad, $precio, $win_points_reward, $imagen_icono, $activo, $orden, $destacado, $descuento_destacado);
+    $stmt = $mysqli->prepare("INSERT INTO juego_paquetes (juego_id, nombre, clave, monto_ff, paquete_api, api_provider, api_source_key, vender_cuenta, cuenta_texto, cantidad, precio, win_points_reward, imagen_icono, activo, orden, destacado, descuento_destacado, precio_manual_override) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('issssssissdisiiiii', $juego_id, $nombre, $clave, $monto_ff, $paquete_api, $provider, $api_source_key, $vender_cuenta, $cuenta_texto, $cantidad, $precio, $win_points_reward, $imagen_icono, $activo, $orden, $destacado, $descuento_destacado, $precio_manual_override);
     $stmt->execute();
     $newPackageId = (int) $mysqli->insert_id;
     $stmt->close();
@@ -1368,6 +1378,10 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
             <?php if ($adminPackageMarkupPct > 0): ?>
                 <div class="form-text mt-1" style="color:#8be9fd;">Para paquetes TiendaGiftVen el precio se calcula automáticamente: precio API × <?= number_format(1 + $adminPackageMarkupPct / 100, 4) ?> (margen <?= number_format($adminPackageMarkupPct, 2) ?>%). Este campo se usa como respaldo si la API no responde.</div>
             <?php endif; ?>
+            <div class="form-check mt-2">
+                <input type="checkbox" name="precio_manual_override" class="form-check-input" id="precioManualCheck">
+                <label class="form-check-label" for="precioManualCheck" style="color:#f9a825;font-size:0.875rem;">Usar precio manual (ignorar precio de API)</label>
+            </div>
         </div>
         <div class="col-md-4">
             <label class="form-label text-neon"><?= htmlspecialchars($winPointsName, ENT_QUOTES, 'UTF-8') ?> a ganar</label>
@@ -1643,12 +1657,15 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                         <?php
                         $pAdminApiId = (int) ($p['paquete_api'] ?? 0);
                         $pAdminApiRaw = ($pAdminApiId > 0 && isset($apiProductsById[$pAdminApiId])) ? floatval($apiProductsById[$pAdminApiId]['precio']) : null;
-                        $pAdminDisplayPrice = ($pAdminApiRaw !== null)
+                        $pAdminManualOverride = !empty($p['precio_manual_override']);
+                        $pAdminDisplayPrice = (!$pAdminManualOverride && $pAdminApiRaw !== null)
                             ? max(0.0, round($pAdminApiRaw * (1 + $adminPackageMarkupPct / 100), 2))
                             : floatval($p['precio']);
                         ?>
                         $<?= number_format($pAdminDisplayPrice, 2) ?>
-                        <?php if ($pAdminApiRaw !== null): ?>
+                        <?php if ($pAdminManualOverride): ?>
+                            <div class="small" style="color:#f9a825;font-size:0.7rem;">Manual</div>
+                        <?php elseif ($pAdminApiRaw !== null): ?>
                             <div class="small" style="color:#8be9fd;font-size:0.7rem;">API: $<?= number_format($pAdminApiRaw, 4) ?></div>
                         <?php endif; ?>
                     </td>
@@ -1719,11 +1736,12 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                     <?php
                     $pCardApiId = (int) ($p['paquete_api'] ?? 0);
                     $pCardApiRaw = ($pCardApiId > 0 && isset($apiProductsById[$pCardApiId])) ? floatval($apiProductsById[$pCardApiId]['precio']) : null;
-                    $pCardDisplayPrice = ($pCardApiRaw !== null)
+                    $pCardManualOverride = !empty($p['precio_manual_override']);
+                    $pCardDisplayPrice = (!$pCardManualOverride && $pCardApiRaw !== null)
                         ? max(0.0, round($pCardApiRaw * (1 + $adminPackageMarkupPct / 100), 2))
                         : floatval($p['precio']);
                     ?>
-                    <div class="text-neon" style="color:#22d3ee;"><span class="fw-semibold">Precio:</span> $<?= number_format($pCardDisplayPrice, 2) ?><?php if ($pCardApiRaw !== null): ?> <span class="small" style="color:#8be9fd;">(API: $<?= number_format($pCardApiRaw, 4) ?>)</span><?php endif; ?></div>
+                    <div class="text-neon" style="color:#22d3ee;"><span class="fw-semibold">Precio:</span> $<?= number_format($pCardDisplayPrice, 2) ?><?php if ($pCardManualOverride): ?> <span class="small" style="color:#f9a825;">Manual</span><?php elseif ($pCardApiRaw !== null): ?> <span class="small" style="color:#8be9fd;">(API: $<?= number_format($pCardApiRaw, 4) ?>)</span><?php endif; ?></div>
                     <div style="color:#fff;"><span class="fw-semibold"><?= htmlspecialchars($winPointsName, ENT_QUOTES, 'UTF-8') ?>:</span> <?= (int) ($p['win_points_reward'] ?? 0) ?></div>
                     <form method="post" action="<?= htmlspecialchars($adminPackageBaseUrl, ENT_QUOTES, 'UTF-8') ?>/<?= $juego_id ?>" class="mt-2 d-inline-flex align-items-center gap-2 js-ajax-toggle-dest-form">
                         <input type="hidden" name="ajax" value="1">
@@ -1972,13 +1990,20 @@ if (isset($_GET['editar'])) {
                 $paqEditApiId = (int) ($paq_edit['paquete_api'] ?? 0);
                 $paqEditApiRaw = ($paqEditApiId > 0 && isset($apiProductsById[$paqEditApiId])) ? floatval($apiProductsById[$paqEditApiId]['precio']) : null;
                 $paqEditComputedPrice = $paqEditApiRaw !== null ? max(0.0, round($paqEditApiRaw * (1 + $adminPackageMarkupPct / 100), 2)) : null;
+                $paqEditManualOverride = !empty($paq_edit['precio_manual_override']);
                 ?>
-                <?php if ($paqEditComputedPrice !== null): ?>
+                <?php if ($paqEditManualOverride): ?>
+                    <div class="form-text mt-1" style="color:#f9a825;">Precio manual activo. El precio de la API no se aplicará a este paquete.</div>
+                <?php elseif ($paqEditComputedPrice !== null): ?>
                     <div class="form-text mt-1" style="color:#22d3ee;">Precio vigente (API + margen): <strong>$<?= number_format($paqEditComputedPrice, 2) ?></strong> — API base: $<?= number_format($paqEditApiRaw, 4) ?> × <?= number_format(1 + $adminPackageMarkupPct / 100, 4) ?></div>
                 <?php else: ?>
                     <div class="form-text mt-1" style="color:#8be9fd;">Margen configurado: <?= number_format($adminPackageMarkupPct, 2) ?>%. El precio real se calculará desde la API cuando el cliente abra el juego.</div>
                 <?php endif; ?>
             <?php endif; ?>
+            <div class="form-check mt-2">
+                <input type="checkbox" name="edit_precio_manual_override" class="form-check-input" id="editPrecioManualCheck" <?= !empty($paq_edit['precio_manual_override']) ? 'checked' : '' ?>>
+                <label class="form-check-label" for="editPrecioManualCheck" style="color:#f9a825;font-size:0.875rem;">Usar precio manual (ignorar precio de API)</label>
+            </div>
         </div>
         <div class="mb-3">
             <label class="form-label text-neon"><?= htmlspecialchars($winPointsName, ENT_QUOTES, 'UTF-8') ?> a ganar</label>
