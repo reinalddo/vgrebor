@@ -119,31 +119,47 @@ function ensure_juegos_categoria_api_discord_2_column(mysqli $mysqli): void {
     }
 }
 
+function ensure_juegos_categoria_api_3_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juegos LIKE 'categoria_api_3'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juegos ADD COLUMN categoria_api_3 VARCHAR(100) NULL AFTER categoria_api_2");
+    }
+}
+
+function ensure_juegos_categoria_api_discord_3_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juegos LIKE 'categoria_api_discord_3'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juegos ADD COLUMN categoria_api_discord_3 VARCHAR(120) NULL AFTER categoria_api_discord_2");
+    }
+}
+
 function admin_game_normalize_api_selection(array $payload, string $giftVenKey, string $discordKey, bool $allowCombined = false): array {
     $giftVenCategory  = trim((string) ($payload[$giftVenKey] ?? ''));
     $giftVenCategory2 = trim((string) ($payload[$giftVenKey . '_2'] ?? ''));
+    $giftVenCategory3 = trim((string) ($payload[$giftVenKey . '_3'] ?? ''));
     $discordCommand   = trim((string) ($payload[$discordKey] ?? ''));
     $discordCommand2  = trim((string) ($payload[$discordKey . '_2'] ?? ''));
+    $discordCommand3  = trim((string) ($payload[$discordKey . '_3'] ?? ''));
 
-    $hasAnyGiftVen = $giftVenCategory !== '' || $giftVenCategory2 !== '';
-    $hasAnyDiscord = $discordCommand !== '' || $discordCommand2 !== '';
+    $hasAnyGiftVen = $giftVenCategory !== '' || $giftVenCategory2 !== '' || $giftVenCategory3 !== '';
+    $hasAnyDiscord = $discordCommand !== '' || $discordCommand2 !== '' || $discordCommand3 !== '';
 
     if (!$allowCombined && $hasAnyGiftVen && $hasAnyDiscord) {
         return [
             'ok' => false,
             'message' => 'Solo puedes seleccionar una API por juego: TiendaGiftVen o Discord.',
-            'giftven' => '', 'giftven2' => '', 'discord' => '', 'discord2' => '', 'api_free_fire' => 0,
+            'giftven' => '', 'giftven2' => '', 'giftven3' => '', 'discord' => '', 'discord2' => '', 'discord3' => '', 'api_free_fire' => 0,
         ];
     }
 
-    foreach ([$discordCommand, $discordCommand2] as $cmd) {
+    foreach ([$discordCommand, $discordCommand2, $discordCommand3] as $cmd) {
         if ($cmd !== '') {
             $discordDefinition = api_discord_find_command($cmd);
             if (!$discordDefinition || ($discordDefinition['kind'] ?? '') !== 'topup') {
                 return [
                     'ok' => false,
                     'message' => 'El comando seleccionado en Juegos API Discord no es válido.',
-                    'giftven' => '', 'giftven2' => '', 'discord' => '', 'discord2' => '', 'api_free_fire' => 0,
+                    'giftven' => '', 'giftven2' => '', 'giftven3' => '', 'discord' => '', 'discord2' => '', 'discord3' => '', 'api_free_fire' => 0,
                 ];
             }
         }
@@ -154,8 +170,10 @@ function admin_game_normalize_api_selection(array $payload, string $giftVenKey, 
         'message' => '',
         'giftven'  => $giftVenCategory,
         'giftven2' => $giftVenCategory2,
+        'giftven3' => $giftVenCategory3,
         'discord'  => $discordCommand,
         'discord2' => $discordCommand2,
+        'discord3' => $discordCommand3,
         'api_free_fire' => $hasAnyGiftVen ? 1 : 0,
     ];
 }
@@ -207,6 +225,8 @@ ensure_juegos_categoria_api_column($mysqli);
 ensure_juegos_categoria_api_discord_column($mysqli);
 ensure_juegos_categoria_api_2_column($mysqli);
 ensure_juegos_categoria_api_discord_2_column($mysqli);
+ensure_juegos_categoria_api_3_column($mysqli);
+ensure_juegos_categoria_api_discord_3_column($mysqli);
 ensure_juegos_orden_column($mysqli);
 ensure_juegos_slug_column($mysqli);
 ensure_juegos_imagen_hero_column($mysqli);
@@ -348,10 +368,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
     }
     $edit_categoria_api   = $apiSelection['giftven'];
     $edit_categoria_api_2 = $apiSelection['giftven2'];
+    $edit_categoria_api_3 = $apiSelection['giftven3'];
     $edit_categoria_api_discord = $discordApiEnabled
         ? $apiSelection['discord']
         : trim((string) ($currentGame['categoria_api_discord'] ?? ''));
     $edit_categoria_api_discord_2 = $discordApiEnabled ? $apiSelection['discord2'] : '';
+    $edit_categoria_api_discord_3 = $discordApiEnabled ? $apiSelection['discord3'] : '';
     $edit_api_free_fire = $apiSelection['api_free_fire'];
     $edit_activo = isset($_POST['edit_activo']) ? 1 : 0;
     $edit_moneda_fija_id = isset($_POST['edit_moneda_fija_id']) && $_POST['edit_moneda_fija_id'] !== '' ? intval($_POST['edit_moneda_fija_id']) : null;
@@ -403,9 +425,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
         $edit_sticker_imagen = $currentStickerImage;
     }
 
-    $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_2=?, categoria_api_discord=?, categoria_api_discord_2=?, activo=?, moneda_fija_id=?, sticker_texto=?, sticker_icono=?, sticker_color_fondo=?, sticker_imagen=? WHERE id=?");
-    // Types: 6s(nombre..imagen_paquete) + 2i(popular,api_ff) + 4s(cat_api,cat_api2,cat_discord,cat_discord2) + 2i(activo,moneda) + 4s(stickers) + 1i(WHERE id) = 19
-    $stmt->bind_param('ssssss'.'ii'.'ssss'.'ii'.'ssss'.'i', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_2, $edit_categoria_api_discord, $edit_categoria_api_discord_2, $edit_activo, $edit_moneda_fija_id, $edit_sticker_texto, $edit_sticker_icono, $edit_sticker_color_fondo, $edit_sticker_imagen, $edit_id);
+    $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_2=?, categoria_api_3=?, categoria_api_discord=?, categoria_api_discord_2=?, categoria_api_discord_3=?, activo=?, moneda_fija_id=?, sticker_texto=?, sticker_icono=?, sticker_color_fondo=?, sticker_imagen=? WHERE id=?");
+    // Types: 6s + 2i + 6s(cat_api..cat_discord3) + 2i(activo,moneda) + 4s(stickers) + 1i(WHERE id) = 21
+    $stmt->bind_param('ssssss'.'ii'.'ssssss'.'ii'.'ssss'.'i', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_2, $edit_categoria_api_3, $edit_categoria_api_discord, $edit_categoria_api_discord_2, $edit_categoria_api_discord_3, $edit_activo, $edit_moneda_fija_id, $edit_sticker_texto, $edit_sticker_icono, $edit_sticker_color_fondo, $edit_sticker_imagen, $edit_id);
     $stmt->execute();
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
     game_set_categories($mysqli, $edit_id, $catIds);
@@ -425,8 +447,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     }
     $categoria_api          = $apiSelection['giftven'];
     $categoria_api_2        = $apiSelection['giftven2'];
+    $categoria_api_3        = $apiSelection['giftven3'];
     $categoria_api_discord  = $discordApiEnabled ? $apiSelection['discord'] : '';
     $categoria_api_discord_2 = $discordApiEnabled ? $apiSelection['discord2'] : '';
+    $categoria_api_discord_3 = $discordApiEnabled ? $apiSelection['discord3'] : '';
     $api_free_fire = $apiSelection['api_free_fire'];
     $activo = isset($_POST['activo']) ? 1 : 0;
     $orden = admin_game_next_order($mysqli);
@@ -441,9 +465,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $sticker_color_fondo  = preg_match('/^#[0-9a-fA-F]{3,6}$/', $rawStickerColorC) ? $rawStickerColorC : '#0f1a2e';
     $stickerUploadC       = game_sticker_store_upload($_FILES['sticker_imagen'] ?? []);
     $sticker_imagen       = ($stickerUploadC['ok'] && $stickerUploadC['path'] !== '') ? $stickerUploadC['path'] : '';
-    $stmt = $mysqli->prepare("INSERT INTO juegos (nombre, imagen, imagen_hero, imagen_paquete, descripcion, slug, moneda_fija_id, popular, api_free_fire, categoria_api, categoria_api_2, categoria_api_discord, categoria_api_discord_2, activo, orden, sticker_texto, sticker_icono, sticker_color_fondo, sticker_imagen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    // Types: 6s(nombre..slug) + 3i(moneda,popular,api_ff) + 4s(cat_api,cat_api2,cat_discord,cat_discord2) + 2i(activo,orden) + 4s(stickers) = 19
-    $stmt->bind_param('ssssss'.'iii'.'ssss'.'ii'.'ssss', $nombre, $imagen, $imagen_hero, $imagen_paquete, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_2, $categoria_api_discord, $categoria_api_discord_2, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen);
+    $stmt = $mysqli->prepare("INSERT INTO juegos (nombre, imagen, imagen_hero, imagen_paquete, descripcion, slug, moneda_fija_id, popular, api_free_fire, categoria_api, categoria_api_2, categoria_api_3, categoria_api_discord, categoria_api_discord_2, categoria_api_discord_3, activo, orden, sticker_texto, sticker_icono, sticker_color_fondo, sticker_imagen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    // Types: 6s + 3i(moneda,popular,api_ff) + 6s(cat_api..cat_discord3) + 2i(activo,orden) + 4s(stickers) = 21
+    $stmt->bind_param('ssssss'.'iii'.'ssssss'.'ii'.'ssss', $nombre, $imagen, $imagen_hero, $imagen_paquete, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_2, $categoria_api_3, $categoria_api_discord, $categoria_api_discord_2, $categoria_api_discord_3, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen);
     $stmt->execute();
     $juego_id = $mysqli->insert_id;
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
@@ -573,7 +597,17 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     <option value="<?= htmlspecialchars($apiCategory, ENT_QUOTES, 'UTF-8') ?>" <?= (string) ($juego_edit['categoria_api_2'] ?? '') === (string) $apiCategory ? 'selected' : '' ?>><?= htmlspecialchars($apiCategory, ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
-                <div class="form-text mt-2" style="color:#8be9fd;">Segunda categoría de TiendaGiftVen. Úsalo si el juego tiene dos catálogos distintos (ej: Blood Strike y Blood Strike 2.0).</div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Segunda categoría de TiendaGiftVen (ej: Blood Strike 2.0).</div>
+            </div>
+            <div class="form-check mb-3">
+                <label class="form-label text-neon" for="editCategoriaApiInput3">Juegos API TiendaGiftVen (Slot 3 — opcional)</label>
+                <select name="edit_categoria_api_tiendagiftven_3" id="editCategoriaApiInput3" class="form-select<?= $gameApiExclusiveClass ?>" data-exclusive-group="edit-game-api" data-exclusive-target="editDiscordApiInput" data-exclusive-enabled="<?= $mixedApiUnionEnabled ? '0' : '1' ?>" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                    <option value="">— Sin tercer slot —</option>
+                    <?php foreach ($apiCategories as $apiCategory): ?>
+                    <option value="<?= htmlspecialchars($apiCategory, ENT_QUOTES, 'UTF-8') ?>" <?= (string) ($juego_edit['categoria_api_3'] ?? '') === (string) $apiCategory ? 'selected' : '' ?>><?= htmlspecialchars($apiCategory, ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-text mt-2" style="color:#8be9fd;">Tercera categoría de TiendaGiftVen opcional.</div>
             </div>
             <?php if ($discordApiEnabled): ?>
             <div class="form-check mb-3">
@@ -601,7 +635,19 @@ if ($gcatAssignResult instanceof mysqli_result) {
                         <option value="<?= htmlspecialchars($discordKey, ENT_QUOTES, 'UTF-8') ?>" <?= (string) ($juego_edit['categoria_api_discord_2'] ?? '') === $discordKey ? 'selected' : '' ?>><?= htmlspecialchars($discordLabel, ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
-                <div class="form-text mt-2" style="color:#8be9fd;">Segundo comando de Discord. Úsalo si el juego mezcla dos catálogos Discord distintos (ej: Free Fire recarga y Roblox recarga).</div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Segundo comando de Discord (ej: Roblox recarga).</div>
+            </div>
+            <div class="form-check mb-3">
+                <label class="form-label text-neon" for="editDiscordApiInput3">Juegos API Discord (Slot 3 — opcional)</label>
+                <select name="edit_categoria_api_discord_3" id="editDiscordApiInput3" class="form-select<?= $gameApiExclusiveClass ?> flex-grow-1" data-exclusive-group="edit-game-api" data-exclusive-target="editCategoriaApiInput" data-exclusive-enabled="<?= $mixedApiUnionEnabled ? '0' : '1' ?>" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                    <option value="">— Sin tercer slot —</option>
+                    <?php foreach ($discordApiCommandOptions as $discordCommand): ?>
+                        <?php $discordKey = (string) ($discordCommand['key'] ?? ''); ?>
+                        <?php $discordLabel = trim((string) ($discordCommand['label'] ?? $discordKey)); ?>
+                        <option value="<?= htmlspecialchars($discordKey, ENT_QUOTES, 'UTF-8') ?>" <?= (string) ($juego_edit['categoria_api_discord_3'] ?? '') === $discordKey ? 'selected' : '' ?>><?= htmlspecialchars($discordLabel, ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-text mt-2" style="color:#8be9fd;">Tercer comando de Discord opcional.</div>
             </div>
             <?php endif; ?>
             <div class="form-check mb-3">
@@ -921,7 +967,17 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     <option value="<?= htmlspecialchars($apiCategory, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($apiCategory, ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
-                <div class="form-text mt-2" style="color:#8be9fd;">Segunda categoría TiendaGiftVen (ej: Blood Strike 2.0 junto al Blood Strike principal).</div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Segunda categoría TiendaGiftVen (ej: Blood Strike 2.0).</div>
+            </div>
+            <div class="form-check mt-3">
+                <label class="form-label" for="categoriaApiInput3" style="color:#00fff7;">Juegos API TiendaGiftVen (Slot 3 — opcional)</label>
+                <select name="categoria_api_tiendagiftven_3" id="categoriaApiInput3" class="form-select<?= $gameApiExclusiveClass ?>" data-exclusive-group="create-game-api" data-exclusive-target="categoriaDiscordApiInput" data-exclusive-enabled="<?= $mixedApiUnionEnabled ? '0' : '1' ?>" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;">
+                    <option value="">— Sin tercer slot —</option>
+                    <?php foreach ($apiCategories as $apiCategory): ?>
+                    <option value="<?= htmlspecialchars($apiCategory, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($apiCategory, ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-text mt-2" style="color:#8be9fd;">Tercera categoría TiendaGiftVen opcional.</div>
             </div>
             <?php if ($discordApiEnabled): ?>
             <div class="form-check mt-3">
@@ -949,7 +1005,19 @@ if ($gcatAssignResult instanceof mysqli_result) {
                         <option value="<?= htmlspecialchars($discordKey, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($discordLabel, ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
-                <div class="form-text mt-2" style="color:#8be9fd;">Segundo comando Discord (ej: Roblox recarga en un juego que ya tiene Free Fire recarga).</div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Segundo comando Discord (ej: Roblox recarga).</div>
+            </div>
+            <div class="form-check mt-3">
+                <label class="form-label" for="categoriaDiscordApiInput3" style="color:#00fff7;">Juegos API Discord (Slot 3 — opcional)</label>
+                <select name="categoria_api_discord_3" id="categoriaDiscordApiInput3" class="form-select<?= $gameApiExclusiveClass ?> flex-grow-1" data-exclusive-group="create-game-api" data-exclusive-target="categoriaApiInput" data-exclusive-enabled="<?= $mixedApiUnionEnabled ? '0' : '1' ?>" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;">
+                    <option value="">— Sin tercer slot —</option>
+                    <?php foreach ($discordApiCommandOptions as $discordCommand): ?>
+                        <?php $discordKey = (string) ($discordCommand['key'] ?? ''); ?>
+                        <?php $discordLabel = trim((string) ($discordCommand['label'] ?? $discordKey)); ?>
+                        <option value="<?= htmlspecialchars($discordKey, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($discordLabel, ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-text mt-2" style="color:#8be9fd;">Tercer comando Discord opcional.</div>
             </div>
             <?php endif; ?>
             <div class="form-check mt-3">
@@ -1299,7 +1367,15 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 <option value="<?= htmlspecialchars($apiCategory, ENT_QUOTES, 'UTF-8') ?>" <?= (string) ($juego_edit['categoria_api_2'] ?? '') === (string) $apiCategory ? 'selected' : '' ?>><?= htmlspecialchars($apiCategory, ENT_QUOTES, 'UTF-8') ?></option>
                 <?php endforeach; ?>
             </select>
-            <div class="text-xs text-slate-400 mb-2">Slot 2: segunda categoría TiendaGiftVen opcional (ej: Blood Strike 2.0).</div>
+            <div class="text-xs text-slate-400 mb-2">Slot 2: segunda categoría TiendaGiftVen opcional.</div>
+            <label class="block text-slate-300 font-medium mb-1">Juegos API TiendaGiftVen (Slot 3 — opcional):</label>
+            <select name="edit_categoria_api_tiendagiftven_3" class="w-full rounded-lg px-3 py-2 bg-slate-800 text-white mb-2<?= $gameApiExclusiveClass ?>" data-exclusive-group="edit-game-api-legacy" data-exclusive-target="editDiscordApiInputLegacy" data-exclusive-enabled="<?= $mixedApiUnionEnabled ? '0' : '1' ?>">
+                <option value="">— Sin tercer slot —</option>
+                <?php foreach ($apiCategories as $apiCategory): ?>
+                <option value="<?= htmlspecialchars($apiCategory, ENT_QUOTES, 'UTF-8') ?>" <?= (string) ($juego_edit['categoria_api_3'] ?? '') === (string) $apiCategory ? 'selected' : '' ?>><?= htmlspecialchars($apiCategory, ENT_QUOTES, 'UTF-8') ?></option>
+                <?php endforeach; ?>
+            </select>
+            <div class="text-xs text-slate-400 mb-2">Slot 3: tercera categoría TiendaGiftVen opcional.</div>
             <?php if ($discordApiEnabled): ?>
             <label class="block text-slate-300 font-medium mb-1">Juegos API Discord (Slot 1):</label>
             <div class="flex gap-2 items-start flex-wrap mb-2">
@@ -1322,7 +1398,17 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 <option value="<?= htmlspecialchars($discordKey, ENT_QUOTES, 'UTF-8') ?>" <?= (string) ($juego_edit['categoria_api_discord_2'] ?? '') === $discordKey ? 'selected' : '' ?>><?= htmlspecialchars($discordLabel, ENT_QUOTES, 'UTF-8') ?></option>
                 <?php endforeach; ?>
             </select>
-            <div class="text-xs text-slate-400 mb-2">Slot 2: segundo comando Discord opcional (ej: Roblox recarga).</div>
+            <div class="text-xs text-slate-400 mb-2">Slot 2: segundo comando Discord opcional.</div>
+            <label class="block text-slate-300 font-medium mb-1">Juegos API Discord (Slot 3 — opcional):</label>
+            <select name="edit_categoria_api_discord_3" class="w-full rounded-lg px-3 py-2 bg-slate-800 text-white mb-2<?= $gameApiExclusiveClass ?>" data-exclusive-group="edit-game-api-legacy" data-exclusive-target="editCategoriaApiInputLegacy" data-exclusive-enabled="<?= $mixedApiUnionEnabled ? '0' : '1' ?>">
+                <option value="">— Sin tercer slot —</option>
+                <?php foreach ($discordApiCommandOptions as $discordCommand): ?>
+                <?php $discordKey = (string) ($discordCommand['key'] ?? ''); ?>
+                <?php $discordLabel = trim((string) ($discordCommand['label'] ?? $discordKey)); ?>
+                <option value="<?= htmlspecialchars($discordKey, ENT_QUOTES, 'UTF-8') ?>" <?= (string) ($juego_edit['categoria_api_discord_3'] ?? '') === $discordKey ? 'selected' : '' ?>><?= htmlspecialchars($discordLabel, ENT_QUOTES, 'UTF-8') ?></option>
+                <?php endforeach; ?>
+            </select>
+            <div class="text-xs text-slate-400 mb-2">Slot 3: tercer comando Discord opcional.</div>
             <?php endif; ?>
             <label class="block text-slate-300 mb-1">Imagen actual:</label>
             <?php if ($juego_edit['imagen']): ?>

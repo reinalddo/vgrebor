@@ -417,6 +417,16 @@ include __DIR__ . "/includes/header.php";
           // keep existing products
         }
       }
+      $juegoCategoriaApi3Game = trim((string) ($game['categoria_api_3'] ?? ''));
+      if ($juegoCategoriaApi3Game !== '') {
+        try {
+          foreach (recargas_api_fetch_products_by_category($juegoCategoriaApi3Game) as $apiProduct) {
+            $apiProductsById[(int) ($apiProduct['id'] ?? 0)] = $apiProduct;
+          }
+        } catch (Throwable $e) {
+          // keep existing products
+        }
+      }
     }
 
     $resPaq = $mysqli->query("SELECT * FROM juego_paquetes WHERE juego_id=" . intval($game['id']) . " AND COALESCE(activo, 1) = 1 ORDER BY CASE WHEN orden IS NULL THEN 1 ELSE 0 END, orden ASC, id ASC");
