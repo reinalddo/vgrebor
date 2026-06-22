@@ -440,6 +440,7 @@ include __DIR__ . "/includes/header.php";
     $packageFeaturesByPackage = package_features_for_packages($mysqli, array_map(static fn (array $package): int => (int) ($package['id'] ?? 0), $paquetes));
   ?>
   <?php $gameMarkupPct = floatval($game['precio_markup_pct'] ?? 0); ?>
+  <?php $priceSyncQueue = []; ?>
   <div class="row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3 mb-4" id="pack-grid">
     <?php foreach ($paquetes as $pack):
         $packApiId = (int) ($pack['paquete_api'] ?? 0);
@@ -448,6 +449,9 @@ include __DIR__ . "/includes/header.php";
         $precio_base = ($packApiRawPrice !== null)
             ? max(0.0, round($packApiRawPrice * (1 + $gameMarkupPct / 100), 2))
             : floatval($pack['precio']);
+        if (!$packManualOverride && $packApiRawPrice !== null && abs($precio_base - floatval($pack['precio'])) > 0.00001) {
+            $priceSyncQueue[] = ['id' => (int) ($pack['id'] ?? 0), 'precio' => $precio_base];
+        }
         $precio_mostrar = $moneda_actual ? currency_convert_from_base($precio_base, $moneda_actual) : currency_apply_amount_rule($precio_base, null);
         $clave_moneda = $moneda_actual['clave'] ?? 'USD';
         $mostrarDecimales = $moneda_actual ? currency_should_show_decimals($moneda_actual) : true;
@@ -563,7 +567,18 @@ include __DIR__ . "/includes/header.php";
       </div>
     <?php endforeach; ?>
   </div>
-  <?php 
+  <?php
+    // Sync fallback prices with last known API price (skip manual overrides)
+    foreach ($priceSyncQueue as $syncEntry) {
+        $stmtPriceSync = $mysqli->prepare("UPDATE juego_paquetes SET precio = ? WHERE id = ? AND precio_manual_override = 0 LIMIT 1");
+        if ($stmtPriceSync) {
+            $stmtPriceSync->bind_param('di', $syncEntry['precio'], $syncEntry['id']);
+            $stmtPriceSync->execute();
+            $stmtPriceSync->close();
+        }
+    }
+  ?>
+  <?php
     $monedas_js = [];
     foreach ($monedas as $m) {
       $monedas_js[$m['id']] = [
