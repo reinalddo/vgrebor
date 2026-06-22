@@ -688,9 +688,10 @@ function fetch_valid_coupon(mysqli $mysqli, string $code, int $gameId = 0): ?arr
     }
     coupon_ensure_points_column($mysqli);
     coupon_ensure_game_scope_column($mysqli);
-    $stmt = $mysqli->prepare("SELECT * FROM cupones WHERE codigo = ? LIMIT 1");
+    $normalizedCode = strtoupper(trim(str_replace('-', '', $code)));
+    $stmt = $mysqli->prepare("SELECT * FROM cupones WHERE REPLACE(codigo, '-', '') = ? LIMIT 1");
     if (!$stmt) return null;
-    $stmt->bind_param('s', $code);
+    $stmt->bind_param('s', $normalizedCode);
     $stmt->execute();
     $res = $stmt->get_result();
     $coupon = $res ? $res->fetch_assoc() : null;
@@ -710,12 +711,13 @@ function fetch_coupon_by_code(mysqli $mysqli, string $code): ?array {
     coupon_ensure_points_column($mysqli);
     coupon_ensure_game_scope_column($mysqli);
 
-    $stmt = $mysqli->prepare('SELECT * FROM cupones WHERE codigo = ? LIMIT 1');
+    $normalizedCode = strtoupper(trim(str_replace('-', '', $code)));
+    $stmt = $mysqli->prepare("SELECT * FROM cupones WHERE REPLACE(codigo, '-', '') = ? LIMIT 1");
     if (!$stmt) {
         return null;
     }
 
-    $stmt->bind_param('s', $code);
+    $stmt->bind_param('s', $normalizedCode);
     $stmt->execute();
     $res = $stmt->get_result();
     $coupon = $res ? $res->fetch_assoc() : null;
@@ -2873,7 +2875,7 @@ function render_order_email(string $title, string $eyebrow, string $messageHtml,
 }
 
 function normalize_coupon_code(string $value): string {
-    return strtoupper(trim($value));
+    return strtoupper(trim(str_replace('-', '', $value)));
 }
 
 function is_valid_coupon_code(string $value): bool {
