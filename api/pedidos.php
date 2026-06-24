@@ -8088,7 +8088,7 @@ if ($action === 'create') {
     }
     $zoneCandidates = ['input2', 'zone_id', 'zoneid', 'zone', 'server_id', 'serverid', 'server'];
     $zoneIdToSave = null;
-    if (should_store_last_purchase_identifier() && is_array($player_fields)) {
+    if (is_array($player_fields)) {
         foreach ($zoneCandidates as $candidate) {
             $candidateVal = trim((string) ($player_fields[$candidate] ?? ''));
             if ($candidateVal !== '') {
@@ -8100,7 +8100,7 @@ if ($action === 'create') {
     update_user_last_purchase_details(
         $mysqli,
         (int) ($cliente_usuario_id ?? 0),
-        should_store_last_purchase_identifier() ? $user_identifier : null,
+        $user_identifier,
         null,
         null,
         null,
@@ -8969,11 +8969,10 @@ if ($action === 'submit_payment') {
         json_error('No se pudieron guardar los datos del pago.', 500);
     }
     $stmt->close();
-    $storeIdentifier = should_store_last_purchase_identifier();
     update_user_last_purchase_details(
         $mysqli,
         (int) ($order['cliente_usuario_id'] ?? 0),
-        $storeIdentifier ? (string) ($order['user_identifier'] ?? '') : null,
+        (string) ($order['user_identifier'] ?? ''),
         $phone,
         $nombreTitularRaw !== '' ? $nombreTitularRaw : null,
         $cedulaTitularRaw !== '' ? $cedulaTitularRaw : null,
