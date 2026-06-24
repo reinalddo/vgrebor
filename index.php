@@ -400,7 +400,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           inset: 0;
           background: linear-gradient(110deg, transparent 20%, rgba(255,255,255,0.18) 38%, rgba(255,255,255,0.72) 50%, rgba(255,255,255,0.18) 62%, transparent 80%);
           background-size: 220% 100%;
-          animation: game-sticker-shimmer 1.2s ease-in-out infinite;
+          animation: game-sticker-shimmer 1.7s ease-in-out infinite;
         }
         @keyframes game-sticker-shimmer {
           0%   { background-position: 220% 0; }
