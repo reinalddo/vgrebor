@@ -10134,11 +10134,19 @@ include __DIR__ . "/includes/header.php";
   }
 
   function updatePackPrices() {
+    const showPointsPrices = preferredCheckoutPaymentMode === 'points';
     packCards.forEach(card => {
       const base = parseFloat(card.getAttribute('data-base'));
       const precio = normalizeCurrencyAmount(base * monedaActualTasa, monedaActualMostrarDecimales);
-      card.querySelector('.precio-label').textContent = formatCurrencyAmount(precio, monedaActualMostrarDecimales);
-      card.querySelector('.moneda-label').textContent = monedaActualClave;
+      const winPointsActive = card.dataset.winPointsActive === '1';
+      const winPointsRequired = Number(card.dataset.winPointsRequired || 0);
+      if (showPointsPrices && winPointsActive && winPointsRequired > 0) {
+        card.querySelector('.precio-label').textContent = winPointsRequired.toLocaleString('en-US');
+        card.querySelector('.moneda-label').textContent = winPointsState.name || 'Pts';
+      } else {
+        card.querySelector('.precio-label').textContent = formatCurrencyAmount(precio, monedaActualMostrarDecimales);
+        card.querySelector('.moneda-label').textContent = monedaActualClave;
+      }
       card.setAttribute('data-price-value', String(precio));
       card.setAttribute('data-show-decimals', monedaActualMostrarDecimales ? '1' : '0');
       card.setAttribute('data-moneda', monedaActualClave);
@@ -10486,6 +10494,7 @@ include __DIR__ . "/includes/header.php";
                   const switchedCurrency = syncVisibleCurrencyWithPreferredPayment(activePack, { resetCoupon: !couponApplied });
                   const nextCurrencyCode = String(monedaActualClave || '').trim().toUpperCase();
                   if (!switchedCurrency) {
+                    updatePackPrices();
                     updateResumenCompra(activePack);
                   } else if (previousCurrencyCode !== nextCurrencyCode && nextCurrencyCode !== '') {
                     scrollToPackPricingSection();
