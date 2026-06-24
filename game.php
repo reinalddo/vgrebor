@@ -6763,10 +6763,6 @@ include __DIR__ . "/includes/header.php";
       nextMode = '';
     }
 
-    if (nextMode === 'points' && !canUsePointsNow) {
-      nextMode = '';
-    }
-
     return {
       mode: nextMode,
       methodId: nextMode === 'money' ? nextMethodId : '',
@@ -6915,7 +6911,7 @@ include __DIR__ . "/includes/header.php";
       const isSelected = selection.mode === 'points';
       cards.push(`
         <div class="payment-method-public-card${isSelected ? ' is-selected' : ''}${pointsDisabled ? ' is-disabled' : ''}">
-          <button type="button" class="payment-method-public-button" data-payment-option="points" ${pointsDisabled ? 'disabled' : ''}>${pointsMarkup}</button>
+          <button type="button" class="payment-method-public-button" data-payment-option="points">${pointsMarkup}</button>
           ${pointsCornerMarkup}
         </div>`);
     }
@@ -6960,6 +6956,13 @@ include __DIR__ . "/includes/header.php";
       paymentMethodCatalogCopy.textContent = hasPack
         ? 'Seleccionado: PayPal. Al confirmar, abriremos el checkout oficial para autorizar y capturar el pago.'
         : 'Seleccionado: PayPal. Mostraremos los precios en una moneda compatible con PayPal mientras eliges el paquete.';
+      return;
+    }
+
+    if (selection.mode === 'points' && selection.canUsePointsNow) {
+      paymentMethodCatalogCopy.textContent = hasPack
+        ? `Seleccionado: ${winPointsState.name || 'Win Points'}. Al confirmar, se canjeará tu saldo de puntos para procesar la recarga.`
+        : `Seleccionado: ${winPointsState.name || 'Win Points'}.`;
       return;
     }
 
@@ -10161,14 +10164,17 @@ include __DIR__ . "/includes/header.php";
     }
     const paymentSelection = activePack ? resolvePreferredCheckoutSelection(activePack) : null;
     const hasPaymentSelection = Boolean(paymentSelection && paymentSelection.mode);
+    const pointsSelectedButBlocked = Boolean(paymentSelection && paymentSelection.mode === 'points' && !paymentSelection.canUsePointsNow);
     const needsPlayerVerification = requiresVerifiedPlayerForCheckout();
     const paymentDifferenceBlocked = activePack ? getPaymentDifferenceBreakdown(activePack, selectedTotalValue).blocksSelection : false;
     const blockedByGameEntryWindow = !gameEntryWindowAccepted;
-    buyButton.disabled = !activePack || !requiredFilled || !hasPaymentSelection || needsPlayerVerification || paymentDifferenceBlocked || blockedByGameEntryWindow;
+    buyButton.disabled = !activePack || !requiredFilled || !hasPaymentSelection || needsPlayerVerification || paymentDifferenceBlocked || blockedByGameEntryWindow || pointsSelectedButBlocked;
     if (paymentDifferenceBlocked) {
       buyButton.textContent = paymentDifferenceBlockedBuyButtonLabel;
     } else if (activePack && !hasPaymentSelection) {
       buyButton.textContent = 'Selecciona un metodo de pago';
+    } else if (pointsSelectedButBlocked) {
+      buyButton.textContent = `${winPointsState.name || 'Puntos'} insuficientes`;
     } else if (blockedByGameEntryWindow) {
       buyButton.textContent = defaultBuyButtonLabel;
     } else {
