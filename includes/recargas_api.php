@@ -358,9 +358,24 @@ function recargas_api_canonical_field_name(string $rawName, string $rawDescripti
     }
 
     if (!in_array($name, ['input1', 'input2', 'input3', 'input4'], true)) {
-        if ($name === 'userid' || $name === 'user_id') {
+        if (in_array($name, ['userid', 'user_id', 'playerid', 'player_id', 'uid'], true)) {
             return 'id_juego';
         }
+
+        $description = mb_strtolower(trim($rawDescription), 'UTF-8');
+        $description = preg_replace('/\s+/u', ' ', $description) ?? $description;
+        if (
+            str_contains($description, 'user id')
+            || str_contains($description, 'player id')
+            || str_contains($description, 'id pengguna')
+            || str_contains($description, 'pengguna id')
+            || str_contains($description, 'id del jugador')
+            || str_contains($description, 'id de jugador')
+            || str_contains($description, 'id de usuario')
+        ) {
+            return 'id_juego';
+        }
+
         return $name;
     }
 

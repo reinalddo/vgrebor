@@ -4766,7 +4766,7 @@ function player_field_aliases(string $fieldName): array {
     }
 
     $aliasGroups = [
-        ['id_juego', 'player_id', 'playerid', 'user_id', 'userid', 'input1'],
+        ['id_juego', 'player_id', 'playerid', 'user_id', 'userid', 'uid', 'input1'],
         ['zone_id', 'zoneid', 'zona', 'zone', 'server_id', 'serverid', 'input2'],
     ];
 
@@ -5538,6 +5538,12 @@ function execute_catalog_api_purchase_once(int $productId, ?string $userIdentifi
         }
 
         $payload[$fieldName] = $fieldValue;
+    }
+
+    $playerIdPayloadKeys = ['id_juego', 'player_id', 'playerid', 'user_id', 'userid', 'uid', 'input1'];
+    $payloadHasPlayerId = !empty(array_intersect_key($payload, array_flip($playerIdPayloadKeys)));
+    if (!$payloadHasPlayerId && trim((string) $userIdentifier) !== '') {
+        $payload['id_juego'] = trim((string) $userIdentifier);
     }
 
     try {
