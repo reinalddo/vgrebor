@@ -398,13 +398,13 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           content: '';
           position: absolute;
           inset: 0;
-          background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.22) 50%, transparent 70%);
-          background-size: 200% 100%;
-          animation: game-sticker-shimmer 2.4s ease-in-out infinite;
+          background: linear-gradient(110deg, transparent 20%, rgba(255,255,255,0.18) 38%, rgba(255,255,255,0.72) 50%, rgba(255,255,255,0.18) 62%, transparent 80%);
+          background-size: 220% 100%;
+          animation: game-sticker-shimmer 1.2s ease-in-out infinite;
         }
         @keyframes game-sticker-shimmer {
-          0%   { background-position: 200% 0; }
-          100% { background-position: -200% 0; }
+          0%   { background-position: 220% 0; }
+          100% { background-position: -220% 0; }
         }
         .game-sticker-text, .game-sticker-icon, .game-sticker-img {
           position: relative;
