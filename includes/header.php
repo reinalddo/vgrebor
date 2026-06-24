@@ -683,8 +683,10 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       .site-topbar-enabled .site-auth-container {
         order: 3;
         flex: 0 0 auto;
-        margin-left: 0 !important;
+        /*margin-left: 0 !important;*/
         display: block;
+        position: absolute !important;
+        right: 10px;
       }
       .site-topbar-mobile-search-toggle {
         display: inline-flex;
@@ -695,6 +697,8 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         flex: 0 0 44px;
         width: 44px;
         height: 44px;
+        position: absolute;
+        right: 250px;
       }
       .site-topbar-enabled .site-auth-trigger,
       .site-topbar-enabled #user-trigger {
@@ -725,6 +729,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         flex: 0 0 44px;
         width: 44px;
         height: 44px;
+        right: 70px;
       }
       .site-topbar-search-input {
         min-height: 44px;
