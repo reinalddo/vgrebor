@@ -246,6 +246,13 @@ function ensure_juego_paquetes_precio_manual_override_column(mysqli $mysqli): vo
     }
 }
 
+function ensure_juego_paquetes_orden_gg_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'orden_gg'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN orden_gg SMALLINT UNSIGNED NULL AFTER descuento_destacado");
+    }
+}
+
 function ensure_juegos_api_discord_catalog_columns(mysqli $mysqli): void {
     $columns = [
         'api_discord_catalog_json' => "ALTER TABLE juegos ADD COLUMN api_discord_catalog_json LONGTEXT NULL AFTER categoria_api_discord",
@@ -567,6 +574,7 @@ ensure_juego_paquetes_orden_column($mysqli);
 ensure_juego_paquetes_destacado_column($mysqli);
 ensure_juego_paquetes_descuento_destacado_column($mysqli);
 ensure_juego_paquetes_precio_manual_override_column($mysqli);
+ensure_juego_paquetes_orden_gg_column($mysqli);
 ensure_juegos_api_discord_catalog_columns($mysqli);
 package_account_sales_ensure_schema($mysqli);
 package_features_ensure_schema($mysqli);
@@ -972,6 +980,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $edit_activo = isset($_POST['edit_activo']) ? 1 : 0;
     $edit_destacado = isset($_POST['edit_destacado']) ? 1 : 0;
     $edit_descuento_destacado = max(0, min(99, (int) ($_POST['edit_descuento_destacado'] ?? 0)));
+    $edit_orden_gg = ($_POST['edit_orden_gg'] ?? '') !== '' ? max(0, (int) $_POST['edit_orden_gg']) : null;
     $edit_precio_manual_override = isset($_POST['edit_precio_manual_override']) ? 1 : 0;
     $edit_imagen_icono = admin_package_store_upload($_FILES['edit_imagen_icono'] ?? []);
     $editExistingGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['edit_existing_account_gallery_replace'] ?? []);
@@ -993,11 +1002,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el monto de Free Fire para este paquete.']);
     }
     if ($edit_imagen_icono) {
-        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, imagen_icono=?, activo=?, destacado=?, descuento_destacado=?, precio_manual_override=? WHERE id=?");
-        $stmt->bind_param('ssssssissdisiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_imagen_icono, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_precio_manual_override, $edit_id);
+        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, imagen_icono=?, activo=?, destacado=?, descuento_destacado=?, orden_gg=?, precio_manual_override=? WHERE id=?");
+        $stmt->bind_param('ssssssissdisiiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_imagen_icono, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_orden_gg, $edit_precio_manual_override, $edit_id);
     } else {
-        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, activo=?, destacado=?, descuento_destacado=?, precio_manual_override=? WHERE id=?");
-        $stmt->bind_param('ssssssissdiiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_precio_manual_override, $edit_id);
+        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, activo=?, destacado=?, descuento_destacado=?, orden_gg=?, precio_manual_override=? WHERE id=?");
+        $stmt->bind_param('ssssssissdiiiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_orden_gg, $edit_precio_manual_override, $edit_id);
     }
     $stmt->execute();
     $stmt->close();
@@ -1075,6 +1084,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $activo = isset($_POST['activo']) ? 1 : 0;
     $destacado = isset($_POST['destacado']) ? 1 : 0;
     $descuento_destacado = max(0, min(99, (int) ($_POST['descuento_destacado'] ?? 0)));
+    $orden_gg = ($_POST['orden_gg'] ?? '') !== '' ? max(0, (int) $_POST['orden_gg']) : null;
     $precio_manual_override = isset($_POST['precio_manual_override']) ? 1 : 0;
     $orden = admin_package_next_order($mysqli, $juego_id);
     $imagen_icono = admin_package_store_upload($_FILES['imagen_icono'] ?? []);
@@ -1088,8 +1098,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     if ($provider === 'free_fire' && $monto_ff === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el monto de Free Fire para este paquete.']);
     }
-    $stmt = $mysqli->prepare("INSERT INTO juego_paquetes (juego_id, nombre, clave, monto_ff, paquete_api, api_provider, api_source_key, vender_cuenta, cuenta_texto, cantidad, precio, win_points_reward, imagen_icono, activo, orden, destacado, descuento_destacado, precio_manual_override) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('issssssissdisiiiii', $juego_id, $nombre, $clave, $monto_ff, $paquete_api, $provider, $api_source_key, $vender_cuenta, $cuenta_texto, $cantidad, $precio, $win_points_reward, $imagen_icono, $activo, $orden, $destacado, $descuento_destacado, $precio_manual_override);
+    $stmt = $mysqli->prepare("INSERT INTO juego_paquetes (juego_id, nombre, clave, monto_ff, paquete_api, api_provider, api_source_key, vender_cuenta, cuenta_texto, cantidad, precio, win_points_reward, imagen_icono, activo, orden, destacado, descuento_destacado, orden_gg, precio_manual_override) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('issssssissdisiiiiii', $juego_id, $nombre, $clave, $monto_ff, $paquete_api, $provider, $api_source_key, $vender_cuenta, $cuenta_texto, $cantidad, $precio, $win_points_reward, $imagen_icono, $activo, $orden, $destacado, $descuento_destacado, $orden_gg, $precio_manual_override);
     $stmt->execute();
     $newPackageId = (int) $mysqli->insert_id;
     $stmt->close();
@@ -1457,6 +1467,9 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <label class="form-check-label text-neon" for="paqueteDestacadoCheck">&#9889; Paquete destacado (GG Drops)</label>
             </div>
             <div id="descuentoDestacadoWrap" class="mt-2" style="display:none;">
+                <label class="form-label text-neon small mb-1" for="descuentoDestacadoInput">Orden en GG Drops</label>
+                <input type="number" min="0" max="9999" name="orden_gg" id="ordenGgInput" value="" class="form-control form-control-sm mb-2" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;max-width:120px;" placeholder="Auto">
+                <div class="form-text mb-2" style="color:#8be9fd;">Posición en la sección GG Drops (vacío = automático).</div>
                 <label class="form-label text-neon small mb-1" for="descuentoDestacadoInput">Descuento GG Drops (%)</label>
                 <input type="number" min="0" max="99" name="descuento_destacado" id="descuentoDestacadoInput" value="0" class="form-control form-control-sm" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;max-width:120px;">
                 <div class="form-text" style="color:#8be9fd;">Porcentaje mostrado en la tarjeta (0 = sin descuento).</div>
@@ -2018,6 +2031,9 @@ if (isset($_GET['editar'])) {
             <label class="form-check-label text-neon" for="editPaqueteDestacadoCheck">&#9889; Paquete destacado (GG Drops)</label>
         </div>
         <div id="editDescuentoDestacadoWrap" class="mb-3" style="<?= !empty($paq_edit['destacado']) ? '' : 'display:none;' ?>">
+            <label class="form-label text-neon small mb-1" for="editOrdenGgInput">Orden en GG Drops</label>
+            <input type="number" min="0" max="9999" name="edit_orden_gg" id="editOrdenGgInput" value="<?= $paq_edit['orden_gg'] !== null ? (int) $paq_edit['orden_gg'] : '' ?>" class="form-control form-control-sm mb-2" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;max-width:120px;" placeholder="Auto">
+            <div class="form-text mb-2" style="color:#8be9fd;">Posición en la sección GG Drops (vacío = automático).</div>
             <label class="form-label text-neon small mb-1" for="editDescuentoDestacadoInput">Descuento GG Drops (%)</label>
             <input type="number" min="0" max="99" name="edit_descuento_destacado" id="editDescuentoDestacadoInput" value="<?= (int) ($paq_edit['descuento_destacado'] ?? 0) ?>" class="form-control form-control-sm" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;max-width:120px;">
             <div class="form-text" style="color:#8be9fd;">Porcentaje mostrado en la tarjeta (0 = sin descuento).</div>

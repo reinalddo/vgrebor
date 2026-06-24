@@ -146,6 +146,10 @@ $_ggCheckDesc = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'descuento
 if ($_ggCheckDesc instanceof mysqli_result && $_ggCheckDesc->num_rows === 0) {
   $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN descuento_destacado TINYINT UNSIGNED DEFAULT 0 NULL AFTER destacado");
 }
+$_ggCheckOrdGg = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'orden_gg'");
+if ($_ggCheckOrdGg instanceof mysqli_result && $_ggCheckOrdGg->num_rows === 0) {
+  $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN orden_gg SMALLINT UNSIGNED NULL AFTER descuento_destacado");
+}
 $_ggDropsRes = $mysqli->query(
   "SELECT jp.id, jp.nombre, jp.precio, jp.imagen_icono, jp.juego_id,
           COALESCE(jp.descuento_destacado, 0) AS descuento_destacado,
@@ -154,7 +158,7 @@ $_ggDropsRes = $mysqli->query(
    FROM juego_paquetes jp
    INNER JOIN juegos j ON j.id = jp.juego_id
    WHERE jp.destacado = 1 AND COALESCE(jp.activo, 1) = 1 AND COALESCE(j.activo, 1) = 1
-   ORDER BY jp.orden ASC, jp.id ASC
+   ORDER BY CASE WHEN jp.orden_gg IS NULL THEN 1 ELSE 0 END ASC, jp.orden_gg ASC, jp.orden ASC, jp.id ASC
    LIMIT 20"
 );
 if ($_ggDropsRes instanceof mysqli_result) {
@@ -3255,20 +3259,20 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             if ($dpkgCurrencyId > 0 && isset($gameCurrencyMap[$dpkgCurrencyId])) {
               $dpkgCurrency = $gameCurrencyMap[$dpkgCurrencyId];
               $dpkgConverted = currency_convert_from_base($dpkgPrecio, $dpkgCurrency);
-              $dpkgPriceLabel = strtoupper($dpkgCurrency['clave']) . ' ' . currency_format_amount($dpkgConverted, $dpkgCurrency);
               if ($dpkgDescuento > 0 && $dpkgDescuento < 100) {
-                $dpkgOriginal = $dpkgPrecio / (1 - $dpkgDescuento / 100);
-                $dpkgOriginalConverted = currency_convert_from_base($dpkgOriginal, $dpkgCurrency);
-                $dpkgOriginalLabel = strtoupper($dpkgCurrency['clave']) . ' ' . currency_format_amount($dpkgOriginalConverted, $dpkgCurrency);
+                $dpkgOriginalLabel = strtoupper($dpkgCurrency['clave']) . ' ' . currency_format_amount($dpkgConverted, $dpkgCurrency);
+                $dpkgDiscountedConverted = currency_convert_from_base($dpkgPrecio * (1 - $dpkgDescuento / 100), $dpkgCurrency);
+                $dpkgPriceLabel = strtoupper($dpkgCurrency['clave']) . ' ' . currency_format_amount($dpkgDiscountedConverted, $dpkgCurrency);
               } else {
+                $dpkgPriceLabel = strtoupper($dpkgCurrency['clave']) . ' ' . currency_format_amount($dpkgConverted, $dpkgCurrency);
                 $dpkgOriginalLabel = '';
               }
             } else {
-              $dpkgPriceLabel = '$ ' . number_format($dpkgPrecio, 2);
               if ($dpkgDescuento > 0 && $dpkgDescuento < 100) {
-                $dpkgOriginal = $dpkgPrecio / (1 - $dpkgDescuento / 100);
-                $dpkgOriginalLabel = '$ ' . number_format($dpkgOriginal, 2);
+                $dpkgOriginalLabel = '$ ' . number_format($dpkgPrecio, 2);
+                $dpkgPriceLabel = '$ ' . number_format($dpkgPrecio * (1 - $dpkgDescuento / 100), 2);
               } else {
+                $dpkgPriceLabel = '$ ' . number_format($dpkgPrecio, 2);
                 $dpkgOriginalLabel = '';
               }
             }
