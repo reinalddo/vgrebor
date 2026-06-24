@@ -300,6 +300,10 @@ $winPointsPackageRewards = $winPointsEnabled
 $winPointsRedemptionRules = $winPointsEnabled
   ? win_points_fetch_game_redemption_rules($mysqli, (int) ($game['id'] ?? 0))
   : [];
+$gameHasAnyPointsRule = $winPointsEnabled && !empty(array_filter(
+  $winPointsRedemptionRules,
+  fn($rule) => !empty($rule['activo']) && (int) ($rule['required_points'] ?? 0) > 0
+));
 $paymentHeaderMinimalEnabled = store_config_get('encabezado_pago', '0') === '1';
 $paymentWindowConfigEnabled = store_config_get('ventana_pago_config', '0') === '1';
 $paymentSendingOrderTitle = trim((string) store_config_get('ventana_pago_enviando_titulo', 'Enviando orden...'));
@@ -4731,6 +4735,7 @@ include __DIR__ . "/includes/header.php";
   const paymentSupportWhatsappBase = <?= json_encode($paymentSupportWhatsappBase, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const winPointsState = <?= json_encode([
     'enabled' => $winPointsEnabled,
+    'gameHasAnyRule' => $gameHasAnyPointsRule,
     'loggedIn' => $loggedUserId > 0,
     'name' => $winPointsProgramName,
     'iconUrl' => $winPointsIconUrl,
@@ -6730,7 +6735,7 @@ include __DIR__ . "/includes/header.php";
     const hasPointsRule = Boolean(hasPack && pack.redeemActive && getPackRequiredPoints(pack) > 0);
     const requiredPoints = hasPointsRule ? getPackRequiredPoints(pack) : 0;
     const canUsePointsNow = Boolean(hasPack && canRedeemPackWithPoints(pack));
-    const showPointsOption = Boolean(hasPack && winPointsState.enabled && hasPointsRule);
+    const showPointsOption = Boolean(winPointsState.enabled && (hasPack ? hasPointsRule : winPointsState.gameHasAnyRule));
     const canUseBinancePagonorte = hasPack ? Boolean(canUseBinancePagonorteCheckout(pack)) : Boolean(binancePagonorteCheckoutEnabled && resolveBinancePagonorteCurrencyEntry());
     const canUseBinance = hasPack ? Boolean(canUseBinanceCheckout(pack)) : Boolean(binancePayCheckoutEnabled);
     const canUsePayPal = hasPack
@@ -6890,20 +6895,25 @@ include __DIR__ . "/includes/header.php";
 
     if (selection.showPointsOption) {
       const pointsDisabled = !selection.canUsePointsNow;
-      const pointsNeedText = `Necesitas ${formatWinPointsAmount(selection.requiredPoints || 0)}`;
-      let pointsMeta = pointsNeedText;
-      if (!winPointsState.loggedIn) {
-        pointsMeta = `${pointsNeedText} · Inicia sesión para usarlo`;
-      } else if (!selection.hasPointsRule) {
-        pointsMeta = 'Este paquete no admite canje';
-      } else if (winPointsState.monthlyMinimumMet === false) {
-        const required = Number(winPointsState.monthlyMinimumRequired || 5).toFixed(2);
-        const spent = Number(winPointsState.monthlyMinimumSpent || 0).toFixed(2);
-        pointsMeta = `Restringido · Recarga mínima $${required}/mes (llevas $${spent})`;
-      } else if (selection.canUsePointsNow) {
-        pointsMeta = `${pointsNeedText} · Saldo actual ${formatWinPointsAmount(winPointsState.balance || 0)}`;
+      let pointsMeta = '';
+      if (!hasPack) {
+        pointsMeta = `Saldo actual: ${formatWinPointsAmount(winPointsState.balance || 0)}`;
       } else {
-        pointsMeta = `${pointsNeedText} · Saldo actual ${formatWinPointsAmount(winPointsState.balance || 0)}`;
+        const pointsNeedText = `Necesitas ${formatWinPointsAmount(selection.requiredPoints || 0)}`;
+        pointsMeta = pointsNeedText;
+        if (!winPointsState.loggedIn) {
+          pointsMeta = `${pointsNeedText} · Inicia sesión para usarlo`;
+        } else if (!selection.hasPointsRule) {
+          pointsMeta = 'Este paquete no admite canje';
+        } else if (winPointsState.monthlyMinimumMet === false) {
+          const required = Number(winPointsState.monthlyMinimumRequired || 5).toFixed(2);
+          const spent = Number(winPointsState.monthlyMinimumSpent || 0).toFixed(2);
+          pointsMeta = `Restringido · Recarga mínima $${required}/mes (llevas $${spent})`;
+        } else if (selection.canUsePointsNow) {
+          pointsMeta = `${pointsNeedText} · Saldo actual ${formatWinPointsAmount(winPointsState.balance || 0)}`;
+        } else {
+          pointsMeta = `${pointsNeedText} · Saldo actual ${formatWinPointsAmount(winPointsState.balance || 0)}`;
+        }
       }
       const pointsImageUrl = String(winPointsState.paymentImageUrl || '').trim();
       const pointsCornerMarkup = paymentMethodPublicCornerMarkup(String(winPointsState.paymentCornerImageUrl || '').trim());
@@ -6967,7 +6977,9 @@ include __DIR__ . "/includes/header.php";
     }
 
     if (selection.showPointsOption && !selection.canUsePointsNow) {
-      if (!winPointsState.loggedIn) {
+      if (!hasPack) {
+        paymentMethodCatalogCopy.textContent = `${winPointsState.name || 'Win Points'} seleccionado. Elige un paquete para ver cuántos puntos necesitas.`;
+      } else if (!winPointsState.loggedIn) {
         paymentMethodCatalogCopy.textContent = `${winPointsState.name || 'Win Points'} está activo para este paquete. Inicia sesión para usarlo como método de pago.`;
       } else if (winPointsState.monthlyMinimumMet === false) {
         const required = Number(winPointsState.monthlyMinimumRequired || 5).toFixed(2);
