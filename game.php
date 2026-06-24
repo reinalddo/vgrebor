@@ -10540,15 +10540,13 @@ include __DIR__ . "/includes/header.php";
                   const mode = paymentCancelOrderButton.dataset.mode || 'cancel';
                   if (mode === 'close') {
                     closePaymentModal(true);
-                    resetCheckoutState();
                     return;
                   }
                   if (!activePaymentOrder) {
+                    closePaymentModal(true);
                     return;
                   }
-                  setOverlayVisible(paymentCancelConfirmModal, false);
-                  closePaymentModal(true);
-                  resetCheckoutState();
+                  setOverlayVisible(paymentCancelConfirmModal, true);
                 });
               }
 
@@ -10578,7 +10576,6 @@ include __DIR__ . "/includes/header.php";
                     setOverlayVisible(paymentCancelConfirmModal, false);
                     showToast(data.message || 'Orden cancelada.', 'error');
                     closePaymentModal(true);
-                    resetCheckoutState();
                   })
                   .catch((error) => {
                     setOverlayVisible(paymentCancelConfirmModal, false);
