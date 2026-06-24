@@ -3113,7 +3113,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             display: flex;
             gap: 0.6rem;
             overflow-x: auto;
-            scroll-behavior: smooth;
+            scroll-behavior: auto;
             scrollbar-width: none;
             -ms-overflow-style: none;
             padding-bottom: 0.25rem;
@@ -3213,33 +3213,11 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             margin-left: auto;
             white-space: nowrap;
           }
-          .gg-drops-nav-btn {
-            background: rgba(11,20,32,0.92);
-            border: 1px solid rgba(34,211,238,0.3);
-            color: #22d3ee;
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            flex-shrink: 0;
-            font-size: 1.1rem;
-            line-height: 1;
-            transition: background 0.15s, border-color 0.15s;
-            padding: 0;
-          }
-          .gg-drops-nav-btn:hover { background: rgba(34,211,238,0.12); border-color: rgba(34,211,238,0.6); }
         </style>
-        <div class="d-flex align-items-center justify-content-between mb-3">
+        <div class="d-flex align-items-center mb-3">
           <h2 class="fw-bold mb-0" style="font-family:'Oxanium',sans-serif;font-size:1.1rem;letter-spacing:0.04em;">
             <?= htmlspecialchars(store_config_get('gg_drops_nombre', 'GG DROPS'), ENT_QUOTES, 'UTF-8') ?> <span style="color:#22d3ee;">&#9889;</span>
           </h2>
-          <div class="d-flex gap-2">
-            <button type="button" class="gg-drops-nav-btn" id="gg-drops-prev" aria-label="Anterior">&#8249;</button>
-            <button type="button" class="gg-drops-nav-btn" id="gg-drops-next" aria-label="Siguiente">&#8250;</button>
-          </div>
         </div>
         <div class="gg-drops-track" id="gg-drops-track">
           <?php foreach ($ggDropsPackages as $dpkg):
@@ -3308,16 +3286,31 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         <script>
         (function () {
           var track = document.getElementById('gg-drops-track');
-          var btnPrev = document.getElementById('gg-drops-prev');
-          var btnNext = document.getElementById('gg-drops-next');
-          if (!track || !btnPrev || !btnNext) return;
-          var scrollAmount = 232;
-          btnPrev.addEventListener('click', function () {
-            track.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+          if (!track || track.children.length === 0) return;
+
+          // Duplicate cards for seamless infinite loop
+          Array.from(track.children).forEach(function (card) {
+            track.appendChild(card.cloneNode(true));
           });
-          btnNext.addEventListener('click', function () {
-            track.scrollBy({ left: scrollAmount, behavior: 'smooth' });
-          });
+
+          var speed = 0.8; // px per frame (~48 px/s at 60 fps)
+          var paused = false;
+
+          track.addEventListener('mouseenter', function () { paused = true; });
+          track.addEventListener('mouseleave', function () { paused = false; });
+
+          function tick() {
+            if (!paused) {
+              var half = track.scrollWidth / 2;
+              track.scrollLeft += speed;
+              if (track.scrollLeft >= half) {
+                track.scrollLeft -= half;
+              }
+            }
+            requestAnimationFrame(tick);
+          }
+
+          requestAnimationFrame(tick);
         })();
         </script>
       </section>
