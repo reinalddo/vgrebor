@@ -2616,7 +2616,7 @@ function resolve_order_payment_discount_base_amount(array $order): float {
     return payment_difference_normalize_amount((float) ($order['precio'] ?? 0));
 }
 
-function resolve_order_payment_discount_snapshot(array $order, string $paymentMode, ?array $method = null): array {
+function resolve_order_payment_discount_snapshot(array $order, string $paymentMode, ?array $method = null, ?mysqli $mysqli = null): array {
     $baseAmount = resolve_order_payment_discount_base_amount($order);
     $normalizedMode = in_array($paymentMode, ['money', 'binance_pagonorte', 'binance', 'paypal'], true) ? $paymentMode : '';
     $percentage = 0.0;
@@ -2660,7 +2660,28 @@ function resolve_order_payment_discount_snapshot(array $order, string $paymentMo
     if (!empty(trim((string) ($order['cupon'] ?? '')))) {
         // Cupón aplicado: precio post-cupón está en precio_original
         $rawCouponPrice = (float) ($order['precio_original'] ?? 0);
-        $existingDiscountedPrice = payment_difference_normalize_amount($rawCouponPrice > 0 ? $rawCouponPrice : (float) ($order['precio'] ?? 0));
+        if ($rawCouponPrice > 0) {
+            $existingDiscountedPrice = payment_difference_normalize_amount($rawCouponPrice);
+        } else {
+            // precio_original no fue almacenado (pedido creado antes de esta versión).
+            // Re-consultar el cupón en BD para recuperar el precio con descuento.
+            $recoveredDiscountedPrice = null;
+            if ($mysqli instanceof mysqli) {
+                $savedCouponCode = trim((string) ($order['cupon'] ?? ''));
+                // Usar fetch_coupon_by_code (sin validar vigencia ni límite de usos) porque
+                // el uso ya fue contado al crear el pedido; solo necesitamos los datos del descuento.
+                $recoveredCouponData = fetch_coupon_by_code($mysqli, $savedCouponCode);
+                if ($recoveredCouponData) {
+                    $recoveredDiscountedPrice = payment_difference_normalize_amount(
+                        apply_coupon_to_price($baseAmount, $recoveredCouponData)
+                    );
+                }
+            }
+            if ($recoveredDiscountedPrice !== null) {
+                $existingDiscountedPrice = $recoveredDiscountedPrice;
+            }
+            // Si cupón ya no existe o expiró: $existingDiscountedPrice queda null → el admin debe corregir el pedido.
+        }
         $existingDiscountLabel = 'coupon';
     } elseif ($dropMontoStored > 0.0) {
         // Drop aplicado sin cupón
@@ -2728,7 +2749,7 @@ function resolve_order_payment_discount_snapshot(array $order, string $paymentMo
 
 function persist_order_payment_selection(mysqli $mysqli, array $order, string $paymentMode, ?array $method = null): array {
     $orderId = (int) ($order['id'] ?? 0);
-    $snapshot = resolve_order_payment_discount_snapshot($order, $paymentMode, $method);
+    $snapshot = resolve_order_payment_discount_snapshot($order, $paymentMode, $method, $mysqli);
     if ($orderId <= 0) {
         return [
             'snapshot' => $snapshot,
