@@ -10488,6 +10488,7 @@ include __DIR__ . "/includes/header.php";
                   if (activePaymentOrder) {
                     setActivePaymentMode(mode, methodId, { expandSelected: shouldExpandSinglePaymentOption() });
                   }
+                  updateButtonState();
                 });
               }
 
