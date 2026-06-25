@@ -6393,6 +6393,54 @@ function find_matching_binance_pagonorte_movement_with_retry(
     ];
 }
 
+function find_bank_movement_by_reference_binance_with_retry(
+    mysqli $mysqli,
+    array $config,
+    string $reportedReference,
+    int $requiredDigits,
+    int $orderId,
+    int $attempts = 2,
+    int $delaySeconds = 8,
+    ?array $initialMovements = null
+): array {
+    $attempts = max(1, $attempts);
+    $delaySeconds = max(0, $delaySeconds);
+    $latestMovements = is_array($initialMovements) ? $initialMovements : [];
+    $match = null;
+
+    for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+        if ($attempt > 1 || empty($latestMovements)) {
+            $latestMovements = fetch_and_sync_binance_pagonorte_movements($mysqli, $config);
+        }
+
+        $match = find_bank_movement_by_reference(
+            $mysqli,
+            $latestMovements,
+            $reportedReference,
+            $requiredDigits,
+            $orderId
+        );
+
+        if ($match !== null) {
+            return [
+                'match' => $match,
+                'movements' => $latestMovements,
+                'attempts' => $attempt,
+            ];
+        }
+
+        if ($attempt < $attempts && $delaySeconds > 0) {
+            sleep($delaySeconds);
+        }
+    }
+
+    return [
+        'match' => null,
+        'movements' => $latestMovements,
+        'attempts' => $attempts,
+    ];
+}
+
 function find_bank_movement_by_reference_with_retry(
     mysqli $mysqli,
     array $bankConfig,
@@ -8913,22 +8961,13 @@ if ($action === 'submit_payment') {
 
     $preselectedMatchingMovement = null;
     if ($usesBankValidation || $usesBinancePagonorteValidation) {
-        $preselectedMatchingMovement = $paymentDifferenceEnabled
-            ? find_bank_movement_by_reference(
-                $mysqli,
-                $bankMovements,
-                $referenceNumber,
-                $referenceMatchDigits,
-                $orderId
-            )
-            : find_matching_bank_movement(
-                $mysqli,
-                $bankMovements,
-                $referenceNumber,
-                (float) ($order['precio'] ?? 0),
-                $referenceMatchDigits,
-                $orderId
-            );
+        $preselectedMatchingMovement = find_bank_movement_by_reference(
+            $mysqli,
+            $bankMovements,
+            $referenceNumber,
+            $referenceMatchDigits,
+            $orderId
+        );
     }
 
     $referenceConflict = null;
@@ -8983,8 +9022,18 @@ if ($action === 'submit_payment') {
 
         if ($matchingMovement === null) {
             try {
-                $retryResult = $paymentDifferenceEnabled
-                    ? find_bank_movement_by_reference_with_retry(
+                $retryResult = $usesBinancePagonorteValidation
+                    ? find_bank_movement_by_reference_binance_with_retry(
+                        $mysqli,
+                        $binancePagonorteConfig,
+                        $referenceNumber,
+                        $referenceMatchDigits,
+                        $orderId,
+                        3,
+                        5,
+                        $bankMovements
+                    )
+                    : find_bank_movement_by_reference_with_retry(
                         $mysqli,
                         $bankConfig,
                         $referenceNumber,
@@ -8993,30 +9042,7 @@ if ($action === 'submit_payment') {
                         3,
                         5,
                         $bankMovements
-                    )
-                    : ($usesBinancePagonorteValidation
-                        ? find_matching_binance_pagonorte_movement_with_retry(
-                            $mysqli,
-                            $binancePagonorteConfig,
-                            $referenceNumber,
-                            (float) ($updatedOrder['precio'] ?? 0),
-                            $referenceMatchDigits,
-                            $orderId,
-                            3,
-                            5,
-                            $bankMovements
-                        )
-                        : find_matching_bank_movement_with_retry(
-                            $mysqli,
-                            $bankConfig,
-                            $referenceNumber,
-                            (float) ($updatedOrder['precio'] ?? 0),
-                            $referenceMatchDigits,
-                            $orderId,
-                            3,
-                            5,
-                            $bankMovements
-                        ));
+                    );
                 $matchingMovement = $retryResult['match'];
                 $bankMovements = $retryResult['movements'];
                 error_log('TVG bank validation attempts for order #' . $orderId . ': ' . (int) ($retryResult['attempts'] ?? 1));
