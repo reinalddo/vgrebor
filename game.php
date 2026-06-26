@@ -10203,7 +10203,11 @@ include __DIR__ . "/includes/header.php";
     const showPointsPrices = preferredCheckoutPaymentMode === 'points';
     packCards.forEach(card => {
       const base = parseFloat(card.getAttribute('data-base'));
-      const precio = normalizeCurrencyAmount(base * monedaActualTasa, monedaActualMostrarDecimales);
+      const dropPercent = Math.max(0, Math.min(99, Number(card.getAttribute('data-drop-percent') || 0)));
+      const precioBase = normalizeCurrencyAmount(base * monedaActualTasa, monedaActualMostrarDecimales);
+      const precio = dropPercent > 0
+        ? normalizeCurrencyAmount(precioBase * (1 - dropPercent / 100), monedaActualMostrarDecimales)
+        : precioBase;
       const winPointsActive = card.dataset.winPointsActive === '1';
       const winPointsRequired = Number(card.dataset.winPointsRequired || 0);
       if (showPointsPrices && winPointsActive && winPointsRequired > 0) {
@@ -10216,6 +10220,10 @@ include __DIR__ . "/includes/header.php";
       card.setAttribute('data-price-value', String(precio));
       card.setAttribute('data-show-decimals', monedaActualMostrarDecimales ? '1' : '0');
       card.setAttribute('data-moneda', monedaActualClave);
+      const originalLabel = card.querySelector('.precio-original-label');
+      if (originalLabel) {
+        originalLabel.textContent = formatCurrencyAmount(precioBase, monedaActualMostrarDecimales);
+      }
     });
   }
   updatePackPrices();
