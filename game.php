@@ -10599,35 +10599,7 @@ include __DIR__ . "/includes/header.php";
 
               if (paymentCancelOrderButton) {
                 paymentCancelOrderButton.addEventListener('click', function() {
-                  const mode = paymentCancelOrderButton.dataset.mode || 'cancel';
-                  if (mode === 'close') {
-                    closePaymentModal(true);
-                    return;
-                  }
-                  if (!activePaymentOrder) {
-                    closePaymentModal(true);
-                    return;
-                  }
-                  paymentCancelOrderButton.disabled = true;
-                  fetch(buildAppUrl('/api/pedidos.php'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: `action=cancel_order&order_id=${encodeURIComponent(activePaymentOrder.orderId)}`
-                  })
-                  .then(async (response) => {
-                    const data = await parseApiJsonResponse(response, 'No se pudo cancelar la orden en este momento.');
-                    if (!response.ok || !data.ok) {
-                      throw new Error((data && data.message) ? data.message : 'No se pudo cancelar la orden.');
-                    }
-                    showToast(data.message || 'Orden cancelada.', 'error');
-                    closePaymentModal(true);
-                  })
-                  .catch((error) => {
-                    setPaymentAlert(normalizeApiRequestErrorMessage(error, 'No se pudo cancelar la orden en este momento.'), 'danger');
-                  })
-                  .finally(() => {
-                    paymentCancelOrderButton.disabled = false;
-                  });
+                  closePaymentModal(true);
                 });
               }
 
