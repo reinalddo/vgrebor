@@ -8007,24 +8007,12 @@ if ($action === 'create') {
     }
 
     // ── Descuento máximo: Drop vs Cupón ────────────────────────────────────────
-    // El precio en BD ya trae el drop aplicado (descuento_destacado).
-    // Calculamos precio sin drop para comparar los tres descuentos (drop, cupón, método pago).
-    $packageDropPercent = 0;
-    {
-        $dpStmt = $mysqli->prepare('SELECT COALESCE(descuento_destacado, 0) FROM juego_paquetes WHERE id = ? LIMIT 1');
-        if ($dpStmt) {
-            $dpStmt->bind_param('i', $package_id);
-            $dpStmt->execute();
-            $dpResult = $dpStmt->get_result();
-            $dpRow = $dpResult instanceof mysqli_result ? $dpResult->fetch_row() : null;
-            $dpStmt->close();
-            $packageDropPercent = max(0, min(99, (int) ($dpRow[0] ?? 0)));
-        }
+    $packageDropPercent = max(0, min(99, (int) ($selectedPackage['descuento_destacado'] ?? 0)));
+    // $price aún es el precio base sin drop; aplicar el drop ahora
+    $priceBeforeDrop = $price;
+    if ($packageDropPercent > 0) {
+        $price = currency_apply_amount_rule($priceBeforeDrop * (1 - $packageDropPercent / 100), $selectedCurrency);
     }
-    // Precio original antes del drop (precio de lista sin ningún descuento)
-    $priceBeforeDrop = $packageDropPercent > 0
-        ? currency_apply_amount_rule(round($price / (1 - $packageDropPercent / 100), 4), $selectedCurrency)
-        : $price;
     $dropSavings = max(0.0, round($priceBeforeDrop - $price, 4));
 
     // Comparar drop vs cupón: solo el mayor aplica
