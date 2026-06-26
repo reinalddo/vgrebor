@@ -10808,11 +10808,10 @@ include __DIR__ . "/includes/header.php";
                     const nextState = String((data && data.estado) || '').toLowerCase();
                     const providerFlow = String((data && data.provider_flow) || '').toLowerCase();
                     if (nextState === 'enviado') {
-                      const successMessage = data.message || (getAccountSalePayload(data)
+                      const isAccountSaleResult = !!getAccountSalePayload(data);
+                      const successMessage = isAccountSaleResult
                         ? (paymentMode === 'points' ? 'Canje realizado y cuenta entregada correctamente.' : 'La cuenta fue entregada correctamente.')
-                        : (paymentMode === 'points'
-                          ? 'Canje realizado y recarga procesada correctamente.'
-                          : 'La recarga fue procesada correctamente.'));
+                        : (paymentMode === 'points' ? 'Canje realizado y recarga procesada correctamente.' : 'Tu recarga fue procesada y enviada correctamente.');
                       const successNote = buildBloodStrikeEliteDiscordSuccessNote(data);
                       setPaymentAlert(successMessage, 'success', { extraMessage: successNote });
                       renderDeliveredCodes(data);
@@ -10820,7 +10819,10 @@ include __DIR__ . "/includes/header.php";
                       setPaymentFormDisabled(true);
                       clearPaymentTimer();
                       setCancelOrderButtonMode('close');
-                      showPaymentStatusModal('Operación exitosa', successMessage, 'success', { extraMessage: successNote });
+                      if (!isAccountSaleResult) {
+                        paymentStatusShouldCloseAll = true;
+                      }
+                      showPaymentStatusModal('¡Recarga Exitosa!', successMessage, 'success', { extraMessage: successNote });
                       return;
                     }
 
@@ -10871,8 +10873,9 @@ include __DIR__ . "/includes/header.php";
                       const successPresentation = isAcceptedFlow ? successfulProviderPendingPresentation(effectiveProviderFlow, data) : null;
                       const paidNote = requiresManualReview ? '' : buildBloodStrikeEliteDiscordSuccessNote(data);
 
+                      const completedMsg = 'Tu recarga fue procesada y enviada correctamente.';
                       setPaymentAlert(
-                        isCompletedFlow ? paidMessage : (successPresentation ? successPresentation.message : paidMessage),
+                        isCompletedFlow ? completedMsg : (successPresentation ? successPresentation.message : paidMessage),
                         requiresManualReview ? 'warning' : (isCompletedFlow ? 'success' : (successPresentation ? (successPresentation.statusType || 'info') : 'success')),
                         { extraMessage: paidNote }
                       );
@@ -10885,9 +10888,12 @@ include __DIR__ . "/includes/header.php";
                       setPaymentFormDisabled(true);
                       clearPaymentTimer();
                       setCancelOrderButtonMode('close');
+                      if (isCompletedFlow) {
+                        paymentStatusShouldCloseAll = true;
+                      }
                       showPaymentStatusModal(
-                        requiresManualReview ? 'Revisión requerida' : (isCompletedFlow ? 'Operación exitosa' : (successPresentation ? successPresentation.title : 'Operación exitosa')),
-                        isCompletedFlow ? paidMessage : (successPresentation ? successPresentation.message : paidMessage),
+                        requiresManualReview ? 'Revisión requerida' : (isCompletedFlow ? '¡Recarga Exitosa!' : (successPresentation ? successPresentation.title : 'Operación exitosa')),
+                        isCompletedFlow ? completedMsg : (successPresentation ? successPresentation.message : paidMessage),
                         requiresManualReview ? 'danger' : (isCompletedFlow ? 'success' : (successPresentation ? (successPresentation.statusType || 'info') : 'success')),
                         { extraMessage: paidNote }
                       );
