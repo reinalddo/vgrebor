@@ -670,7 +670,7 @@ include __DIR__ . "/includes/header.php";
         const dropPercent = Math.max(0, Math.min(99, Number(card.getAttribute('data-drop-percent') || 0)));
         const precioBase = normalizeCurrencyAmount(base * monedaActualTasa, monedaActualMostrarDecimales);
         const precio = dropPercent > 0
-          ? normalizeCurrencyAmount(precioBase * (1 - dropPercent / 100), monedaActualMostrarDecimales)
+          ? normalizeCurrencyAmount(base * monedaActualTasa * (1 - dropPercent / 100), monedaActualMostrarDecimales)
           : precioBase;
         card.querySelector('.precio-label').textContent = formatCurrencyAmount(precio, monedaActualMostrarDecimales);
         card.querySelector('.moneda-label').textContent = monedaActualClave;
@@ -10206,7 +10206,7 @@ include __DIR__ . "/includes/header.php";
       const dropPercent = Math.max(0, Math.min(99, Number(card.getAttribute('data-drop-percent') || 0)));
       const precioBase = normalizeCurrencyAmount(base * monedaActualTasa, monedaActualMostrarDecimales);
       const precio = dropPercent > 0
-        ? normalizeCurrencyAmount(precioBase * (1 - dropPercent / 100), monedaActualMostrarDecimales)
+        ? normalizeCurrencyAmount(base * monedaActualTasa * (1 - dropPercent / 100), monedaActualMostrarDecimales)
         : precioBase;
       const winPointsActive = card.dataset.winPointsActive === '1';
       const winPointsRequired = Number(card.dataset.winPointsRequired || 0);
