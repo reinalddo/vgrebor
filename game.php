@@ -457,6 +457,12 @@ include __DIR__ . "/includes/header.php";
             $priceSyncQueue[] = ['id' => (int) ($pack['id'] ?? 0), 'precio' => $precio_base];
         }
         $precio_mostrar = $moneda_actual ? currency_convert_from_base($precio_base, $moneda_actual) : currency_apply_amount_rule($precio_base, null);
+        $packDropPercent = max(0, min(99, (int) ($pack['descuento_destacado'] ?? 0)));
+        $precio_mostrar_con_drop = $packDropPercent > 0
+            ? ($moneda_actual
+                ? currency_convert_from_base($precio_base * (1 - $packDropPercent / 100), $moneda_actual)
+                : currency_apply_amount_rule($precio_base * (1 - $packDropPercent / 100), null))
+            : $precio_mostrar;
         $clave_moneda = $moneda_actual['clave'] ?? 'USD';
         $mostrarDecimales = $moneda_actual ? currency_should_show_decimals($moneda_actual) : true;
         $packId = (int) ($pack['id'] ?? 0);
@@ -509,7 +515,7 @@ include __DIR__ . "/includes/header.php";
           data-base-currency="<?= htmlspecialchars($clave_moneda) ?>"
           data-name="<?= htmlspecialchars($pack['nombre'], ENT_QUOTES, 'UTF-8') ?>"
           data-cantidad="<?= htmlspecialchars($pack['cantidad'], ENT_QUOTES, 'UTF-8') ?>"
-          data-price-value="<?= htmlspecialchars((string) $precio_mostrar, ENT_QUOTES, 'UTF-8') ?>"
+          data-price-value="<?= htmlspecialchars((string) $precio_mostrar_con_drop, ENT_QUOTES, 'UTF-8') ?>"
           data-show-decimals="<?= $mostrarDecimales ? '1' : '0' ?>"
           data-required-fields="<?= htmlspecialchars(json_encode($apiRequiredFields, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8') ?>"
           data-win-points-reward="<?= $packWinPointsReward ?>"
@@ -553,9 +559,15 @@ include __DIR__ . "/includes/header.php";
               <?php endif; ?>
               <div class="pack-card-footer">
                 <span class="moneda-label"><?= htmlspecialchars($clave_moneda) ?></span>
-                <span class="precio-label">
-                  <?= currency_format_amount($precio_mostrar, $moneda_actual) ?>
-                </span>
+                <div class="pack-card-price-block">
+                  <?php if ($packDropPercent > 0): ?>
+                    <div class="pack-card-drop-row">
+                      <span class="pack-card-drop-badge">-<?= $packDropPercent ?>%</span>
+                      <span class="precio-original-label"><?= currency_format_amount($precio_mostrar, $moneda_actual) ?></span>
+                    </div>
+                  <?php endif; ?>
+                  <span class="precio-label"><?= currency_format_amount($precio_mostrar_con_drop, $moneda_actual) ?></span>
+                </div>
               </div>
               <?php if ($winPointsEnabled && $packWinPointsReward > 0): ?>
                 <div class="pack-win-points-badge">
@@ -655,12 +667,20 @@ include __DIR__ . "/includes/header.php";
     function updatePackPrices() {
       packCards.forEach(card => {
         const base = parseFloat(card.getAttribute('data-base'));
-        const precio = normalizeCurrencyAmount(base * monedaActualTasa, monedaActualMostrarDecimales);
+        const dropPercent = Math.max(0, Math.min(99, Number(card.getAttribute('data-drop-percent') || 0)));
+        const precioBase = normalizeCurrencyAmount(base * monedaActualTasa, monedaActualMostrarDecimales);
+        const precio = dropPercent > 0
+          ? normalizeCurrencyAmount(precioBase * (1 - dropPercent / 100), monedaActualMostrarDecimales)
+          : precioBase;
         card.querySelector('.precio-label').textContent = formatCurrencyAmount(precio, monedaActualMostrarDecimales);
         card.querySelector('.moneda-label').textContent = monedaActualClave;
         card.setAttribute('data-price-value', String(precio));
         card.setAttribute('data-show-decimals', monedaActualMostrarDecimales ? '1' : '0');
         card.setAttribute('data-moneda', monedaActualClave);
+        const originalLabel = card.querySelector('.precio-original-label');
+        if (originalLabel) {
+          originalLabel.textContent = formatCurrencyAmount(precioBase, monedaActualMostrarDecimales);
+        }
       });
     }
     updatePackPrices();
@@ -4057,6 +4077,40 @@ include __DIR__ . "/includes/header.php";
     font-weight: 800;
     line-height: 1;
     text-shadow: 0 0 12px rgba(var(--theme-price-text-rgb), 0.16);
+  }
+
+  .pack-card-price-block {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.1rem;
+  }
+
+  .pack-card-drop-row {
+    display: flex;
+    align-items: center;
+    gap: 0.22rem;
+  }
+
+  .precio-original-label {
+    color: var(--theme-price-muted);
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-decoration: line-through;
+    opacity: 0.55;
+    line-height: 1;
+  }
+
+  .pack-card-drop-badge {
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.55rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    padding: 0.1rem 0.28rem;
+    border-radius: 0.25rem;
+    line-height: 1.4;
+    flex-shrink: 0;
   }
 
   .neon-selected {
