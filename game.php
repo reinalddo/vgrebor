@@ -4875,6 +4875,7 @@ include __DIR__ . "/includes/header.php";
     discountType: '',
     discountValue: 0,
   };
+  let paymentStatusShouldCloseAll = false;
   const paymentStatusModal = document.getElementById('payment-status-modal');
   const paymentStatusModalTitle = document.getElementById('payment-status-modal-title');
   const paymentStatusModalMessage = document.getElementById('payment-status-modal-message');
@@ -8461,15 +8462,19 @@ include __DIR__ . "/includes/header.php";
       if (nextState === 'enviado') {
         clearPaymentStatusPolling();
         renderDeliveredCodes(data);
-        const successMessage = getAccountSalePayload(data)
+        const isAccountSaleResult = !!getAccountSalePayload(data);
+        const successMessage = isAccountSaleResult
           ? 'Pago verificado y cuenta entregada correctamente.'
-          : 'Pago verificado y recarga procesada correctamente.';
+          : 'Tu recarga fue procesada y enviada correctamente.';
         const successNote = buildBloodStrikeEliteDiscordSuccessNote(data);
         setPaymentAlert(successMessage, 'success', { extraMessage: successNote });
         setPaymentFormDisabled(true);
         clearPaymentTimer();
         setCancelOrderButtonMode('close');
-        showPaymentStatusModal('Operación exitosa', successMessage, 'success', { extraMessage: successNote });
+        if (!isAccountSaleResult) {
+          paymentStatusShouldCloseAll = true;
+        }
+        showPaymentStatusModal('¡Recarga Exitosa!', successMessage, 'success', { extraMessage: successNote });
         return;
       }
 
@@ -8495,13 +8500,15 @@ include __DIR__ . "/includes/header.php";
 
         if (isCompletedFlow) {
           clearPaymentStatusPolling();
+          paymentStatusShouldCloseAll = true;
           const successNote = buildBloodStrikeEliteDiscordSuccessNote(data);
-          setPaymentAlert(paidMessage, 'success', { extraMessage: successNote });
+          const completedMsg = 'Tu recarga fue procesada y enviada correctamente.';
+          setPaymentAlert(completedMsg, 'success', { extraMessage: successNote });
           clearPaymentSupportUi();
           setPaymentFormDisabled(true);
           clearPaymentTimer();
           setCancelOrderButtonMode('close');
-          showPaymentStatusModal('Operación exitosa', paidMessage, 'success', { extraMessage: successNote });
+          showPaymentStatusModal('¡Recarga Exitosa!', completedMsg, 'success', { extraMessage: successNote });
           return;
         }
 
@@ -8532,13 +8539,15 @@ include __DIR__ . "/includes/header.php";
 
         if (isCompletedFlow) {
           clearPaymentStatusPolling();
+          paymentStatusShouldCloseAll = true;
           const successNote = buildBloodStrikeEliteDiscordSuccessNote(data);
-          setPaymentAlert(paidMessage, 'success', { extraMessage: successNote });
+          const completedMsg = 'Tu recarga fue procesada y enviada correctamente.';
+          setPaymentAlert(completedMsg, 'success', { extraMessage: successNote });
           clearPaymentSupportUi();
           setPaymentFormDisabled(true);
           clearPaymentTimer();
           setCancelOrderButtonMode('close');
-          showPaymentStatusModal('Operación exitosa', paidMessage, 'success', { extraMessage: successNote });
+          showPaymentStatusModal('¡Recarga Exitosa!', completedMsg, 'success', { extraMessage: successNote });
           return;
         }
 
@@ -8911,7 +8920,13 @@ include __DIR__ . "/includes/header.php";
     paymentStatusModalAccept.addEventListener('click', function() {
       clearPaymentStatusPolling();
       setOverlayVisible(paymentStatusModal, false);
-      scrollPaymentSubmitIntoView();
+      if (paymentStatusShouldCloseAll) {
+        paymentStatusShouldCloseAll = false;
+        closePaymentModal(true);
+        resetCheckoutState();
+      } else {
+        scrollPaymentSubmitIntoView();
+      }
     });
   }
 
@@ -10071,6 +10086,7 @@ include __DIR__ . "/includes/header.php";
   }
 
   function closePaymentModal(resetState) {
+    paymentStatusShouldCloseAll = false;
     clearPaymentTimer();
     setOverlayVisible(paymentModal, false);
     setPaymentAlert('', 'info');
