@@ -10739,6 +10739,9 @@ include __DIR__ . "/includes/header.php";
                   })
                   .then(async (response) => {
                     const data = await parseApiJsonResponse(response, 'No pudimos validar tu pago en este momento. Espera 1 minuto y vuelve a intentarlo.');
+                    if (data && data.api_error) {
+                      console.log('Error API:', data.api_error);
+                    }
                     if (!response.ok || !data.ok) {
                       throw new Error((data && data.message) ? data.message : 'No se pudieron guardar los datos del pago.');
                     }

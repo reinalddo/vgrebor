@@ -8946,7 +8946,7 @@ if ($action === 'submit_payment') {
                 ? fetch_and_sync_binance_pagonorte_movements($mysqli, $binancePagonorteConfig)
                 : fetch_and_sync_bank_movements($mysqli, $bankConfig);
         } catch (Throwable $e) {
-            json_error('Su Pago está en proceso, Espere 1 min y vuelva a intentar', 502);
+            json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $e->getMessage()], 502);
         }
 
         if ($bankFlowRequested && !$usesBankValidation && !$usesBinancePagonorteValidation) {
@@ -9047,7 +9047,7 @@ if ($action === 'submit_payment') {
                 $bankMovements = $retryResult['movements'];
                 error_log('TVG bank validation attempts for order #' . $orderId . ': ' . (int) ($retryResult['attempts'] ?? 1));
             } catch (Throwable $e) {
-                json_error('Su Pago está en proceso, Espere 1 min y vuelva a intentar', 502);
+                json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $e->getMessage()], 502);
             }
         }
 
