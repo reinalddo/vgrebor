@@ -10773,6 +10773,8 @@ include __DIR__ . "/includes/header.php";
                     const cedulaVal = paymentCedulaInput ? paymentCedulaInput.value.trim() : '';
                     if (nombreVal) defaultPaymentNombre = nombreVal;
                     if (cedulaVal) defaultPaymentCedula = cedulaVal;
+                    const lastUsedIdentifier = activePaymentOrder && activePaymentOrder.userId ? String(activePaymentOrder.userId).trim() : '';
+                    if (lastUsedIdentifier) defaultOrderUserIdentifier = lastUsedIdentifier;
 
                     setOverlayVisible(loadingModal, false);
 
