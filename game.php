@@ -4758,7 +4758,7 @@ include __DIR__ . "/includes/header.php";
   const appBasePath = <?= json_encode($scriptDir, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const rememberLastPurchaseIdentifierEnabled = <?= $rememberLastPurchaseIdentifierEnabled ? 'true' : 'false' ?>;
   const defaultOrderEmail = <?= json_encode($loggedUserEmail, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
-  let defaultOrderUserIdentifier = <?= json_encode($loggedUserLastPurchaseIdentifier, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+  let defaultOrderUserIdentifier = <?= json_encode($loggedUserLastPurchaseIdentifier, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?> || localStorage.getItem('rbs_player_id') || '';
   let defaultPaymentPhone = <?= json_encode($loggedUserLastPurchasePhone, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   let defaultPaymentNombre = <?= json_encode($loggedUserLastPurchaseNombre, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   let defaultPaymentCedula = <?= json_encode($loggedUserLastPurchaseCedula, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
@@ -11096,6 +11096,7 @@ include __DIR__ . "/includes/header.php";
                 const userId = typeof options.forceUserId === 'string'
                   ? options.forceUserId.trim()
                   : (playerPrimaryInput ? playerPrimaryInput.value.trim() : '');
+                if (userId) { defaultOrderUserIdentifier = userId; localStorage.setItem('rbs_player_id', userId); }
                 const playerFields = options.forcePlayerFields && typeof options.forcePlayerFields === 'object'
                   ? options.forcePlayerFields
                   : collectPlayerFields();
