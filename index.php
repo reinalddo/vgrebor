@@ -71,6 +71,26 @@ if ($startupPopupShouldRender) {
   }
 }
 include __DIR__ . "/includes/header.php";
+?><script>
+(function () {
+  var hash = window.location.hash;
+  if (!hash || !/^#cat-/.test(hash)) return;
+  // Remove hash now so the browser never attempts its own anchor scroll
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+  window.addEventListener('load', function () {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        var el = document.querySelector(hash);
+        if (!el) return;
+        var headerEl = document.querySelector('.site-header-topbar');
+        var headerH  = headerEl ? headerEl.getBoundingClientRect().height : 70;
+        var top = el.getBoundingClientRect().top + window.scrollY - headerH - 16;
+        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      });
+    });
+  });
+})();
+</script><?php
 require_once __DIR__ . '/includes/roulette.php';
 home_gallery_ensure_table();
 $galleryItems = home_gallery_all();
@@ -3385,7 +3405,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         <?php if ($todosActivo):
           $dtTodosImg = $todosCategory['imagen'] !== '' && in_array($todosCategory['mostrar_menu'], ['imagen', 'imagen_texto'], true);
         ?>
-        <section class="dest-category-section mt-0 mb-5" data-sect-cat="all" data-aos="fade-up">
+        <section class="dest-category-section mt-0 mb-5" data-sect-cat="all" id="cat-<?= htmlspecialchars($todosCategory['slug'] ?? 'todos', ENT_QUOTES, 'UTF-8') ?>" data-aos="fade-up">
           <div class="dest-section-header">
             <?php if ($dtTodosImg): ?>
               <h2 class="dest-section-title"><?= htmlspecialchars($todosCategory['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
@@ -3406,7 +3426,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         <?php foreach ($destacadaCategories as $dcat):
           $dtUsaImagen = $dcat['imagen'] !== '' && in_array($dcat['mostrar_menu'], ['imagen', 'imagen_texto'], true);
         ?>
-        <section class="dest-category-section mb-5" data-sect-cat="<?= (int)$dcat['id'] ?>" data-aos="fade-up">
+        <section class="dest-category-section mb-5" data-sect-cat="<?= (int)$dcat['id'] ?>" id="cat-<?= htmlspecialchars($dcat['slug'], ENT_QUOTES, 'UTF-8') ?>" data-aos="fade-up">
           <div class="dest-section-header">
             <?php if ($dtUsaImagen): ?>
               <h2 class="dest-section-title"><?= htmlspecialchars($dcat['nombre'], ENT_QUOTES, 'UTF-8') ?></h2>
@@ -5103,6 +5123,7 @@ RLTSCRIPT;
 ?>
 <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
 <script>AOS.init({duration:750,easing:'ease-out-cubic',once:true,offset:60});</script>
+
 <?php
 include __DIR__ . "/includes/footer.php";
 ?>

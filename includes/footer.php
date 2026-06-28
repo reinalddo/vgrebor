@@ -1270,21 +1270,17 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
           <div class="col-lg-3 col-md-6">
             <h4 class="tvg-footer-col-title">EXPLORAR</h4>
             <ul class="tvg-footer-links">
-              <?php foreach ($footerCol2Items as $i => $item): ?>
-                <?php $url = $footerCol2Links[$i]['url'] ?? ''; $tgt = $footerCol2Links[$i]['target'] ?? '_self'; ?>
+              <?php foreach ($footerCol2Items as $i => $item):
+                $catSlug = trim($footerCol2Links[$i]['url'] ?? '');
+                if ($catSlug === '') continue;
+                $catHref = '/#cat-' . rawurlencode($catSlug);
+              ?>
                 <li class="tvg-footer-link-item">
                   <span class="tvg-footer-link-icon"><?= $item['icon'] ?></span>
-                  <?php if ($url !== ''): ?>
-                    <a href="<?= htmlspecialchars($url, ENT_QUOTES, 'UTF-8') ?>"<?= $tgt === '_blank' ? ' target="_blank" rel="noopener noreferrer"' : '' ?> class="tvg-footer-link">
-                      <?= htmlspecialchars($item['text'], ENT_QUOTES, 'UTF-8') ?>
-                      <?php if ($item['sub'] !== ''): ?><br><span class="tvg-footer-link-sub"><?= htmlspecialchars($item['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
-                    </a>
-                  <?php else: ?>
-                    <span class="tvg-footer-link">
-                      <?= htmlspecialchars($item['text'], ENT_QUOTES, 'UTF-8') ?>
-                      <?php if ($item['sub'] !== ''): ?><br><span class="tvg-footer-link-sub"><?= htmlspecialchars($item['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
-                    </span>
-                  <?php endif; ?>
+                  <a href="<?= htmlspecialchars($catHref, ENT_QUOTES, 'UTF-8') ?>" class="tvg-footer-link tvg-cat-anchor-link" data-cat-slug="<?= htmlspecialchars($catSlug, ENT_QUOTES, 'UTF-8') ?>">
+                    <?= htmlspecialchars($item['text'], ENT_QUOTES, 'UTF-8') ?>
+                    <?php if ($item['sub'] !== ''): ?><br><span class="tvg-footer-link-sub"><?= htmlspecialchars($item['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                  </a>
                 </li>
               <?php endforeach; ?>
             </ul>
@@ -1423,7 +1419,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       height: 16px;
     }
     .tvg-footer-col-title {
-      font-size: .7rem;
+      font-size: 1.4rem;
       font-weight: 800;
       letter-spacing: .14em;
       color: var(--theme-highlight, #8b5cf6);
@@ -1548,6 +1544,28 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       .tvg-footer-top { padding: 2rem 0 1.2rem; }
     }
   </style>
+  <script>
+  (function () {
+    function tvgScrollToEl(el) {
+      var headerEl = document.querySelector('.site-header-topbar');
+      var headerH  = headerEl ? headerEl.getBoundingClientRect().height : 70;
+      var top = el.getBoundingClientRect().top + window.scrollY - headerH - 16;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+    }
+    var isHome = window.location.pathname === '/' || window.location.pathname === '/index.php';
+    document.querySelectorAll('a.tvg-cat-anchor-link').forEach(function (link) {
+      link.addEventListener('click', function (e) {
+        var slug = link.dataset.catSlug;
+        if (!slug) return;
+        var target = document.getElementById('cat-' + slug);
+        if (isHome && target) {
+          e.preventDefault();
+          tvgScrollToEl(target);
+        }
+      });
+    });
+  })();
+  </script>
   <?php else: ?>
   <?php if ($hasFacebook || $hasInstagram || $hasTiktok): ?>
     <div class="social-footer-shell social-footer-shell-public mt-5" role="contentinfo">

@@ -11,6 +11,7 @@ require_once __DIR__ . '/includes/google_oauth.php';
 require_once __DIR__ . '/includes/win_points.php';
 require_once __DIR__ . '/includes/api_discord.php';
 require_once __DIR__ . '/includes/blocked_players.php';
+require_once __DIR__ . '/includes/game_categories.php';
 
 $cfg = store_config_all();
 $paymentMethodDiscountsEnabled = trim((string) ($cfg['descuento_metodo_pago'] ?? store_config_get('descuento_metodo_pago', '0'))) === '1';
@@ -3244,6 +3245,29 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
               ['text' => 'Tarjetas de Regalo', 'sub' => '(Gift Cards PS, Xbox, Amazon)'],
               ['text' => 'Otros Servicios', 'sub' => '(Recargas Zinli, TikTok monedas, venta cuentas)'],
             ];
+            // Categorías visibles en inicio para dropdown de anclas (todos + destacadas con juegos)
+            $footerCatOptions = [];
+            if (function_exists('game_categories_ensure_schema')) {
+                game_categories_ensure_schema($mysqli);
+                $fcatRes = $mysqli->query(
+                    "SELECT DISTINCT jc.id, jc.nombre, jc.slug, COALESCE(jc.es_todos,0) AS es_todos
+                     FROM juego_categorias jc
+                     WHERE jc.activa = 1
+                       AND (
+                           COALESCE(jc.es_todos, 0) = 1
+                           OR (
+                               COALESCE(jc.destacada, 0) = 1
+                               AND EXISTS (SELECT 1 FROM juego_categoria_asignada a WHERE a.categoria_id = jc.id)
+                           )
+                       )
+                     ORDER BY jc.es_todos DESC, jc.orden ASC, jc.nombre ASC"
+                );
+                if ($fcatRes instanceof mysqli_result) {
+                    while ($fcatRow = $fcatRes->fetch_assoc()) {
+                        $footerCatOptions[] = $fcatRow;
+                    }
+                }
+            }
             $footerCol3Labels = [
               ['text' => '¿Cómo comprar?'],
               ['text' => 'Preguntas Frecuentes (FAQ)'],
@@ -3297,21 +3321,20 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
 
               <!-- Sección 2: Columna Explorar -->
               <h5 class="fw-bold text-info mb-3 mt-2">Sección 2 — Columna EXPLORAR</h5>
+              <div class="small text-secondary mb-3">Cada ítem se enlaza a una categoría del inicio. Al hacer clic, el visitante será llevado directamente a esa sección con desplazamiento suave.</div>
               <div class="mb-4">
                 <?php foreach ($footerCol2Labels as $i => $label): ?>
                   <div class="mb-3 p-3 rounded-3" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
                     <div class="fw-semibold text-light mb-2"><?= htmlspecialchars($label['text'], ENT_QUOTES, 'UTF-8') ?><?php if (!empty($label['sub'])): ?> <span class="text-secondary fw-normal small"><?= htmlspecialchars($label['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></div>
-                    <div class="row g-2">
-                      <div class="col-md-8">
-                        <input type="text" name="footer_col2_url[]" value="<?= htmlspecialchars($footerCol2Links[$i]['url'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" placeholder="URL o ancla (ej: /juegos, #recargas, https://...)">
-                      </div>
-                      <div class="col-md-4">
-                        <select name="footer_col2_target[]" class="form-select form-select-sm">
-                          <option value="_self" <?= ($footerCol2Links[$i]['target'] ?? '_self') === '_self' ? 'selected' : '' ?>>Misma pestaña</option>
-                          <option value="_blank" <?= ($footerCol2Links[$i]['target'] ?? '') === '_blank' ? 'selected' : '' ?>>Nueva pestaña</option>
-                        </select>
-                      </div>
-                    </div>
+                    <select name="footer_col2_url[]" class="form-select form-select-sm">
+                      <option value="">— Sin enlace —</option>
+                      <?php foreach ($footerCatOptions as $fcat): ?>
+                        <option value="<?= htmlspecialchars($fcat['slug'], ENT_QUOTES, 'UTF-8') ?>" <?= ($footerCol2Links[$i]['url'] ?? '') === $fcat['slug'] ? 'selected' : '' ?>>
+                          <?= htmlspecialchars($fcat['nombre'], ENT_QUOTES, 'UTF-8') ?><?= !empty($fcat['es_todos']) ? ' (Sistema — Todos los juegos)' : '' ?>
+                        </option>
+                      <?php endforeach; ?>
+                    </select>
+                    <input type="hidden" name="footer_col2_target[]" value="_self">
                   </div>
                 <?php endforeach; ?>
               </div>
