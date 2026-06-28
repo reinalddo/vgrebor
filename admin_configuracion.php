@@ -27,7 +27,7 @@ $binanceApiTabEnabled = store_config_get('api_binance', '0') === '1';
 $binancePagonorteTabEnabled = store_config_get('api_binance_pagonorte', '0') === '1';
 $paypalTabEnabled = store_config_get('pago_paypal', '0') === '1';
 $discordApiTabEnabled = store_config_get('api_discord', '0') === '1';
-$allowedTabs = ['correo', 'cabecera', 'sociales', 'api-banco', 'api-free-fire', 'personalizar-colores', 'galeria', 'metodos-pago', 'bloqueo-jugadores'];
+$allowedTabs = ['correo', 'cabecera', 'sociales', 'api-banco', 'api-free-fire', 'personalizar-colores', 'galeria', 'metodos-pago', 'bloqueo-jugadores', 'footer'];
 if ($binanceApiTabEnabled) {
   $allowedTabs[] = 'api-binance';
 }
@@ -54,6 +54,14 @@ home_gallery_ensure_table();
 payment_methods_ensure_table();
 blocked_players_ensure_table();
 $blockedPlayerItems = blocked_players_all();
+$footerNewEnabled  = trim((string) ($cfg['footer_nuevo_activo'] ?? '0')) === '1';
+$footerLogoUrl     = trim((string) ($cfg['footer_logo_url'] ?? ''));
+$footerCopyright   = trim((string) ($cfg['footer_copyright'] ?? ''));
+$footerCol2Links   = store_config_footer_col_links(2);
+$footerCol3Links   = store_config_footer_col_links(3);
+$footerCol4Links   = store_config_footer_col_links(4);
+$footerPaymentLogos = store_config_footer_payment_logos();
+
 $logoTienda = trim((string) ($cfg['logo_tienda'] ?? ''));
 $publicBackgroundSettings = store_config_public_background_settings();
 $publicAnimatedBackgroundEnabled = !empty($publicBackgroundSettings['enabled']);
@@ -1157,13 +1165,16 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
           <div class="neon-tabs-item">
             <a href="/admin/configuracion?tab=bloqueo-jugadores" class="neon-tab-link <?= $activeTab === 'bloqueo-jugadores' ? 'active' : '' ?>">Bloqueo Id de Usuario</a>
           </div>
+          <div class="neon-tabs-item">
+            <a href="/admin/configuracion?tab=footer" class="neon-tab-link <?= $activeTab === 'footer' ? 'active' : '' ?>">Footer</a>
+          </div>
         </div>
       </div>
 
       <div class="card neon-card mb-4">
         <div class="card-header text-center py-4" style="background: linear-gradient(90deg, var(--theme-highlight) 0%, var(--theme-success) 100%); color: var(--theme-button-text-strong); border-radius: 16px 16px 0 0;">
           <h2 class="h4 fw-bold mb-0" style="font-family: 'Oxanium', 'Montserrat', 'Arial', sans-serif; letter-spacing: 0.08em;">
-            <?php if ($activeTab === 'correo'): ?>Configuración de correo corporativo<?php elseif ($activeTab === 'cabecera'): ?>Datos de cabecera<?php elseif ($activeTab === 'notificaciones-recargas'): ?>Notificaciones Recargas<?php elseif ($activeTab === 'sociales'): ?>Redes Sociales<?php elseif ($activeTab === 'api-banco'): ?>Datos conexión Banco<?php elseif ($activeTab === 'api-free-fire'): ?>Datos API<?php elseif ($activeTab === 'api-binance'): ?>API Binance Pay<?php elseif ($activeTab === 'verificacion-binance'): ?>Verificación Binance<?php elseif ($activeTab === 'paypal'): ?>Paypal<?php elseif ($activeTab === 'api-discord'): ?>API Discord<?php elseif ($activeTab === 'personalizar-colores'): ?>Personalizar Colores<?php elseif ($activeTab === 'ventana-inicial'): ?>Ventana Inicial<?php elseif ($activeTab === 'galeria'): ?>Galería principal del index<?php elseif ($activeTab === 'bloqueo-jugadores'): ?>Bloqueo de Id de Usuario<?php else: ?>Métodos de Pago<?php endif; ?>
+            <?php if ($activeTab === 'correo'): ?>Configuración de correo corporativo<?php elseif ($activeTab === 'cabecera'): ?>Datos de cabecera<?php elseif ($activeTab === 'notificaciones-recargas'): ?>Notificaciones Recargas<?php elseif ($activeTab === 'sociales'): ?>Redes Sociales<?php elseif ($activeTab === 'api-banco'): ?>Datos conexión Banco<?php elseif ($activeTab === 'api-free-fire'): ?>Datos API<?php elseif ($activeTab === 'api-binance'): ?>API Binance Pay<?php elseif ($activeTab === 'verificacion-binance'): ?>Verificación Binance<?php elseif ($activeTab === 'paypal'): ?>Paypal<?php elseif ($activeTab === 'api-discord'): ?>API Discord<?php elseif ($activeTab === 'personalizar-colores'): ?>Personalizar Colores<?php elseif ($activeTab === 'ventana-inicial'): ?>Ventana Inicial<?php elseif ($activeTab === 'galeria'): ?>Galería principal del index<?php elseif ($activeTab === 'bloqueo-jugadores'): ?>Bloqueo de Id de Usuario<?php elseif ($activeTab === 'footer'): ?>Footer Personalizado<?php else: ?>Métodos de Pago<?php endif; ?>
           </h2>
         </div>
         <div class="card-body p-4">
@@ -3224,6 +3235,180 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                 </div>
               <?php endif; ?>
             </div>
+          <?php elseif ($activeTab === 'footer'): ?>
+            <?php
+            $footerCol2Labels = [
+              ['text' => 'Recargas (Juegos)', 'sub' => '(IDs, pases, diamantes)'],
+              ['text' => 'Streaming Premium', 'sub' => '(Pantallas/cuentas Netflix, Disney+, Spotify)'],
+              ['text' => 'Tarjetas de Regalo', 'sub' => '(Gift Cards PS, Xbox, Amazon)'],
+              ['text' => 'Otros Servicios', 'sub' => '(Recargas Zinli, TikTok monedas, venta cuentas)'],
+            ];
+            $footerCol3Labels = [
+              ['text' => '¿Cómo comprar?'],
+              ['text' => 'Preguntas Frecuentes (FAQ)'],
+              ['text' => 'Términos de Garantía', 'sub' => '(Unificado: Streaming + Recargas)'],
+              ['text' => 'Políticas de Reembolso'],
+              ['text' => 'Política de Privacidad'],
+            ];
+            $footerCol4Labels = [
+              ['text' => 'Email de soporte', 'hint' => 'Texto visible (email o lo que prefieras)'],
+              ['text' => 'WhatsApp Soporte', 'hint' => 'URL o deja vacío para usar la config de WhatsApp del sistema'],
+              ['text' => 'Horario de Atención', 'hint' => 'Texto del horario que aparecerá debajo del título'],
+            ];
+            ?>
+            <div class="config-section-note mb-4">Configura el footer de 4 columnas. Actívalo para reemplazar el footer actual. Los textos de los ítems son fijos; configura aquí los enlaces y las imágenes.</div>
+
+            <form method="post" enctype="multipart/form-data">
+              <input type="hidden" name="config_section" value="footer">
+
+              <!-- Toggle -->
+              <div class="mb-4 p-3 rounded-3" style="background:rgba(var(--theme-primary-rgb),0.08);border:1px solid rgba(var(--theme-primary-rgb),0.2);">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" role="switch" name="footer_nuevo_activo" id="footerActivoSwitch" value="1" <?= $footerNewEnabled ? 'checked' : '' ?>>
+                  <label class="form-check-label fw-bold" for="footerActivoSwitch">Activar Footer Personalizado</label>
+                </div>
+                <div class="small text-secondary mt-1">Al activarlo, el footer actual se reemplazará por el nuevo diseño de 4 columnas.</div>
+              </div>
+
+              <!-- Sección 1: Logo -->
+              <h5 class="fw-bold text-info mb-3 mt-2">Sección 1 — Logo</h5>
+              <div class="row g-3 align-items-start mb-4">
+                <div class="col-md-6">
+                  <label class="form-label">Logo del Footer</label>
+                  <input type="file" name="footer_logo" accept="image/*" class="form-control" id="footerLogoInput">
+                  <div class="small text-secondary mt-1">Si no subes ninguno, se usará el logo principal de la tienda.</div>
+                  <?php if ($footerLogoUrl !== ''): ?>
+                    <div class="mt-2 d-flex align-items-center gap-3">
+                      <img src="<?= htmlspecialchars($footerLogoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Footer logo" style="max-height:56px;max-width:160px;object-fit:contain;background:#111;border-radius:8px;padding:6px;">
+                      <div><label class="form-check-label"><input type="checkbox" name="eliminar_footer_logo" value="1" class="form-check-input me-1">Eliminar logo del footer</label></div>
+                    </div>
+                  <?php endif; ?>
+                  <div id="footerLogoPreview" class="mt-2" style="display:none;">
+                    <img id="footerLogoPreviewImg" src="" alt="Previsualización" style="max-height:56px;max-width:160px;object-fit:contain;background:#111;border-radius:8px;padding:6px;">
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <div class="config-section-note" style="font-size:.85rem;">El texto descriptivo y las redes sociales (Instagram, TikTok, Facebook) se toman automáticamente de la configuración del sistema.</div>
+                </div>
+              </div>
+
+              <!-- Sección 2: Columna Explorar -->
+              <h5 class="fw-bold text-info mb-3 mt-2">Sección 2 — Columna EXPLORAR</h5>
+              <div class="mb-4">
+                <?php foreach ($footerCol2Labels as $i => $label): ?>
+                  <div class="mb-3 p-3 rounded-3" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
+                    <div class="fw-semibold text-light mb-2"><?= htmlspecialchars($label['text'], ENT_QUOTES, 'UTF-8') ?><?php if (!empty($label['sub'])): ?> <span class="text-secondary fw-normal small"><?= htmlspecialchars($label['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></div>
+                    <div class="row g-2">
+                      <div class="col-md-8">
+                        <input type="text" name="footer_col2_url[]" value="<?= htmlspecialchars($footerCol2Links[$i]['url'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" placeholder="URL o ancla (ej: /juegos, #recargas, https://...)">
+                      </div>
+                      <div class="col-md-4">
+                        <select name="footer_col2_target[]" class="form-select form-select-sm">
+                          <option value="_self" <?= ($footerCol2Links[$i]['target'] ?? '_self') === '_self' ? 'selected' : '' ?>>Misma pestaña</option>
+                          <option value="_blank" <?= ($footerCol2Links[$i]['target'] ?? '') === '_blank' ? 'selected' : '' ?>>Nueva pestaña</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                <?php endforeach; ?>
+              </div>
+
+              <!-- Sección 3: Columna Soporte y Legal -->
+              <h5 class="fw-bold text-info mb-3 mt-2">Sección 3 — Columna SOPORTE Y LEGAL</h5>
+              <div class="mb-4">
+                <?php foreach ($footerCol3Labels as $i => $label): ?>
+                  <div class="mb-3 p-3 rounded-3" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
+                    <div class="fw-semibold text-light mb-2"><?= htmlspecialchars($label['text'], ENT_QUOTES, 'UTF-8') ?><?php if (!empty($label['sub'])): ?> <span class="text-secondary fw-normal small"><?= htmlspecialchars($label['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></div>
+                    <div class="row g-2">
+                      <div class="col-md-8">
+                        <input type="text" name="footer_col3_url[]" value="<?= htmlspecialchars($footerCol3Links[$i]['url'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" placeholder="URL o ancla (ej: /faq, #garantia, https://...)">
+                      </div>
+                      <div class="col-md-4">
+                        <select name="footer_col3_target[]" class="form-select form-select-sm">
+                          <option value="_self" <?= ($footerCol3Links[$i]['target'] ?? '_self') === '_self' ? 'selected' : '' ?>>Misma pestaña</option>
+                          <option value="_blank" <?= ($footerCol3Links[$i]['target'] ?? '') === '_blank' ? 'selected' : '' ?>>Nueva pestaña</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                <?php endforeach; ?>
+              </div>
+
+              <!-- Sección 4: Canales de Atención -->
+              <h5 class="fw-bold text-info mb-3 mt-2">Sección 4 — Columna CANALES DE ATENCIÓN</h5>
+              <div class="mb-4">
+                <!-- Item 0: Email -->
+                <div class="mb-3 p-3 rounded-3" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
+                  <div class="fw-semibold text-light mb-2">📧 Email de soporte</div>
+                  <div class="row g-2">
+                    <div class="col-md-5">
+                      <label class="form-label small text-secondary mb-1">Texto visible</label>
+                      <input type="text" name="footer_col4_extra[0]" value="<?= htmlspecialchars($footerCol4Links[0]['extra'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" placeholder="soporte@tutienda.com">
+                    </div>
+                    <div class="col-md-5">
+                      <label class="form-label small text-secondary mb-1">URL del enlace</label>
+                      <input type="text" name="footer_col4_url[0]" value="<?= htmlspecialchars($footerCol4Links[0]['url'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" placeholder="mailto:soporte@tutienda.com">
+                    </div>
+                    <div class="col-md-2">
+                      <label class="form-label small text-secondary mb-1">Abrir en</label>
+                      <select name="footer_col4_target[0]" class="form-select form-select-sm">
+                        <option value="_self" <?= ($footerCol4Links[0]['target'] ?? '_self') === '_self' ? 'selected' : '' ?>>Misma</option>
+                        <option value="_blank" <?= ($footerCol4Links[0]['target'] ?? '') === '_blank' ? 'selected' : '' ?>>Nueva</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                <!-- Item 1: WhatsApp -->
+                <div class="mb-3 p-3 rounded-3" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
+                  <div class="fw-semibold text-light mb-2">💬 WhatsApp Soporte <span class="small text-secondary fw-normal">(Chat Directo)</span></div>
+                  <div class="row g-2">
+                    <div class="col-md-10">
+                      <input type="text" name="footer_col4_url[1]" value="<?= htmlspecialchars($footerCol4Links[1]['url'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" placeholder="Deja vacío para usar el WhatsApp configurado en el sistema">
+                    </div>
+                    <div class="col-md-2">
+                      <select name="footer_col4_target[1]" class="form-select form-select-sm">
+                        <option value="_blank" <?= ($footerCol4Links[1]['target'] ?? '_blank') === '_blank' ? 'selected' : '' ?>>Nueva</option>
+                        <option value="_self" <?= ($footerCol4Links[1]['target'] ?? '') === '_self' ? 'selected' : '' ?>>Misma</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                <!-- Item 2: Horario -->
+                <div class="mb-3 p-3 rounded-3" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
+                  <div class="fw-semibold text-light mb-2">🕐 Horario de Atención</div>
+                  <input type="text" name="footer_col4_extra[2]" value="<?= htmlspecialchars($footerCol4Links[2]['extra'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" placeholder="Lun - Dom: 11:00 AM - 11:59 PM">
+                  <input type="hidden" name="footer_col4_url[2]" value="">
+                  <input type="hidden" name="footer_col4_target[2]" value="">
+                </div>
+              </div>
+
+              <!-- Sección 5: Logos de pago -->
+              <h5 class="fw-bold text-info mb-3 mt-2">Sección 5 — Logos de Pago / Iconos inferiores</h5>
+              <div class="mb-3">
+                <label class="form-label">Subir imagen de logo</label>
+                <input type="file" name="footer_payment_logo_new" accept="image/*" class="form-control mb-2">
+                <div class="small text-secondary mb-3">Sube una imagen a la vez. Las imágenes aparecerán en la misma fila debajo de las columnas.</div>
+                <?php if (!empty($footerPaymentLogos)): ?>
+                  <div class="d-flex flex-wrap gap-3 mb-3 align-items-center">
+                    <?php foreach ($footerPaymentLogos as $idx => $logoPath): ?>
+                      <div class="d-flex flex-column align-items-center gap-1" style="position:relative;">
+                        <img src="<?= htmlspecialchars($logoPath, ENT_QUOTES, 'UTF-8') ?>" alt="Logo de pago" style="height:36px;max-width:80px;object-fit:contain;background:#1a1a1a;border-radius:6px;padding:4px 8px;border:1px solid rgba(255,255,255,0.1);">
+                        <a href="/admin/configuracion?tab=footer&eliminar_footer_logo_pago=<?= $idx ?>" class="btn btn-outline-danger btn-sm rounded-3 py-0 px-2" style="font-size:.7rem;" onclick="return confirm('¿Eliminar este logo?');">✕</a>
+                      </div>
+                    <?php endforeach; ?>
+                  </div>
+                <?php else: ?>
+                  <div class="text-secondary small mb-3">No hay logos de pago configurados aún.</div>
+                <?php endif; ?>
+              </div>
+              <div class="mb-4">
+                <label class="form-label">Texto de Copyright</label>
+                <input type="text" name="footer_copyright" value="<?= htmlspecialchars(store_config_get('footer_copyright', ''), ENT_QUOTES, 'UTF-8') ?>" class="form-control" placeholder="© 2026 TuTienda.com. Todos los derechos reservados.">
+              </div>
+
+              <button type="submit" class="btn btn-primary px-4">Guardar Footer</button>
+            </form>
+
           <?php elseif ($activeTab === 'bloqueo-jugadores'): ?>
             <div class="config-section-note mb-4">Registra aquí los IDs de jugadores que no podrán realizar compras. Cuando un usuario intente comprar con un ID bloqueado, verá un mensaje de advertencia por actividades ilícitas y el proceso se cancelará tanto en el navegador como en el servidor.</div>
             <form method="post" class="mb-4">
@@ -3282,6 +3467,27 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
   </div>
 </div>
 <script>
+  (() => {
+    const footerLogoInput = document.getElementById('footerLogoInput');
+    const footerLogoPreview = document.getElementById('footerLogoPreview');
+    const footerLogoPreviewImg = document.getElementById('footerLogoPreviewImg');
+    if (footerLogoInput && footerLogoPreview && footerLogoPreviewImg) {
+      footerLogoInput.addEventListener('change', () => {
+        const file = footerLogoInput.files && footerLogoInput.files[0];
+        if (file && file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = e => {
+            footerLogoPreviewImg.src = e.target.result;
+            footerLogoPreview.style.display = '';
+          };
+          reader.readAsDataURL(file);
+        } else {
+          footerLogoPreview.style.display = 'none';
+        }
+      });
+    }
+  })();
+
   (() => {
     const notificationPositionSelect = document.querySelector('[data-win-points-notification-position-select]');
     const simulateNotificationButton = document.querySelector('[data-win-points-simulate-notification]');

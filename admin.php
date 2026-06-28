@@ -2195,7 +2195,7 @@ switch ($seccion) {
         $paypalTabEnabled = store_config_get('pago_paypal', '0') === '1';
         $discordApiTabEnabled = store_config_get('api_discord', '0') === '1';
         $activeTab = $_GET['tab'] ?? 'correo';
-        $allowedTabs = ['correo', 'cabecera', 'notificaciones-recargas', 'sociales', 'api-banco', 'api-free-fire', 'personalizar-colores', 'galeria', 'metodos-pago', 'bloqueo-jugadores'];
+        $allowedTabs = ['correo', 'cabecera', 'notificaciones-recargas', 'sociales', 'api-banco', 'api-free-fire', 'personalizar-colores', 'galeria', 'metodos-pago', 'bloqueo-jugadores', 'footer'];
         if ($binanceApiTabEnabled) {
             $allowedTabs[] = 'api-binance';
         }
@@ -2338,6 +2338,19 @@ switch ($seccion) {
                 admin_set_flash('error', 'No se pudo actualizar el orden de la galería.');
             }
             admin_redirect('configuracion', ['tab' => 'galeria']);
+        }
+
+        if ($activeTab === 'footer' && isset($_GET['eliminar_footer_logo_pago'])) {
+            $logos = store_config_footer_payment_logos();
+            $idx = (int) $_GET['eliminar_footer_logo_pago'];
+            if (isset($logos[$idx])) {
+                array_splice($logos, $idx, 1);
+                store_config_upsert('footer_payment_logos', json_encode(array_values($logos), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                admin_set_flash('success', 'Logo de pago eliminado.');
+            } else {
+                admin_set_flash('error', 'Logo no encontrado.');
+            }
+            admin_redirect('configuracion', ['tab' => 'footer']);
         }
 
         if ($activeTab === 'bloqueo-jugadores' && isset($_GET['desbloquear_jugador'])) {
@@ -3373,6 +3386,90 @@ switch ($seccion) {
                 }
 
                 admin_set_flash('error', 'No se pudo guardar el método de pago.');
+            }
+
+            if ($activeTab === 'footer') {
+                $footerActivo = isset($_POST['footer_nuevo_activo']) ? '1' : '0';
+                store_config_upsert('footer_nuevo_activo', $footerActivo);
+
+                // Logo del footer
+                $currentFooterLogo = store_config_get('footer_logo_url', '');
+                $nextFooterLogo = $currentFooterLogo;
+                $hasFooterLogoUpload = isset($_FILES['footer_logo']) && (($_FILES['footer_logo']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE);
+                if ($hasFooterLogoUpload) {
+                    $upload = store_config_store_footer_logo_upload($_FILES['footer_logo']);
+                    if (!$upload['success']) {
+                        admin_set_flash('error', (string) ($upload['message'] ?? 'No se pudo subir el logo del footer.'));
+                        define('ADMIN_CONFIG_POST_HANDLED', true);
+                        admin_redirect('configuracion', ['tab' => 'footer']);
+                    }
+                    if (!empty($upload['path'])) {
+                        $nextFooterLogo = $upload['path'];
+                    }
+                } elseif (isset($_POST['eliminar_footer_logo'])) {
+                    $nextFooterLogo = '';
+                }
+                if ($nextFooterLogo === '') {
+                    store_config_delete('footer_logo_url');
+                } else {
+                    store_config_upsert('footer_logo_url', $nextFooterLogo);
+                }
+
+                // Columna 2
+                $col2Urls    = array_values((array) ($_POST['footer_col2_url']    ?? []));
+                $col2Targets = array_values((array) ($_POST['footer_col2_target'] ?? []));
+                $col2 = [];
+                for ($i = 0; $i < 4; $i++) {
+                    $col2[] = ['url' => trim((string) ($col2Urls[$i] ?? '')), 'target' => trim((string) ($col2Targets[$i] ?? '_self')), 'extra' => ''];
+                }
+                store_config_upsert('footer_col2_links', json_encode($col2, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+                // Columna 3
+                $col3Urls    = array_values((array) ($_POST['footer_col3_url']    ?? []));
+                $col3Targets = array_values((array) ($_POST['footer_col3_target'] ?? []));
+                $col3 = [];
+                for ($i = 0; $i < 5; $i++) {
+                    $col3[] = ['url' => trim((string) ($col3Urls[$i] ?? '')), 'target' => trim((string) ($col3Targets[$i] ?? '_self')), 'extra' => ''];
+                }
+                store_config_upsert('footer_col3_links', json_encode($col3, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+                // Columna 4
+                $col4Urls    = (array) ($_POST['footer_col4_url']    ?? []);
+                $col4Targets = (array) ($_POST['footer_col4_target'] ?? []);
+                $col4Extras  = (array) ($_POST['footer_col4_extra']  ?? []);
+                $col4 = [];
+                for ($i = 0; $i < 3; $i++) {
+                    $col4[$i] = [
+                        'url'    => trim((string) ($col4Urls[$i]    ?? '')),
+                        'target' => trim((string) ($col4Targets[$i] ?? '')),
+                        'extra'  => trim((string) ($col4Extras[$i]  ?? '')),
+                    ];
+                }
+                store_config_upsert('footer_col4_links', json_encode($col4, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+                // Copyright
+                $footerCopyright = trim((string) ($_POST['footer_copyright'] ?? ''));
+                store_config_upsert('footer_copyright', $footerCopyright);
+
+                // Nuevo logo de pago
+                $hasPaymentLogoUpload = isset($_FILES['footer_payment_logo_new']) && (($_FILES['footer_payment_logo_new']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE);
+                if ($hasPaymentLogoUpload) {
+                    $upload = store_config_store_footer_payment_logo_upload($_FILES['footer_payment_logo_new']);
+                    if (!$upload['success']) {
+                        admin_set_flash('error', (string) ($upload['message'] ?? 'No se pudo subir el logo de pago.'));
+                        define('ADMIN_CONFIG_POST_HANDLED', true);
+                        admin_redirect('configuracion', ['tab' => 'footer']);
+                    }
+                    if (!empty($upload['path'])) {
+                        $currentLogos = store_config_footer_payment_logos();
+                        $currentLogos[] = $upload['path'];
+                        store_config_upsert('footer_payment_logos', json_encode(array_values($currentLogos), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                    }
+                }
+
+                admin_set_flash('success', 'Configuración del footer guardada correctamente.');
+                define('ADMIN_CONFIG_POST_HANDLED', true);
+                admin_redirect('configuracion', ['tab' => 'footer']);
             }
 
             if ($activeTab === 'bloqueo-jugadores' && isset($_POST['blocked_player_add'])) {

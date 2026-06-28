@@ -1801,6 +1801,66 @@ function store_config_store_recharge_notification_logo_upload(array $file): arra
     return store_config_store_named_logo_upload($file, 'recharge-notification-logo');
 }
 
+function store_config_store_footer_logo_upload(array $file): array {
+    return store_config_store_named_logo_upload($file, 'footer-logo');
+}
+
+function store_config_store_footer_payment_logo_upload(array $file): array {
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+        return ['success' => true, 'path' => ''];
+    }
+    if (($file['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
+        return ['success' => false, 'message' => 'No se pudo cargar la imagen del logo de pago.'];
+    }
+    $tmpName = $file['tmp_name'] ?? '';
+    if ($tmpName === '' || !is_uploaded_file($tmpName)) {
+        return ['success' => false, 'message' => 'Archivo de logo no válido.'];
+    }
+    if (($file['size'] ?? 0) > 3 * 1024 * 1024) {
+        return ['success' => false, 'message' => 'La imagen de logo no puede superar 3 MB.'];
+    }
+    $imageInfo = @getimagesize($tmpName);
+    if ($imageInfo === false) {
+        return ['success' => false, 'message' => 'El archivo debe ser una imagen válida (JPG, PNG, WEBP, GIF).'];
+    }
+    $mime = $imageInfo['mime'] ?? '';
+    $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'image/gif' => 'gif'];
+    if (!isset($extensions[$mime])) {
+        return ['success' => false, 'message' => 'Formato no permitido. Usa JPG, PNG, WEBP o GIF.'];
+    }
+    $targetDir = tenant_upload_absolute_dir('store/footer-logos');
+    if (!is_dir($targetDir) && !mkdir($targetDir, 0775, true) && !is_dir($targetDir)) {
+        return ['success' => false, 'message' => 'No se pudo crear la carpeta de logos del footer.'];
+    }
+    $fileName = 'footer-payment-logo-' . date('YmdHis') . '-' . bin2hex(random_bytes(4)) . '.' . $extensions[$mime];
+    $targetPath = $targetDir . DIRECTORY_SEPARATOR . $fileName;
+    if (!move_uploaded_file($tmpName, $targetPath)) {
+        return ['success' => false, 'message' => 'No se pudo guardar el logo en el servidor.'];
+    }
+    return ['success' => true, 'path' => tenant_upload_public_path('store/footer-logos', $fileName, true)];
+}
+
+function store_config_footer_payment_logos(): array {
+    $raw = trim((string) store_config_get('footer_payment_logos', ''));
+    if ($raw === '') {
+        return [];
+    }
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) ? array_values(array_filter(array_map('strval', $decoded))) : [];
+}
+
+function store_config_footer_col_links(int $col): array {
+    $key = 'footer_col' . $col . '_links';
+    $count = $col === 3 ? 5 : ($col === 4 ? 3 : 4);
+    $raw = trim((string) store_config_get($key, ''));
+    $decoded = $raw !== '' ? json_decode($raw, true) : null;
+    if (!is_array($decoded) || count($decoded) < $count) {
+        $default = ['url' => '', 'target' => '_self', 'extra' => ''];
+        return array_fill(0, $count, $default);
+    }
+    return array_slice($decoded, 0, $count);
+}
+
 function store_config_store_public_background_media_upload(array $file): array {
     if (($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
         return ['success' => true, 'path' => ''];

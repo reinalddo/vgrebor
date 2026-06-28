@@ -1197,6 +1197,355 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
 ?>
     </div>
   </div>
+  <?php
+  $footerNewEnabled   = trim((string) store_config_get('footer_nuevo_activo', '0')) === '1';
+  $footerLogoUrl      = trim((string) store_config_get('footer_logo_url', ''));
+  $footerCopyright    = trim((string) store_config_get('footer_copyright', ''));
+  $footerCol2Links    = store_config_footer_col_links(2);
+  $footerCol3Links    = store_config_footer_col_links(3);
+  $footerCol4Links    = store_config_footer_col_links(4);
+  $footerPaymentLogos = store_config_footer_payment_logos();
+  $footerEffectiveLogo = $footerLogoUrl !== '' ? $footerLogoUrl : trim((string) store_config_get('logo_tienda', ''));
+
+  $footerCol2Items = [
+    ['text' => 'Recargas (Juegos)',  'sub' => '(IDs, pases, diamantes)',                          'icon' => '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="10" y1="12" y2="12"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="15" x2="15.01" y1="13" y2="13"/><line x1="18" x2="18.01" y1="11" y2="11"/><rect width="20" height="12" x="2" y="6" rx="2"/></svg>'],
+    ['text' => 'Streaming Premium',  'sub' => '(Pantallas/cuentas Netflix, Disney+, Spotify)',   'icon' => '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="15" x="2" y="3" rx="2"/><polyline points="8 21 12 17 16 21"/></svg>'],
+    ['text' => 'Tarjetas de Regalo', 'sub' => '(Gift Cards PS, Xbox, Amazon)',                    'icon' => '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect width="22" height="5" x="1" y="7" rx="1"/><line x1="12" x2="12" y1="22" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>'],
+    ['text' => 'Otros Servicios',    'sub' => '(Recargas Zinli, TikTok monedas, venta cuentas)', 'icon' => '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>'],
+  ];
+  $footerCol3Items = [
+    ['text' => '¿Cómo comprar?',              'sub' => '',                                   'icon' => '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>'],
+    ['text' => 'Preguntas Frecuentes (FAQ)',   'sub' => '',                                   'icon' => '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>'],
+    ['text' => 'Términos de Garantía',         'sub' => '(Unificado: Streaming + Recargas)', 'icon' => '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>'],
+    ['text' => 'Políticas de Reembolso',       'sub' => '',                                   'icon' => '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>'],
+    ['text' => 'Política de Privacidad',       'sub' => '',                                   'icon' => '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'],
+  ];
+  $col4WaUrl = $footerCol4Links[1]['url'] !== '' ? $footerCol4Links[1]['url'] : $whatsappUrl;
+  $col4WaTarget = $footerCol4Links[1]['target'] !== '' ? $footerCol4Links[1]['target'] : '_blank';
+  ?>
+  <?php if ($footerNewEnabled): ?>
+  <footer class="tvg-custom-footer mt-5" role="contentinfo">
+    <div class="tvg-footer-top">
+      <div class="container-xl">
+        <div class="row g-4 g-lg-5">
+
+          <!-- Col 1: Logo + texto + redes -->
+          <div class="col-lg-3 col-md-6">
+            <?php if ($footerEffectiveLogo !== ''): ?>
+              <img src="<?= htmlspecialchars($footerEffectiveLogo, ENT_QUOTES, 'UTF-8') ?>" alt="Logo" class="tvg-footer-logo mb-3">
+            <?php endif; ?>
+            <?php $storeName = trim((string) store_config_get('nombre_tienda', '')); ?>
+            <?php $storeSub  = trim((string) store_config_get('nombre_tienda_subtitulo', '')); ?>
+            <?php if ($storeSub !== ''): ?>
+              <p class="tvg-footer-desc"><?= htmlspecialchars($storeSub, ENT_QUOTES, 'UTF-8') ?></p>
+            <?php endif; ?>
+            <div class="tvg-footer-socials mt-3">
+              <?php if ($hasInstagram): ?>
+                <a href="<?= htmlspecialchars($instagramUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener noreferrer" class="tvg-footer-social-link" aria-label="Instagram">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.3" cy="6.7" r="1"/></svg>
+                </a>
+              <?php endif; ?>
+              <?php if ($hasTiktok): ?>
+                <a href="<?= htmlspecialchars($tiktokUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener noreferrer" class="tvg-footer-social-link" aria-label="TikTok">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M14.57 3c.2 1.68 1.17 3.24 2.62 4.14.93.58 2 .88 3.08.88V11a8.1 8.1 0 0 1-3.37-.73v5.16a6.53 6.53 0 1 1-6.53-6.53c.28 0 .57.02.84.06v3.16a3.52 3.52 0 1 0 2.84 3.44V3h2.52Z"/></svg>
+                </a>
+              <?php endif; ?>
+              <?php if ($hasFacebook): ?>
+                <a href="<?= htmlspecialchars($facebookUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener noreferrer" class="tvg-footer-social-link" aria-label="Facebook">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 22v-8h2.7l.5-3h-3.2V9.1c0-.9.3-1.6 1.7-1.6H17V4.8c-.3 0-1.3-.1-2.4-.1-2.4 0-4.1 1.5-4.1 4.3V11H8v3h2.5v8h3Z"/></svg>
+                </a>
+              <?php endif; ?>
+              <?php if ($hasWhatsapp): ?>
+                <a href="<?= htmlspecialchars($whatsappUrl, ENT_QUOTES, 'UTF-8') ?>" target="_blank" rel="noopener noreferrer" class="tvg-footer-social-link" aria-label="WhatsApp" style="color:#25d366;">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12c0 2.136.558 4.14 1.534 5.874L0 24l6.335-1.652A11.955 11.955 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.882a9.876 9.876 0 01-5.03-1.375l-.36-.214-3.732.977.995-3.633-.235-.374A9.862 9.862 0 012.118 12C2.118 6.531 6.531 2.118 12 2.118c5.469 0 9.882 4.413 9.882 9.882 0 5.469-4.413 9.882-9.882 9.882zm5.42-7.41c-.3-.15-1.76-.87-2.03-.97-.27-.1-.46-.15-.66.15-.2.3-.76.97-.93 1.17-.17.2-.34.22-.64.07-.3-.15-1.27-.47-2.41-1.49-.89-.8-1.49-1.79-1.67-2.09-.17-.3-.02-.47.13-.62.13-.13.3-.34.44-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.66-1.59-.9-2.17-.24-.58-.48-.5-.66-.5h-.56c-.2 0-.52.08-.79.37-.27.3-1.05 1.03-1.05 2.52 0 1.49 1.08 2.92 1.23 3.12.15.2 2.11 3.23 5.12 4.52.72.31 1.29.49 1.73.63.73.23 1.39.2 1.91.12.58-.09 1.76-.72 2.01-1.42.25-.69.25-1.29.17-1.42-.07-.12-.27-.2-.57-.35Z"/></svg>
+                </a>
+              <?php endif; ?>
+            </div>
+          </div>
+
+          <!-- Col 2: Explorar -->
+          <div class="col-lg-3 col-md-6">
+            <h4 class="tvg-footer-col-title">EXPLORAR</h4>
+            <ul class="tvg-footer-links">
+              <?php foreach ($footerCol2Items as $i => $item): ?>
+                <?php $url = $footerCol2Links[$i]['url'] ?? ''; $tgt = $footerCol2Links[$i]['target'] ?? '_self'; ?>
+                <li class="tvg-footer-link-item">
+                  <span class="tvg-footer-link-icon"><?= $item['icon'] ?></span>
+                  <?php if ($url !== ''): ?>
+                    <a href="<?= htmlspecialchars($url, ENT_QUOTES, 'UTF-8') ?>"<?= $tgt === '_blank' ? ' target="_blank" rel="noopener noreferrer"' : '' ?> class="tvg-footer-link">
+                      <?= htmlspecialchars($item['text'], ENT_QUOTES, 'UTF-8') ?>
+                      <?php if ($item['sub'] !== ''): ?><br><span class="tvg-footer-link-sub"><?= htmlspecialchars($item['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                    </a>
+                  <?php else: ?>
+                    <span class="tvg-footer-link">
+                      <?= htmlspecialchars($item['text'], ENT_QUOTES, 'UTF-8') ?>
+                      <?php if ($item['sub'] !== ''): ?><br><span class="tvg-footer-link-sub"><?= htmlspecialchars($item['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                    </span>
+                  <?php endif; ?>
+                </li>
+              <?php endforeach; ?>
+            </ul>
+          </div>
+
+          <!-- Col 3: Soporte y Legal -->
+          <div class="col-lg-3 col-md-6">
+            <h4 class="tvg-footer-col-title">SOPORTE Y LEGAL</h4>
+            <ul class="tvg-footer-links">
+              <?php foreach ($footerCol3Items as $i => $item): ?>
+                <?php $url = $footerCol3Links[$i]['url'] ?? ''; $tgt = $footerCol3Links[$i]['target'] ?? '_self'; ?>
+                <li class="tvg-footer-link-item">
+                  <span class="tvg-footer-link-icon tvg-footer-link-icon--circle"><?= $item['icon'] ?></span>
+                  <?php if ($url !== ''): ?>
+                    <a href="<?= htmlspecialchars($url, ENT_QUOTES, 'UTF-8') ?>"<?= $tgt === '_blank' ? ' target="_blank" rel="noopener noreferrer"' : '' ?> class="tvg-footer-link">
+                      <?= htmlspecialchars($item['text'], ENT_QUOTES, 'UTF-8') ?>
+                      <?php if (!empty($item['sub'])): ?><br><span class="tvg-footer-link-sub"><?= htmlspecialchars($item['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                    </a>
+                  <?php else: ?>
+                    <span class="tvg-footer-link">
+                      <?= htmlspecialchars($item['text'], ENT_QUOTES, 'UTF-8') ?>
+                      <?php if (!empty($item['sub'])): ?><br><span class="tvg-footer-link-sub"><?= htmlspecialchars($item['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                    </span>
+                  <?php endif; ?>
+                </li>
+              <?php endforeach; ?>
+            </ul>
+          </div>
+
+          <!-- Col 4: Canales de Atención -->
+          <div class="col-lg-3 col-md-6">
+            <h4 class="tvg-footer-col-title">CANALES DE ATENCIÓN</h4>
+            <ul class="tvg-footer-links tvg-footer-links--channels">
+              <!-- Email -->
+              <?php $emailUrl = $footerCol4Links[0]['url'] ?? ''; $emailTgt = $footerCol4Links[0]['target'] ?? '_blank'; $emailText = $footerCol4Links[0]['extra'] ?? ''; ?>
+              <li class="tvg-footer-channel-item">
+                <span class="tvg-footer-channel-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                </span>
+                <?php if ($emailUrl !== ''): ?>
+                  <a href="<?= htmlspecialchars($emailUrl, ENT_QUOTES, 'UTF-8') ?>"<?= $emailTgt === '_blank' ? ' target="_blank" rel="noopener noreferrer"' : '' ?> class="tvg-footer-channel-text"><?= htmlspecialchars($emailText !== '' ? $emailText : $emailUrl, ENT_QUOTES, 'UTF-8') ?></a>
+                <?php elseif ($emailText !== ''): ?>
+                  <span class="tvg-footer-channel-text"><?= htmlspecialchars($emailText, ENT_QUOTES, 'UTF-8') ?></span>
+                <?php endif; ?>
+              </li>
+              <!-- WhatsApp -->
+              <?php if ($col4WaUrl !== ''): ?>
+              <li class="tvg-footer-channel-item">
+                <span class="tvg-footer-channel-icon tvg-footer-channel-icon--wa">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.136.558 4.14 1.534 5.874L0 24l6.335-1.652A11.955 11.955 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.882a9.876 9.876 0 01-5.03-1.375l-.36-.214-3.732.977.995-3.633-.235-.374A9.862 9.862 0 012.118 12C2.118 6.531 6.531 2.118 12 2.118c5.469 0 9.882 4.413 9.882 9.882 0 5.469-4.413 9.882-9.882 9.882z"/></svg>
+                </span>
+                <a href="<?= htmlspecialchars($col4WaUrl, ENT_QUOTES, 'UTF-8') ?>" target="<?= htmlspecialchars($col4WaTarget, ENT_QUOTES, 'UTF-8') ?>" rel="noopener noreferrer" class="tvg-footer-channel-text">
+                  WhatsApp Soporte<br><span class="tvg-footer-link-sub">(Chat Directo)</span>
+                </a>
+              </li>
+              <?php endif; ?>
+              <!-- Horario -->
+              <?php $horario = trim((string) ($footerCol4Links[2]['extra'] ?? '')); ?>
+              <?php if ($horario !== ''): ?>
+              <li class="tvg-footer-channel-item">
+                <span class="tvg-footer-channel-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                </span>
+                <span class="tvg-footer-channel-text">Horario Técnico:<br><span class="tvg-footer-link-sub" style="color:var(--theme-highlight);"><?= htmlspecialchars($horario, ENT_QUOTES, 'UTF-8') ?></span></span>
+              </li>
+              <?php endif; ?>
+            </ul>
+          </div>
+
+        </div><!-- /row -->
+      </div>
+    </div><!-- /tvg-footer-top -->
+
+    <!-- Logos de pago + copyright -->
+    <div class="tvg-footer-bottom">
+      <div class="container-xl">
+        <?php if (!empty($footerPaymentLogos)): ?>
+          <div class="tvg-footer-payment-logos">
+            <?php foreach ($footerPaymentLogos as $pLogo): ?>
+              <img src="<?= htmlspecialchars($pLogo, ENT_QUOTES, 'UTF-8') ?>" alt="Método de pago" class="tvg-footer-payment-logo">
+            <?php endforeach; ?>
+          </div>
+        <?php endif; ?>
+        <?php if ($footerCopyright !== ''): ?>
+          <p class="tvg-footer-copyright"><?= htmlspecialchars($footerCopyright, ENT_QUOTES, 'UTF-8') ?></p>
+        <?php endif; ?>
+      </div>
+    </div>
+  </footer>
+  <style>
+    .tvg-custom-footer {
+      border-top: 2px solid transparent;
+      border-image: linear-gradient(90deg, var(--theme-highlight, #8b5cf6) 0%, var(--theme-success, #22d3ee) 100%) 1;
+      background: rgba(0,0,0,0.82);
+      margin-top: 0 !important;
+    }
+    .tvg-footer-top {
+      padding: 3rem 0 2rem;
+    }
+    .tvg-footer-logo {
+      max-height: 52px;
+      max-width: 180px;
+      object-fit: contain;
+      display: block;
+    }
+    .tvg-footer-desc {
+      color: rgba(255,255,255,0.6);
+      font-size: .87rem;
+      line-height: 1.55;
+      margin-bottom: 0;
+    }
+    .tvg-footer-socials {
+      display: flex;
+      gap: .6rem;
+      flex-wrap: wrap;
+    }
+    .tvg-footer-social-link {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: rgba(255,255,255,0.7);
+      transition: color .2s, border-color .2s, background .2s;
+      text-decoration: none;
+    }
+    .tvg-footer-social-link:hover {
+      color: #fff;
+      border-color: rgba(255,255,255,0.4);
+      background: rgba(255,255,255,0.08);
+    }
+    .tvg-footer-social-link svg {
+      width: 16px;
+      height: 16px;
+    }
+    .tvg-footer-col-title {
+      font-size: .7rem;
+      font-weight: 800;
+      letter-spacing: .14em;
+      color: var(--theme-highlight, #8b5cf6);
+      text-transform: uppercase;
+      margin-bottom: 1.1rem;
+      font-family: 'Oxanium','Montserrat','Arial',sans-serif;
+    }
+    .tvg-footer-links {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: .65rem;
+    }
+    .tvg-footer-link-item {
+      display: flex;
+      align-items: flex-start;
+      gap: .55rem;
+    }
+    .tvg-footer-link-icon {
+      flex-shrink: 0;
+      margin-top: 2px;
+      color: rgba(255,255,255,0.45);
+      display: flex;
+    }
+    .tvg-footer-link-icon--circle {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .tvg-footer-link {
+      color: rgba(255,255,255,0.75);
+      text-decoration: none;
+      font-size: .88rem;
+      line-height: 1.4;
+      transition: color .18s;
+    }
+    a.tvg-footer-link:hover {
+      color: #fff;
+      text-decoration: none;
+    }
+    .tvg-footer-link-sub {
+      color: rgba(255,255,255,0.42);
+      font-size: .78rem;
+    }
+    /* Col 4 channels */
+    .tvg-footer-links--channels {
+      gap: .9rem;
+    }
+    .tvg-footer-channel-item {
+      display: flex;
+      align-items: flex-start;
+      gap: .7rem;
+    }
+    .tvg-footer-channel-icon {
+      flex-shrink: 0;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.05);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255,255,255,0.6);
+    }
+    .tvg-footer-channel-icon svg {
+      width: 15px;
+      height: 15px;
+    }
+    .tvg-footer-channel-icon--wa {
+      background: rgba(37,211,102,.12);
+      border-color: rgba(37,211,102,.3);
+      color: #25d366;
+    }
+    .tvg-footer-channel-text {
+      color: rgba(255,255,255,0.8);
+      font-size: .88rem;
+      line-height: 1.45;
+      text-decoration: none;
+      display: block;
+      padding-top: 5px;
+    }
+    a.tvg-footer-channel-text:hover {
+      color: #fff;
+    }
+    /* Bottom */
+    .tvg-footer-bottom {
+      border-top: 1px solid rgba(255,255,255,0.07);
+      padding: 1.4rem 0 1.2rem;
+    }
+    .tvg-footer-payment-logos {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: .6rem;
+      margin-bottom: .8rem;
+    }
+    .tvg-footer-payment-logo {
+      height: 30px;
+      max-width: 72px;
+      object-fit: contain;
+      border-radius: 5px;
+      background: #fff;
+      padding: 3px 6px;
+    }
+    .tvg-footer-copyright {
+      text-align: center;
+      color: rgba(255,255,255,0.38);
+      font-size: .8rem;
+      margin: 0;
+    }
+    @media (max-width: 767.98px) {
+      .tvg-footer-top { padding: 2rem 0 1.2rem; }
+    }
+  </style>
+  <?php else: ?>
   <?php if ($hasFacebook || $hasInstagram || $hasTiktok): ?>
     <div class="social-footer-shell social-footer-shell-public mt-5" role="contentinfo">
       <div class="social-footer-card">
@@ -1230,6 +1579,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       </div>
     </div>
   <?php endif; ?>
+  <?php endif; // footerNewEnabled ?>
   <?php if ($hasWhatsapp || $hasWhatsappChannel): ?>
     <div class="floating-social-stack" aria-label="Accesos rápidos de contacto">
       <?php if ($hasWhatsappChannel): ?>
