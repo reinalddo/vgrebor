@@ -6176,14 +6176,14 @@ function bank_amount_matches_order_total(float $movementAmount, float $orderAmou
 }
 
 function bank_mismatch_failure_type(bool $referenceMatch, bool $amountMatch): string {
-    if (!$referenceMatch && $amountMatch) {
-        return 'reference_mismatch';
+    if ($referenceMatch && $amountMatch) {
+        return 'server_partial_response';
     }
     if ($referenceMatch && !$amountMatch) {
         return 'amount_mismatch';
     }
-    if ($referenceMatch && $amountMatch) {
-        return 'server_partial_response';
+    if (!$referenceMatch) {
+        return 'reference_mismatch';
     }
     return 'server_or_data_mismatch';
 }
@@ -6546,12 +6546,14 @@ function explain_bank_movement_mismatch(array $movements, string $reportedRefere
 
     foreach ($movements as $movement) {
         $reference = (string) ($movement['referencia'] ?? '');
-        $amount = (float) ($movement['monto'] ?? 0);
-        if ($reference !== '' && movement_reference_matches($reference, $reportedReference, $requiredDigits)) {
-            $referenceMatch = true;
+        if ($reference === '') {
+            continue;
         }
-        if (bank_amount_matches_order_total($amount, $orderAmount)) {
-            $amountMatch = true;
+        if (movement_reference_matches($reference, $reportedReference, $requiredDigits)) {
+            $referenceMatch = true;
+            if (bank_amount_matches_order_total((float) ($movement['monto'] ?? 0), $orderAmount)) {
+                $amountMatch = true;
+            }
         }
     }
 
@@ -6559,11 +6561,11 @@ function explain_bank_movement_mismatch(array $movements, string $reportedRefere
     if (!$referenceMatch) {
         $reasons[] = 'La referencia ingresada no coincide con ningún movimiento encontrado en la API bancaria.';
     }
-    if (!$amountMatch) {
-        $reasons[] = 'El monto del pago no coincide con el total esperado del pedido.';
+    if ($referenceMatch && !$amountMatch) {
+        $reasons[] = 'La referencia fue encontrada, pero el monto del movimiento bancario no coincide con el total esperado del pedido.';
     }
     if ($referenceMatch && $amountMatch) {
-        $reasons[] = 'Existe coincidencia parcial en referencia y monto, pero no en un mismo movimiento bancario.';
+        $reasons[] = 'La referencia y el monto coinciden, pero el movimiento no puede asociarse a este pedido (puede estar vinculado a otro pedido).';
     }
 
     return [
