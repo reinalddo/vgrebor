@@ -9553,7 +9553,17 @@ if ($action === 'submit_payment') {
             });
         }
 
-        $mismatch = explain_bank_movement_mismatch($bankMovements, $referenceNumber, (float) ($updatedOrder['precio'] ?? 0), $referenceMatchDigits);
+        $referenceOnlyMatch = find_bank_movement_by_reference($mysqli, $bankMovements, $referenceNumber, $referenceMatchDigits, $orderId);
+        if ($referenceOnlyMatch !== null) {
+            $mismatch = [
+                'reference_match' => true,
+                'amount_match'    => false,
+                'failure_type'    => 'amount_mismatch',
+                'reasons'         => ['La referencia fue encontrada, pero el monto del movimiento bancario no coincide con el total esperado del pedido.'],
+            ];
+        } else {
+            $mismatch = explain_bank_movement_mismatch($bankMovements, $referenceNumber, (float) ($updatedOrder['precio'] ?? 0), $referenceMatchDigits);
+        }
         $pendingOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
         json_response([
             'ok' => true,
