@@ -10,6 +10,7 @@ require_once __DIR__ . '/includes/payment_methods.php';
 require_once __DIR__ . '/includes/google_oauth.php';
 require_once __DIR__ . '/includes/win_points.php';
 require_once __DIR__ . '/includes/api_discord.php';
+require_once __DIR__ . '/includes/blocked_players.php';
 
 $cfg = store_config_all();
 $paymentMethodDiscountsEnabled = trim((string) ($cfg['descuento_metodo_pago'] ?? store_config_get('descuento_metodo_pago', '0'))) === '1';
@@ -26,7 +27,7 @@ $binanceApiTabEnabled = store_config_get('api_binance', '0') === '1';
 $binancePagonorteTabEnabled = store_config_get('api_binance_pagonorte', '0') === '1';
 $paypalTabEnabled = store_config_get('pago_paypal', '0') === '1';
 $discordApiTabEnabled = store_config_get('api_discord', '0') === '1';
-$allowedTabs = ['correo', 'cabecera', 'sociales', 'api-banco', 'api-free-fire', 'personalizar-colores', 'galeria', 'metodos-pago'];
+$allowedTabs = ['correo', 'cabecera', 'sociales', 'api-banco', 'api-free-fire', 'personalizar-colores', 'galeria', 'metodos-pago', 'bloqueo-jugadores'];
 if ($binanceApiTabEnabled) {
   $allowedTabs[] = 'api-binance';
 }
@@ -51,6 +52,8 @@ if (!in_array($activeTab, $allowedTabs, true)) {
 
 home_gallery_ensure_table();
 payment_methods_ensure_table();
+blocked_players_ensure_table();
+$blockedPlayerItems = blocked_players_all();
 $logoTienda = trim((string) ($cfg['logo_tienda'] ?? ''));
 $publicBackgroundSettings = store_config_public_background_settings();
 $publicAnimatedBackgroundEnabled = !empty($publicBackgroundSettings['enabled']);
@@ -1151,13 +1154,16 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
           <div class="neon-tabs-item">
             <a href="/admin/configuracion?tab=metodos-pago" class="neon-tab-link <?= $activeTab === 'metodos-pago' ? 'active' : '' ?>">Métodos de Pago</a>
           </div>
+          <div class="neon-tabs-item">
+            <a href="/admin/configuracion?tab=bloqueo-jugadores" class="neon-tab-link <?= $activeTab === 'bloqueo-jugadores' ? 'active' : '' ?>">Bloqueo Id de Usuario</a>
+          </div>
         </div>
       </div>
 
       <div class="card neon-card mb-4">
         <div class="card-header text-center py-4" style="background: linear-gradient(90deg, var(--theme-highlight) 0%, var(--theme-success) 100%); color: var(--theme-button-text-strong); border-radius: 16px 16px 0 0;">
           <h2 class="h4 fw-bold mb-0" style="font-family: 'Oxanium', 'Montserrat', 'Arial', sans-serif; letter-spacing: 0.08em;">
-            <?php if ($activeTab === 'correo'): ?>Configuración de correo corporativo<?php elseif ($activeTab === 'cabecera'): ?>Datos de cabecera<?php elseif ($activeTab === 'notificaciones-recargas'): ?>Notificaciones Recargas<?php elseif ($activeTab === 'sociales'): ?>Redes Sociales<?php elseif ($activeTab === 'api-banco'): ?>Datos conexión Banco<?php elseif ($activeTab === 'api-free-fire'): ?>Datos API<?php elseif ($activeTab === 'api-binance'): ?>API Binance Pay<?php elseif ($activeTab === 'verificacion-binance'): ?>Verificación Binance<?php elseif ($activeTab === 'paypal'): ?>Paypal<?php elseif ($activeTab === 'api-discord'): ?>API Discord<?php elseif ($activeTab === 'personalizar-colores'): ?>Personalizar Colores<?php elseif ($activeTab === 'ventana-inicial'): ?>Ventana Inicial<?php elseif ($activeTab === 'galeria'): ?>Galería principal del index<?php else: ?>Métodos de Pago<?php endif; ?>
+            <?php if ($activeTab === 'correo'): ?>Configuración de correo corporativo<?php elseif ($activeTab === 'cabecera'): ?>Datos de cabecera<?php elseif ($activeTab === 'notificaciones-recargas'): ?>Notificaciones Recargas<?php elseif ($activeTab === 'sociales'): ?>Redes Sociales<?php elseif ($activeTab === 'api-banco'): ?>Datos conexión Banco<?php elseif ($activeTab === 'api-free-fire'): ?>Datos API<?php elseif ($activeTab === 'api-binance'): ?>API Binance Pay<?php elseif ($activeTab === 'verificacion-binance'): ?>Verificación Binance<?php elseif ($activeTab === 'paypal'): ?>Paypal<?php elseif ($activeTab === 'api-discord'): ?>API Discord<?php elseif ($activeTab === 'personalizar-colores'): ?>Personalizar Colores<?php elseif ($activeTab === 'ventana-inicial'): ?>Ventana Inicial<?php elseif ($activeTab === 'galeria'): ?>Galería principal del index<?php elseif ($activeTab === 'bloqueo-jugadores'): ?>Bloqueo de Id de Usuario<?php else: ?>Métodos de Pago<?php endif; ?>
           </h2>
         </div>
         <div class="card-body p-4">
@@ -2978,7 +2984,7 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                 </div>
               <?php endif; ?>
             </div>
-          <?php else: ?>
+          <?php elseif ($activeTab === 'metodos-pago'): ?>
             <form method="post" enctype="multipart/form-data">
               <input type="hidden" name="config_section" value="metodos-pago">
               <input type="hidden" name="payment_method_id" value="<?= $paymentMethodEditItem ? (int) $paymentMethodEditItem['id'] : 0 ?>">
@@ -3218,6 +3224,57 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                 </div>
               <?php endif; ?>
             </div>
+          <?php elseif ($activeTab === 'bloqueo-jugadores'): ?>
+            <div class="config-section-note mb-4">Registra aquí los IDs de jugadores que no podrán realizar compras. Cuando un usuario intente comprar con un ID bloqueado, verá un mensaje de advertencia por actividades ilícitas y el proceso se cancelará tanto en el navegador como en el servidor.</div>
+            <form method="post" class="mb-4">
+              <input type="hidden" name="config_section" value="bloqueo-jugadores">
+              <input type="hidden" name="blocked_player_add" value="1">
+              <div class="row g-3 align-items-end">
+                <div class="col-md-5">
+                  <label class="form-label">ID de Jugador a Bloquear</label>
+                  <input type="text" name="blocked_player_id" required class="form-control" placeholder="Ej: 7393962808" maxlength="100">
+                </div>
+                <div class="col-md-5">
+                  <label class="form-label">Razón (opcional)</label>
+                  <input type="text" name="blocked_player_reason" class="form-control" placeholder="Ej: Fraude comprobado" maxlength="255">
+                </div>
+                <div class="col-md-2">
+                  <button type="submit" class="btn btn-outline-danger w-100">Bloquear</button>
+                </div>
+              </div>
+            </form>
+            <div class="d-flex align-items-center gap-3 mb-3">
+              <h3 class="h5 fw-bold mb-0 text-info">IDs Bloqueados</h3>
+              <span class="gallery-badge-neon"><?= count($blockedPlayerItems) ?> registros</span>
+            </div>
+            <?php if (empty($blockedPlayerItems)): ?>
+              <div class="config-section-note">No hay ningún ID bloqueado actualmente. Usa el formulario anterior para agregar el primero.</div>
+            <?php else: ?>
+              <div class="table-responsive">
+                <table class="table table-striped align-middle">
+                  <thead>
+                    <tr>
+                      <th>ID de Jugador</th>
+                      <th>Razón</th>
+                      <th>Bloqueado el</th>
+                      <th class="text-end">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <?php foreach ($blockedPlayerItems as $bp): ?>
+                      <tr>
+                        <td class="fw-bold font-monospace"><?= htmlspecialchars($bp['player_id'], ENT_QUOTES, 'UTF-8') ?></td>
+                        <td><?= $bp['razon'] !== '' ? htmlspecialchars($bp['razon'], ENT_QUOTES, 'UTF-8') : '<span class="text-secondary">Sin razón</span>' ?></td>
+                        <td class="small text-secondary"><?= htmlspecialchars($bp['creado_en'], ENT_QUOTES, 'UTF-8') ?></td>
+                        <td class="text-end">
+                          <a href="/admin/configuracion?tab=bloqueo-jugadores&desbloquear_jugador=<?= (int) $bp['id'] ?>" class="btn btn-outline-success btn-sm rounded-4" onclick="return confirm('¿Desbloquear este ID de jugador?');">Desbloquear</a>
+                        </td>
+                      </tr>
+                    <?php endforeach; ?>
+                  </tbody>
+                </table>
+              </div>
+            <?php endif; ?>
           <?php endif; ?>
         </div>
       </div>

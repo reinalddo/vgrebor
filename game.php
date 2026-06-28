@@ -10,6 +10,7 @@ require_once __DIR__ . "/includes/slugify.php";
 require_once __DIR__ . "/includes/player_verification.php";
 require_once __DIR__ . "/includes/package_features.php";
 require_once __DIR__ . "/includes/payment_difference.php";
+require_once __DIR__ . "/includes/blocked_players.php";
 require_once __DIR__ . "/includes/game_entry_window_per_game.php";
 require_once __DIR__ . "/includes/win_points.php";
 require_once __DIR__ . "/includes/binance_pay.php";
@@ -11097,6 +11098,16 @@ include __DIR__ . "/includes/header.php";
                   ? options.forceUserId.trim()
                   : (playerPrimaryInput ? playerPrimaryInput.value.trim() : '');
                 if (userId) { defaultOrderUserIdentifier = userId; localStorage.setItem('rbs_player_id', userId); }
+
+                const BLOCKED_PLAYER_IDS = <?= json_encode(blocked_players_get_all_ids(), JSON_UNESCAPED_UNICODE) ?>;
+                if (userId && BLOCKED_PLAYER_IDS.includes(userId)) {
+                  showPaymentStatusModal(
+                    '⚠️ Advertencia de Actividades Ilícitas',
+                    'Este ID de jugador ha sido suspendido temporalmente por actividades ilícitas. Si crees que es un error, comunícate con el administrador.',
+                    'danger'
+                  );
+                  return;
+                }
                 const playerFields = options.forcePlayerFields && typeof options.forcePlayerFields === 'object'
                   ? options.forcePlayerFields
                   : collectPlayerFields();

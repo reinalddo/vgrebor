@@ -2182,6 +2182,7 @@ switch ($seccion) {
         require_once __DIR__ . '/includes/home_gallery.php';
         require_once __DIR__ . '/includes/payment_methods.php';
         require_once __DIR__ . '/includes/api_discord.php';
+        require_once __DIR__ . '/includes/blocked_players.php';
         $startupPopupNormalEnabled = store_config_get('inicio_popup_activo', '1') === '1';
         $startupPopupVideoEnabled = store_config_get('inicio_popup_video_activo', '0') === '1';
         $startupPopupGalleryEnabled = store_config_get('inicio_popup_galeria', '0') === '1';
@@ -2194,7 +2195,7 @@ switch ($seccion) {
         $paypalTabEnabled = store_config_get('pago_paypal', '0') === '1';
         $discordApiTabEnabled = store_config_get('api_discord', '0') === '1';
         $activeTab = $_GET['tab'] ?? 'correo';
-        $allowedTabs = ['correo', 'cabecera', 'notificaciones-recargas', 'sociales', 'api-banco', 'api-free-fire', 'personalizar-colores', 'galeria', 'metodos-pago'];
+        $allowedTabs = ['correo', 'cabecera', 'notificaciones-recargas', 'sociales', 'api-banco', 'api-free-fire', 'personalizar-colores', 'galeria', 'metodos-pago', 'bloqueo-jugadores'];
         if ($binanceApiTabEnabled) {
             $allowedTabs[] = 'api-binance';
         }
@@ -2337,6 +2338,16 @@ switch ($seccion) {
                 admin_set_flash('error', 'No se pudo actualizar el orden de la galería.');
             }
             admin_redirect('configuracion', ['tab' => 'galeria']);
+        }
+
+        if ($activeTab === 'bloqueo-jugadores' && isset($_GET['desbloquear_jugador'])) {
+            $blockedId = intval($_GET['desbloquear_jugador']);
+            if ($blockedId > 0 && blocked_players_delete($blockedId)) {
+                admin_set_flash('success', 'ID de jugador desbloqueado correctamente.');
+            } else {
+                admin_set_flash('error', 'No se pudo desbloquear el ID de jugador.');
+            }
+            admin_redirect('configuracion', ['tab' => 'bloqueo-jugadores']);
         }
 
         if ($activeTab === 'metodos-pago' && isset($_GET['eliminar_metodo_pago'])) {
@@ -3362,6 +3373,20 @@ switch ($seccion) {
                 }
 
                 admin_set_flash('error', 'No se pudo guardar el método de pago.');
+            }
+
+            if ($activeTab === 'bloqueo-jugadores' && isset($_POST['blocked_player_add'])) {
+                $newPlayerId = trim((string) ($_POST['blocked_player_id'] ?? ''));
+                $newPlayerReason = trim((string) ($_POST['blocked_player_reason'] ?? ''));
+                if ($newPlayerId === '') {
+                    admin_set_flash('error', 'El ID de jugador no puede estar vacío.');
+                } elseif (blocked_players_add($newPlayerId, $newPlayerReason)) {
+                    admin_set_flash('success', 'ID de jugador bloqueado correctamente.');
+                } else {
+                    admin_set_flash('error', 'No se pudo bloquear el ID (puede que ya esté registrado).');
+                }
+                define('ADMIN_CONFIG_POST_HANDLED', true);
+                admin_redirect('configuracion', ['tab' => 'bloqueo-jugadores']);
             }
 
             define('ADMIN_CONFIG_POST_HANDLED', true);

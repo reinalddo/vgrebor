@@ -22,6 +22,7 @@ require_once __DIR__ . '/../includes/recharge_availability.php';
 require_once __DIR__ . '/../includes/recharge_notifications.php';
 require_once __DIR__ . '/../includes/win_points.php';
 require_once __DIR__ . '/../includes/payment_difference.php';
+require_once __DIR__ . '/../includes/blocked_players.php';
 
 if (!function_exists('create_app_mysqli_connection')) {
     function create_app_mysqli_connection(): mysqli {
@@ -8054,6 +8055,15 @@ if ($action === 'create') {
     if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) $missing[] = 'email';
     if (!empty($missing)) {
         json_error('Faltan datos obligatorios del pedido: ' . implode(', ', $missing));
+    }
+
+    $blockedPlayerIds = blocked_players_get_all_ids();
+    $primaryPlayerIdToCheck = trim((string) $user_identifier);
+    if ($primaryPlayerIdToCheck === '') {
+        $primaryPlayerIdToCheck = trim((string) primary_player_identifier_from_fields($player_fields));
+    }
+    if ($primaryPlayerIdToCheck !== '' && in_array($primaryPlayerIdToCheck, $blockedPlayerIds, true)) {
+        json_error('Este ID de jugador ha sido suspendido por actividades ilícitas. Comunícate con el administrador si crees que es un error.', 403);
     }
 
     // ── Descuento máximo: Drop vs Cupón ────────────────────────────────────────
