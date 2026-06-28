@@ -28,19 +28,6 @@ function blocked_players_ensure_table(): void {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
 
-    $seedIds = [
-        ['7393962808', 'Fraude comprobado'],
-        ['7678862118', 'Fraude comprobado'],
-    ];
-    $seedStmt = $mysqli->prepare('INSERT IGNORE INTO jugadores_bloqueados (player_id, razon) VALUES (?, ?)');
-    if ($seedStmt) {
-        foreach ($seedIds as [$pid, $reason]) {
-            $seedStmt->bind_param('ss', $pid, $reason);
-            $seedStmt->execute();
-        }
-        $seedStmt->close();
-    }
-
     $initialized = true;
 }
 
