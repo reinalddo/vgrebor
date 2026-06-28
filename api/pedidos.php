@@ -6171,7 +6171,7 @@ function movement_is_available_for_order(mysqli $mysqli, string $reference, int 
 }
 
 function bank_amount_matches_order_total(float $movementAmount, float $orderAmount): bool {
-    return (int) floor($movementAmount) === (int) floor($orderAmount);
+    return round($movementAmount, 2) === round($orderAmount, 2);
 }
 
 function bank_mismatch_failure_type(bool $referenceMatch, bool $amountMatch): string {

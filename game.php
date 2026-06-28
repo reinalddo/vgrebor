@@ -6572,7 +6572,7 @@ include __DIR__ . "/includes/header.php";
     const taxAmount = taxPercentage > 0
       ? normalizeCurrencyAmount((subtotalAmount * taxPercentage) / 100, showDecimals)
       : 0;
-    const totalAmount = normalizeCurrencyAmount(subtotalAmount + taxAmount, showDecimals);
+    const totalAmount = Number((subtotalAmount + taxAmount).toFixed(2));
 
     // Mensaje informativo sobre el descuento ganador
     let discountWinnerMessage = '';
@@ -6611,7 +6611,7 @@ include __DIR__ . "/includes/header.php";
       baseText: formatPaymentDifferenceMoney(currencyCode, baseAmount, showDecimals),
       discountText: formatPaymentDifferenceMoney(currencyCode, discountAmount, showDecimals),
       taxText: formatPaymentDifferenceMoney(currencyCode, taxAmount, showDecimals),
-      totalText: formatPaymentDifferenceMoney(currencyCode, totalAmount, showDecimals),
+      totalText: formatPaymentDifferenceMoney(currencyCode, totalAmount, true),
     };
   }
 
