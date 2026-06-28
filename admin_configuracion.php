@@ -56,6 +56,7 @@ blocked_players_ensure_table();
 $blockedPlayerItems = blocked_players_all();
 $footerNewEnabled  = trim((string) ($cfg['footer_nuevo_activo'] ?? '0')) === '1';
 $footerLogoUrl     = trim((string) ($cfg['footer_logo_url'] ?? ''));
+$footerCol1Desc    = trim((string) ($cfg['footer_col1_desc'] ?? ''));
 $footerCopyright   = trim((string) ($cfg['footer_copyright'] ?? ''));
 $footerCol2Links   = store_config_footer_col_links(2);
 $footerCol3Links   = store_config_footer_col_links(3);
@@ -3288,7 +3289,9 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                   </div>
                 </div>
                 <div class="col-md-6">
-                  <div class="config-section-note" style="font-size:.85rem;">El texto descriptivo y las redes sociales (Instagram, TikTok, Facebook) se toman automáticamente de la configuración del sistema.</div>
+                  <label class="form-label">Texto descriptivo (Columna 1)</label>
+                  <input type="text" name="footer_col1_desc" value="<?= htmlspecialchars($footerCol1Desc, ENT_QUOTES, 'UTF-8') ?>" class="form-control" placeholder="Ej: Tienda de monedas digitales" maxlength="120">
+                  <div class="small text-secondary mt-1">Aparece debajo del logo. Las redes sociales se toman automáticamente de la configuración del sistema.</div>
                 </div>
               </div>
 

@@ -1235,7 +1235,10 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
               <img src="<?= htmlspecialchars($footerEffectiveLogo, ENT_QUOTES, 'UTF-8') ?>" alt="Logo" class="tvg-footer-logo mb-3">
             <?php endif; ?>
             <?php $storeName = trim((string) store_config_get('nombre_tienda', '')); ?>
-            <?php $storeSub  = trim((string) store_config_get('nombre_tienda_subtitulo', '')); ?>
+            <?php
+              $storeSub = trim((string) store_config_get('footer_col1_desc', ''));
+              if ($storeSub === '') $storeSub = trim((string) store_config_get('nombre_tienda_subtitulo', ''));
+            ?>
             <?php if ($storeSub !== ''): ?>
               <p class="tvg-footer-desc"><?= htmlspecialchars($storeSub, ENT_QUOTES, 'UTF-8') ?></p>
             <?php endif; ?>

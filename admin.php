@@ -3447,6 +3447,10 @@ switch ($seccion) {
                 }
                 store_config_upsert('footer_col4_links', json_encode($col4, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
+                // Texto descriptivo columna 1
+                $footerCol1Desc = trim((string) ($_POST['footer_col1_desc'] ?? ''));
+                store_config_upsert('footer_col1_desc', $footerCol1Desc);
+
                 // Copyright
                 $footerCopyright = trim((string) ($_POST['footer_copyright'] ?? ''));
                 store_config_upsert('footer_copyright', $footerCopyright);
