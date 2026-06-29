@@ -1231,7 +1231,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
         <div class="row g-4 g-lg-5">
 
           <!-- Col 1: Logo + texto + redes -->
-          <div class="col-lg-3 col-md-6">
+          <div class="col-lg-3 col-md-6 tvg-footer-col1-center">
             <?php if ($footerEffectiveLogo !== ''): ?>
               <img src="<?= htmlspecialchars($footerEffectiveLogo, ENT_QUOTES, 'UTF-8') ?>" alt="Logo" class="tvg-footer-logo mb-3">
             <?php endif; ?>
@@ -1800,6 +1800,9 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     }
     @media (max-width: 767.98px) {
       .tvg-footer-top { padding: 2rem 0 1.2rem; }
+      .tvg-footer-col1-center { text-align: center; }
+      .tvg-footer-col1-center .tvg-footer-logo { margin-left: auto; margin-right: auto; }
+      .tvg-footer-col1-center .tvg-footer-socials { justify-content: center; }
     }
   </style>
   <script>
