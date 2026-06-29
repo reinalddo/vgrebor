@@ -292,6 +292,50 @@ $paypalReturnUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
 $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=paypal_cancel';
 ?>
 <style>
+  .tvg-legal-tabs { border-bottom-color: rgba(255,255,255,.12); }
+  .tvg-legal-tabs .nav-link {
+    color: rgba(255,255,255,.6);
+    background: transparent;
+    border: 1px solid transparent;
+    font-weight: 600;
+    font-size: .85rem;
+  }
+  .tvg-legal-tabs .nav-link:hover { color: #fff; border-color: rgba(255,255,255,.1); }
+  .tvg-legal-tabs .nav-link.active {
+    color: var(--theme-success, #22d3ee);
+    background: rgba(255,255,255,.03);
+    border-color: rgba(255,255,255,.07) rgba(255,255,255,.07) transparent;
+  }
+  .legal-quill-editor .ql-toolbar.ql-snow {
+    background: #11151d;
+    border: 1px solid rgba(255,255,255,.1);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+  }
+  .legal-quill-editor .ql-container.ql-snow {
+    background: #0b0f17;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 0 0 8px 8px;
+    color: #e5e7eb;
+    min-height: 360px;
+    max-height: 480px;
+    overflow-y: auto;
+    font-size: .92rem;
+  }
+  .legal-quill-editor .ql-snow .ql-stroke { stroke: #cbd5e1; }
+  .legal-quill-editor .ql-snow .ql-fill { fill: #cbd5e1; }
+  .legal-quill-editor .ql-snow .ql-picker { color: #cbd5e1; }
+  .legal-quill-editor .ql-snow .ql-picker-options {
+    background: #11151d;
+    border: 1px solid rgba(255,255,255,.12) !important;
+  }
+  .legal-quill-editor .ql-snow .ql-picker-item { color: #cbd5e1; }
+  .legal-quill-editor .ql-snow.ql-toolbar button:hover .ql-stroke,
+  .legal-quill-editor .ql-snow.ql-toolbar button.ql-active .ql-stroke,
+  .legal-quill-editor .ql-snow .ql-picker-label:hover .ql-stroke { stroke: var(--theme-success, #22d3ee); }
+  .legal-quill-editor .ql-snow.ql-toolbar button:hover .ql-fill,
+  .legal-quill-editor .ql-snow.ql-toolbar button.ql-active .ql-fill { fill: var(--theme-success, #22d3ee); }
+  .legal-quill-editor .ql-editor.ql-blank::before { color: rgba(255,255,255,.35); }
   .neon-card {
     background: #181f2a !important;
     border-radius: 18px !important;
@@ -3341,10 +3385,22 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
 
               <!-- Sección 3: Columna Soporte y Legal -->
               <h5 class="fw-bold text-info mb-3 mt-2">Sección 3 — Columna SOPORTE Y LEGAL</h5>
+              <?php
+                $legalPages = store_config_legal_pages();
+                $legalSlugs = array_keys($legalPages);
+              ?>
               <div class="mb-4">
                 <?php foreach ($footerCol3Labels as $i => $label): ?>
+                  <?php if ($i === 3 || $i === 4): ?>
+                    <input type="hidden" name="footer_col3_url[]" value="/<?= htmlspecialchars($legalSlugs[$i - 2], ENT_QUOTES, 'UTF-8') ?>">
+                    <input type="hidden" name="footer_col3_target[]" value="_self">
+                    <?php continue; ?>
+                  <?php endif; ?>
                   <div class="mb-3 p-3 rounded-3" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
-                    <div class="fw-semibold text-light mb-2"><?= htmlspecialchars($label['text'], ENT_QUOTES, 'UTF-8') ?><?php if (!empty($label['sub'])): ?> <span class="text-secondary fw-normal small"><?= htmlspecialchars($label['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></div>
+                    <div class="fw-semibold text-light mb-2">
+                      <?= $i === 2 ? 'Páginas Legales (Términos, Reembolso y Privacidad)' : htmlspecialchars($label['text'], ENT_QUOTES, 'UTF-8') ?>
+                      <?php if ($i !== 2 && !empty($label['sub'])): ?> <span class="text-secondary fw-normal small"><?= htmlspecialchars($label['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                    </div>
                     <?php if ($i === 0): ?>
                       <div class="mb-2">
                         <label class="form-label small text-secondary mb-1">Enlace de YouTube <span class="text-warning">(se abrirá en un modal al hacer clic)</span></label>
@@ -3375,18 +3431,36 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                       <input type="hidden" name="footer_col3_url[]" value="">
                       <input type="hidden" name="footer_col3_target[]" value="_self">
                       <input type="hidden" name="footer_col3_extra[1]" value="">
-                    <?php else: ?>
-                      <div class="row g-2">
-                        <div class="col-md-8">
-                          <input type="text" name="footer_col3_url[]" value="<?= htmlspecialchars($footerCol3Links[$i]['url'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" placeholder="URL o ancla (ej: /faq, #garantia, https://...)">
-                        </div>
-                        <div class="col-md-4">
-                          <select name="footer_col3_target[]" class="form-select form-select-sm">
-                            <option value="_self" <?= ($footerCol3Links[$i]['target'] ?? '_self') === '_self' ? 'selected' : '' ?>>Misma pestaña</option>
-                            <option value="_blank" <?= ($footerCol3Links[$i]['target'] ?? '') === '_blank' ? 'selected' : '' ?>>Nueva pestaña</option>
-                          </select>
-                        </div>
+                    <?php elseif ($i === 2): ?>
+                      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
+                      <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+                      <ul class="nav nav-tabs tvg-legal-tabs" id="legalTabsNav" role="tablist">
+                        <?php foreach ($legalPages as $slug => $info): ?>
+                          <li class="nav-item" role="presentation">
+                            <button class="nav-link <?= $slug === $legalSlugs[0] ? 'active' : '' ?>" id="legalTabBtn-<?= htmlspecialchars($slug, ENT_QUOTES, 'UTF-8') ?>" data-bs-toggle="tab" data-bs-target="#legalTabPane-<?= htmlspecialchars($slug, ENT_QUOTES, 'UTF-8') ?>" type="button" role="tab">
+                              <?= htmlspecialchars($info['title'], ENT_QUOTES, 'UTF-8') ?>
+                            </button>
+                          </li>
+                        <?php endforeach; ?>
+                      </ul>
+                      <div class="tab-content p-3 rounded-bottom-3" id="legalTabsContent" style="background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07);border-top:0;">
+                        <?php foreach ($legalPages as $slug => $info): ?>
+                          <div class="tab-pane fade <?= $slug === $legalSlugs[0] ? 'show active' : '' ?>" id="legalTabPane-<?= htmlspecialchars($slug, ENT_QUOTES, 'UTF-8') ?>" role="tabpanel">
+                            <label class="form-label small text-secondary mb-1">Contenido — se publicará en <code>/<?= htmlspecialchars($slug, ENT_QUOTES, 'UTF-8') ?></code></label>
+                            <div id="legalQuill-<?= htmlspecialchars($slug, ENT_QUOTES, 'UTF-8') ?>" class="legal-quill-editor"></div>
+                            <textarea id="legalTextarea-<?= htmlspecialchars($slug, ENT_QUOTES, 'UTF-8') ?>" class="legal-html-textarea d-none" data-legal-key="<?= htmlspecialchars($info['key'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars(store_config_get($info['key'], ''), ENT_QUOTES, 'UTF-8') ?></textarea>
+                            <div class="small text-secondary mt-1">Usa la barra de herramientas para dar formato (negrita, cursiva, subrayado, colores, fuente).</div>
+                          </div>
+                        <?php endforeach; ?>
                       </div>
+                      <div class="mt-3 d-flex align-items-center gap-2">
+                        <button type="button" id="legalSaveBtn" class="btn btn-sm fw-bold" style="background:linear-gradient(90deg,var(--theme-highlight,#8b5cf6),var(--theme-success,#22d3ee));color:#fff;border:0;padding:.4rem 1rem;">
+                          💾 Guardar Páginas Legales
+                        </button>
+                        <span id="legalSaveStatus" class="small text-secondary"></span>
+                      </div>
+                      <input type="hidden" name="footer_col3_url[]" value="/<?= htmlspecialchars($legalSlugs[0], ENT_QUOTES, 'UTF-8') ?>">
+                      <input type="hidden" name="footer_col3_target[]" value="_self">
                     <?php endif; ?>
                   </div>
                 <?php endforeach; ?>
@@ -4227,6 +4301,86 @@ $adminFaqJson  = json_encode($adminFaqItems, JSON_UNESCAPED_UNICODE | JSON_HEX_T
     document.getElementById('faqAddBtn').addEventListener('click', addOrUpdate);
     document.getElementById('faqCancelEditBtn').addEventListener('click', cancelEdit);
     document.getElementById('faqSaveBtn').addEventListener('click', saveToServer);
+  });
+})();
+
+(function () {
+  'use strict';
+  var adminUrl = (function () {
+    var p = window.location.pathname;
+    return p.split('?')[0];
+  })();
+  var legalSlugs = <?= json_encode($legalSlugs) ?>;
+  var quillInstances = {};
+
+  function initLegalEditors() {
+    if (typeof Quill === 'undefined') return;
+    legalSlugs.forEach(function (slug) {
+      var editorEl  = document.getElementById('legalQuill-' + slug);
+      var textarea  = document.getElementById('legalTextarea-' + slug);
+      if (!editorEl || !textarea || quillInstances[slug]) return;
+      var quill = new Quill(editorEl, {
+        theme: 'snow',
+        placeholder: 'Escribe aquí el contenido...',
+        modules: {
+          toolbar: [
+            [{ font: [] }],
+            [{ header: [1, 2, 3, false] }],
+            ['bold', 'italic', 'underline', 'strike'],
+            [{ color: [] }, { background: [] }],
+            [{ list: 'ordered' }, { list: 'bullet' }],
+            [{ align: [] }],
+            ['link'],
+            ['clean']
+          ]
+        }
+      });
+      quill.root.innerHTML = textarea.value;
+      quillInstances[slug] = { quill: quill, textarea: textarea };
+    });
+  }
+
+  async function saveLegalPages() {
+    var btn    = document.getElementById('legalSaveBtn');
+    var status = document.getElementById('legalSaveStatus');
+    if (!btn) return;
+    Object.keys(quillInstances).forEach(function (slug) {
+      quillInstances[slug].textarea.value = quillInstances[slug].quill.root.innerHTML;
+    });
+    var textareas = document.querySelectorAll('.legal-html-textarea');
+    var payload = {};
+    textareas.forEach(function (ta) {
+      payload[ta.dataset.legalKey] = ta.value;
+    });
+    btn.disabled = true;
+    btn.textContent = 'Guardando...';
+    status.textContent = '';
+    try {
+      var fd = new FormData();
+      fd.append('action', 'save_legal');
+      fd.append('legal_pages', JSON.stringify(payload));
+      var resp = await fetch(adminUrl, { method: 'POST', body: fd });
+      var data = await resp.json();
+      if (data.ok) {
+        status.textContent = '✔ Páginas legales guardadas';
+        status.style.color = '#22d3ee';
+      } else {
+        throw new Error('Error del servidor');
+      }
+    } catch (err) {
+      status.textContent = '✖ Error al guardar';
+      status.style.color = '#f87171';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '💾 Guardar Páginas Legales';
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    initLegalEditors();
+    var btn = document.getElementById('legalSaveBtn');
+    if (!btn) return;
+    btn.addEventListener('click', saveLegalPages);
   });
 })();
 </script>

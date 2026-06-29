@@ -1300,8 +1300,10 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
           <div class="col-lg-3 col-md-6">
             <h4 class="tvg-footer-col-title">SOPORTE Y LEGAL</h4>
             <ul class="tvg-footer-links">
+              <?php $legalSlugList = array_keys(store_config_legal_pages()); ?>
               <?php foreach ($footerCol3Items as $i => $item): ?>
                 <?php $url = $footerCol3Links[$i]['url'] ?? ''; $tgt = $footerCol3Links[$i]['target'] ?? '_self'; ?>
+                <?php if ($i >= 2 && isset($legalSlugList[$i - 2])): $url = '/' . $legalSlugList[$i - 2]; $tgt = '_self'; endif; ?>
                 <?php $ytId = ($i === 0) ? tvg_youtube_id($url) : ''; ?>
                 <?php $ytVertical = ($i === 0 && ($footerCol3Links[0]['extra'] ?? '') === 'vertical') ? '1' : '0'; ?>
                 <?php $isFaqItem = ($i === 1 && count($faqItems) > 0); ?>

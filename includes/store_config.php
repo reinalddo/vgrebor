@@ -1856,6 +1856,23 @@ function store_config_faq_items(): array {
     return is_array($arr) ? $arr : [];
 }
 
+function store_config_legal_pages(): array {
+    return [
+        'terminos-de-garantia'   => ['key' => 'legal_terminos_garantia_html',   'title' => 'Términos de Garantía'],
+        'politicas-de-reembolso' => ['key' => 'legal_politicas_reembolso_html', 'title' => 'Políticas de Reembolso'],
+        'politica-de-privacidad' => ['key' => 'legal_politica_privacidad_html', 'title' => 'Política de Privacidad'],
+    ];
+}
+
+function store_config_legal_sanitize_html(string $html): string {
+    $allowed = '<p><br><b><strong><i><em><u><ul><ol><li><h1><h2><h3><h4><h5><h6><a><span><div><blockquote><hr><table><thead><tbody><tr><td><th>';
+    $clean = strip_tags($html, $allowed);
+    $clean = preg_replace('/\son\w+\s*=\s*"[^"]*"/i', '', $clean);
+    $clean = preg_replace("/\son\w+\s*=\s*'[^']*'/i", '', $clean);
+    $clean = preg_replace('/javascript\s*:/i', '', $clean);
+    return trim((string) $clean);
+}
+
 function store_config_footer_col_links(int $col): array {
     $key = 'footer_col' . $col . '_links';
     $count = $col === 3 ? 5 : ($col === 4 ? 3 : 4);

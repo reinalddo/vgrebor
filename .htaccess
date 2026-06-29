@@ -27,6 +27,11 @@ RewriteRule ^juego/([0-9]+)(?:-([a-zA-Z0-9-]+))?/?$ game.php?id=$1&requested_slu
 # Legacy slug URLs
 RewriteRule ^tienda/([a-zA-Z0-9-]+)/?$ game.php?slug=$1 [L,QSA]
 
+# Páginas legales
+RewriteRule ^terminos-de-garantia/?$ legal.php?p=terminos-de-garantia [L,QSA]
+RewriteRule ^politicas-de-reembolso/?$ legal.php?p=politicas-de-reembolso [L,QSA]
+RewriteRule ^politica-de-privacidad/?$ legal.php?p=politica-de-privacidad [L,QSA]
+
 # Friendly list URLs
 RewriteRule ^populares/?$ populares.php [L,QSA]
 RewriteRule ^juegos/?$ juegos.php [L,QSA]

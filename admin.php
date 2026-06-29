@@ -238,6 +238,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
     admin_json_response(['ok' => true, 'count' => count($clean)]);
 }
 
+// AJAX: guardar páginas legales (Términos de Garantía, Políticas de Reembolso, Política de Privacidad)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_legal') {
+    $pages   = store_config_legal_pages();
+    $rawJson = trim((string) ($_POST['legal_pages'] ?? ''));
+    $data    = ($rawJson !== '') ? json_decode($rawJson, true) : [];
+    if (!is_array($data)) $data = [];
+    $saved = 0;
+    foreach ($pages as $slug => $info) {
+        $html = trim((string) ($data[$info['key']] ?? ''));
+        $html = store_config_legal_sanitize_html($html);
+        store_config_upsert($info['key'], $html);
+        if ($html !== '') $saved++;
+    }
+    admin_json_response(['ok' => true, 'count' => $saved]);
+}
+
 function admin_runtime_refresh_targets(): array {
     return [
         __DIR__ . '/game.php',
