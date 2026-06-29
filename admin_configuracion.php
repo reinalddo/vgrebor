@@ -3345,17 +3345,38 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                 <?php foreach ($footerCol3Labels as $i => $label): ?>
                   <div class="mb-3 p-3 rounded-3" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
                     <div class="fw-semibold text-light mb-2"><?= htmlspecialchars($label['text'], ENT_QUOTES, 'UTF-8') ?><?php if (!empty($label['sub'])): ?> <span class="text-secondary fw-normal small"><?= htmlspecialchars($label['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></div>
-                    <div class="row g-2">
-                      <div class="col-md-8">
-                        <input type="text" name="footer_col3_url[]" value="<?= htmlspecialchars($footerCol3Links[$i]['url'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" placeholder="URL o ancla (ej: /faq, #garantia, https://...)">
+                    <?php if ($i === 0): ?>
+                      <div class="mb-2">
+                        <label class="form-label small text-secondary mb-1">Enlace de YouTube <span class="text-warning">(se abrirá en un modal al hacer clic)</span></label>
+                        <input type="url" name="footer_col3_url[]" value="<?= htmlspecialchars($footerCol3Links[$i]['url'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" placeholder="https://www.youtube.com/watch?v=... o https://youtu.be/...">
+                        <input type="hidden" name="footer_col3_target[]" value="_self">
                       </div>
-                      <div class="col-md-4">
-                        <select name="footer_col3_target[]" class="form-select form-select-sm">
-                          <option value="_self" <?= ($footerCol3Links[$i]['target'] ?? '_self') === '_self' ? 'selected' : '' ?>>Misma pestaña</option>
-                          <option value="_blank" <?= ($footerCol3Links[$i]['target'] ?? '') === '_blank' ? 'selected' : '' ?>>Nueva pestaña</option>
-                        </select>
+                      <div>
+                        <label class="form-label small text-secondary mb-1">Orientación del video</label>
+                        <div class="d-flex gap-3">
+                          <div class="form-check">
+                            <input class="form-check-input" type="radio" name="footer_col3_extra[0]" id="ytOrient16x9" value="" <?= ($footerCol3Links[0]['extra'] ?? '') !== 'vertical' ? 'checked' : '' ?>>
+                            <label class="form-check-label small" for="ytOrient16x9">Horizontal (16:9)</label>
+                          </div>
+                          <div class="form-check">
+                            <input class="form-check-input" type="radio" name="footer_col3_extra[0]" id="ytOrient9x16" value="vertical" <?= ($footerCol3Links[0]['extra'] ?? '') === 'vertical' ? 'checked' : '' ?>>
+                            <label class="form-check-label small" for="ytOrient9x16">Vertical (9:16 — Shorts / TikTok style)</label>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    <?php else: ?>
+                      <div class="row g-2">
+                        <div class="col-md-8">
+                          <input type="text" name="footer_col3_url[]" value="<?= htmlspecialchars($footerCol3Links[$i]['url'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" placeholder="URL o ancla (ej: /faq, #garantia, https://...)">
+                        </div>
+                        <div class="col-md-4">
+                          <select name="footer_col3_target[]" class="form-select form-select-sm">
+                            <option value="_self" <?= ($footerCol3Links[$i]['target'] ?? '_self') === '_self' ? 'selected' : '' ?>>Misma pestaña</option>
+                            <option value="_blank" <?= ($footerCol3Links[$i]['target'] ?? '') === '_blank' ? 'selected' : '' ?>>Nueva pestaña</option>
+                          </select>
+                        </div>
+                      </div>
+                    <?php endif; ?>
                   </div>
                 <?php endforeach; ?>
               </div>

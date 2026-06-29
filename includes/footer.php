@@ -1287,14 +1287,30 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
           </div>
 
           <!-- Col 3: Soporte y Legal -->
+          <?php
+          if (!function_exists('tvg_youtube_id')) {
+            function tvg_youtube_id(string $u): string {
+              if (preg_match('/(?:youtube\.com\/watch\?(?:.*&)?v=|youtu\.be\/)([A-Za-z0-9_\-]{11})/', $u, $m)) return $m[1];
+              if (preg_match('/youtube\.com\/embed\/([A-Za-z0-9_\-]{11})/', $u, $m)) return $m[1];
+              return '';
+            }
+          }
+          ?>
           <div class="col-lg-3 col-md-6">
             <h4 class="tvg-footer-col-title">SOPORTE Y LEGAL</h4>
             <ul class="tvg-footer-links">
               <?php foreach ($footerCol3Items as $i => $item): ?>
                 <?php $url = $footerCol3Links[$i]['url'] ?? ''; $tgt = $footerCol3Links[$i]['target'] ?? '_self'; ?>
+                <?php $ytId = ($i === 0) ? tvg_youtube_id($url) : ''; ?>
+                <?php $ytVertical = ($i === 0 && ($footerCol3Links[0]['extra'] ?? '') === 'vertical') ? '1' : '0'; ?>
                 <li class="tvg-footer-link-item">
                   <span class="tvg-footer-link-icon tvg-footer-link-icon--circle"><?= $item['icon'] ?></span>
-                  <?php if ($url !== ''): ?>
+                  <?php if ($ytId !== ''): ?>
+                    <button type="button" class="tvg-footer-link tvg-footer-link-btn" data-bs-toggle="modal" data-bs-target="#tvgYtModal" data-yt-id="<?= htmlspecialchars($ytId, ENT_QUOTES, 'UTF-8') ?>" data-yt-vertical="<?= $ytVertical ?>">
+                      <?= htmlspecialchars($item['text'], ENT_QUOTES, 'UTF-8') ?>
+                      <?php if (!empty($item['sub'])): ?><br><span class="tvg-footer-link-sub"><?= htmlspecialchars($item['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                    </button>
+                  <?php elseif ($url !== ''): ?>
                     <a href="<?= htmlspecialchars($url, ENT_QUOTES, 'UTF-8') ?>"<?= $tgt === '_blank' ? ' target="_blank" rel="noopener noreferrer"' : '' ?> class="tvg-footer-link">
                       <?= htmlspecialchars($item['text'], ENT_QUOTES, 'UTF-8') ?>
                       <?php if (!empty($item['sub'])): ?><br><span class="tvg-footer-link-sub"><?= htmlspecialchars($item['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
@@ -1370,6 +1386,26 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       </div>
     </div>
   </footer>
+
+  <!-- Modal YouTube — ¿Cómo comprar? -->
+  <div class="modal fade" id="tvgYtModal" tabindex="-1" aria-labelledby="tvgYtModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" id="tvgYtModalDialog">
+      <div class="modal-content tvg-yt-modal-content">
+        <div class="modal-header tvg-yt-modal-header">
+          <h5 class="modal-title tvg-yt-modal-title" id="tvgYtModalLabel">¿Cómo comprar?</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="ratio ratio-16x9" id="tvgYtRatio">
+            <iframe id="tvgYtFrame" src="" frameborder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowfullscreen></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <style>
     .tvg-custom-footer {
       border-top: 2px solid transparent;
@@ -1468,6 +1504,74 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       color: #fff;
       text-decoration: none;
     }
+    button.tvg-footer-link-btn {
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      text-align: left;
+    }
+    button.tvg-footer-link-btn:hover {
+      color: #fff;
+    }
+    /* ── YouTube modal neon gaming ── */
+    #tvgYtModal .modal-dialog {
+      max-width: 780px;
+    }
+    #tvgYtModal .modal-dialog.tvg-yt-vertical {
+      max-width: 340px;
+    }
+    .tvg-yt-modal-content {
+      background: #060810;
+      border: 0;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1.5px var(--theme-highlight, #8b5cf6),
+        0 0 28px 4px rgba(139,92,246,.35),
+        0 0 60px 10px rgba(34,211,238,.15),
+        0 24px 64px rgba(0,0,0,.8);
+      position: relative;
+    }
+    .tvg-yt-modal-content::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 14px;
+      padding: 1.5px;
+      background: linear-gradient(135deg, var(--theme-highlight,#8b5cf6), var(--theme-success,#22d3ee), var(--theme-highlight,#8b5cf6));
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .tvg-yt-modal-header {
+      background: linear-gradient(90deg, rgba(139,92,246,.18) 0%, rgba(34,211,238,.10) 100%);
+      border-bottom: 1px solid rgba(139,92,246,.3);
+      padding: 0.85rem 1.2rem;
+      position: relative;
+      z-index: 2;
+    }
+    .tvg-yt-modal-title {
+      font-size: 1rem;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      background: linear-gradient(90deg, var(--theme-highlight,#8b5cf6), var(--theme-success,#22d3ee));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      filter: drop-shadow(0 0 6px rgba(139,92,246,.6));
+    }
+    .tvg-yt-modal-content .modal-body {
+      position: relative;
+      z-index: 2;
+      background: #000;
+    }
+    .tvg-yt-modal-content .ratio iframe {
+      border-radius: 0 0 12px 12px;
+    }
     .tvg-footer-link-sub {
       color: rgba(255,255,255,0.42);
       font-size: .78rem;
@@ -1563,6 +1667,35 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
           tvgScrollToEl(target);
         }
       });
+    });
+  })();
+
+  // YouTube modal — abrir con autoplay, soporte 16:9 y 9:16, detener al cerrar
+  (function () {
+    var modal   = document.getElementById('tvgYtModal');
+    if (!modal) return;
+    var frame   = document.getElementById('tvgYtFrame');
+    var dialog  = document.getElementById('tvgYtModalDialog');
+    var ratio   = document.getElementById('tvgYtRatio');
+    modal.addEventListener('show.bs.modal', function (e) {
+      var btn        = e.relatedTarget;
+      var ytId       = btn ? (btn.dataset.ytId       || '') : '';
+      var isVertical = btn ? (btn.dataset.ytVertical === '1') : false;
+      if (dialog && ratio) {
+        if (isVertical) {
+          dialog.classList.add('tvg-yt-vertical');
+          ratio.style.setProperty('--bs-aspect-ratio', '177.78%');
+        } else {
+          dialog.classList.remove('tvg-yt-vertical');
+          ratio.style.removeProperty('--bs-aspect-ratio');
+        }
+      }
+      if (ytId && frame) {
+        frame.src = 'https://www.youtube.com/embed/' + ytId + '?autoplay=1&rel=0';
+      }
+    });
+    modal.addEventListener('hidden.bs.modal', function () {
+      if (frame) frame.src = '';
     });
   })();
   </script>

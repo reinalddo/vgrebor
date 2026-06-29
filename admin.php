@@ -3427,9 +3427,11 @@ switch ($seccion) {
                 // Columna 3
                 $col3Urls    = array_values((array) ($_POST['footer_col3_url']    ?? []));
                 $col3Targets = array_values((array) ($_POST['footer_col3_target'] ?? []));
+                $col3Extras  = (array) ($_POST['footer_col3_extra'] ?? []);
                 $col3 = [];
                 for ($i = 0; $i < 5; $i++) {
-                    $col3[] = ['url' => trim((string) ($col3Urls[$i] ?? '')), 'target' => trim((string) ($col3Targets[$i] ?? '_self')), 'extra' => ''];
+                    $extra = $i === 0 ? trim((string) ($col3Extras[0] ?? '')) : '';
+                    $col3[] = ['url' => trim((string) ($col3Urls[$i] ?? '')), 'target' => trim((string) ($col3Targets[$i] ?? '_self')), 'extra' => $extra];
                 }
                 store_config_upsert('footer_col3_links', json_encode($col3, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
