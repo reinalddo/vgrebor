@@ -1381,8 +1381,8 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       padding: 3rem 0 2rem;
     }
     .tvg-footer-logo {
-      max-height: 52px;
-      max-width: 180px;
+      max-height: 104px;
+      max-width: 360px;
       object-fit: contain;
       display: block;
     }
@@ -1527,12 +1527,12 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       margin-bottom: .8rem;
     }
     .tvg-footer-payment-logo {
-      height: 30px;
-      max-width: 72px;
-      object-fit: contain;
+      height: 38px;
+      max-width: 90px;
+      object-fit: cover;
       border-radius: 5px;
-      background: #fff;
-      padding: 3px 6px;
+      background: transparent;
+      padding: 0;
     }
     .tvg-footer-copyright {
       text-align: center;
