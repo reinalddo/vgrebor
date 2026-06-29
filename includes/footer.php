@@ -1401,8 +1401,8 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 34px;
-      height: 34px;
+      width: 51px;
+      height: 51px;
       border-radius: 50%;
       border: 1px solid rgba(255,255,255,0.15);
       color: rgba(255,255,255,0.7);
@@ -1415,8 +1415,8 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       background: rgba(255,255,255,0.08);
     }
     .tvg-footer-social-link svg {
-      width: 16px;
-      height: 16px;
+      width: 24px;
+      height: 24px;
     }
     .tvg-footer-col-title {
       font-size: 1.4rem;
