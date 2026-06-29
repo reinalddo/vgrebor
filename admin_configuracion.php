@@ -3364,6 +3364,17 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                           </div>
                         </div>
                       </div>
+                    <?php elseif ($i === 1): ?>
+                      <div class="d-flex align-items-center gap-3">
+                        <button type="button" class="btn btn-sm fw-bold" data-bs-toggle="modal" data-bs-target="#adminFaqModal"
+                          style="background:linear-gradient(90deg,var(--theme-highlight,#8b5cf6),var(--theme-success,#22d3ee));color:#fff;border:0;padding:.4rem 1rem;">
+                          ⚡ Configurar FAQ
+                        </button>
+                        <span class="small text-secondary">Se abrirá un modal acordeón en el footer al hacer clic.</span>
+                      </div>
+                      <input type="hidden" name="footer_col3_url[]" value="">
+                      <input type="hidden" name="footer_col3_target[]" value="_self">
+                      <input type="hidden" name="footer_col3_extra[1]" value="">
                     <?php else: ?>
                       <div class="row g-2">
                         <div class="col-md-8">
@@ -4030,4 +4041,194 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
     });
   })();
 </script>
+<?php
+// Modal FAQ Admin — datos PHP → JS
+$adminFaqItems = store_config_faq_items();
+$adminFaqJson  = json_encode($adminFaqItems, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_QUOT);
+?>
+<!-- ── Modal: Configurar FAQ ── -->
+<div class="modal fade" id="adminFaqModal" tabindex="-1" aria-labelledby="adminFaqModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
+    <div class="modal-content" style="background:#0d1117;border:1.5px solid rgba(139,92,246,.4);border-radius:14px;overflow:hidden;">
+      <div class="modal-header" style="background:linear-gradient(90deg,rgba(139,92,246,.2),rgba(34,211,238,.1));border-bottom:1px solid rgba(139,92,246,.3);">
+        <h5 class="modal-title fw-bold" id="adminFaqModalLabel" style="background:linear-gradient(90deg,#8b5cf6,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">⚡ Configurar FAQ — Preguntas y Respuestas</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body p-3">
+        <!-- Formulario agregar/editar -->
+        <div class="mb-4 p-3 rounded-3" style="background:rgba(255,255,255,0.03);border:1px solid rgba(34,211,238,.25);">
+          <h6 class="fw-bold mb-3" id="faqFormTitle" style="color:#22d3ee;">➕ Nueva Pregunta</h6>
+          <input type="hidden" id="faqEditId" value="">
+          <div class="mb-2">
+            <label class="form-label small text-secondary mb-1">Pregunta</label>
+            <input type="text" id="faqQInput" class="form-control form-control-sm" placeholder="¿Cuánto tarda la entrega?">
+          </div>
+          <div class="mb-3">
+            <label class="form-label small text-secondary mb-1">Respuesta</label>
+            <textarea id="faqAInput" rows="3" class="form-control form-control-sm" placeholder="Escribe la respuesta aquí..."></textarea>
+          </div>
+          <div class="d-flex gap-2">
+            <button type="button" id="faqCancelEditBtn" class="btn btn-sm btn-outline-secondary d-none">✕ Cancelar edición</button>
+            <button type="button" id="faqAddBtn" class="btn btn-sm fw-bold" style="background:linear-gradient(90deg,#8b5cf6,#22d3ee);color:#fff;border:0;">➕ Agregar</button>
+          </div>
+        </div>
+        <!-- Tabla de items -->
+        <div>
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="small text-secondary" id="faqCountLabel">0 preguntas</span>
+          </div>
+          <div id="faqListWrap"></div>
+          <div id="faqEmptyMsg" class="text-center text-secondary py-4 small">No hay preguntas aún. Agrega la primera arriba ⬆</div>
+        </div>
+      </div>
+      <div class="modal-footer" style="border-top:1px solid rgba(255,255,255,.08);gap:.5rem;">
+        <span id="faqSaveStatus" class="small me-auto"></span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+        <button type="button" id="faqSaveBtn" class="btn btn-sm fw-bold" style="background:linear-gradient(90deg,#8b5cf6,#22d3ee);color:#fff;border:0;min-width:140px;">
+          💾 Guardar cambios
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var faqItems  = <?= $adminFaqJson ?> || [];
+  var adminUrl  = (function () {
+    var p = window.location.pathname;
+    return p.split('?')[0];
+  })();
+
+  function uid() {
+    return 'faq_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function renderList() {
+    var wrap  = document.getElementById('faqListWrap');
+    var empty = document.getElementById('faqEmptyMsg');
+    var count = document.getElementById('faqCountLabel');
+    if (!wrap) return;
+    count.textContent = faqItems.length + (faqItems.length === 1 ? ' pregunta' : ' preguntas');
+    if (faqItems.length === 0) {
+      wrap.innerHTML = '';
+      empty.classList.remove('d-none');
+      return;
+    }
+    empty.classList.add('d-none');
+    wrap.innerHTML = faqItems.map(function (item, idx) {
+      return '<div class="d-flex align-items-start gap-2 mb-2 p-2 rounded-3" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,.07);">' +
+        '<span class="text-secondary small mt-1" style="min-width:22px;font-weight:700;">' + (idx + 1) + '.</span>' +
+        '<div class="flex-grow-1 overflow-hidden">' +
+          '<div class="fw-semibold text-light small mb-1 text-truncate">' + escHtml(item.q) + '</div>' +
+          '<div class="text-secondary" style="font-size:.78rem;white-space:pre-wrap;max-height:52px;overflow:hidden;">' + escHtml(item.a) + '</div>' +
+        '</div>' +
+        '<div class="d-flex gap-1 flex-shrink-0">' +
+          '<button type="button" class="btn btn-sm btn-outline-info py-0 px-2 faq-edit-btn" data-id="' + escHtml(item.id) + '" title="Editar" style="font-size:.75rem;">✏</button>' +
+          '<button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 faq-del-btn" data-id="' + escHtml(item.id) + '" title="Eliminar" style="font-size:.75rem;">🗑</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    wrap.querySelectorAll('.faq-edit-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () { startEdit(btn.dataset.id); });
+    });
+    wrap.querySelectorAll('.faq-del-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () { deleteItem(btn.dataset.id); });
+    });
+  }
+
+  function startEdit(id) {
+    var item = faqItems.find(function (x) { return x.id === id; });
+    if (!item) return;
+    document.getElementById('faqEditId').value = id;
+    document.getElementById('faqQInput').value = item.q;
+    document.getElementById('faqAInput').value = item.a;
+    document.getElementById('faqFormTitle').textContent = '✏ Editar Pregunta';
+    document.getElementById('faqFormTitle').style.color = '#f59e0b';
+    document.getElementById('faqCancelEditBtn').classList.remove('d-none');
+    document.getElementById('faqAddBtn').textContent = '💾 Actualizar';
+    document.getElementById('faqQInput').focus();
+  }
+
+  function cancelEdit() {
+    document.getElementById('faqEditId').value = '';
+    document.getElementById('faqQInput').value = '';
+    document.getElementById('faqAInput').value = '';
+    document.getElementById('faqFormTitle').textContent = '➕ Nueva Pregunta';
+    document.getElementById('faqFormTitle').style.color = '#22d3ee';
+    document.getElementById('faqCancelEditBtn').classList.add('d-none');
+    document.getElementById('faqAddBtn').textContent = '➕ Agregar';
+  }
+
+  function addOrUpdate() {
+    var id = document.getElementById('faqEditId').value.trim();
+    var q  = document.getElementById('faqQInput').value.trim();
+    var a  = document.getElementById('faqAInput').value.trim();
+    if (!q) { document.getElementById('faqQInput').focus(); return; }
+    if (id) {
+      var idx = faqItems.findIndex(function (x) { return x.id === id; });
+      if (idx !== -1) faqItems[idx] = { id: id, q: q, a: a };
+    } else {
+      faqItems.push({ id: uid(), q: q, a: a });
+    }
+    cancelEdit();
+    renderList();
+  }
+
+  function deleteItem(id) {
+    if (!window.confirm('¿Eliminar esta pregunta?')) return;
+    faqItems = faqItems.filter(function (x) { return x.id !== id; });
+    renderList();
+  }
+
+  async function saveToServer() {
+    var btn    = document.getElementById('faqSaveBtn');
+    var status = document.getElementById('faqSaveStatus');
+    btn.disabled = true;
+    btn.textContent = 'Guardando...';
+    status.textContent = '';
+    try {
+      var fd = new FormData();
+      fd.append('action', 'save_faq');
+      fd.append('faq_items', JSON.stringify(faqItems));
+      var resp = await fetch(adminUrl, { method: 'POST', body: fd });
+      var data = await resp.json();
+      if (data.ok) {
+        status.textContent = '✔ Guardado — ' + data.count + ' pregunta(s)';
+        status.style.color = '#22d3ee';
+      } else {
+        throw new Error('Error del servidor');
+      }
+    } catch (err) {
+      status.textContent = '✖ Error al guardar';
+      status.style.color = '#f87171';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '💾 Guardar cambios';
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var modal = document.getElementById('adminFaqModal');
+    if (!modal) return;
+
+    // Mover al body para evitar que contenedores anidados bloqueen el backdrop de Bootstrap
+    if (modal.parentNode !== document.body) {
+      document.body.appendChild(modal);
+    }
+
+    modal.addEventListener('show.bs.modal', function () { renderList(); });
+    document.getElementById('faqAddBtn').addEventListener('click', addOrUpdate);
+    document.getElementById('faqCancelEditBtn').addEventListener('click', cancelEdit);
+    document.getElementById('faqSaveBtn').addEventListener('click', saveToServer);
+  });
+})();
+</script>
+
 <?php if (!defined('ADMIN_LAYOUT_EMBEDDED')) include __DIR__ . '/includes/footer.php'; ?>

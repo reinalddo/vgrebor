@@ -1849,6 +1849,13 @@ function store_config_footer_payment_logos(): array {
     return is_array($decoded) ? array_values(array_filter(array_map('strval', $decoded))) : [];
 }
 
+function store_config_faq_items(): array {
+    $raw = trim((string) store_config_get('faq_items', ''));
+    if ($raw === '') return [];
+    $arr = json_decode($raw, true);
+    return is_array($arr) ? $arr : [];
+}
+
 function store_config_footer_col_links(int $col): array {
     $key = 'footer_col' . $col . '_links';
     $count = $col === 3 ? 5 : ($col === 4 ? 3 : 4);

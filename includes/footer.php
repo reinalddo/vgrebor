@@ -1203,6 +1203,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   $footerCopyright    = trim((string) store_config_get('footer_copyright', ''));
   $footerCol2Links    = store_config_footer_col_links(2);
   $footerCol3Links    = store_config_footer_col_links(3);
+  $faqItems           = store_config_faq_items();
   $footerCol4Links    = store_config_footer_col_links(4);
   $footerPaymentLogos = store_config_footer_payment_logos();
   $footerEffectiveLogo = $footerLogoUrl !== '' ? $footerLogoUrl : trim((string) store_config_get('logo_tienda', ''));
@@ -1303,12 +1304,17 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
                 <?php $url = $footerCol3Links[$i]['url'] ?? ''; $tgt = $footerCol3Links[$i]['target'] ?? '_self'; ?>
                 <?php $ytId = ($i === 0) ? tvg_youtube_id($url) : ''; ?>
                 <?php $ytVertical = ($i === 0 && ($footerCol3Links[0]['extra'] ?? '') === 'vertical') ? '1' : '0'; ?>
+                <?php $isFaqItem = ($i === 1 && count($faqItems) > 0); ?>
                 <li class="tvg-footer-link-item">
                   <span class="tvg-footer-link-icon tvg-footer-link-icon--circle"><?= $item['icon'] ?></span>
                   <?php if ($ytId !== ''): ?>
                     <button type="button" class="tvg-footer-link tvg-footer-link-btn" data-bs-toggle="modal" data-bs-target="#tvgYtModal" data-yt-id="<?= htmlspecialchars($ytId, ENT_QUOTES, 'UTF-8') ?>" data-yt-vertical="<?= $ytVertical ?>">
                       <?= htmlspecialchars($item['text'], ENT_QUOTES, 'UTF-8') ?>
                       <?php if (!empty($item['sub'])): ?><br><span class="tvg-footer-link-sub"><?= htmlspecialchars($item['sub'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                    </button>
+                  <?php elseif ($isFaqItem): ?>
+                    <button type="button" class="tvg-footer-link tvg-footer-link-btn" data-bs-toggle="modal" data-bs-target="#tvgFaqModal">
+                      <?= htmlspecialchars($item['text'], ENT_QUOTES, 'UTF-8') ?>
                     </button>
                   <?php elseif ($url !== ''): ?>
                     <a href="<?= htmlspecialchars($url, ENT_QUOTES, 'UTF-8') ?>"<?= $tgt === '_blank' ? ' target="_blank" rel="noopener noreferrer"' : '' ?> class="tvg-footer-link">
@@ -1386,6 +1392,45 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       </div>
     </div>
   </footer>
+
+  <!-- Modal FAQ — Preguntas Frecuentes -->
+  <?php if (!empty($faqItems)): ?>
+  <div class="modal fade" id="tvgFaqModal" tabindex="-1" aria-labelledby="tvgFaqModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+      <div class="modal-content tvg-faq-modal-content">
+        <div class="modal-header tvg-faq-modal-header">
+          <h5 class="modal-title tvg-faq-modal-title" id="tvgFaqModalLabel">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:.4rem;vertical-align:-.15em;"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+            PREGUNTAS FRECUENTES
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="accordion tvg-faq-accordion" id="tvgFaqAccordion">
+            <?php foreach ($faqItems as $idx => $faq): ?>
+              <div class="accordion-item tvg-faq-item">
+                <h2 class="accordion-header" id="tvgFaqH<?= $idx ?>">
+                  <button class="accordion-button tvg-faq-btn collapsed" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#tvgFaqC<?= $idx ?>"
+                    aria-expanded="false" aria-controls="tvgFaqC<?= $idx ?>">
+                    <span class="tvg-faq-q-num"><?= $idx + 1 ?></span>
+                    <?= htmlspecialchars($faq['q'], ENT_QUOTES, 'UTF-8') ?>
+                  </button>
+                </h2>
+                <div id="tvgFaqC<?= $idx ?>" class="accordion-collapse collapse"
+                  aria-labelledby="tvgFaqH<?= $idx ?>" data-bs-parent="#tvgFaqAccordion">
+                  <div class="accordion-body tvg-faq-body">
+                    <?= nl2br(htmlspecialchars($faq['a'], ENT_QUOTES, 'UTF-8')) ?>
+                  </div>
+                </div>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <?php endif; ?>
 
   <!-- Modal YouTube — ¿Cómo comprar? -->
   <div class="modal fade" id="tvgYtModal" tabindex="-1" aria-labelledby="tvgYtModalLabel" aria-hidden="true">
@@ -1514,6 +1559,113 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     button.tvg-footer-link-btn:hover {
       color: #fff;
     }
+    /* ── FAQ modal neon gaming ── */
+    .tvg-faq-modal-content {
+      background: #07090f;
+      border: 0;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1.5px var(--theme-success, #22d3ee),
+        0 0 30px 4px rgba(34,211,238,.25),
+        0 0 70px 10px rgba(139,92,246,.12),
+        0 24px 64px rgba(0,0,0,.85);
+      position: relative;
+    }
+    .tvg-faq-modal-content::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 14px;
+      padding: 1.5px;
+      background: linear-gradient(135deg, var(--theme-success,#22d3ee), var(--theme-highlight,#8b5cf6), var(--theme-success,#22d3ee));
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .tvg-faq-modal-header {
+      background: linear-gradient(90deg, rgba(34,211,238,.15) 0%, rgba(139,92,246,.12) 100%);
+      border-bottom: 1px solid rgba(34,211,238,.25);
+      padding: .9rem 1.2rem;
+      position: relative;
+      z-index: 2;
+    }
+    .tvg-faq-modal-title {
+      font-size: 1rem;
+      font-weight: 800;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      background: linear-gradient(90deg, var(--theme-success,#22d3ee), var(--theme-highlight,#8b5cf6));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      filter: drop-shadow(0 0 8px rgba(34,211,238,.5));
+    }
+    /* Accordion items */
+    .tvg-faq-accordion {
+      border-radius: 0;
+    }
+    .tvg-faq-item {
+      background: transparent;
+      border: 0;
+      border-bottom: 1px solid rgba(255,255,255,.07);
+    }
+    .tvg-faq-item:last-child {
+      border-bottom: 0;
+    }
+    .tvg-faq-btn {
+      background: #07090f;
+      color: rgba(255,255,255,.82);
+      font-weight: 600;
+      font-size: .92rem;
+      padding: 1rem 1.2rem;
+      gap: .75rem;
+      box-shadow: none !important;
+      border: 0;
+      transition: color .2s, background .2s;
+    }
+    .tvg-faq-btn::after {
+      filter: invert(1) brightness(1.5);
+      flex-shrink: 0;
+    }
+    .tvg-faq-btn:not(.collapsed) {
+      background: rgba(34,211,238,.06);
+      color: var(--theme-success, #22d3ee);
+      box-shadow: inset 3px 0 0 var(--theme-success, #22d3ee) !important;
+    }
+    .tvg-faq-btn:hover {
+      background: rgba(255,255,255,.04);
+      color: #fff;
+    }
+    .tvg-faq-q-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 1px solid rgba(34,211,238,.45);
+      font-size: .7rem;
+      font-weight: 800;
+      color: var(--theme-success, #22d3ee);
+      flex-shrink: 0;
+    }
+    .tvg-faq-btn:not(.collapsed) .tvg-faq-q-num {
+      background: var(--theme-success, #22d3ee);
+      color: #000;
+      border-color: var(--theme-success, #22d3ee);
+    }
+    .tvg-faq-body {
+      background: rgba(34,211,238,.03);
+      color: rgba(255,255,255,.7);
+      font-size: .88rem;
+      line-height: 1.65;
+      padding: .85rem 1.2rem .85rem 3.2rem;
+      border-top: 1px dashed rgba(34,211,238,.12);
+    }
+
     /* ── YouTube modal neon gaming ── */
     #tvgYtModal .modal-dialog {
       max-width: 780px;

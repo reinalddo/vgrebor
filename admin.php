@@ -221,6 +221,23 @@ function admin_json_response(array $payload, int $statusCode = 200): void {
     exit();
 }
 
+// AJAX: guardar items FAQ
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_faq') {
+    $rawJson = trim((string) ($_POST['faq_items'] ?? ''));
+    $items   = ($rawJson !== '') ? json_decode($rawJson, true) : [];
+    if (!is_array($items)) $items = [];
+    $clean = [];
+    foreach ($items as $item) {
+        $q = trim((string) ($item['q'] ?? ''));
+        $a = trim((string) ($item['a'] ?? ''));
+        if ($q !== '') {
+            $clean[] = ['id' => (string) ($item['id'] ?? uniqid('faq_', true)), 'q' => $q, 'a' => $a];
+        }
+    }
+    store_config_upsert('faq_items', json_encode($clean, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    admin_json_response(['ok' => true, 'count' => count($clean)]);
+}
+
 function admin_runtime_refresh_targets(): array {
     return [
         __DIR__ . '/game.php',
