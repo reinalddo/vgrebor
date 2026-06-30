@@ -4744,12 +4744,12 @@ include __DIR__ . "/includes/header.php";
     }
   }
 
-  /* Pre-confirm modal: display:block en lugar de flex para que overflow-y:auto haga scroll real */
   #payment-pre-confirm-modal.is-visible {
-    display: block !important;
+    display: flex !important;
+    align-items: center;
   }
   #payment-pre-confirm-modal .modal-dialog {
-    margin: max(0.75rem, calc(50vh - 210px)) auto 0.75rem;
+    margin: 0.75rem auto;
     width: calc(100% - 2rem);
     max-width: 420px;
   }
@@ -4973,6 +4973,7 @@ include __DIR__ . "/includes/header.php";
   const preConfirmCancelBtn = document.getElementById('pre-confirm-cancel-btn');
   let pendingWhatsappUrl = '';
   let pendingPaymentExecution = null;
+  let pendingOpenModal = null;
   let lastFocusedElement = null;
   let activePack = null;
   let activeAccountGalleryPreview = { pack: null, index: 0 };
@@ -10208,11 +10209,20 @@ include __DIR__ . "/includes/header.php";
     }
     renderWinPointsPaymentState(pack, currentMethod);
     setCancelOrderButtonMode('cancel');
-    setOverlayVisible(paymentModal, true);
-    scrollPaymentModalToTop();
-    clearPaymentTimer();
-    updatePaymentTimer();
-    paymentTimerInterval = setInterval(updatePaymentTimer, 1000);
+    pendingOpenModal = function() {
+      setOverlayVisible(paymentModal, true);
+      scrollPaymentModalToTop();
+      clearPaymentTimer();
+      updatePaymentTimer();
+      paymentTimerInterval = setInterval(updatePaymentTimer, 1000);
+    };
+    if (preConfirmTosCheck) preConfirmTosCheck.checked = false;
+    if (preConfirmProceedBtn) {
+      preConfirmProceedBtn.disabled = true;
+      preConfirmProceedBtn.textContent = totalText ? 'CONFIRMAR COMPRA - ' + totalText : 'CONFIRMAR COMPRA';
+    }
+    setOverlayVisible(paymentPreConfirmModal, true);
+    if (paymentPreConfirmModal) paymentPreConfirmModal.scrollTop = 0;
     return true;
   }
 
@@ -10940,14 +10950,9 @@ include __DIR__ . "/includes/header.php";
                     }
                   });
                   }; // end pendingPaymentExecution
-                  if (preConfirmTosCheck) preConfirmTosCheck.checked = false;
-                  if (preConfirmProceedBtn) {
-                    preConfirmProceedBtn.disabled = true;
-                    const _pcTotal = String((activePaymentOrder && activePaymentOrder.confirmedTotalText) || '').trim();
-                    preConfirmProceedBtn.textContent = _pcTotal ? 'Confirmar Compra - ' + _pcTotal : 'Confirmar Compra';
-                  }
-                  setOverlayVisible(paymentPreConfirmModal, true);
-                  if (paymentPreConfirmModal) paymentPreConfirmModal.scrollTop = 0;
+                  const _exec = pendingPaymentExecution;
+                  pendingPaymentExecution = null;
+                  if (_exec) _exec();
                 });
               }
 
@@ -10964,16 +10969,16 @@ include __DIR__ . "/includes/header.php";
               if (preConfirmCancelBtn) {
                 preConfirmCancelBtn.addEventListener('click', function() {
                   setOverlayVisible(paymentPreConfirmModal, false);
-                  pendingPaymentExecution = null;
+                  pendingOpenModal = null;
                 });
               }
               if (preConfirmProceedBtn) {
                 preConfirmProceedBtn.addEventListener('click', function() {
-                  if (!pendingPaymentExecution) return;
+                  if (!pendingOpenModal) return;
                   setOverlayVisible(paymentPreConfirmModal, false);
-                  const exec = pendingPaymentExecution;
-                  pendingPaymentExecution = null;
-                  exec();
+                  const fn = pendingOpenModal;
+                  pendingOpenModal = null;
+                  fn();
                 });
               }
 
