@@ -2759,6 +2759,19 @@ function persist_order_payment_selection(mysqli $mysqli, array $order, string $p
         ];
     }
 
+    // RED DE SEGURIDAD: si el monto final calculado difiere del precio confirmado
+    // almacenado en ≤ tolerancia de redondeo, preservar el precio original para
+    // que el monto que pagó el cliente coincida con el esperado en la verificación bancaria.
+    $originalOrderPrice = (float) ($order['precio'] ?? 0);
+    if ($originalOrderPrice > 0) {
+        $orderCurrencyCode = normalize_currency_code((string) ($order['moneda'] ?? ''));
+        $orderCurrencyObj  = currency_find_by_code($orderCurrencyCode);
+        $blindTolerance    = currency_should_show_decimals($orderCurrencyObj) ? 0.02 : 2.0;
+        if (abs($snapshot['final_amount'] - $originalOrderPrice) <= $blindTolerance) {
+            $snapshot['final_amount'] = $originalOrderPrice;
+        }
+    }
+
     $stmt = $mysqli->prepare("UPDATE pedidos SET precio_descuento_metodo_pago_base = ?, descuento_metodo_pago_porcentaje = ?, descuento_metodo_pago_monto = ?, precio = ?, metodo_pago = ?, payment_method_id = ? WHERE id = ? AND estado = 'pendiente' LIMIT 1");
     if ($stmt) {
         $methodName = $snapshot['method_name'];
@@ -7958,6 +7971,9 @@ if ($action === 'create') {
         json_error('La moneda seleccionada no es válida.');
     }
     $currency = currency_normalize_code((string) ($selectedCurrency['clave'] ?? $currency));
+    // Guardar precio confirmado por el cliente (lo que se mostró en pantalla) antes de
+    // que se sobreescriba con el cálculo del servidor. Será usado para blindar el precio final.
+    $clientConfirmedPrice = $price > 0 ? $price : 0.0;
     $unitPrice = currency_convert_from_base((float) ($selectedPackage['precio'] ?? 0), $selectedCurrency);
     $price = currency_apply_amount_rule($unitPrice * $purchaseQuantity, $selectedCurrency);
     if ($price <= 0) {
@@ -8115,6 +8131,20 @@ if ($action === 'create') {
 
     // Base para comparar descuento de método de pago: siempre desde precio sin drop
     $priceBeforeCoupon = $priceBeforeDrop;
+
+    // BLINDAR PRECIO: si el precio calculado por el servidor difiere del precio confirmado
+    // por el cliente (lo que se mostró en pantalla) en ≤ tolerancia por redondeo de punto
+    // flotante, usar el precio del cliente como canónico. Esto evita discrepancias de ±1
+    // unidad que causan errores "El monto no coincide" al verificar el pago bancario.
+    if ($clientConfirmedPrice > 0) {
+        $priceBlindTolerance = currency_should_show_decimals($selectedCurrency) ? 0.02 : 2.0;
+        if (abs($clientConfirmedPrice - $price) <= $priceBlindTolerance) {
+            // Reajustar el ahorro del drop para que sea consistente con el precio blindado,
+            // evitando que persist_order_payment_selection recalcule un valor diferente.
+            $dropSavings = max(0.0, round($priceBeforeDrop - $clientConfirmedPrice, 4));
+            $price = $clientConfirmedPrice;
+        }
+    }
 
     $priceBeforeDifferenceCredit = payment_difference_normalize_amount($price);
     $paymentDifferenceCredit = payment_difference_get_credit();
