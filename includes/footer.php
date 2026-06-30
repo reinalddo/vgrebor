@@ -1269,7 +1269,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
 
           <!-- Col 2: Explorar -->
           <div class="col-lg-3 col-md-6">
-            <h4 class="tvg-footer-col-title">EXPLORAR</h4>
+            <h4 class="tvg-footer-col-title">PRODUCTOS Y SERVICIOS</h4>
             <ul class="tvg-footer-links">
               <?php foreach ($footerCol2Items as $i => $item):
                 $catSlug = trim($footerCol2Links[$i]['url'] ?? '');
