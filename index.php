@@ -4996,8 +4996,14 @@ if ($rouletteEnabled) {
   function showPrizeModal(result) {
     if (!modal) return;
     const icons = { winpoints: '🪙', coupon: '🎟️', immunity: '🛡️', streaming_ticket: '🎬' };
-    const icon = result.icon_emoji || icons[result.prize_type] || '🎁';
-    modalIcon.textContent = icon;
+    const imgUrl = (result.icon_image_url || '').trim();
+    if (imgUrl) {
+      const sizeMap = { small: '48px', medium: '72px', large: '96px' };
+      const sz = sizeMap[result.icon_size] || '72px';
+      modalIcon.innerHTML = '<img src="' + imgUrl.replace(/"/g, '&quot;') + '" alt="" style="width:' + sz + ';height:' + sz + ';object-fit:contain;display:block;margin:0 auto;">';
+    } else {
+      modalIcon.textContent = result.icon_emoji || icons[result.prize_type] || '🎁';
+    }
     modalLabel.textContent = result.prize_label || '¡Premio!';
 
     let desc = '';

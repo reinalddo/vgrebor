@@ -485,6 +485,8 @@ if (!function_exists('roulette_execute_spin')) {
                 'immunity_days'          => $immunityDays,
                 'streaming_user_id'      => $streamingUserId,
                 'icon_emoji'             => (string) ($winner['icon_emoji'] ?? '🎁'),
+                'icon_image_url'         => (string) ($winner['icon_image_url'] ?? ''),
+                'icon_size'              => (string) ($winner['icon_size'] ?? 'medium'),
                 'color'                  => (string) ($winner['color'] ?? '#22d3ee'),
                 'wp_cost'                => $spinCost,
                 'balance_before'         => $balanceBefore,
