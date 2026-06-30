@@ -301,10 +301,12 @@ $winPointsPackageRewards = $winPointsEnabled
 $winPointsRedemptionRules = $winPointsEnabled
   ? win_points_fetch_game_redemption_rules($mysqli, (int) ($game['id'] ?? 0))
   : [];
-$gameHasAnyPointsRule = $winPointsEnabled && !empty(array_filter(
+$gameHasAnyRedemptionRule = !empty(array_filter(
   $winPointsRedemptionRules,
   fn($rule) => !empty($rule['activo']) && (int) ($rule['required_points'] ?? 0) > 0
 ));
+$gameHasAnyAwardRule = !empty(array_filter($winPointsPackageRewards, fn($r) => (int) $r > 0));
+$gameHasAnyPointsRule = $winPointsEnabled && ($gameHasAnyRedemptionRule || $gameHasAnyAwardRule);
 $paymentHeaderMinimalEnabled = store_config_get('encabezado_pago', '0') === '1';
 $paymentWindowConfigEnabled = store_config_get('ventana_pago_config', '0') === '1';
 $paymentSendingOrderTitle = trim((string) store_config_get('ventana_pago_enviando_titulo', 'Enviando orden...'));
