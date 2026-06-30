@@ -6792,7 +6792,7 @@ include __DIR__ . "/includes/header.php";
     const hasPointsRule = Boolean(hasPack && pack.redeemActive && getPackRequiredPoints(pack) > 0);
     const requiredPoints = hasPointsRule ? getPackRequiredPoints(pack) : 0;
     const canUsePointsNow = Boolean(hasPack && canRedeemPackWithPoints(pack));
-    const showPointsOption = Boolean(winPointsState.enabled && (hasPack ? hasPointsRule : winPointsState.gameHasAnyRule));
+    const showPointsOption = Boolean(winPointsState.enabled && winPointsState.gameHasAnyRule);
     const canUseBinancePagonorte = hasPack ? Boolean(canUseBinancePagonorteCheckout(pack)) : Boolean(binancePagonorteCheckoutEnabled && resolveBinancePagonorteCurrencyEntry());
     const canUseBinance = hasPack ? Boolean(canUseBinanceCheckout(pack)) : Boolean(binancePayCheckoutEnabled);
     const canUsePayPal = hasPack
