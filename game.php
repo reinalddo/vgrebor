@@ -6506,6 +6506,11 @@ include __DIR__ . "/includes/header.php";
     if (!publicOrderSummaryShell || !publicOrderSummaryRows || !publicOrderSummaryTotal || !buyButton) {
       return;
     }
+    // In cart mode keep the cart summary — don't let single-pack logic clear it
+    if (typeof cartMode !== 'undefined' && cartMode) {
+      if (typeof updateResumenCompraCart === 'function') updateResumenCompraCart();
+      return;
+    }
 
     if (!pack) {
       publicOrderSummaryShell.classList.add('d-none');
@@ -10622,6 +10627,14 @@ include __DIR__ . "/includes/header.php";
     syncPlayerVerificationUi();
   }
   function updateResumenCompra(pack) {
+    // In cart mode, keep the cart summary visible and ignore single-pack state
+    if (typeof cartMode !== 'undefined' && cartMode) {
+      if (typeof updateResumenCompraCart === 'function') updateResumenCompraCart();
+      // Re-render payment method catalog with a reference pack so selection is highlighted
+      const refPack = (typeof cartItems !== 'undefined' && cartItems.length > 0) ? cartItems[0].pack : null;
+      renderPublicPaymentMethodCatalog(refPack);
+      return;
+    }
     const quantity = syncOrderQuantityInput();
     if (pack) {
       pack.purchaseQuantity = quantity;
@@ -10933,6 +10946,11 @@ include __DIR__ . "/includes/header.php";
                     setActivePaymentMode(mode, methodId, { expandSelected: shouldExpandSinglePaymentOption() });
                   }
                   updateButtonState();
+                  // In cart mode, re-sync the summary and button after payment method selection
+                  if (cartMode) {
+                    updateResumenCompraCart();
+                    syncCartBuyButton();
+                  }
                 });
               }
 
@@ -11631,9 +11649,9 @@ include __DIR__ . "/includes/header.php";
               // ============================================================
               // MULTI-CART SYSTEM
               // ============================================================
-              let cartMode = false;
-              let cartItems = []; // [{pack, quantity}]
-              let cartTotalBlindado = null; // locked after user clicks "Continuar" from cart modal
+              var cartMode = false;
+              var cartItems = []; // [{pack, quantity}]
+              var cartTotalBlindado = null; // locked after user clicks "Continuar" from cart modal
 
               const multiCartCheck      = document.getElementById('multi-cart-check');
               const multiCartModal      = document.getElementById('multi-cart-modal');
@@ -11674,8 +11692,7 @@ include __DIR__ . "/includes/header.php";
               // ── Update cart header button state ──────────────────────────
               function syncCartHeaderButton() {
                 if (!headerCartBtn || !cartBtnCount) return;
-                const total = cartItems.reduce((s, ci) => s + ci.quantity, 0);
-                cartBtnCount.textContent = String(total);
+                cartBtnCount.textContent = String(cartItems.length);
                 const shouldShow = cartMode && cartItems.length >= 2;
                 headerCartBtn.classList.toggle('is-visible', shouldShow);
               }
@@ -11876,6 +11893,18 @@ include __DIR__ . "/includes/header.php";
                   return;
                 }
 
+                // Refresh pack state from card DOM so prices reflect current currency
+                const prevMoneda = cartItems.length > 0 ? cartItems[0].pack.moneda : null;
+                cartItems = cartItems.map(ci => {
+                  const card = document.querySelector(`.pack-card[data-package-id="${ci.pack.id}"]`);
+                  return card ? { ...ci, pack: buildPackStateFromCard(card) } : ci;
+                });
+                // If currency changed, invalidate the blindado lock (it was in the old currency)
+                const newMoneda = cartItems.length > 0 ? cartItems[0].pack.moneda : null;
+                if (prevMoneda && newMoneda && prevMoneda !== newMoneda) {
+                  cartTotalBlindado = null;
+                }
+
                 // Build rows
                 const rowsHtml = cartItems.map(ci => {
                   const sub     = cartItemSubtotal(ci);
@@ -11957,8 +11986,9 @@ include __DIR__ . "/includes/header.php";
               const origMonedaSelectHandler = monedaSelect ? monedaSelect.onchange : null;
               if (monedaSelect) {
                 monedaSelect.addEventListener('change', () => {
-                  if (cartMode && cartTotalBlindado === null) {
-                    // Re-read prices from updated cards
+                  if (cartMode) {
+                    // Always invalidate the blindado lock on currency change and refresh
+                    cartTotalBlindado = null;
                     cartItems = cartItems.map(ci => {
                       const card = document.querySelector(`.pack-card[data-package-id="${ci.pack.id}"]`);
                       if (!card) return ci;
