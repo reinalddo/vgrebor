@@ -4992,7 +4992,7 @@ function provider_status_to_local_status(string $providerStatus): ?string {
     $normalized = strtolower(trim($providerStatus));
 
     return match ($normalized) {
-        'completado', 'completed', 'success' => 'enviado',
+        'completado', 'completed', 'success', 'aprobado' => 'enviado',
         'procesando', 'processing', 'pending' => 'pagado',
         'cancelado', 'cancelled', 'canceled' => 'cancelado',
         default => null,

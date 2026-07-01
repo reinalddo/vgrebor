@@ -639,7 +639,7 @@ function recargas_api_purchase_is_completed(array $response): bool {
     }
 
     $status = strtolower(trim((string) ($response['estado'] ?? '')));
-    if (in_array($status, ['completado', 'completed', 'success', 'enviado'], true)) {
+    if (in_array($status, ['completado', 'completed', 'success', 'enviado', 'aprobado'], true)) {
         return true;
     }
 
