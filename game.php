@@ -586,6 +586,18 @@ include __DIR__ . "/includes/header.php";
       </div>
     <?php endforeach; ?>
   </div>
+
+  <!-- Multi-cart toggle -->
+  <div class="multi-cart-toggle-wrap" id="multi-cart-toggle-wrap">
+    <label class="multi-cart-toggle-label" for="multi-cart-check">
+      <input type="checkbox" id="multi-cart-check" class="multi-cart-toggle-input" />
+      <span class="multi-cart-toggle-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+      </span>
+      <span class="multi-cart-toggle-text">Quiero comprar más de 1 paquete</span>
+    </label>
+  </div>
+
   <?php
     // Sync fallback prices with last known API price (skip manual overrides)
     foreach ($priceSyncQueue as $syncEntry) {
@@ -850,6 +862,64 @@ include __DIR__ . "/includes/header.php";
   </div>
   <?php endif; ?>
 
+  <!-- ============================================================
+       MULTI-CART MODAL
+       ============================================================ -->
+  <div id="multi-cart-modal" class="app-overlay-modal" tabindex="-1" aria-hidden="true" aria-label="Carrito de paquetes" role="dialog">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" style="width:min(95vw,540px);">
+      <div class="modal-content bg-dark text-light rounded-4 p-0" style="border:1px solid #22d3ee;">
+        <div class="multi-cart-modal-header">
+          <div class="multi-cart-modal-title-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22" aria-hidden="true"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+            <h3 class="multi-cart-modal-title">Tu Carrito</h3>
+          </div>
+          <button type="button" id="multi-cart-modal-close" class="btn-close btn-close-white" aria-label="Cerrar"></button>
+        </div>
+        <div class="multi-cart-modal-body" id="multi-cart-modal-body">
+          <!-- Items rendered by JS -->
+        </div>
+        <div class="multi-cart-modal-footer">
+          <div class="multi-cart-modal-total-row">
+            <span class="multi-cart-modal-total-label">Total</span>
+            <strong id="multi-cart-modal-total" class="multi-cart-modal-total-value">-</strong>
+          </div>
+          <div class="multi-cart-modal-actions">
+            <button type="button" id="multi-cart-keep-shopping" class="btn btn-outline-info fw-bold">Seguir Seleccionando</button>
+            <button type="button" id="multi-cart-proceed" class="btn btn-info fw-bold multi-cart-proceed-btn">
+              <span id="multi-cart-proceed-label">Continuar con la compra</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       BATCH PROGRESS MODAL
+       ============================================================ -->
+  <div id="batch-progress-modal" class="app-overlay-modal" tabindex="-1" aria-hidden="true" aria-label="Procesando compra" role="dialog">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" style="width:min(95vw,500px);">
+      <div class="modal-content bg-dark text-light rounded-4 p-0" style="border:1px solid #22d3ee;">
+        <div class="batch-progress-modal-header">
+          <h3 class="batch-progress-modal-title">Procesando tu compra</h3>
+          <p id="batch-progress-current-label" class="batch-progress-current-label">Iniciando...</p>
+        </div>
+        <div class="batch-progress-bar-wrap">
+          <div class="batch-progress-bar-track">
+            <div id="batch-progress-bar" class="batch-progress-bar-fill" style="width:0%"></div>
+          </div>
+          <span id="batch-progress-fraction" class="batch-progress-fraction">0/0</span>
+        </div>
+        <div id="batch-progress-items" class="batch-progress-items">
+          <!-- Items appended by JS -->
+        </div>
+        <div class="batch-progress-footer" id="batch-progress-footer" style="display:none;">
+          <button type="button" id="batch-progress-close" class="btn btn-info fw-bold w-100 py-2">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal Loading Bootstrap -->
   <div id="loading-modal" class="modal fade app-overlay-modal<?= $paymentWindowConfigEnabled ? ' payment-window-theme-enabled' : '' ?>" tabindex="-1" aria-hidden="true" data-payment-loading-state="processing">
     <div class="modal-dialog modal-dialog-centered">
@@ -930,6 +1000,14 @@ include __DIR__ . "/includes/header.php";
         <div id="payment-modal-alert" class="d-none alert mb-3"></div>
         <div id="payment-modal-reasons" class="d-none payment-reasons-card mb-3"></div>
         <div id="payment-modal-actions" class="d-none payment-support-actions mb-4"></div>
+        <div id="payment-cart-summary" class="mb-3 p-3 rounded-3" style="background:rgba(34,211,238,.06);border:1px solid rgba(34,211,238,.22);">
+          <p class="small text-info fw-bold mb-2">Paquetes a comprar:</p>
+          <ul class="payment-cart-summary-list" id="payment-cart-summary-list"></ul>
+          <div class="d-flex justify-content-between mt-2 pt-2" style="border-top:1px solid rgba(34,211,238,.18);">
+            <span class="small text-secondary fw-semibold">Total del carrito</span>
+            <strong id="payment-cart-summary-total" class="small" style="color:#22d3ee;">-</strong>
+          </div>
+        </div>
         <div class="payment-summary-card mb-4<?= $paymentHeaderMinimalEnabled ? ' payment-summary-card--minimal' : '' ?>">
           <div class="payment-summary-minimal">
             <div class="payment-summary-minimal-media">
@@ -1104,6 +1182,254 @@ include __DIR__ . "/includes/header.php";
   </div>
 
 <style>
+  /* ── Multi-cart toggle ─────────────────────────────────────── */
+  .multi-cart-toggle-wrap {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+  }
+  .multi-cart-toggle-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    cursor: pointer;
+    padding: 0.5rem 1.1rem;
+    border-radius: 999px;
+    background: rgba(34,211,238,.07);
+    border: 1.5px solid rgba(34,211,238,.28);
+    color: #22d3ee;
+    font-size: 0.88rem;
+    font-weight: 600;
+    transition: background 0.18s, border-color 0.18s;
+    user-select: none;
+  }
+  .multi-cart-toggle-label:hover {
+    background: rgba(34,211,238,.14);
+    border-color: rgba(34,211,238,.55);
+  }
+  .multi-cart-toggle-input {
+    appearance: none;
+    width: 2.4rem;
+    height: 1.2rem;
+    border-radius: 999px;
+    border: 1.5px solid #22d3ee;
+    background: transparent;
+    position: relative;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.18s;
+  }
+  .multi-cart-toggle-input::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 2px;
+    transform: translateY(-50%);
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 50%;
+    background: #22d3ee;
+    transition: left 0.18s;
+  }
+  .multi-cart-toggle-input:checked {
+    background: rgba(34,211,238,.25);
+  }
+  .multi-cart-toggle-input:checked::after {
+    left: calc(100% - 0.9rem);
+  }
+  .multi-cart-toggle-icon {
+    opacity: 0.85;
+    display: flex;
+    align-items: center;
+  }
+  /* ── Cart header button ────────────────────────────────────── */
+  #header-cart-btn {
+    display: none;
+    position: relative;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.32rem 0.75rem;
+    border-radius: 999px;
+    border: 1.5px solid #22d3ee;
+    background: rgba(34,211,238,.1);
+    color: #22d3ee;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.16s;
+    flex-shrink: 0;
+  }
+  #header-cart-btn.is-visible { display: inline-flex; }
+  #header-cart-btn:hover { background: rgba(34,211,238,.22); }
+  #header-cart-btn .cart-btn-badge {
+    background: #22d3ee;
+    color: #0b0f18;
+    border-radius: 999px;
+    padding: 0 0.38rem;
+    font-size: 0.7rem;
+    font-weight: 800;
+    min-width: 1.25rem;
+    text-align: center;
+  }
+  /* ── Pack card: account-sale disabled overlay in cart mode ── */
+  .pack-card.cart-mode-account-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  .pack-card.cart-mode-account-disabled::after {
+    content: 'No disponible en modo carrito';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(5,10,20,.82);
+    color: #f87171;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-align: center;
+    padding: 0.5rem;
+    border-radius: inherit;
+  }
+  /* ── Cart Modal ────────────────────────────────────────────── */
+  .multi-cart-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem 0.75rem;
+    border-bottom: 1px solid rgba(34,211,238,.2);
+  }
+  .multi-cart-modal-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #22d3ee;
+  }
+  .multi-cart-modal-title { font-size: 1.05rem; font-weight: 700; margin: 0; color: #22d3ee; }
+  .multi-cart-modal-body { padding: 0.5rem 0; max-height: 52vh; overflow-y: auto; }
+  .multi-cart-item {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.65rem 1.25rem;
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .multi-cart-item:last-child { border-bottom: none; }
+  .multi-cart-item-name { font-size: 0.85rem; font-weight: 600; color: #e2e8f0; line-height: 1.3; }
+  .multi-cart-item-sub { font-size: 0.76rem; color: #94a3b8; }
+  .multi-cart-item-stepper {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    background: rgba(255,255,255,.06);
+    border-radius: 0.5rem;
+    padding: 0.2rem 0.35rem;
+  }
+  .multi-cart-item-stepper button {
+    width: 1.5rem; height: 1.5rem;
+    border: 1px solid rgba(34,211,238,.35);
+    background: transparent;
+    color: #22d3ee;
+    border-radius: 0.35rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.14s;
+  }
+  .multi-cart-item-stepper button:hover { background: rgba(34,211,238,.15); }
+  .multi-cart-item-qty { min-width: 1.5rem; text-align: center; font-size: 0.88rem; font-weight: 700; color: #e2e8f0; }
+  .multi-cart-item-price { font-size: 0.88rem; font-weight: 700; color: #22d3ee; white-space: nowrap; text-align: right; }
+  .multi-cart-item-del {
+    background: transparent;
+    border: none;
+    color: #f87171;
+    cursor: pointer;
+    padding: 0.2rem 0.3rem;
+    border-radius: 0.35rem;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.14s;
+  }
+  .multi-cart-item-del:hover { background: rgba(248,113,113,.12); }
+  .multi-cart-empty-state {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: #64748b;
+    font-size: 0.88rem;
+  }
+  .multi-cart-modal-footer {
+    padding: 0.75rem 1.25rem 1rem;
+    border-top: 1px solid rgba(34,211,238,.2);
+  }
+  .multi-cart-modal-total-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+  .multi-cart-modal-total-label { font-size: 0.88rem; color: #94a3b8; font-weight: 600; }
+  .multi-cart-modal-total-value { font-size: 1.35rem; color: #22d3ee; font-weight: 800; }
+  .multi-cart-modal-actions { display: flex; gap: 0.6rem; }
+  .multi-cart-modal-actions .btn { flex: 1; }
+  .multi-cart-proceed-btn { background: linear-gradient(90deg,#6366f1,#22d3ee); border: none; color: #fff; font-size: 0.85rem; }
+  .multi-cart-proceed-btn:hover { opacity: 0.9; color: #fff; }
+
+  /* ── Batch Progress Modal ──────────────────────────────────── */
+  .batch-progress-modal-header {
+    padding: 1.1rem 1.25rem 0.6rem;
+    border-bottom: 1px solid rgba(34,211,238,.2);
+  }
+  .batch-progress-modal-title { font-size: 1.05rem; font-weight: 700; color: #22d3ee; margin: 0 0 0.25rem; }
+  .batch-progress-current-label { font-size: 0.8rem; color: #94a3b8; margin: 0; }
+  .batch-progress-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 1.25rem;
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .batch-progress-bar-track { flex: 1; height: 6px; background: rgba(255,255,255,.08); border-radius: 999px; overflow: hidden; }
+  .batch-progress-bar-fill { height: 100%; background: linear-gradient(90deg,#6366f1,#22d3ee); border-radius: 999px; transition: width 0.5s ease; }
+  .batch-progress-fraction { font-size: 0.75rem; font-weight: 700; color: #94a3b8; white-space: nowrap; }
+  .batch-progress-items { max-height: 42vh; overflow-y: auto; padding: 0.35rem 0; }
+  .batch-progress-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.55rem 1.25rem;
+    border-bottom: 1px solid rgba(255,255,255,.05);
+    font-size: 0.83rem;
+  }
+  .batch-progress-item:last-child { border-bottom: none; }
+  .batch-progress-item-icon { width: 1.25rem; text-align: center; font-size: 0.9rem; flex-shrink: 0; }
+  .batch-progress-item-name { flex: 1; color: #e2e8f0; font-weight: 600; line-height: 1.2; }
+  .batch-progress-item-qty { color: #94a3b8; flex-shrink: 0; }
+  .batch-progress-item-status { flex-shrink: 0; font-weight: 700; font-size: 0.76rem; }
+  .batch-status-pending { color: #94a3b8; }
+  .batch-status-processing { color: #facc15; }
+  .batch-status-done { color: #4ade80; }
+  .batch-status-partial { color: #fb923c; }
+  .batch-status-error { color: #f87171; }
+  .batch-progress-footer { padding: 0.85rem 1.25rem; border-top: 1px solid rgba(34,211,238,.2); }
+  /* ── Payment modal cart summary ────────────────────────────── */
+  #payment-cart-summary { display: none; }
+  #payment-cart-summary.is-visible { display: block; }
+  .payment-cart-summary-list { list-style: none; margin: 0; padding: 0; }
+  .payment-cart-summary-item {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: #94a3b8;
+    padding: 0.22rem 0;
+    border-bottom: 1px solid rgba(255,255,255,.05);
+  }
+  .payment-cart-summary-item:last-child { border-bottom: none; }
+  .payment-cart-summary-item span:last-child { font-weight: 600; color: #e2e8f0; }
+
   .app-overlay-modal {
     display: none;
     position: fixed;
@@ -10675,6 +11001,8 @@ include __DIR__ . "/includes/header.php";
                     showToast('No hay una orden pendiente para confirmar.', 'error');
                     return;
                   }
+                  // Cart mode: handled by executeCartPurchase via onclick property
+                  if (activePaymentOrder && activePaymentOrder.isCart) return;
 
                   const paymentMode = normalizeCheckoutPaymentMode(activePaymentOrder.paymentMode);
                   const methods = getPaymentMethodsForCurrency(activePaymentOrder.currency);
@@ -11293,8 +11621,666 @@ include __DIR__ . "/includes/header.php";
 
               orderForm.addEventListener('submit', function(event) {
                 event.preventDefault();
+                if (cartMode && cartItems.length > 0) {
+                  submitCartCheckout();
+                  return;
+                }
                 submitOrderCreationRequest({ triggerButton: buyButton });
               });
+
+              // ============================================================
+              // MULTI-CART SYSTEM
+              // ============================================================
+              let cartMode = false;
+              let cartItems = []; // [{pack, quantity}]
+              let cartTotalBlindado = null; // locked after user clicks "Continuar" from cart modal
+
+              const multiCartCheck      = document.getElementById('multi-cart-check');
+              const multiCartModal      = document.getElementById('multi-cart-modal');
+              const multiCartModalBody  = document.getElementById('multi-cart-modal-body');
+              const multiCartModalTotal = document.getElementById('multi-cart-modal-total');
+              const multiCartProceed    = document.getElementById('multi-cart-proceed');
+              const multiCartProceedLbl = document.getElementById('multi-cart-proceed-label');
+              const multiCartKeepShop   = document.getElementById('multi-cart-keep-shopping');
+              const multiCartModalClose = document.getElementById('multi-cart-modal-close');
+              const batchProgressModal  = document.getElementById('batch-progress-modal');
+              const batchProgressBar    = document.getElementById('batch-progress-bar');
+              const batchProgressFrac   = document.getElementById('batch-progress-fraction');
+              const batchProgressItems  = document.getElementById('batch-progress-items');
+              const batchProgressFooter = document.getElementById('batch-progress-footer');
+              const batchProgressLabel  = document.getElementById('batch-progress-current-label');
+              const batchProgressClose  = document.getElementById('batch-progress-close');
+              const paymentCartSummary  = document.getElementById('payment-cart-summary');
+              const paymentCartSumList  = document.getElementById('payment-cart-summary-list');
+              const paymentCartSumTotal = document.getElementById('payment-cart-summary-total');
+
+              // ── Inject cart button into header ───────────────────────────
+              function buildCartHeaderButton() {
+                const btn = document.createElement('button');
+                btn.id = 'header-cart-btn';
+                btn.type = 'button';
+                btn.setAttribute('aria-label', 'Ver carrito');
+                btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="17" height="17" aria-hidden="true"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg><span class="cart-btn-badge" id="cart-btn-count">0</span>`;
+                btn.addEventListener('click', () => openCartModal());
+                const searchEl = document.querySelector('[data-public-search]');
+                if (searchEl && searchEl.parentElement) {
+                  searchEl.parentElement.insertBefore(btn, searchEl);
+                }
+              }
+              buildCartHeaderButton();
+              const headerCartBtn   = document.getElementById('header-cart-btn');
+              const cartBtnCount    = document.getElementById('cart-btn-count');
+
+              // ── Update cart header button state ──────────────────────────
+              function syncCartHeaderButton() {
+                if (!headerCartBtn || !cartBtnCount) return;
+                const total = cartItems.reduce((s, ci) => s + ci.quantity, 0);
+                cartBtnCount.textContent = String(total);
+                const shouldShow = cartMode && cartItems.length >= 2;
+                headerCartBtn.classList.toggle('is-visible', shouldShow);
+              }
+
+              // ── Cart price calculation ───────────────────────────────────
+              function cartItemSubtotal(cartItem) {
+                const base  = parseFloat(cartItem.pack.priceValue || 0);
+                const drop  = Math.max(0, Math.min(99, Number(cartItem.pack.dropPercent || 0)));
+                const price = drop > 0
+                  ? normalizeCurrencyAmount(base * (1 - drop / 100), cartItem.pack.showDecimals)
+                  : normalizeCurrencyAmount(base, cartItem.pack.showDecimals);
+                return normalizeCurrencyAmount(price * cartItem.quantity, cartItem.pack.showDecimals);
+              }
+
+              function cartGrandTotal() {
+                if (cartTotalBlindado !== null) return cartTotalBlindado;
+                const showDec = cartItems.length > 0 ? cartItems[0].pack.showDecimals : monedaActualMostrarDecimales;
+                return normalizeCurrencyAmount(
+                  cartItems.reduce((s, ci) => s + cartItemSubtotal(ci), 0),
+                  showDec
+                );
+              }
+
+              function cartGrandTotalText() {
+                const total   = cartGrandTotal();
+                const showDec = cartItems.length > 0 ? cartItems[0].pack.showDecimals : monedaActualMostrarDecimales;
+                const moneda  = cartItems.length > 0 ? cartItems[0].pack.moneda : monedaActualClave;
+                return `${moneda} ${formatCurrencyAmount(total, showDec)}`;
+              }
+
+              // ── Render cart modal body ───────────────────────────────────
+              function renderCartModal() {
+                if (!multiCartModalBody) return;
+                if (cartItems.length === 0) {
+                  multiCartModalBody.innerHTML = '<div class="multi-cart-empty-state">No hay paquetes en el carrito.</div>';
+                  if (multiCartModalTotal) multiCartModalTotal.textContent = '-';
+                  if (multiCartProceedLbl) multiCartProceedLbl.textContent = 'Continuar con la compra';
+                  if (multiCartProceed) multiCartProceed.disabled = true;
+                  return;
+                }
+                const html = cartItems.map((ci, idx) => {
+                  const sub     = cartItemSubtotal(ci);
+                  const showDec = ci.pack.showDecimals;
+                  const moneda  = ci.pack.moneda;
+                  return `<div class="multi-cart-item" data-cart-idx="${idx}">
+                    <div>
+                      <div class="multi-cart-item-name">${escapePaymentHtml(ci.pack.name)}</div>
+                      <div class="multi-cart-item-sub">${moneda} ${formatCurrencyAmount(sub, showDec)}</div>
+                    </div>
+                    <div class="multi-cart-item-stepper">
+                      <button type="button" class="cart-qty-dec" data-idx="${idx}" aria-label="Disminuir">-</button>
+                      <span class="multi-cart-item-qty">${ci.quantity}</span>
+                      <button type="button" class="cart-qty-inc" data-idx="${idx}" aria-label="Aumentar">+</button>
+                    </div>
+                    <button type="button" class="multi-cart-item-del" data-idx="${idx}" aria-label="Eliminar paquete">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                    </button>
+                  </div>`;
+                }).join('');
+                multiCartModalBody.innerHTML = html;
+
+                // Bind stepper and delete buttons
+                multiCartModalBody.querySelectorAll('.cart-qty-dec').forEach(btn => {
+                  btn.addEventListener('click', () => {
+                    const idx = parseInt(btn.dataset.idx);
+                    if (cartItems[idx] && cartItems[idx].quantity > 1) {
+                      cartItems[idx].quantity--;
+                      cartTotalBlindado = null;
+                      renderCartModal();
+                      syncCartHeaderButton();
+                    }
+                  });
+                });
+                multiCartModalBody.querySelectorAll('.cart-qty-inc').forEach(btn => {
+                  btn.addEventListener('click', () => {
+                    const idx = parseInt(btn.dataset.idx);
+                    if (cartItems[idx]) {
+                      cartItems[idx].quantity++;
+                      cartTotalBlindado = null;
+                      renderCartModal();
+                      syncCartHeaderButton();
+                    }
+                  });
+                });
+                multiCartModalBody.querySelectorAll('.multi-cart-item-del').forEach(btn => {
+                  btn.addEventListener('click', () => {
+                    const idx = parseInt(btn.dataset.idx);
+                    if (cartItems[idx]) {
+                      removeCartItemByIndex(idx);
+                    }
+                  });
+                });
+
+                // Update total
+                const total   = cartGrandTotal();
+                const showDec = cartItems.length > 0 ? cartItems[0].pack.showDecimals : monedaActualMostrarDecimales;
+                const moneda  = cartItems.length > 0 ? cartItems[0].pack.moneda : monedaActualClave;
+                const txt     = `${moneda} ${formatCurrencyAmount(total, showDec)}`;
+                if (multiCartModalTotal) multiCartModalTotal.textContent = txt;
+                if (multiCartProceedLbl) multiCartProceedLbl.textContent = `Continuar con la compra - ${txt}`;
+                if (multiCartProceed) multiCartProceed.disabled = cartItems.length === 0;
+              }
+
+              function openCartModal() {
+                renderCartModal();
+                setOverlayVisible(multiCartModal, true);
+              }
+
+              // ── Remove cart item ─────────────────────────────────────────
+              function removeCartItemByIndex(idx) {
+                if (!cartItems[idx]) return;
+                const packId = cartItems[idx].pack.id;
+                cartItems.splice(idx, 1);
+                cartTotalBlindado = null;
+                // Deselect the card on the page
+                const card = document.querySelector(`.pack-card[data-package-id="${packId}"]`);
+                if (card) card.classList.remove('neon-selected');
+                renderCartModal();
+                syncCartHeaderButton();
+                updateResumenCompraCart();
+                syncCartBuyButton();
+              }
+
+              // ── Cart mode toggle ─────────────────────────────────────────
+              if (multiCartCheck) {
+                multiCartCheck.addEventListener('change', () => {
+                  cartMode = multiCartCheck.checked;
+                  cartItems = [];
+                  cartTotalBlindado = null;
+
+                  // Reset all pack card selections
+                  packCards2.forEach(card => card.classList.remove('neon-selected'));
+
+                  // Reset account-sale disabled state
+                  packCards2.forEach(card => {
+                    card.classList.remove('cart-mode-account-disabled');
+                    card.style.pointerEvents = '';
+                  });
+
+                  if (cartMode) {
+                    // Mark account-sale packs as unavailable
+                    packCards2.forEach(card => {
+                      if (card.dataset.accountSale === '1') {
+                        card.classList.add('cart-mode-account-disabled');
+                      }
+                    });
+                    // Reset single-pack state
+                    activePack = null;
+                    updateResumenCompra(null);
+                    renderPlayerFields(null);
+                    updateButtonState();
+                    setOverlayVisible(publicOrderSummaryShell, false);
+                  } else {
+                    syncCartHeaderButton();
+                    updateResumenCompraCart();
+                    syncCartBuyButton();
+                  }
+                });
+              }
+
+              // ── Pack card click in cart mode ─────────────────────────────
+              // Intercept pack clicks when cartMode is on
+              packCards2.forEach(card => {
+                card.addEventListener('click', function(e) {
+                  if (!cartMode) return; // normal flow handles it
+                  if (card.dataset.accountSale === '1') return; // disabled
+
+                  e.stopImmediatePropagation(); // prevent original handler
+
+                  const packId   = card.dataset.packageId;
+                  const existing = cartItems.findIndex(ci => ci.pack.id === packId);
+
+                  if (existing >= 0) {
+                    // Toggle off: remove from cart
+                    cartItems.splice(existing, 1);
+                    card.classList.remove('neon-selected');
+                  } else {
+                    // Add to cart
+                    const pack = buildPackStateFromCard(card);
+                    cartItems.push({ pack, quantity: 1 });
+                    card.classList.add('neon-selected');
+                  }
+
+                  cartTotalBlindado = null;
+                  syncCartHeaderButton();
+                  updateResumenCompraCart();
+                  syncCartBuyButton();
+                }, true); // capture phase to intercept before original handler
+              });
+
+              // ── Public order summary in cart mode ────────────────────────
+              function updateResumenCompraCart() {
+                if (!cartMode || !publicOrderSummaryShell || !publicOrderSummaryRows || !publicOrderSummaryTotal) return;
+
+                if (cartItems.length === 0) {
+                  setOverlayVisible(publicOrderSummaryShell, false);
+                  if (publicOrderSummaryMethod) publicOrderSummaryMethod.classList.add('d-none');
+                  return;
+                }
+
+                // Build rows
+                const rowsHtml = cartItems.map(ci => {
+                  const sub     = cartItemSubtotal(ci);
+                  const showDec = ci.pack.showDecimals;
+                  const moneda  = ci.pack.moneda;
+                  const qLabel  = ci.quantity > 1 ? ` ×${ci.quantity}` : '';
+                  return `<div class="payment-order-summary-row"><span>${escapePaymentHtml(ci.pack.name)}${qLabel}</span><span>${moneda} ${formatCurrencyAmount(sub, showDec)}</span></div>`;
+                }).join('');
+
+                publicOrderSummaryRows.innerHTML = rowsHtml;
+                const total    = cartGrandTotal();
+                const showDec  = cartItems[0].pack.showDecimals;
+                const moneda   = cartItems[0].pack.moneda;
+                const totalTxt = `${moneda} ${formatCurrencyAmount(total, showDec)}`;
+                publicOrderSummaryTotal.textContent = totalTxt;
+                publicOrderSummaryShell.classList.remove('d-none');
+
+                // Update buy button label
+                if (buyButton) {
+                  buyButton.textContent = cartTotalBlindado !== null
+                    ? `Continuar con la compra - ${totalTxt}`
+                    : `Continuar con la compra - ${totalTxt}`;
+                }
+              }
+
+              function syncCartBuyButton() {
+                if (!buyButton || !cartMode) return;
+                const hasItems      = cartItems.length > 0;
+                const hasPayment    = !!resolvePreferredCheckoutSelection(cartItems[0] ? cartItems[0].pack : null).mode;
+                const requiredOk    = (() => {
+                  const fields = Array.from(orderForm.querySelectorAll('[required]'));
+                  return fields.every(f => f.value.trim() !== '');
+                })();
+                buyButton.disabled = !hasItems || !requiredOk;
+                if (hasItems) {
+                  const totalTxt = cartGrandTotalText();
+                  buyButton.textContent = `Continuar con la compra - ${totalTxt}`;
+                } else {
+                  buyButton.textContent = 'Selecciona al menos un paquete';
+                }
+              }
+
+              // ── Cart modal buttons ───────────────────────────────────────
+              if (multiCartKeepShop) {
+                multiCartKeepShop.addEventListener('click', () => setOverlayVisible(multiCartModal, false));
+              }
+              if (multiCartModalClose) {
+                multiCartModalClose.addEventListener('click', () => setOverlayVisible(multiCartModal, false));
+              }
+              if (multiCartProceed) {
+                multiCartProceed.addEventListener('click', () => {
+                  // Lock total (BLINDADO)
+                  cartTotalBlindado = cartGrandTotal();
+                  setOverlayVisible(multiCartModal, false);
+                  // Scroll to buy button
+                  const buySection = document.getElementById('public-order-summary-shell') || orderForm;
+                  if (buySection) {
+                    setTimeout(() => {
+                      buySection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 120);
+                  }
+                  updateResumenCompraCart();
+                  syncCartBuyButton();
+                });
+              }
+
+              // ── Progress modal close ─────────────────────────────────────
+              if (batchProgressClose) {
+                batchProgressClose.addEventListener('click', () => {
+                  setOverlayVisible(batchProgressModal, false);
+                  resetCartState();
+                });
+              }
+
+              // ── Sync currency with cart ──────────────────────────────────
+              // When currency changes in cart mode, recalculate cart prices
+              const _origSetVisibleCurrency = setVisibleCurrency;
+              // Hook: after currency changes, update cart display (total isn't blindado yet)
+              const origMonedaSelectHandler = monedaSelect ? monedaSelect.onchange : null;
+              if (monedaSelect) {
+                monedaSelect.addEventListener('change', () => {
+                  if (cartMode && cartTotalBlindado === null) {
+                    // Re-read prices from updated cards
+                    cartItems = cartItems.map(ci => {
+                      const card = document.querySelector(`.pack-card[data-package-id="${ci.pack.id}"]`);
+                      if (!card) return ci;
+                      return { ...ci, pack: buildPackStateFromCard(card) };
+                    });
+                    renderCartModal();
+                    updateResumenCompraCart();
+                    syncCartBuyButton();
+                  }
+                });
+              }
+
+
+              // ── Reset cart state ─────────────────────────────────────────
+              function resetCartState() {
+                cartItems = [];
+                cartTotalBlindado = null;
+                packCards2.forEach(card => card.classList.remove('neon-selected'));
+                if (multiCartCheck) multiCartCheck.checked = false;
+                cartMode = false;
+                packCards2.forEach(card => card.classList.remove('cart-mode-account-disabled'));
+                syncCartHeaderButton();
+                updateResumenCompraCart();
+                if (buyButton) {
+                  buyButton.textContent = defaultBuyButtonLabel;
+                  buyButton.disabled = true;
+                }
+                if (publicOrderSummaryShell) publicOrderSummaryShell.classList.add('d-none');
+              }
+
+              // ── Submit cart checkout ─────────────────────────────────────
+              async function submitCartCheckout() {
+                if (cartItems.length === 0) {
+                  showToast('No hay paquetes en el carrito.', 'error');
+                  return;
+                }
+
+                const userId = playerPrimaryInput ? playerPrimaryInput.value.trim() : '';
+                const email  = orderEmailInput ? orderEmailInput.value.trim() : '';
+
+                if (!userId) { showToast('Debes ingresar tu ID de jugador.', 'error'); return; }
+                if (!email)  { showToast('Debes ingresar tu correo electrónico.', 'error'); return; }
+
+                // Use pack currency/showDecimals from first item
+                const refPack   = cartItems[0].pack;
+                const showDec   = refPack.showDecimals;
+                const currency  = refPack.moneda;
+                const total     = cartTotalBlindado !== null ? cartTotalBlindado : cartGrandTotal();
+                const totalText = `${currency} ${formatCurrencyAmount(total, showDec)}`;
+
+                const paymentSelection = resolvePreferredCheckoutSelection(refPack);
+                if (!paymentSelection.mode) {
+                  showToast('Selecciona un método de pago antes de continuar.', 'error');
+                  return;
+                }
+
+                const playerFields = collectPlayerFields();
+                const playerFieldsJson = JSON.stringify(playerFields);
+
+                // Build cart items array for backend
+                const cartPayload = cartItems.map(ci => ({
+                  package_id: ci.pack.id,
+                  quantity: ci.quantity,
+                  price: normalizeCurrencyAmount(cartItemSubtotal(ci), ci.pack.showDecimals),
+                  moneda: ci.pack.moneda,
+                }));
+
+                // Collect payment data from the payment form (same as normal flow)
+                // We open the payment modal first so user can enter payment data
+                // For cart mode we fake an order_id = 0 and batch_id will be returned after payment data entry
+
+                // Unlock a synthetic order context for the payment modal
+                const cartPseudoOrder = {
+                  orderId: '__cart__',
+                  pack: refPack,
+                  confirmedTotalText: totalText,
+                  expiresAtMs: Date.now() + 30 * 60 * 1000,
+                  email,
+                  isCart: true,
+                  cartPayload,
+                  cartTotal: total,
+                  currency,
+                  userId,
+                  playerFieldsJson,
+                  paymentSelection,
+                };
+                openCartPaymentModal(cartPseudoOrder);
+              }
+
+              // ── Open payment modal in cart mode ──────────────────────────
+              function openCartPaymentModal(ctx) {
+                // Show cart summary in modal header
+                if (paymentCartSumList && ctx.cartPayload) {
+                  paymentCartSumList.innerHTML = ctx.cartPayload.map(item => {
+                    const ci = cartItems.find(c => String(c.pack.id) === String(item.package_id));
+                    const name = ci ? ci.pack.name : `Paquete #${item.package_id}`;
+                    const qty  = item.quantity > 1 ? ` ×${item.quantity}` : '';
+                    return `<li class="payment-cart-summary-item"><span>${escapePaymentHtml(name)}${qty}</span><span>${item.moneda} ${formatCurrencyAmount(item.price, ctx.pack.showDecimals)}</span></li>`;
+                  }).join('');
+                }
+                if (paymentCartSumTotal) paymentCartSumTotal.textContent = ctx.confirmedTotalText;
+                if (paymentCartSummary) paymentCartSummary.classList.add('is-visible');
+
+                // Hide single-product summary, show cart summary
+                const singleSummaryCard = document.querySelector('.payment-summary-card');
+                if (singleSummaryCard) singleSummaryCard.style.display = 'none';
+
+                // Update total display
+                if (paymentSummaryTotal) paymentSummaryTotal.textContent = ctx.confirmedTotalText;
+                if (paymentSummaryMinimalTotal) paymentSummaryMinimalTotal.textContent = ctx.confirmedTotalText;
+                updatePaymentSummaryCopyButtons(ctx.confirmedTotalText);
+
+                // Use the normal openPaymentModal infrastructure but with cart context
+                activePaymentOrder = {
+                  orderId: '__cart__',
+                  pack: ctx.pack,
+                  confirmedTotalText: ctx.confirmedTotalText,
+                  expiresAtMs: ctx.expiresAtMs,
+                  email: ctx.email,
+                  isCart: true,
+                  cartCtx: ctx,
+                };
+
+                // Render payment methods for the cart currency
+                renderPaymentMethodsByCurrency(ctx.currency || '');
+
+                // Set the submit button to handle cart flow
+                if (paymentSubmitButton) {
+                  paymentSubmitButton.textContent = `Realizar Compra - ${ctx.confirmedTotalText}`;
+                  paymentSubmitButton.onclick = () => executeCartPurchase(ctx);
+                }
+
+                // Start payment timer
+                clearPaymentTimer();
+                updatePaymentTimer();
+                paymentTimerInterval = setInterval(updatePaymentTimer, 1000);
+
+                setOverlayVisible(paymentModal, true);
+                scrollPaymentModalToTop();
+              }
+
+              // ── Execute cart purchase (after user fills payment data) ─────
+              async function executeCartPurchase(ctx) {
+                if (!paymentSubmitButton) return;
+
+                // Collect payment data from modal fields
+                const refNumber   = paymentAdvReferenceInput ? paymentAdvReferenceInput.value.trim()
+                                  : (paymentReferenceInput   ? paymentReferenceInput.value.trim() : '');
+                const phoneVal    = paymentPhoneAdvInput      ? paymentPhoneAdvInput.value.trim()
+                                  : (paymentPhoneInput        ? paymentPhoneInput.value.trim() : '');
+                const nombreVal   = paymentNombreInput        ? paymentNombreInput.value.trim() : '';
+                const cedulaVal   = paymentCedulaInput        ? paymentCedulaInput.value.trim() : '';
+
+                const preferredSel = resolvePreferredCheckoutSelection(ctx.pack);
+                const payMode      = preferredSel.mode || 'money';
+                const payMethodId  = preferredSel.methodId || 0;
+
+                // Gather coupon
+                const couponVal = normalizeCouponCode(couponInput ? couponInput.value : '');
+
+                paymentSubmitButton.disabled = true;
+                setLoadingModalContent('Registrando pedidos...', 'Estamos creando los pedidos del carrito.', 'processing');
+                setOverlayVisible(loadingModal, true);
+
+                let batchId, orderIds;
+                try {
+                  const body = new URLSearchParams();
+                  body.set('action', 'batch_create_and_pay');
+                  body.set('game_id', String(<?= (int) ($game['id'] ?? 0) ?>));
+                  body.set('cart_items_json', JSON.stringify(ctx.cartPayload));
+                  body.set('user_identifier', ctx.userId || '');
+                  body.set('player_fields_json', ctx.playerFieldsJson || '');
+                  body.set('email', ctx.email || '');
+                  body.set('currency', ctx.currency || '');
+                  body.set('total_price', String(ctx.cartTotal));
+                  body.set('payment_method_id', String(payMethodId));
+                  body.set('payment_mode', payMode);
+                  body.set('reference_number', refNumber);
+                  body.set('phone', phoneVal);
+                  body.set('nombre_titular', nombreVal);
+                  body.set('cedula_titular', cedulaVal);
+                  body.set('coupon', couponVal);
+
+                  const resp = await fetch(buildAppUrl('/api/pedidos.php'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: body.toString(),
+                  });
+                  const data = await resp.json();
+
+                  if (!data || !data.ok) {
+                    throw new Error((data && data.message) ? data.message : 'No se pudieron crear los pedidos.');
+                  }
+
+                  batchId  = data.batch_id;
+                  orderIds = Array.isArray(data.order_ids) ? data.order_ids : [];
+
+                  if (orderIds.length === 0) {
+                    throw new Error('No se registraron pedidos en el carrito.');
+                  }
+                } catch (err) {
+                  setOverlayVisible(loadingModal, false);
+                  paymentSubmitButton.disabled = false;
+                  showToast(normalizeApiRequestErrorMessage(err, 'Error al registrar los pedidos.'), 'error');
+                  return;
+                }
+
+                // Close loading and payment modal, open progress modal
+                setOverlayVisible(loadingModal, false);
+                setOverlayVisible(paymentModal, false);
+                // Restore payment modal to normal state
+                if (paymentCartSummary) paymentCartSummary.classList.remove('is-visible');
+                const singleSummaryCard = document.querySelector('.payment-summary-card');
+                if (singleSummaryCard) singleSummaryCard.style.display = '';
+                if (paymentSubmitButton) paymentSubmitButton.onclick = null;
+
+                // Open progress modal and process items
+                await runBatchProgress(batchId, orderIds);
+              }
+
+              // ── Run progress modal and fulfill items ─────────────────────
+              async function runBatchProgress(batchId, orderIds) {
+                if (!batchProgressModal || !batchProgressItems) return;
+
+                const total = orderIds.length;
+
+                // Build initial item list with pending state
+                batchProgressItems.innerHTML = cartItems.slice(0, total).map((ci, i) => {
+                  const qty = ci.quantity > 1 ? ` ×${ci.quantity}` : '';
+                  return `<div class="batch-progress-item" id="batch-item-${i}">
+                    <span class="batch-progress-item-icon batch-status-pending">⏳</span>
+                    <span class="batch-progress-item-name">${escapePaymentHtml(ci.pack.name)}</span>
+                    <span class="batch-progress-item-qty">${qty}</span>
+                    <span class="batch-progress-item-status batch-status-pending">Pendiente</span>
+                  </div>`;
+                }).join('');
+
+                if (batchProgressBar) batchProgressBar.style.width = '0%';
+                if (batchProgressFrac) batchProgressFrac.textContent = `0/${total}`;
+                if (batchProgressLabel) batchProgressLabel.textContent = 'Iniciando recargas...';
+                if (batchProgressFooter) batchProgressFooter.style.display = 'none';
+
+                setOverlayVisible(batchProgressModal, true);
+
+                let doneCount = 0;
+                let allSuccess = true;
+
+                for (let i = 0; i < orderIds.length; i++) {
+                  const orderId = orderIds[i];
+                  const ci      = cartItems[i] || cartItems[0];
+                  const row     = document.getElementById(`batch-item-${i}`);
+
+                  if (batchProgressLabel) {
+                    batchProgressLabel.textContent = `Procesando ${i + 1}/${total}: ${ci ? ci.pack.name : ''}`;
+                  }
+                  if (row) {
+                    row.querySelector('.batch-progress-item-icon').textContent = '⚙️';
+                    row.querySelector('.batch-progress-item-icon').className = 'batch-progress-item-icon batch-status-processing';
+                    row.querySelector('.batch-progress-item-status').textContent = 'Procesando...';
+                    row.querySelector('.batch-progress-item-status').className = 'batch-progress-item-status batch-status-processing';
+                  }
+
+                  let result = null;
+                  try {
+                    const body = new URLSearchParams();
+                    body.set('action', 'batch_fulfill_item');
+                    body.set('order_id', String(orderId));
+                    body.set('batch_id', batchId);
+                    const resp = await fetch(buildAppUrl('/api/pedidos.php'), {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                      body: body.toString(),
+                    });
+                    result = await resp.json();
+                  } catch (err) {
+                    result = { ok: false, message: 'Error de red.', estado: 'pagado' };
+                  }
+
+                  doneCount++;
+                  const pct = Math.round((doneCount / total) * 100);
+                  if (batchProgressBar)  batchProgressBar.style.width = `${pct}%`;
+                  if (batchProgressFrac) batchProgressFrac.textContent = `${doneCount}/${total}`;
+
+                  const isDone     = result && (result.estado === 'enviado' || result.already_done);
+                  const isPartial  = result && result.estado === 'pagado' && result.processing;
+                  const isManual   = result && result.manual;
+                  const isError    = !result || (!isDone && !isPartial && !isManual);
+
+                  if (!isDone && !isPartial) allSuccess = false;
+
+                  if (row) {
+                    let icon, statusText, statusClass;
+                    if (isDone) {
+                      icon = '✅'; statusText = 'Enviado'; statusClass = 'batch-status-done';
+                    } else if (isPartial) {
+                      icon = '🔄'; statusText = 'En proceso'; statusClass = 'batch-status-partial';
+                    } else if (isManual) {
+                      icon = '⏰'; statusText = 'Manual'; statusClass = 'batch-status-partial';
+                    } else {
+                      icon = '❌'; statusText = result && result.message ? result.message.slice(0,32) : 'Error'; statusClass = 'batch-status-error';
+                    }
+                    row.querySelector('.batch-progress-item-icon').textContent = icon;
+                    row.querySelector('.batch-progress-item-icon').className = `batch-progress-item-icon ${statusClass}`;
+                    row.querySelector('.batch-progress-item-status').textContent = statusText;
+                    row.querySelector('.batch-progress-item-status').className = `batch-progress-item-status ${statusClass}`;
+                  }
+
+                  // 1-second delay between items (not after last one)
+                  if (i < orderIds.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                  }
+                }
+
+                // Done
+                if (batchProgressLabel) {
+                  batchProgressLabel.textContent = allSuccess
+                    ? `¡Listo! ${doneCount} recarga${doneCount !== 1 ? 's' : ''} procesada${doneCount !== 1 ? 's' : ''} correctamente.`
+                    : `Proceso completado. Revisa el estado de cada paquete.`;
+                }
+                if (batchProgressFooter) batchProgressFooter.style.display = '';
+              }
+
               </script>
             </section>
 <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>

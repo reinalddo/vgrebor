@@ -252,6 +252,10 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         'precio_sin_drop' => "ALTER TABLE pedidos ADD COLUMN precio_sin_drop DECIMAL(12,2) NULL AFTER precio_original",
         'descuento_drop_porcentaje' => "ALTER TABLE pedidos ADD COLUMN descuento_drop_porcentaje DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER precio_sin_drop",
         'descuento_drop_monto' => "ALTER TABLE pedidos ADD COLUMN descuento_drop_monto DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER descuento_drop_porcentaje",
+        'cart_batch_id' => "ALTER TABLE pedidos ADD COLUMN cart_batch_id VARCHAR(64) NULL AFTER descuento_drop_monto",
+        'cart_batch_total' => "ALTER TABLE pedidos ADD COLUMN cart_batch_total DECIMAL(12,2) NULL AFTER cart_batch_id",
+        'cart_batch_index' => "ALTER TABLE pedidos ADD COLUMN cart_batch_index SMALLINT UNSIGNED NULL AFTER cart_batch_total",
+        'cart_batch_size' => "ALTER TABLE pedidos ADD COLUMN cart_batch_size SMALLINT UNSIGNED NULL AFTER cart_batch_index",
     ];
     $colResult = $mysqli->query("SHOW COLUMNS FROM pedidos");
     $existing = [];
@@ -10841,6 +10845,301 @@ if ($action === 'update_status') {
     }
 
     json_response(['ok' => true, 'message' => 'Estado actualizado', 'estado' => $new_status, 'order_id' => $order_id]);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// BATCH CART: create_cart_and_pay
+// Creates N pedido records (one per cart item) already in 'pagado' state,
+// all sharing a cart_batch_id. Payment data is recorded on each order.
+// ──────────────────────────────────────────────────────────────────────
+if ($action === 'batch_create_and_pay') {
+    $mysqli = ensure_mysqli_connection($mysqli);
+
+    $gameId       = intval($_POST['game_id'] ?? 0);
+    $cartJson     = trim((string) ($_POST['cart_items_json'] ?? ''));
+    $userIdRaw    = sanitize_str($_POST['user_identifier'] ?? null, 150);
+    $pfjRaw       = trim((string) ($_POST['player_fields_json'] ?? ''));
+    $email        = sanitize_str($_POST['email'] ?? null, 180);
+    $currency     = sanitize_str($_POST['currency'] ?? null, 20);
+    $totalBlindado = floatval(str_replace([',', ' '], '', $_POST['total_price'] ?? '0'));
+    $payMethodId  = intval($_POST['payment_method_id'] ?? 0);
+    $refNumber    = substr(trim((string) ($_POST['reference_number'] ?? '')), 0, 120);
+    $phone        = substr(trim((string) ($_POST['phone'] ?? '')), 0, 40);
+    $nombreTit    = substr(trim((string) ($_POST['nombre_titular'] ?? '')), 0, 160);
+    $cedulaTit    = substr(trim((string) ($_POST['cedula_titular'] ?? '')), 0, 60);
+    $couponInput  = sanitize_str($_POST['coupon'] ?? null, 60);
+    $payMode      = trim((string) ($_POST['payment_mode'] ?? 'money'));
+    $payMode      = in_array($payMode, ['money', 'points', 'binance_pagonorte'], true) ? $payMode : 'money';
+
+    if ($gameId <= 0) {
+        json_error('Juego inválido.');
+    }
+
+    $cartItems = json_decode($cartJson, true);
+    if (!is_array($cartItems) || count($cartItems) < 1) {
+        json_error('El carrito no tiene paquetes válidos.');
+    }
+
+    // Resolve method name
+    $methodName = '';
+    if ($payMode === 'money' && $payMethodId > 0) {
+        $meth = fetch_active_payment_method($mysqli, $payMethodId);
+        $methodName = $meth ? (string) ($meth['nombre'] ?? '') : '';
+    } elseif ($payMode === 'binance_pagonorte') {
+        $methodName = 'Binance';
+    } elseif ($payMode === 'points') {
+        $methodName = 'RECoins';
+    }
+
+    // Fetch game name once
+    $gameName = '';
+    $stmtG = $mysqli->prepare('SELECT nombre FROM juegos WHERE id = ? LIMIT 1');
+    if ($stmtG) {
+        $stmtG->bind_param('i', $gameId);
+        $stmtG->execute();
+        $resG = $stmtG->get_result();
+        $rowG = $resG ? $resG->fetch_assoc() : null;
+        $gameName = $rowG ? (string) ($rowG['nombre'] ?? '') : '';
+        $stmtG->close();
+    }
+
+    $tenantSlug      = resolve_tenant_slug();
+    $clienteUsuarioId = isset($_SESSION['auth_user']['id']) ? intval($_SESSION['auth_user']['id']) : null;
+    $playerFields    = parse_player_fields_request($pfjRaw);
+    $playerFieldsJson = $pfjRaw !== '' ? $pfjRaw : null;
+    $batchId         = bin2hex(random_bytes(16));
+    $batchSize       = count($cartItems);
+    $orderIds        = [];
+
+    // Handle points payment
+    if ($payMode === 'points') {
+        $winPointsEnabled = win_points_enabled();
+        if (!$winPointsEnabled || $clienteUsuarioId === null || $clienteUsuarioId <= 0) {
+            json_error('Los RECoins no están disponibles para este pago.');
+        }
+        $userPointsSummary = win_points_fetch_user_summary($mysqli, $clienteUsuarioId);
+        $availablePoints = (int) ($userPointsSummary['balance'] ?? 0);
+        // Collect required points total
+        $totalRequired = 0;
+        foreach ($cartItems as $ci) {
+            $pkg = fetch_game_package($mysqli, intval($ci['package_id'] ?? 0), $gameId);
+            if ($pkg) {
+                $rule = win_points_fetch_game_redemption_rules($mysqli, $gameId);
+                $pkgRule = $rule[intval($ci['package_id'] ?? 0)] ?? null;
+                $req = max(0, (int) (($pkgRule['required_points'] ?? 0)));
+                $qty = max(1, intval($ci['quantity'] ?? 1));
+                $totalRequired += $req * $qty;
+            }
+        }
+        if ($availablePoints < $totalRequired) {
+            json_error('No tienes suficientes RECoins para completar esta compra.');
+        }
+    }
+
+    foreach ($cartItems as $itemIdx => $cartItem) {
+        $pkgId    = intval($cartItem['package_id'] ?? 0);
+        $qty      = max(1, intval($cartItem['quantity'] ?? 1));
+        $itemPrice = floatval($cartItem['price'] ?? 0);
+        $itemMoneda = (string) ($cartItem['moneda'] ?? $currency ?? 'VES');
+
+        if ($pkgId <= 0 || $itemPrice <= 0) {
+            continue;
+        }
+
+        $pkg = fetch_game_package($mysqli, $pkgId, $gameId);
+        if (!$pkg) {
+            continue;
+        }
+
+        $packName       = (string) ($pkg['nombre'] ?? '');
+        $packAmountText = (string) ($pkg['cantidad'] ?? '');
+        $montoFF        = (string) ($pkg['monto_ff'] ?? '');
+        $paqueteApi     = isset($pkg['paquete_api']) ? (int) $pkg['paquete_api'] : null;
+        $discordCmd     = game_discord_api_command($mysqli, $gameId);
+        $pkgProvider    = package_api_provider_from_row($pkg, ['categoria_api_discord' => $discordCmd]);
+        $apiDiscordData = build_api_discord_order_insert_data($mysqli, $gameId, $pkgProvider);
+
+        $winPointsAward = 0;
+        if (win_points_enabled() && $clienteUsuarioId !== null && $clienteUsuarioId > 0) {
+            $winPointsAward = win_points_package_reward($pkg) * $qty;
+        }
+
+        $pkgAmountNum = is_numeric($packAmountText) ? intval($packAmountText) : 1;
+
+        try {
+            $oid = pedidos_insert_order($mysqli, array_merge([
+                'tenant_slug'                        => $tenantSlug,
+                'juego_id'                           => $gameId,
+                'paquete_id'                         => $pkgId,
+                'juego_nombre'                       => $gameName,
+                'paquete_nombre'                     => $packName,
+                'paquete_cantidad'                   => $packAmountText,
+                'monto_ff'                           => $montoFF !== '' ? $montoFF : null,
+                'paquete_api'                        => $paqueteApi,
+                'api_provider'                       => $pkgProvider !== '' ? $pkgProvider : null,
+                'moneda'                             => $itemMoneda,
+                'precio'                             => $itemPrice,
+                'precio_descuento_metodo_pago_base'  => $itemPrice,
+                'descuento_metodo_pago_porcentaje'   => 0,
+                'descuento_metodo_pago_monto'        => 0,
+                'precio_original'                    => $itemPrice,
+                'precio_sin_drop'                    => $itemPrice,
+                'descuento_drop_porcentaje'          => 0,
+                'descuento_drop_monto'               => 0,
+                'user_identifier'                    => $userIdRaw,
+                'player_fields_json'                 => $playerFieldsJson,
+                'email'                              => $email,
+                'cliente_usuario_id'                 => $clienteUsuarioId,
+                'cupon'                              => $couponInput !== null ? normalize_coupon_code($couponInput) : null,
+                'cantidad_compra'                    => $qty,
+                'cantidad'                           => $pkgAmountNum,
+                'estado'                             => 'pagado',
+                'numero_referencia'                  => $refNumber,
+                'telefono_contacto'                  => $phone,
+                'metodo_pago'                        => $methodName,
+                'payment_method_id'                  => $payMethodId,
+                'win_points_awarded'                 => $winPointsAward,
+                'win_points_payment_mode'            => $payMode === 'points' ? 'points' : 'money',
+                'cart_batch_id'                      => $batchId,
+                'cart_batch_total'                   => $totalBlindado,
+                'cart_batch_index'                   => $itemIdx + 1,
+                'cart_batch_size'                    => $batchSize,
+            ], $apiDiscordData));
+            $orderIds[] = $oid;
+        } catch (Throwable $e) {
+            error_log('TVG batch_create_and_pay item #' . ($itemIdx + 1) . ' failed: ' . $e->getMessage());
+        }
+    }
+
+    if (empty($orderIds)) {
+        json_error('No se pudo crear ningún pedido del carrito.');
+    }
+
+    json_response([
+        'ok'         => true,
+        'message'    => 'Pedidos del carrito creados.',
+        'batch_id'   => $batchId,
+        'order_ids'  => $orderIds,
+        'batch_size' => count($orderIds),
+    ]);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// BATCH CART: batch_fulfill_item
+// Processes one cart item: submits to provider API, updates estado.
+// Called sequentially by the frontend progress modal.
+// ──────────────────────────────────────────────────────────────────────
+if ($action === 'batch_fulfill_item') {
+    $mysqli = ensure_mysqli_connection($mysqli);
+
+    $orderId = intval($_POST['order_id'] ?? 0);
+    $batchId = trim((string) ($_POST['batch_id'] ?? ''));
+
+    if ($orderId <= 0 || $batchId === '') {
+        json_error('Parámetros inválidos.');
+    }
+
+    $order = fetch_order_by_id($mysqli, $orderId);
+    if (!$order) {
+        json_error('Pedido no encontrado.', 404);
+    }
+
+    if (trim((string) ($order['cart_batch_id'] ?? '')) !== $batchId) {
+        json_error('El pedido no pertenece a este carrito.', 403);
+    }
+
+    $currentState = trim((string) ($order['estado'] ?? ''));
+    if ($currentState === 'enviado') {
+        json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Ya procesado.', 'already_done' => true]);
+    }
+    if (!in_array($currentState, ['pendiente', 'pagado'], true)) {
+        json_error('El pedido no está en estado válido para procesar.', 409);
+    }
+
+    // Ensure it's in pagado state before processing
+    if ($currentState === 'pendiente') {
+        $clm = $mysqli->prepare("UPDATE pedidos SET estado = 'pagado' WHERE id = ? AND estado = 'pendiente' LIMIT 1");
+        if ($clm) {
+            $clm->bind_param('i', $orderId);
+            $clm->execute();
+            $clm->close();
+        }
+        $order = fetch_order_by_id($mysqli, $orderId) ?: $order;
+    }
+
+    $pkgProvider   = strtolower(trim((string) ($order['api_provider'] ?? '')));
+    $pkgApiId      = (int) ($order['paquete_api'] ?? 0);
+    $orderFields   = order_player_fields_from_json((string) ($order['player_fields_json'] ?? ''));
+    $qty           = order_purchase_quantity($order);
+
+    // ── GiftVen catalog API ──────────────────────────────────────────
+    if ($pkgProvider === 'giftven' && $pkgApiId > 0) {
+        try {
+            $res = execute_catalog_api_purchase($pkgApiId, (string) ($order['user_identifier'] ?? ''), $orderFields, $qty);
+        } catch (Throwable $e) {
+            $res = ['success' => false, 'accepted' => false, 'message' => $e->getMessage(), 'reference' => '', 'payload' => ['exception' => $e->getMessage()]];
+        }
+
+        $ppData    = (array) ($res['payload'] ?? []);
+        $ppRef     = (string) ($res['reference'] ?? '');
+        $ppMsg     = provider_order_status_message($ppData, (string) ($res['message'] ?? ''));
+        $ppPayload = json_encode($ppData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $ppOid     = recargas_api_extract_provider_order_id($ppData);
+        $ppState   = strtolower(trim((string) ($ppData['estado'] ?? '')));
+        $ppCode    = provider_delivered_code_text($ppData);
+        $histJson  = append_provider_history(
+            $order['recargas_api_historial_json'] ?? null,
+            build_provider_history_entry('batch_purchase', $ppState, !empty($res['success']) ? 'enviado' : 'pagado', $ppMsg, $ppRef, $ppOid, $ppCode)
+        );
+
+        if (!empty($res['success'])) {
+            $st = 'enviado';
+            $upd = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_estado=?, recargas_api_codigo_entregado=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=?, estado=? WHERE id=? AND estado='pagado'");
+            if ($upd) {
+                $upd->bind_param('ssssssssi', $ppRef, $ppMsg, $ppPayload, $ppOid, $ppState, $ppCode, $histJson, $st, $orderId);
+                $upd->execute();
+                $upd->close();
+            }
+            $updOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
+            win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+            recharge_notifications_emit_for_order($mysqli, $updOrder);
+            json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Recarga completada.', 'provider_reference' => $ppRef, 'provider_code' => $ppCode]);
+        }
+
+        if (!empty($res['accepted'])) {
+            $upd2 = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_estado=?, recargas_api_codigo_entregado=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=? WHERE id=? AND estado='pagado'");
+            if ($upd2) {
+                $upd2->bind_param('sssssssi', $ppRef, $ppMsg, $ppPayload, $ppOid, $ppState, $ppCode, $histJson, $orderId);
+                $upd2->execute();
+                $upd2->close();
+            }
+            continue_provider_follow_up_in_background($orderId);
+            json_response(['ok' => true, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Pedido recibido y procesándose.', 'provider_reference' => $ppRef, 'processing' => true]);
+        }
+
+        json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $ppMsg ?: 'La recarga no fue procesada por el proveedor.', 'provider_message' => $ppMsg]);
+    }
+
+    // ── Discord API ──────────────────────────────────────────────────
+    if ($pkgProvider === 'discord') {
+        $dispatchResult = execute_api_discord_order_dispatch($order);
+        $targetState    = (!empty($dispatchResult['sent']) && ($dispatchResult['provider_status'] ?? '') === 'sent') ? 'enviado' : 'pagado';
+
+        if (!persist_api_discord_dispatch_result($mysqli, $order, $dispatchResult, 'pagado', $targetState)) {
+            json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'No se pudo registrar el resultado en Discord.']);
+        }
+
+        $updOrder  = fetch_order_by_id($mysqli, $orderId) ?: $order;
+        $finalSt   = trim((string) ($updOrder['estado'] ?? 'pagado'));
+        if ($finalSt === 'enviado') {
+            win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+            recharge_notifications_emit_for_order($mysqli, $updOrder);
+        }
+        json_response(['ok' => $finalSt === 'enviado', 'estado' => $finalSt, 'order_id' => $orderId, 'message' => $finalSt === 'enviado' ? 'Pedido enviado por Discord.' : 'En espera de confirmación de Discord.']);
+    }
+
+    // ── No auto-recharge (manual / free_fire legacy) ─────────────────
+    json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Pedido registrado. Será procesado manualmente.', 'manual' => true]);
 }
 
 json_error('Acción no soportada', 422);
