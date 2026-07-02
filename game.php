@@ -12154,15 +12154,21 @@ include __DIR__ . "/includes/header.php";
                   // Lock total (BLINDADO)
                   cartTotalBlindado = cartGrandTotal();
                   setOverlayVisible(multiCartModal, false);
-                  // Scroll to buy button
-                  const buySection = document.getElementById('public-order-summary-shell') || orderForm;
-                  if (buySection) {
-                    setTimeout(() => {
-                      buySection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }, 120);
-                  }
                   updateResumenCompraCart();
                   syncCartBuyButton();
+                  setTimeout(() => {
+                    // Si ya hay método de pago seleccionado → scroll al resumen
+                    const summaryShell = document.getElementById('public-order-summary-shell');
+                    const hasPaymentMethod = summaryShell && !summaryShell.classList.contains('d-none');
+                    if (hasPaymentMethod) {
+                      summaryShell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    } else {
+                      // Sin método de pago → scroll al selector de métodos
+                      const methodCatalog = document.querySelector('.payment-method-catalog-shell');
+                      const target = methodCatalog || orderForm;
+                      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }, 120);
                 });
               }
 
