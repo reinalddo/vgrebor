@@ -1005,8 +1005,18 @@ include __DIR__ . "/includes/header.php";
         <div id="payment-cart-summary" class="mb-3 p-3 rounded-3" style="background:rgba(34,211,238,.06);border:1px solid rgba(34,211,238,.22);">
           <p class="small text-info fw-bold mb-2">Paquetes a comprar:</p>
           <ul class="payment-cart-summary-list" id="payment-cart-summary-list"></ul>
+          <div id="payment-cart-discount-section" style="display:none;border-top:1px solid rgba(34,211,238,.12);margin-top:0.5rem;padding-top:0.4rem;">
+            <div class="d-flex justify-content-between" style="padding:0.18rem 0;font-size:0.8rem;">
+              <span class="text-secondary">Subtotal</span>
+              <span id="payment-cart-raw-total" class="fw-semibold" style="color:#94a3b8;">-</span>
+            </div>
+            <div class="d-flex justify-content-between" style="padding:0.18rem 0;font-size:0.8rem;">
+              <span id="payment-cart-coupon-label" class="text-secondary">Cupón</span>
+              <span id="payment-cart-discount-amount" class="fw-bold" style="color:#4ade80;">-</span>
+            </div>
+          </div>
           <div class="d-flex justify-content-between mt-2 pt-2" style="border-top:1px solid rgba(34,211,238,.18);">
-            <span class="small text-secondary fw-semibold">Total del carrito</span>
+            <span class="small text-secondary fw-semibold" id="payment-cart-total-label">Total del carrito</span>
             <strong id="payment-cart-summary-total" class="small" style="color:#22d3ee;">-</strong>
           </div>
         </div>
@@ -12075,6 +12085,8 @@ include __DIR__ . "/includes/header.php";
                 );
                 if (cartCouponActive || cartPaymentDiscPct > 0) {
                   const itemsSum = normalizeCurrencyAmount(cartItems.reduce((s, ci) => s + cartItemSubtotal(ci), 0), showDec);
+                  // Fila de subtotal antes del descuento
+                  rowsHtml += `<div class="payment-order-summary-row" style="border-top:1px solid rgba(34,211,238,.12);margin-top:0.3rem;padding-top:0.3rem;"><span class="payment-order-summary-row-label" style="color:#94a3b8;">Subtotal</span><strong class="payment-order-summary-row-value" style="color:#94a3b8;">${moneda} ${formatCurrencyAmount(itemsSum, showDec)}</strong></div>`;
                   const couponAmt = cartCouponActive ? normalizeCurrencyAmount(Number(appliedCouponSummary.discountAmount || 0), showDec) : 0;
                   const paymentAmt = cartPaymentDiscPct > 0 ? normalizeCurrencyAmount((itemsSum * cartPaymentDiscPct) / 100, showDec) : 0;
                   // Best discount wins
@@ -12216,11 +12228,14 @@ include __DIR__ . "/includes/header.php";
                 if (!email)  { showToast('Debes ingresar tu correo electrónico.', 'error'); return; }
 
                 // Use pack currency/showDecimals from first item
-                const refPack   = cartItems[0].pack;
-                const showDec   = refPack.showDecimals;
-                const currency  = refPack.moneda;
-                const total     = cartTotalBlindado !== null ? cartTotalBlindado : cartGrandTotal();
-                const totalText = `${currency} ${formatCurrencyAmount(total, showDec)}`;
+                const refPack      = cartItems[0].pack;
+                const showDec      = refPack.showDecimals;
+                const currency     = refPack.moneda;
+                const total        = cartTotalBlindado !== null ? cartTotalBlindado : cartGrandTotal();
+                const totalText    = `${currency} ${formatCurrencyAmount(total, showDec)}`;
+                const rawTotal     = normalizeCurrencyAmount(cartItems.reduce((s, ci) => s + cartItemSubtotal(ci), 0), showDec);
+                const hasDiscount  = couponApplied && cartTotalBlindado !== null && rawTotal > total;
+                const discountAmt  = hasDiscount ? normalizeCurrencyAmount(rawTotal - total, showDec) : 0;
 
                 const paymentSelection = resolvePreferredCheckoutSelection(refPack);
                 if (!paymentSelection.mode) {
@@ -12256,6 +12271,10 @@ include __DIR__ . "/includes/header.php";
                   currency,
                   userId,
                   playerFieldsJson,
+                  hasDiscount,
+                  rawTotalText: hasDiscount ? `${currency} ${formatCurrencyAmount(rawTotal, showDec)}` : '',
+                  discountAmountText: hasDiscount ? `${currency} ${formatCurrencyAmount(discountAmt, showDec)}` : '',
+                  couponCode: hasDiscount && couponApplied ? String(couponValue || '') : '',
                   paymentSelection,
                 };
                 openCartPaymentModal(cartPseudoOrder);
@@ -12273,6 +12292,24 @@ include __DIR__ . "/includes/header.php";
                   }).join('');
                 }
                 if (paymentCartSumTotal) paymentCartSumTotal.textContent = ctx.confirmedTotalText;
+                // Mostrar desglose de descuento si hay cupón aplicado
+                const discSection   = document.getElementById('payment-cart-discount-section');
+                const rawTotalEl    = document.getElementById('payment-cart-raw-total');
+                const couponLabelEl = document.getElementById('payment-cart-coupon-label');
+                const discAmtEl     = document.getElementById('payment-cart-discount-amount');
+                const totalLabelEl  = document.getElementById('payment-cart-total-label');
+                if (discSection) {
+                  if (ctx.hasDiscount) {
+                    if (rawTotalEl)    rawTotalEl.textContent    = ctx.rawTotalText;
+                    if (couponLabelEl) couponLabelEl.textContent = ctx.couponCode ? `Cupón ${ctx.couponCode}` : 'Descuento';
+                    if (discAmtEl)     discAmtEl.textContent     = `-${ctx.discountAmountText}`;
+                    if (totalLabelEl)  totalLabelEl.textContent  = 'Total a pagar';
+                    discSection.style.display = '';
+                  } else {
+                    discSection.style.display = 'none';
+                    if (totalLabelEl) totalLabelEl.textContent = 'Total del carrito';
+                  }
+                }
                 if (paymentCartSummary) paymentCartSummary.classList.add('is-visible');
 
                 // Hide single-product summary, show cart summary
