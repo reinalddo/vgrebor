@@ -1308,33 +1308,50 @@ include __DIR__ . "/includes/header.php";
     color: #22d3ee;
   }
   .multi-cart-modal-title { font-size: 1.05rem; font-weight: 700; margin: 0; color: #22d3ee; }
-  .multi-cart-modal-body { padding: 0.5rem 0; max-height: 52vh; overflow-y: auto; }
+  .multi-cart-modal-body { padding: 0.5rem 0; max-height: 60vh; overflow-y: auto; }
   .multi-cart-item {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 60px 1fr auto auto;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.65rem 1.25rem;
+    gap: 0.75rem;
+    padding: 0.85rem 1.25rem;
     border-bottom: 1px solid rgba(255,255,255,.06);
   }
   .multi-cart-item:last-child { border-bottom: none; }
-  .multi-cart-item-name { font-size: 0.85rem; font-weight: 600; color: #e2e8f0; line-height: 1.3; }
-  .multi-cart-item-sub { font-size: 0.76rem; color: #94a3b8; }
+  .multi-cart-item-img {
+    width: 60px; height: 60px;
+    border-radius: 0.5rem;
+    object-fit: cover;
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(34,211,238,.2);
+    flex-shrink: 0;
+  }
+  .multi-cart-item-img-placeholder {
+    width: 60px; height: 60px;
+    border-radius: 0.5rem;
+    background: rgba(34,211,238,.07);
+    border: 1px solid rgba(34,211,238,.2);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    color: rgba(34,211,238,.35);
+  }
+  .multi-cart-item-name { font-size: 0.95rem; font-weight: 700; color: #e2e8f0; line-height: 1.3; }
+  .multi-cart-item-sub { font-size: 0.82rem; color: #22d3ee; font-weight: 600; margin-top: 0.2rem; }
   .multi-cart-item-stepper {
     display: flex;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.3rem;
     background: rgba(255,255,255,.06);
     border-radius: 0.5rem;
-    padding: 0.2rem 0.35rem;
+    padding: 0.25rem 0.4rem;
   }
   .multi-cart-item-stepper button {
-    width: 1.5rem; height: 1.5rem;
+    width: 1.7rem; height: 1.7rem;
     border: 1px solid rgba(34,211,238,.35);
     background: transparent;
     color: #22d3ee;
     border-radius: 0.35rem;
-    font-size: 0.95rem;
+    font-size: 1rem;
     font-weight: 700;
     cursor: pointer;
     line-height: 1;
@@ -1342,14 +1359,14 @@ include __DIR__ . "/includes/header.php";
     transition: background 0.14s;
   }
   .multi-cart-item-stepper button:hover { background: rgba(34,211,238,.15); }
-  .multi-cart-item-qty { min-width: 1.5rem; text-align: center; font-size: 0.88rem; font-weight: 700; color: #e2e8f0; }
-  .multi-cart-item-price { font-size: 0.88rem; font-weight: 700; color: #22d3ee; white-space: nowrap; text-align: right; }
+  .multi-cart-item-qty { min-width: 1.6rem; text-align: center; font-size: 0.95rem; font-weight: 700; color: #e2e8f0; }
+  .multi-cart-item-price { font-size: 0.95rem; font-weight: 700; color: #22d3ee; white-space: nowrap; text-align: right; }
   .multi-cart-item-del {
     background: transparent;
     border: none;
     color: #f87171;
     cursor: pointer;
-    padding: 0.2rem 0.3rem;
+    padding: 0.3rem 0.35rem;
     border-radius: 0.35rem;
     display: flex; align-items: center; justify-content: center;
     transition: background 0.14s;
@@ -11800,7 +11817,12 @@ include __DIR__ . "/includes/header.php";
                   const sub     = cartItemSubtotal(ci);
                   const showDec = ci.pack.showDecimals;
                   const moneda  = ci.pack.moneda;
+                  const imgUrl  = String(ci.pack.imageUrl || '').trim();
+                  const imgHtml = imgUrl
+                    ? `<img class="multi-cart-item-img" src="${escapePaymentHtml(imgUrl)}" alt="${escapePaymentHtml(ci.pack.name)}" loading="lazy">`
+                    : `<div class="multi-cart-item-img-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg></div>`;
                   return `<div class="multi-cart-item" data-cart-idx="${idx}">
+                    ${imgHtml}
                     <div>
                       <div class="multi-cart-item-name">${escapePaymentHtml(ci.pack.name)}</div>
                       <div class="multi-cart-item-sub">${moneda} ${formatCurrencyAmount(sub, showDec)}</div>
