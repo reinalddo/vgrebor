@@ -150,7 +150,8 @@ if (!empty($_SESSION['auth_user']['id'])) {
   $loggedUserId = (int) $_SESSION['auth_user']['id'];
 }
 if (!empty($_SESSION['auth_user']['email'])) {
-  $loggedUserEmail = (string) $_SESSION['auth_user']['email'];
+  $rawEmail = (string) $_SESSION['auth_user']['email'];
+  $loggedUserEmail = filter_var($rawEmail, FILTER_VALIDATE_EMAIL) ? $rawEmail : '';
 }
 $loggedUserRole = strtolower(trim((string) ($_SESSION['auth_user']['rol'] ?? '')));
 $canSimulateDailyMissionPurchase = in_array($loggedUserRole, ['admin', 'root'], true);
@@ -384,16 +385,6 @@ include __DIR__ . "/includes/header.php";
           <div id="player-verification-feedback" class="d-none mt-2"></div>
         </div>
         <div id="extra-player-fields" class="col-md-6 col-12"></div>
-      </div>
-    </div>
-    <div class="col-md-6">
-      <label class="form-label text-info">Correo</label>
-      <input type="email" name="email" placeholder="tu@email.com" value="<?= htmlspecialchars($loggedUserEmail, ENT_QUOTES, 'UTF-8') ?>" autocomplete="email" class="form-control bg-dark text-info border-info" required />
-    </div>
-    <div class="col-md-6">
-      <label class="form-label text-info">Información importante</label>
-      <div class="email-disclaimer-card">
-        El correo electronico ingresado sera utilizado exclusivamente, para el envio de su comprobante electronico
       </div>
     </div>
     <div class="col-12">
@@ -1072,6 +1063,15 @@ include __DIR__ . "/includes/header.php";
                   <img id="payment-method-qr-image" src="" alt="QR del método de pago" class="payment-method-qr-image">
                 </div>
                 <div id="payment-method-discount" class="payment-method-discount d-none"></div>
+                <div class="mt-3 pt-3" style="border-top:1px solid rgba(34,211,238,.15);">
+                  <div class="mb-2">
+                    <label for="order-email-input" class="form-label text-info small mb-1">Correo electrónico</label>
+                    <input type="email" id="order-email-input" name="email" placeholder="tu@email.com" value="<?= htmlspecialchars($loggedUserEmail, ENT_QUOTES, 'UTF-8') ?>" autocomplete="email" class="form-control bg-dark text-info border-info" />
+                  </div>
+                  <div class="email-disclaimer-card">
+                    El correo electrónico ingresado será utilizado exclusivamente para el envío de su comprobante electrónico.
+                  </div>
+                </div>
               </div>
               <div id="payment-reference-group" class="mb-3" style="display:none;">
                 <label id="payment-reference-label" class="form-label small mb-1" style="color:#22d3ee;">Número de referencia del pago</label>
@@ -5201,7 +5201,7 @@ include __DIR__ . "/includes/header.php";
   const publicOrderSummaryRows = document.getElementById('public-order-summary-rows');
   const publicOrderSummaryTotal = document.getElementById('public-order-summary-total');
   const orderForm = document.getElementById("order-form");
-  const orderEmailInput = orderForm ? orderForm.querySelector('input[name="email"]') : null;
+  const orderEmailInput = document.getElementById('order-email-input');
   const buyButton = document.getElementById("buy-button");
   const accountSaleNote = document.getElementById('account-sale-note');
   const defaultBuyButtonLabel = 'Continuar con la Compra';
@@ -10450,7 +10450,7 @@ include __DIR__ . "/includes/header.php";
 
   function resetCheckoutState() {
     orderForm.reset();
-    orderForm.email.value = defaultOrderEmail || '';
+    if (orderEmailInput) orderEmailInput.value = defaultOrderEmail || '';
     restoreStoredPurchaseDefaults(true);
     couponInput.value = '';
     couponInput.disabled = false;
@@ -10598,6 +10598,7 @@ include __DIR__ . "/includes/header.php";
     if (paymentNombreInput && paymentNombreInput.value.trim() === '') paymentNombreInput.value = defaultPaymentNombre || '';
     if (paymentCedulaInput && paymentCedulaInput.value.trim() === '') paymentCedulaInput.value = defaultPaymentCedula || '';
     if (paymentPhoneAdvInput && paymentPhoneAdvInput.value.trim() === '') paymentPhoneAdvInput.value = defaultPaymentPhone || '';
+    if (orderEmailInput && orderEmailInput.value.trim() === '') orderEmailInput.value = defaultOrderEmail || '';
     setPaymentFormDisabled(false);
     setPaymentAlert('', 'info');
     clearPaymentSupportUi();
@@ -11185,6 +11186,15 @@ include __DIR__ . "/includes/header.php";
                     setPaymentAlert('Debes ingresar un número de teléfono para contactarte.', 'danger');
                     return;
                   }
+
+                  // Validate email in modal before submitting
+                  const modalEmailVal = orderEmailInput ? orderEmailInput.value.trim() : '';
+                  if (!modalEmailVal || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(modalEmailVal)) {
+                    setPaymentAlert('Debes ingresar un correo electrónico válido para recibir el comprobante.', 'danger');
+                    if (orderEmailInput) orderEmailInput.focus();
+                    return;
+                  }
+                  if (activePaymentOrder) activePaymentOrder.email = modalEmailVal;
 
                   pendingPaymentExecution = function() {
                   setPaymentFormDisabled(true);
@@ -12242,7 +12252,6 @@ include __DIR__ . "/includes/header.php";
                 const email  = orderEmailInput ? orderEmailInput.value.trim() : '';
 
                 if (!userId) { showToast('Debes ingresar tu ID de jugador.', 'error'); return; }
-                if (!email)  { showToast('Debes ingresar tu correo electrónico.', 'error'); return; }
 
                 // Use pack currency/showDecimals from first item
                 const refPack      = cartItems[0].pack;
@@ -12363,6 +12372,7 @@ include __DIR__ . "/includes/header.php";
                 updatePaymentTimer();
                 paymentTimerInterval = setInterval(updatePaymentTimer, 1000);
 
+                if (orderEmailInput && orderEmailInput.value.trim() === '') orderEmailInput.value = defaultOrderEmail || '';
                 setOverlayVisible(paymentModal, true);
                 scrollPaymentModalToTop();
               }
@@ -12370,6 +12380,14 @@ include __DIR__ . "/includes/header.php";
               // ── Execute cart purchase (after user fills payment data) ─────
               async function executeCartPurchase(ctx) {
                 if (!paymentSubmitButton) return;
+
+                // Validate email in modal before proceeding
+                const cartModalEmail = orderEmailInput ? orderEmailInput.value.trim() : '';
+                if (!cartModalEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cartModalEmail)) {
+                  setPaymentAlert('Debes ingresar un correo electrónico válido para recibir el comprobante.', 'danger');
+                  if (orderEmailInput) orderEmailInput.focus();
+                  return;
+                }
 
                 // Collect payment data from modal fields
                 const refNumber   = paymentAdvReferenceInput ? paymentAdvReferenceInput.value.trim()
@@ -12398,7 +12416,7 @@ include __DIR__ . "/includes/header.php";
                   body.set('cart_items_json', JSON.stringify(ctx.cartPayload));
                   body.set('user_identifier', ctx.userId || '');
                   body.set('player_fields_json', ctx.playerFieldsJson || '');
-                  body.set('email', ctx.email || '');
+                  body.set('email', cartModalEmail || ctx.email || '');
                   body.set('currency', ctx.currency || '');
                   body.set('total_price', String(ctx.cartTotal));
                   body.set('payment_method_id', String(payMethodId));

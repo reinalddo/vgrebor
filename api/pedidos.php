@@ -8074,7 +8074,7 @@ if ($action === 'create') {
     if (!$pack_name) $missing[] = 'pack_name';
     if (!$currency) $missing[] = 'currency';
     if (!$selectedPackageIsAccountSale && !$usesCatalogApi && !$user_identifier) $missing[] = 'user_identifier';
-    if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) $missing[] = 'email';
+    // Email validado en la confirmación de pago (ventana de pago), no al crear la orden
     if (!empty($missing)) {
         json_error('Faltan datos obligatorios del pedido: ' . implode(', ', $missing));
     }
