@@ -587,7 +587,8 @@ include __DIR__ . "/includes/header.php";
     <?php endforeach; ?>
   </div>
 
-  <!-- Multi-cart toggle -->
+  <!-- Multi-cart toggle (solo admin) -->
+  <?php if ($loggedUserRole === 'admin' || $loggedUserRole === 'root'): ?>
   <div class="multi-cart-toggle-wrap" id="multi-cart-toggle-wrap">
     <label class="multi-cart-toggle-label" for="multi-cart-check">
       <input type="checkbox" id="multi-cart-check" class="multi-cart-toggle-input" />
@@ -597,6 +598,7 @@ include __DIR__ . "/includes/header.php";
       <span class="multi-cart-toggle-text">Quiero comprar más de 1 paquete</span>
     </label>
   </div>
+  <?php endif; ?>
 
   <?php
     // Sync fallback prices with last known API price (skip manual overrides)
