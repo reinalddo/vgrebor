@@ -3336,6 +3336,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
       </section>
       <?php endif; ?>
 
+      <?php if (!empty($popularGames)): ?>
       <section class="mt-5" data-aos="fade-up">
         <div class="d-flex align-items-center justify-content-between">
           <h2 class="fw-bold" style="font-family:'Oxanium',sans-serif;font-size:1.1rem;">Juegos populares</h2>
@@ -3371,6 +3372,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           <?php endforeach; ?>
         </div>
       </section>
+      <?php endif; ?>
 
       <?php if (!empty($featured)): ?>
         <section class="mt-5 featured-section-mobile" data-aos="fade-up">
