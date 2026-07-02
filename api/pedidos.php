@@ -4024,8 +4024,8 @@ function sync_local_order_with_binance_payload(mysqli $mysqli, array $order, arr
             if ($trackingFollowUp) {
                 continue_provider_follow_up_in_background($mysqli, (int) ($paidOrder['id'] ?? $orderId), 8, 8);
             } elseif ($acceptedLike) {
-                $autoSyncAttempts = $manualProcessing ? 5 : 3;
-                $autoSyncDelaySeconds = $manualProcessing ? 4 : 2;
+                $autoSyncAttempts = $manualProcessing ? 10 : 8;
+                $autoSyncDelaySeconds = $manualProcessing ? 3 : 3;
                 try {
                     $autoSyncResult = try_auto_sync_provider_order($mysqli, $paidOrder, $autoSyncAttempts, $autoSyncDelaySeconds);
                     if (is_array($autoSyncResult['order'] ?? null)) {
@@ -4422,8 +4422,8 @@ function sync_local_order_with_paypal_payload(mysqli $mysqli, array $order, arra
             if ($trackingFollowUp) {
                 continue_provider_follow_up_in_background($mysqli, (int) ($paidOrder['id'] ?? $orderId), 8, 8);
             } elseif ($acceptedLike) {
-                $autoSyncAttempts = $manualProcessing ? 5 : 3;
-                $autoSyncDelaySeconds = $manualProcessing ? 4 : 2;
+                $autoSyncAttempts = $manualProcessing ? 10 : 8;
+                $autoSyncDelaySeconds = $manualProcessing ? 3 : 3;
                 try {
                     $autoSyncResult = try_auto_sync_provider_order($mysqli, $paidOrder, $autoSyncAttempts, $autoSyncDelaySeconds);
                     if (is_array($autoSyncResult['order'] ?? null)) {
@@ -8820,8 +8820,8 @@ if ($action === 'submit_payment') {
             recharge_notifications_emit_for_order($mysqli, $paidOrder);
 
             if ($acceptedLike) {
-                $autoSyncAttempts = $manualProcessing ? 5 : 3;
-                $autoSyncDelaySeconds = $manualProcessing ? 4 : 2;
+                $autoSyncAttempts = $manualProcessing ? 10 : 8;
+                $autoSyncDelaySeconds = $manualProcessing ? 3 : 3;
                 $autoSyncResult = try_auto_sync_provider_order($mysqli, $paidOrder, $autoSyncAttempts, $autoSyncDelaySeconds);
                 if (is_array($autoSyncResult)) {
                     $providerMessage = trim((string) ($autoSyncResult['provider_message'] ?? $providerMessage));
@@ -9487,8 +9487,8 @@ if ($action === 'submit_payment') {
                 $paidOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
                 recharge_notifications_emit_for_order($mysqli, $paidOrder);
 
-                $autoSyncAttempts = $manualProcessing ? 5 : 3;
-                $autoSyncDelaySeconds = $manualProcessing ? 4 : 2;
+                $autoSyncAttempts = $manualProcessing ? 10 : 8;
+                $autoSyncDelaySeconds = $manualProcessing ? 3 : 3;
                 $autoSyncResult = try_auto_sync_provider_order($mysqli, $paidOrder, $autoSyncAttempts, $autoSyncDelaySeconds);
                 if (is_array($autoSyncResult)) {
                     $paidOrder = is_array($autoSyncResult['order'] ?? null) ? $autoSyncResult['order'] : $paidOrder;
@@ -10302,8 +10302,8 @@ if ($action === 'admin_retry_recharge') {
             $stmt->close();
 
             $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
-            $autoSyncAttempts = $manualProcessing ? 5 : 3;
-            $autoSyncDelaySeconds = $manualProcessing ? 4 : 2;
+            $autoSyncAttempts = $manualProcessing ? 10 : 8;
+            $autoSyncDelaySeconds = $manualProcessing ? 3 : 3;
             $autoSyncResult = try_auto_sync_provider_order($mysqli, $updatedOrder, $autoSyncAttempts, $autoSyncDelaySeconds);
             if (is_array($autoSyncResult)) {
                 $updatedOrder = is_array($autoSyncResult['order'] ?? null) ? $autoSyncResult['order'] : $updatedOrder;
