@@ -1270,6 +1270,25 @@ include __DIR__ . "/includes/header.php";
     text-align: center;
     padding: 0 0.2rem;
   }
+  /* ── Fly-to-cart ghost ──────────────────────────────────── */
+  .fly-ghost {
+    position: fixed;
+    width: 56px;
+    height: 56px;
+    border-radius: 0.5rem;
+    pointer-events: none;
+    z-index: 9999;
+    overflow: hidden;
+    border: 1.5px solid rgba(34,211,238,.6);
+    box-shadow: 0 0 14px rgba(34,211,238,.45);
+  }
+  .fly-ghost img { width: 100%; height: 100%; object-fit: cover; }
+  @keyframes cartFabPop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.28); }
+    100% { transform: scale(1); }
+  }
+  .cart-fab-pop { animation: cartFabPop 0.32s ease-out !important; }
   /* ── Pack card: account-sale disabled overlay in cart mode ── */
   .pack-card.cart-mode-account-disabled {
     opacity: 0.45;
@@ -11778,6 +11797,41 @@ include __DIR__ . "/includes/header.php";
               // ── Update cart button state ─────────────────────────────────
               function syncCartHeaderButton() { syncFloatCartFab(); }
 
+              // ── Fly-to-cart animation ────────────────────────────────────
+              function flyPackToCart(card) {
+                const cardRect = card.getBoundingClientRect();
+                const fab = document.getElementById('float-cart-fab');
+                const ghost = document.createElement('div');
+                ghost.className = 'fly-ghost';
+                const img = card.querySelector('img');
+                if (img) {
+                  const gi = document.createElement('img');
+                  gi.src = img.src;
+                  ghost.appendChild(gi);
+                } else {
+                  ghost.style.background = 'linear-gradient(135deg,#6366f1,#22d3ee)';
+                }
+                const startX = cardRect.left + cardRect.width  / 2 - 28;
+                const startY = cardRect.top  + cardRect.height / 2 - 28;
+                ghost.style.left = startX + 'px';
+                ghost.style.top  = startY + 'px';
+                document.body.appendChild(ghost);
+                const fabRect  = fab ? fab.getBoundingClientRect() : null;
+                const targetX  = fabRect ? fabRect.left + fabRect.width  / 2 - 28 : window.innerWidth  - 60;
+                const targetY  = fabRect ? fabRect.top  + fabRect.height / 2 - 28 : window.innerHeight - 60;
+                const dx = targetX - startX;
+                const dy = targetY - startY;
+                const anim = ghost.animate([
+                  { transform: 'translate(0,0) scale(1)',                                    opacity: 1   },
+                  { transform: `translate(${dx*.35}px,${dy*.05}px) scale(.75)`,             opacity: .9, offset: .35 },
+                  { transform: `translate(${dx}px,${dy}px) scale(.12)`,                     opacity: 0   }
+                ], { duration: 580, easing: 'cubic-bezier(.25,.46,.45,.94)', fill: 'forwards' });
+                anim.onfinish = () => {
+                  ghost.remove();
+                  if (fab) { fab.classList.remove('cart-fab-pop'); void fab.offsetWidth; fab.classList.add('cart-fab-pop'); }
+                };
+              }
+
               // ── Cart price calculation ───────────────────────────────────
               function cartItemSubtotal(cartItem) {
                 const base  = parseFloat(cartItem.pack.priceValue || 0);
@@ -11967,7 +12021,10 @@ include __DIR__ . "/includes/header.php";
                   }
 
                   cartTotalBlindado = null;
-                  syncCartHeaderButton();
+                  syncCartHeaderButton(); // muestra el fab antes de animar
+
+                  // Animación solo al agregar el 2do paquete en adelante (fab ya visible)
+                  if (existing < 0 && cartItems.length >= 2) flyPackToCart(card);
                 }, true); // capture phase to intercept before original handler
               });
 
