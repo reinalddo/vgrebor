@@ -71,3 +71,11 @@
 2026-07-02 10:37:35 | code: CUPON01 | pack_price: 33369
 2026-07-02 10:42:34 | code: CUPON01 | pack_price: 33369
 2026-07-02 10:43:09 | code: CUPON01 | pack_price: 25.99
+2026-07-02 10:50:24 | code: CUPON01 | pack_price: 25.99
+2026-07-02 12:40:24 | code: CUPON01 | pack_price: 25.99
+2026-07-02 12:41:26 | code: CUPON01 | pack_price: 25.99
+2026-07-02 12:50:46 | code: CUPON01 | pack_price: 25.99
+2026-07-02 13:05:25 | code: CUPON01 | pack_price: 25.99
+2026-07-02 13:05:49 | code: CUPON01 | pack_price: 25.99
+2026-07-02 13:11:10 | code: CUPON01 | pack_price: 25.99
+2026-07-02 13:11:11 | code: CUPON01 | pack_price: 16373

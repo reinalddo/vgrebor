@@ -6875,27 +6875,31 @@ include __DIR__ . "/includes/header.php";
     let couponSuppressedByPayment = false;
     let dropSuppressedByPayment = false;
     const dropPercent = pack ? Number(pack.dropPercent || 0) : 0;
-    // Precio antes del drop (precio de lista real)
-    const priceBeforeDrop = dropPercent > 0 && baseAmount > 0
-      ? normalizeCurrencyAmount(baseAmount / (1 - dropPercent / 100), showDecimals)
-      : baseAmount;
-    const dropSavingsAmt = normalizeCurrencyAmount(Math.max(0, priceBeforeDrop - baseAmount), showDecimals);
     const couponIsActive = couponApplied && Number(appliedCouponSummary.discountAmount || 0) > 0;
-    // Ahorro del cupón calculado desde precio sin drop (para comparación justa)
+
+    // Cuando el cupón está activo, selectedTotalValue ya es el precio post-cupón.
+    // Se recupera el precio del paquete ANTES del cupón para hacer comparaciones justas.
+    const packPriceNoCoupon = couponIsActive && Number(appliedCouponSummary.originalAmount || 0) > 0
+      ? normalizeCurrencyAmount(Number(appliedCouponSummary.originalAmount), showDecimals)
+      : baseAmount;
+
+    // Precio antes del drop (precio de lista real), calculado desde el precio sin cupón
+    const priceBeforeDrop = dropPercent > 0 && packPriceNoCoupon > 0
+      ? normalizeCurrencyAmount(packPriceNoCoupon / (1 - dropPercent / 100), showDecimals)
+      : packPriceNoCoupon;
+    const dropSavingsAmt = normalizeCurrencyAmount(Math.max(0, priceBeforeDrop - packPriceNoCoupon), showDecimals);
+
+    // Usar el monto de descuento guardado del backend — calculado contra la base correcta
     const couponDiscountAmtFromOriginal = couponIsActive
-      ? normalizeCurrencyAmount(
-          appliedCouponSummary.discountType === 'porcentaje'
-            ? (priceBeforeDrop * Number(appliedCouponSummary.discountValue || 0)) / 100
-            : Number(appliedCouponSummary.discountValue || 0),
-          showDecimals
-        )
+      ? normalizeCurrencyAmount(Number(appliedCouponSummary.discountAmount || 0), showDecimals)
       : 0;
+
     // Mejor descuento pre-existente (el mayor entre drop y cupón)
     const bestExistingDiscount = Math.max(dropSavingsAmt, couponDiscountAmtFromOriginal);
     if (discountPercentage > 0 && priceBeforeDrop > 0) {
       const paymentDiscountAmt = normalizeCurrencyAmount((priceBeforeDrop * discountPercentage) / 100, showDecimals);
       if (paymentDiscountAmt > bestExistingDiscount) {
-        // Método de pago gana: usar precio sin drop como base
+        // Método de pago gana: usar precio de lista como base para calcular descuento y total
         baseAmount = priceBeforeDrop;
         couponSuppressedByPayment = couponIsActive;
         dropSuppressedByPayment = dropSavingsAmt > 0;
@@ -10951,10 +10955,28 @@ include __DIR__ . "/includes/header.php";
                   storePreferredCheckoutPayment(mode, methodId);
                   const switchedCurrency = syncVisibleCurrencyWithPreferredPayment(activePack, { resetCoupon: !couponApplied });
                   const nextCurrencyCode = String(monedaActualClave || '').trim().toUpperCase();
+                  const currencyActuallyChanged = previousCurrencyCode !== nextCurrencyCode && nextCurrencyCode !== '';
+
+                  // Coupon was calculated in the old currency — reset and auto-reapply in the new one
+                  if (currencyActuallyChanged && couponApplied) {
+                    const savedCouponCode = couponValue;
+                    // Restore selectedTotalValue to the full pack price in the new currency
+                    // before resetCouponState calls renderPublicOrderSummary internally
+                    if (activePack) {
+                      selectedTotalValue = getPackTotalPrice(activePack, getOrderQuantity());
+                    }
+                    resetCouponState(true);
+                    if (savedCouponCode && couponInput && applyCouponButton) {
+                      couponInput.value = savedCouponCode;
+                      // Auto-reapply in the new currency so the user doesn't have to click again
+                      setTimeout(() => applyCouponButton.click(), 0);
+                    }
+                  }
+
                   if (!switchedCurrency) {
                     updatePackPrices();
                     updateResumenCompra(activePack);
-                  } else if (previousCurrencyCode !== nextCurrencyCode && nextCurrencyCode !== '') {
+                  } else if (currencyActuallyChanged) {
                     scrollToPackPricingSection();
                   }
 
