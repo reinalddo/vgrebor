@@ -5304,6 +5304,11 @@ include __DIR__ . "/includes/header.php";
   let pendingOpenModal = null;
   let lastFocusedElement = null;
   let activePack = null;
+  // Cart mode state — declared at global scope so all functions can access it
+  let cartMode = false;
+  let cartItems = [];
+  let cartTotalBlindado = null;
+  let updateResumenCompraCart = null;
   let activeAccountGalleryPreview = { pack: null, index: 0 };
   let selectedTotalValue = 0;
   let couponApplied = false;
@@ -11649,9 +11654,9 @@ include __DIR__ . "/includes/header.php";
               // ============================================================
               // MULTI-CART SYSTEM
               // ============================================================
-              var cartMode = false;
-              var cartItems = []; // [{pack, quantity}]
-              var cartTotalBlindado = null; // locked after user clicks "Continuar" from cart modal
+              cartMode = false;
+              cartItems = []; // [{pack, quantity}]
+              cartTotalBlindado = null; // locked after user clicks "Continuar" from cart modal
 
               const multiCartCheck      = document.getElementById('multi-cart-check');
               const multiCartModal      = document.getElementById('multi-cart-modal');
@@ -11833,22 +11838,26 @@ include __DIR__ . "/includes/header.php";
                   });
 
                   if (cartMode) {
+                    // Hide single-pack summary widgets (quantity + selected pack)
+                    if (purchaseSummaryLayout) purchaseSummaryLayout.classList.add('d-none');
                     // Mark account-sale packs as unavailable
                     packCards2.forEach(card => {
                       if (card.dataset.accountSale === '1') {
                         card.classList.add('cart-mode-account-disabled');
                       }
                     });
-                    // Reset single-pack state
+                    // Reset single-pack state and hide summary until packs are selected
                     activePack = null;
-                    updateResumenCompra(null);
                     renderPlayerFields(null);
                     updateButtonState();
-                    setOverlayVisible(publicOrderSummaryShell, false);
+                    publicOrderSummaryShell.classList.add('d-none');
                   } else {
+                    // Restore single-pack summary widgets
+                    if (purchaseSummaryLayout) purchaseSummaryLayout.classList.remove('d-none');
                     syncCartHeaderButton();
-                    updateResumenCompraCart();
-                    syncCartBuyButton();
+                    // activePack is null after leaving cart mode, so hide the summary shell
+                    renderPublicOrderSummary(null);
+                    updateButtonState();
                   }
                 });
               }
@@ -11878,17 +11887,15 @@ include __DIR__ . "/includes/header.php";
 
                   cartTotalBlindado = null;
                   syncCartHeaderButton();
-                  updateResumenCompraCart();
-                  syncCartBuyButton();
                 }, true); // capture phase to intercept before original handler
               });
 
               // ── Public order summary in cart mode ────────────────────────
-              function updateResumenCompraCart() {
+              updateResumenCompraCart = function() {
                 if (!cartMode || !publicOrderSummaryShell || !publicOrderSummaryRows || !publicOrderSummaryTotal) return;
 
                 if (cartItems.length === 0) {
-                  setOverlayVisible(publicOrderSummaryShell, false);
+                  publicOrderSummaryShell.classList.add('d-none');
                   if (publicOrderSummaryMethod) publicOrderSummaryMethod.classList.add('d-none');
                   return;
                 }
@@ -11921,6 +11928,7 @@ include __DIR__ . "/includes/header.php";
                 const totalTxt = `${moneda} ${formatCurrencyAmount(total, showDec)}`;
                 publicOrderSummaryTotal.textContent = totalTxt;
                 publicOrderSummaryShell.classList.remove('d-none');
+                restartPublicCheckoutSummaryAnimation(`cart:${totalTxt}:${cartItems.length}`);
 
                 // Update buy button label
                 if (buyButton) {
@@ -11928,7 +11936,7 @@ include __DIR__ . "/includes/header.php";
                     ? `Continuar con la compra - ${totalTxt}`
                     : `Continuar con la compra - ${totalTxt}`;
                 }
-              }
+              };
 
               function syncCartBuyButton() {
                 if (!buyButton || !cartMode) return;
