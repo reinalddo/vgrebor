@@ -11814,9 +11814,10 @@ include __DIR__ . "/includes/header.php";
                   fab.addEventListener('click', () => openCartModal());
                 }
                 const count = cartItems.length;
-                const shouldShow = cartMode && count >= 2;
+                const shouldShow = cartMode;
                 if (shouldShow) {
-                  if (badge) badge.textContent = String(count);
+                  if (badge) badge.textContent = count > 0 ? String(count) : '';
+                  if (badge) badge.style.display = count > 0 ? '' : 'none';
                   const stack = document.querySelector('.floating-social-stack');
                   if (stack && !stack.contains(fab)) stack.prepend(fab);
                   fab.style.display = '';
@@ -12017,6 +12018,7 @@ include __DIR__ . "/includes/header.php";
                     renderPlayerFields(null);
                     updateButtonState();
                     publicOrderSummaryShell.classList.add('d-none');
+                    syncCartHeaderButton(); // muestra el FAB al activar el modo carrito
                   } else {
                     // Restore single-pack summary widgets
                     if (purchaseSummaryLayout) purchaseSummaryLayout.classList.remove('d-none');
@@ -12054,8 +12056,8 @@ include __DIR__ . "/includes/header.php";
                   cartTotalBlindado = null;
                   syncCartHeaderButton(); // muestra el fab antes de animar
 
-                  // Animación solo al agregar el 2do paquete en adelante (fab ya visible)
-                  if (existing < 0 && cartItems.length >= 2) flyPackToCart(card);
+                  // Animación al agregar cualquier paquete al carrito
+                  if (existing < 0 && cartItems.length >= 1) flyPackToCart(card);
                 }, true); // capture phase to intercept before original handler
               });
 
