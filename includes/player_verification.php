@@ -25,6 +25,7 @@ function player_verification_definition_for_game(array $game): ?array {
     $name = player_verification_normalize_text((string) ($game['nombre'] ?? ''));
     $slug = player_verification_normalize_text((string) ($game['slug'] ?? ''));
     $haystack = trim($name . ' ' . $slug);
+    $haystackCompact = str_replace(' ', '', $haystack);
 
     if ($haystack === '') {
         return null;
@@ -33,6 +34,7 @@ function player_verification_definition_for_game(array $game): ?array {
     if (
         strpos($haystack, 'mobile legends') !== false
         || strpos($haystack, 'mobile legend') !== false
+        || strpos($haystackCompact, 'mobilelegend') !== false
         || strpos($haystack, 'mlbb') !== false
     ) {
         return [
@@ -57,7 +59,7 @@ function player_verification_definition_for_game(array $game): ?array {
         ];
     }
 
-    if (strpos($haystack, 'blood strike') !== false || strpos($haystack, 'bloodstrike') !== false) {
+    if (strpos($haystack, 'blood strike') !== false || strpos($haystackCompact, 'bloodstrike') !== false) {
         return [
             'key' => 'blood_strike',
             'button_label' => 'Verificar nombre del jugador',
@@ -97,7 +99,7 @@ function player_verification_definition_for_game(array $game): ?array {
         ];
     }
 
-    if (strpos($haystack, 'free fire') !== false && strpos($haystack, 'indonesia') !== false) {
+    if ((strpos($haystack, 'free fire') !== false || strpos($haystackCompact, 'freefire') !== false) && strpos($haystack, 'indonesia') !== false) {
         return [
             'key' => 'free_fire_indonesia',
             'button_label' => 'Verificar nombre del jugador',
@@ -113,7 +115,7 @@ function player_verification_definition_for_game(array $game): ?array {
         ];
     }
 
-    if (strpos($haystack, 'free fire') !== false && strpos($haystack, 'pines') === false && strpos($haystack, 'hype') === false) {
+    if ((strpos($haystack, 'free fire') !== false || strpos($haystackCompact, 'freefire') !== false) && strpos($haystack, 'pines') === false && strpos($haystack, 'hype') === false) {
         return [
             'key' => 'free_fire_latam',
             'button_label' => 'Verificar nombre del jugador',
