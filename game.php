@@ -10955,11 +10955,20 @@ include __DIR__ . "/includes/header.php";
                   storePreferredCheckoutPayment(mode, methodId);
                   const switchedCurrency = syncVisibleCurrencyWithPreferredPayment(activePack, { resetCoupon: !couponApplied });
                   const nextCurrencyCode = String(monedaActualClave || '').trim().toUpperCase();
-                  const currencyActuallyChanged = previousCurrencyCode !== nextCurrencyCode && nextCurrencyCode !== '';
+                  // A blank previousCurrencyCode means no payment was previously selected — not a real change
+                  const currencyActuallyChanged = previousCurrencyCode !== '' && previousCurrencyCode !== nextCurrencyCode && nextCurrencyCode !== '';
 
                   // Coupon was calculated in the old currency — reset and auto-reapply in the new one
                   if (currencyActuallyChanged && couponApplied) {
                     const savedCouponCode = couponValue;
+                    // In cart mode, restore the blindado lock to the raw item sum so the
+                    // re-applied coupon uses the correct base, not the already-discounted total
+                    if (cartMode && cartItems.length > 0) {
+                      cartTotalBlindado = normalizeCurrencyAmount(
+                        cartItems.reduce((s, ci) => s + cartItemSubtotal(ci), 0),
+                        cartItems[0].pack.showDecimals
+                      );
+                    }
                     // Restore selectedTotalValue to the full pack price in the new currency
                     // before resetCouponState calls renderPublicOrderSummary internally
                     if (activePack) {
@@ -11949,6 +11958,15 @@ include __DIR__ . "/includes/header.php";
                   return;
                 }
 
+                // Don't show the summary until the user has selected a payment method
+                const cartRefPack = cartItems[0].pack;
+                const cartSelection = resolvePreferredCheckoutSelection(cartRefPack);
+                if (!cartSelection || !cartSelection.mode) {
+                  publicOrderSummaryShell.classList.add('d-none');
+                  if (publicOrderSummaryMethod) publicOrderSummaryMethod.classList.add('d-none');
+                  return;
+                }
+
                 // Refresh pack state from card DOM so prices reflect current currency
                 const prevMoneda = cartItems.length > 0 ? cartItems[0].pack.moneda : null;
                 cartItems = cartItems.map(ci => {
@@ -11961,29 +11979,57 @@ include __DIR__ . "/includes/header.php";
                   cartTotalBlindado = null;
                 }
 
-                // Build rows
-                const rowsHtml = cartItems.map(ci => {
-                  const sub     = cartItemSubtotal(ci);
-                  const showDec = ci.pack.showDecimals;
-                  const moneda  = ci.pack.moneda;
-                  const qLabel  = ci.quantity > 1 ? ` ×${ci.quantity}` : '';
-                  return `<div class="payment-order-summary-row"><span>${escapePaymentHtml(ci.pack.name)}${qLabel}</span><span>${moneda} ${formatCurrencyAmount(sub, showDec)}</span></div>`;
+                // Build individual pack rows
+                const showDec  = cartItems[0].pack.showDecimals;
+                const moneda   = cartItems[0].pack.moneda;
+                let rowsHtml = cartItems.map(ci => {
+                  const sub    = cartItemSubtotal(ci);
+                  const qLabel = ci.quantity > 1 ? ` ×${ci.quantity}` : '';
+                  return `<div class="payment-order-summary-row"><span class="payment-order-summary-row-label">${escapePaymentHtml(ci.pack.name)}${qLabel}</span><strong class="payment-order-summary-row-value">${moneda} ${formatCurrencyAmount(sub, showDec)}</strong></div>`;
                 }).join('');
+
+                // Discount rows: coupon and/or payment method
+                const cartCouponActive = couponApplied && appliedCouponSummary && Number(appliedCouponSummary.discountAmount || 0) > 0;
+                const cartPaymentDiscPct = resolvePaymentModeDiscountPercentage(cartSelection.mode,
+                  cartSelection.mode === 'money' ? (cartSelection.methods && (cartSelection.methods.find(m => String(m.id) === String(cartSelection.methodId || '')) || cartSelection.methods[0])) : null
+                );
+                if (cartCouponActive || cartPaymentDiscPct > 0) {
+                  const itemsSum = normalizeCurrencyAmount(cartItems.reduce((s, ci) => s + cartItemSubtotal(ci), 0), showDec);
+                  const couponAmt = cartCouponActive ? normalizeCurrencyAmount(Number(appliedCouponSummary.discountAmount || 0), showDec) : 0;
+                  const paymentAmt = cartPaymentDiscPct > 0 ? normalizeCurrencyAmount((itemsSum * cartPaymentDiscPct) / 100, showDec) : 0;
+                  // Best discount wins
+                  const couponWins = couponAmt >= paymentAmt;
+                  if (couponWins && cartCouponActive) {
+                    rowsHtml += `<div class="payment-order-summary-row"><span class="payment-order-summary-row-label">Cupón ${escapePaymentHtml(String(appliedCouponSummary.code || ''))}</span><strong class="payment-order-summary-row-value is-positive">-${moneda} ${formatCurrencyAmount(couponAmt, showDec)}</strong></div>`;
+                  } else if (!couponWins && cartPaymentDiscPct > 0) {
+                    rowsHtml += `<div class="payment-order-summary-row"><span class="payment-order-summary-row-label">Descuento</span><strong class="payment-order-summary-row-value is-positive">${formatDiscountPercentage(cartPaymentDiscPct)}</strong></div>`;
+                    rowsHtml += `<div class="payment-order-summary-row"><span class="payment-order-summary-row-label">Tu ahorro</span><strong class="payment-order-summary-row-value is-positive">${moneda} ${formatCurrencyAmount(paymentAmt, showDec)}</strong></div>`;
+                  }
+                }
 
                 publicOrderSummaryRows.innerHTML = rowsHtml;
                 const total    = cartGrandTotal();
-                const showDec  = cartItems[0].pack.showDecimals;
-                const moneda   = cartItems[0].pack.moneda;
                 const totalTxt = `${moneda} ${formatCurrencyAmount(total, showDec)}`;
                 publicOrderSummaryTotal.textContent = totalTxt;
                 publicOrderSummaryShell.classList.remove('d-none');
                 restartPublicCheckoutSummaryAnimation(`cart:${totalTxt}:${cartItems.length}`);
 
+                // Show payment method label badge (mirrors what renderPublicOrderSummary does)
+                if (publicOrderSummaryMethod) {
+                  const cartSelectedMethod = cartSelection.mode === 'money'
+                    ? (cartSelection.methods && cartSelection.methods.find(m => String(m.id) === String(cartSelection.methodId || '')) || (cartSelection.methods && cartSelection.methods[0]) || null)
+                    : null;
+                  const cartMethodLabel = cartSelection.mode === 'binance' ? (String(typeof binancePayButtonLabel !== 'undefined' ? binancePayButtonLabel : '') || 'Binance Pay')
+                    : cartSelection.mode === 'paypal' ? (String(typeof paypalPayButtonLabel !== 'undefined' ? paypalPayButtonLabel : '') || 'PayPal')
+                    : cartSelection.mode === 'points' ? String((typeof winPointsState !== 'undefined' && winPointsState.name) || 'Win Points')
+                    : String(cartSelectedMethod && cartSelectedMethod.nombre ? cartSelectedMethod.nombre : 'Método de pago');
+                  publicOrderSummaryMethod.textContent = cartMethodLabel;
+                  publicOrderSummaryMethod.classList.remove('d-none');
+                }
+
                 // Update buy button label
                 if (buyButton) {
-                  buyButton.textContent = cartTotalBlindado !== null
-                    ? `Continuar con la compra - ${totalTxt}`
-                    : `Continuar con la compra - ${totalTxt}`;
+                  buyButton.textContent = `Continuar con la compra - ${totalTxt}`;
                 }
               };
 
