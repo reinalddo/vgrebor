@@ -10594,6 +10594,17 @@ include __DIR__ . "/includes/header.php";
   updatePackPrices();
 
   function updateButtonState() {
+    // Cart mode: activePack is null by design — use cart-specific logic instead
+    if (typeof cartMode !== 'undefined' && cartMode) {
+      if (buyButton) {
+        const hasItems = typeof cartItems !== 'undefined' && cartItems.length > 0;
+        const requiredFields = Array.from(orderForm.querySelectorAll('[required]'));
+        const requiredFilled = requiredFields.every(f => f.value.trim() !== '');
+        buyButton.disabled = !hasItems || !requiredFilled;
+      }
+      syncPlayerVerificationUi();
+      return;
+    }
     // Solo controlar el estado del botón, no mostrar mensajes de error aquí
     const requiredFields = Array.from(orderForm.querySelectorAll("[required]"));
     let requiredFilled = true;
