@@ -1244,35 +1244,31 @@ include __DIR__ . "/includes/header.php";
     display: flex;
     align-items: center;
   }
-  /* ── Cart header button ────────────────────────────────────── */
-  #header-cart-btn {
-    display: none;
-    position: relative;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.32rem 0.75rem;
-    border-radius: 999px;
-    border: 1.5px solid #22d3ee;
-    background: rgba(34,211,238,.1);
-    color: #22d3ee;
-    font-size: 0.8rem;
-    font-weight: 700;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.16s;
-    flex-shrink: 0;
+  /* ── Float cart FAB ─────────────────────────────────────── */
+  .float-cart-fab-btn {
+    background: linear-gradient(135deg, rgba(99,102,241,.95), rgba(34,211,238,.88));
+    border-color: rgba(99,102,241,.7);
+    color: #fff;
+    box-shadow: 0 0 18px rgba(99,102,241,.35), 0 0 40px rgba(34,211,238,.15);
   }
-  #header-cart-btn.is-visible { display: inline-flex; }
-  #header-cart-btn:hover { background: rgba(34,211,238,.22); }
-  #header-cart-btn .cart-btn-badge {
+  .float-cart-fab-btn:hover {
+    color: #fff;
+    box-shadow: 0 0 28px rgba(99,102,241,.5), 0 0 60px rgba(34,211,238,.22);
+  }
+  .float-cart-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
     background: #22d3ee;
     color: #0b0f18;
-    border-radius: 999px;
-    padding: 0 0.38rem;
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     font-weight: 800;
-    min-width: 1.25rem;
+    border-radius: 999px;
+    min-width: 1.15rem;
+    height: 1.15rem;
+    line-height: 1.15rem;
     text-align: center;
+    padding: 0 0.2rem;
   }
   /* ── Pack card: account-sale disabled overlay in cart mode ── */
   .pack-card.cart-mode-account-disabled {
@@ -11754,30 +11750,33 @@ include __DIR__ . "/includes/header.php";
               const paymentCartSumList  = document.getElementById('payment-cart-summary-list');
               const paymentCartSumTotal = document.getElementById('payment-cart-summary-total');
 
-              // ── Inject cart button into header ───────────────────────────
-              function buildCartHeaderButton() {
-                const btn = document.createElement('button');
-                btn.id = 'header-cart-btn';
-                btn.type = 'button';
-                btn.setAttribute('aria-label', 'Ver carrito');
-                btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="17" height="17" aria-hidden="true"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg><span class="cart-btn-badge" id="cart-btn-count">0</span>`;
-                btn.addEventListener('click', () => openCartModal());
-                const searchEl = document.querySelector('[data-public-search]');
-                if (searchEl && searchEl.parentElement) {
-                  searchEl.parentElement.insertBefore(btn, searchEl);
+              const headerCartBtn   = null; // movido a fab flotante
+              const cartBtnCount    = null;
+
+              // ── Floating corner cart FAB ─────────────────────────────────
+              // El elemento se resuelve en cada llamada porque está después del script en el DOM
+              function syncFloatCartFab() {
+                const fab   = document.getElementById('float-cart-fab');
+                const badge = document.getElementById('float-cart-fab-badge');
+                if (!fab) return;
+                if (!fab.dataset.cartReady) {
+                  fab.dataset.cartReady = '1';
+                  fab.addEventListener('click', () => openCartModal());
+                }
+                const count = cartItems.length;
+                const shouldShow = cartMode && count >= 2;
+                if (shouldShow) {
+                  if (badge) badge.textContent = String(count);
+                  const stack = document.querySelector('.floating-social-stack');
+                  if (stack && !stack.contains(fab)) stack.prepend(fab);
+                  fab.style.display = '';
+                } else {
+                  fab.style.display = 'none';
                 }
               }
-              buildCartHeaderButton();
-              const headerCartBtn   = document.getElementById('header-cart-btn');
-              const cartBtnCount    = document.getElementById('cart-btn-count');
 
-              // ── Update cart header button state ──────────────────────────
-              function syncCartHeaderButton() {
-                if (!headerCartBtn || !cartBtnCount) return;
-                cartBtnCount.textContent = String(cartItems.length);
-                const shouldShow = cartMode && cartItems.length >= 2;
-                headerCartBtn.classList.toggle('is-visible', shouldShow);
-              }
+              // ── Update cart button state ─────────────────────────────────
+              function syncCartHeaderButton() { syncFloatCartFab(); }
 
               // ── Cart price calculation ───────────────────────────────────
               function cartItemSubtotal(cartItem) {
@@ -12442,6 +12441,15 @@ include __DIR__ . "/includes/header.php";
             </section>
 <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
 <script>AOS.init({duration:750,easing:'ease-out-cubic',once:true,offset:60});</script>
+<?php if ($loggedUserRole === 'admin' || $loggedUserRole === 'root'): ?>
+<button type="button" id="float-cart-fab" class="floating-social-button float-cart-fab-btn" aria-label="Ver carrito" style="display:none;">
+  <span class="floating-social-icon" aria-hidden="true" style="position:relative;">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+    <span id="float-cart-fab-badge" class="float-cart-badge">0</span>
+  </span>
+  <span class="floating-social-label">Carrito</span>
+</button>
+<?php endif; ?>
 <?php
 include __DIR__ . "/includes/footer.php";
 ?>
