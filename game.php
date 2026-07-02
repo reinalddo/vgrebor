@@ -619,8 +619,8 @@ include __DIR__ . "/includes/header.php";
     <?php endforeach; ?>
   </div>
 
-  <!-- Multi-cart toggle -->
-  <div class="multi-cart-toggle-wrap" id="multi-cart-toggle-wrap">
+  <!-- Multi-cart toggle (oculto, siempre activo) -->
+  <div class="multi-cart-toggle-wrap" id="multi-cart-toggle-wrap" style="display:none">
     <label class="multi-cart-toggle-label" for="multi-cart-check">
       <input type="checkbox" id="multi-cart-check" class="multi-cart-toggle-input" />
       <span class="multi-cart-toggle-icon" aria-hidden="true">
@@ -1253,6 +1253,13 @@ include __DIR__ . "/includes/header.php";
     align-items: center;
   }
   /* ── Float cart FAB ─────────────────────────────────────── */
+  /* Fallback: si el FAB no está dentro del .floating-social-stack lo posiciona bottom-right */
+  #float-cart-fab:not(.floating-social-stack *) {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 1050;
+  }
   .float-cart-fab-btn {
     background: linear-gradient(135deg, rgba(99,102,241,.95), rgba(34,211,238,.88));
     border-color: rgba(99,102,241,.7);
@@ -11780,7 +11787,7 @@ include __DIR__ . "/includes/header.php";
               // ============================================================
               // MULTI-CART SYSTEM
               // ============================================================
-              cartMode = false;
+              cartMode = true;
               cartItems = []; // [{pack, quantity}]
               cartTotalBlindado = null; // locked after user clicks "Continuar" from cart modal
 
@@ -11995,6 +12002,7 @@ include __DIR__ . "/includes/header.php";
 
               // ── Cart mode toggle ─────────────────────────────────────────
               if (multiCartCheck) {
+                multiCartCheck.checked = true;
                 multiCartCheck.addEventListener('change', () => {
                   cartMode = multiCartCheck.checked;
                   cartItems = [];
@@ -12033,6 +12041,8 @@ include __DIR__ . "/includes/header.php";
                     updateButtonState();
                   }
                 });
+                // Activar modo carrito desde el inicio
+                multiCartCheck.dispatchEvent(new Event('change'));
               }
 
               // ── Pack card click in cart mode ─────────────────────────────
@@ -12237,8 +12247,8 @@ include __DIR__ . "/includes/header.php";
                 cartItems = [];
                 cartTotalBlindado = null;
                 packCards2.forEach(card => card.classList.remove('neon-selected'));
-                if (multiCartCheck) multiCartCheck.checked = false;
-                cartMode = false;
+                if (multiCartCheck) multiCartCheck.checked = true;
+                cartMode = true;
                 packCards2.forEach(card => card.classList.remove('cart-mode-account-disabled'));
                 syncCartHeaderButton();
                 updateResumenCompraCart();
@@ -12578,7 +12588,9 @@ include __DIR__ . "/includes/header.php";
             </section>
 <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
 <script>AOS.init({duration:750,easing:'ease-out-cubic',once:true,offset:60});</script>
-<?php if ($loggedUserRole === 'admin' || $loggedUserRole === 'root'): ?>
+<?php
+include __DIR__ . "/includes/footer.php";
+?>
 <button type="button" id="float-cart-fab" class="floating-social-button float-cart-fab-btn" aria-label="Ver carrito" style="display:none;">
   <span class="floating-social-icon" aria-hidden="true" style="position:relative;">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
@@ -12586,7 +12598,4 @@ include __DIR__ . "/includes/header.php";
   </span>
   <span class="floating-social-label" id="float-cart-fab-label"></span>
 </button>
-<?php endif; ?>
-<?php
-include __DIR__ . "/includes/footer.php";
-?>
+<script>if (typeof syncFloatCartFab === 'function') syncFloatCartFab();</script>
