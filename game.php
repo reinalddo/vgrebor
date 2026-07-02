@@ -366,10 +366,51 @@ include __DIR__ . "/includes/header.php";
   </div>
 </section>
 
-<section class="container mt-4" data-aos="fade-up">
+<section class="container mt-4 mb-3" data-aos="fade-up">
+  <h2 class="page-step-title text-info mb-0">PASO 1: Ingrese su información de jugador</h2>
+</section>
+
+
+<section class="container mt-5 mb-5 p-4 bg-dark bg-opacity-75 rounded-4 shadow" data-aos="fade-up">
+  <form class="row g-3" id="order-form">
+    <div class="col-12">
+      <div class="row g-3" id="player-fields-row">
+        <div class="col-md-6 col-12" id="player-primary-field">
+          <label class="form-label text-info" id="player-primary-label">ID de usuario</label>
+          <div class="d-flex flex-column flex-sm-row gap-2 align-items-stretch">
+            <input type="text" id="order-user-id" name="user_id" placeholder="Ej: 12345678" value="<?= htmlspecialchars($loggedUserLastPurchaseIdentifier, ENT_QUOTES, 'UTF-8') ?>" class="form-control bg-dark text-info border-info" required />
+            <button type="button" id="verify-player-button" class="btn btn-outline-info fw-bold text-nowrap d-none"><?= htmlspecialchars((string) ($playerVerificationConfig['buttonLabel'] ?? 'Verificar nombre del jugador'), ENT_QUOTES, 'UTF-8') ?></button>
+          </div>
+          <div id="player-verification-feedback" class="d-none mt-2"></div>
+        </div>
+        <div id="extra-player-fields" class="col-md-6 col-12"></div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label text-info">Correo</label>
+      <input type="email" name="email" placeholder="tu@email.com" value="<?= htmlspecialchars($loggedUserEmail, ENT_QUOTES, 'UTF-8') ?>" autocomplete="email" class="form-control bg-dark text-info border-info" required />
+    </div>
+    <div class="col-md-6">
+      <label class="form-label text-info">Información importante</label>
+      <div class="email-disclaimer-card">
+        El correo electronico ingresado sera utilizado exclusivamente, para el envio de su comprobante electronico
+      </div>
+    </div>
+    <div class="col-12">
+      <div id="account-sale-note" class="d-none alert account-sale-note mb-0">
+        Al verificar el pago te mostraremos los datos completos de la cuenta comprada junto con su galería registrada.
+      </div>
+    </div>
+    <div class="col-12">
+    </div>
+  </form>
+</section>
+
+
+<section id="game-packages-section" class="container mt-4" data-aos="fade-up">
   <div class="row mb-2 align-items-center">
     <div class="col">
-      <h2 class="page-step-title text-info mb-0">PASO 1: Seleccione su producto</h2>
+      <h2 class="page-step-title text-info mb-0">PASO 2: Seleccione su producto</h2>
     </div>
     <div class="col-auto">
       <span class="text-uppercase text-secondary small">elige uno</span>
@@ -737,47 +778,6 @@ include __DIR__ . "/includes/header.php";
       </div>
     </div>
   </div>
-</section>
-
-
-<section class="container mt-4 mb-3" data-aos="fade-up">
-  <h2 class="page-step-title text-info mb-0">PASO 2: Ingrese su información de jugador</h2>
-</section>
-
-
-<section class="container mt-5 mb-5 p-4 bg-dark bg-opacity-75 rounded-4 shadow" data-aos="fade-up">
-  <form class="row g-3" id="order-form">
-    <div class="col-12">
-      <div class="row g-3" id="player-fields-row">
-        <div class="col-md-6 col-12" id="player-primary-field">
-          <label class="form-label text-info" id="player-primary-label">ID de usuario</label>
-          <div class="d-flex flex-column flex-sm-row gap-2 align-items-stretch">
-            <input type="text" id="order-user-id" name="user_id" placeholder="Ej: 12345678" value="<?= htmlspecialchars($loggedUserLastPurchaseIdentifier, ENT_QUOTES, 'UTF-8') ?>" class="form-control bg-dark text-info border-info" required />
-            <button type="button" id="verify-player-button" class="btn btn-outline-info fw-bold text-nowrap d-none"><?= htmlspecialchars((string) ($playerVerificationConfig['buttonLabel'] ?? 'Verificar nombre del jugador'), ENT_QUOTES, 'UTF-8') ?></button>
-          </div>
-          <div id="player-verification-feedback" class="d-none mt-2"></div>
-        </div>
-        <div id="extra-player-fields" class="col-md-6 col-12"></div>
-      </div>
-    </div>
-    <div class="col-md-6">
-      <label class="form-label text-info">Correo</label>
-      <input type="email" name="email" placeholder="tu@email.com" value="<?= htmlspecialchars($loggedUserEmail, ENT_QUOTES, 'UTF-8') ?>" autocomplete="email" class="form-control bg-dark text-info border-info" required />
-    </div>
-    <div class="col-md-6">
-      <label class="form-label text-info">Información importante</label>
-      <div class="email-disclaimer-card">
-        El correo electronico ingresado sera utilizado exclusivamente, para el envio de su comprobante electronico
-      </div>
-    </div>
-    <div class="col-12">
-      <div id="account-sale-note" class="d-none alert account-sale-note mb-0">
-        Al verificar el pago te mostraremos los datos completos de la cuenta comprada junto con su galería registrada.
-      </div>
-    </div>
-    <div class="col-12">
-    </div>
-  </form>
 </section>
 
 <section class="container mt-3 mb-5" data-aos="fade-up">
@@ -8313,7 +8313,14 @@ include __DIR__ . "/includes/header.php";
   }
 
   function activePackSupportsPlayerVerification() {
-    if (!playerVerificationConfig || !activePack || isAccountSalePack(activePack)) {
+    if (!playerVerificationConfig) {
+      return false;
+    }
+    // Si no hay paquete seleccionado, mostrar igual (el jugador llena su info primero)
+    if (!activePack) {
+      return true;
+    }
+    if (isAccountSalePack(activePack)) {
       return false;
     }
     // La verificación de jugador solo aplica a paquetes de TiendaGiftVen, no Discord
@@ -8457,6 +8464,10 @@ include __DIR__ . "/includes/header.php";
           serverUnavailable: false,
         };
         setPlayerVerificationFeedback('success', String(data.message || 'Jugador encontrado.'));
+        window.setTimeout(() => {
+          const packSection = document.getElementById('game-packages-section');
+          if (packSection) scrollViewportToElement(packSection, { duration: 560, offset: 18 });
+        }, 350);
       } else {
         const verificationStatus = String((data && data.status) || '').toLowerCase();
         const verificationMessage = String((data && data.message) || 'No se pudo verificar el jugador.');
