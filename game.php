@@ -11535,6 +11535,7 @@ include __DIR__ . "/includes/header.php";
                     if (cartMode) {
                       // Lock discounted total so cartGrandTotal() returns it and updateResumenCompraCart shows it
                       cartTotalBlindado = selectedTotalValue;
+                      syncFloatCartFab(); // actualiza el FAB con el total con descuento de inmediato
                       updateResumenCompraCart();
                     } else {
                       pack.purchaseQuantity = getOrderQuantity();
@@ -11818,6 +11819,8 @@ include __DIR__ . "/includes/header.php";
                 if (shouldShow) {
                   if (badge) badge.textContent = count > 0 ? String(count) : '';
                   if (badge) badge.style.display = count > 0 ? '' : 'none';
+                  const label = document.getElementById('float-cart-fab-label');
+                  if (label) label.textContent = count > 0 ? cartGrandTotalText() : '';
                   const stack = document.querySelector('.floating-social-stack');
                   if (stack && !stack.contains(fab)) stack.prepend(fab);
                   fab.style.display = '';
@@ -12146,6 +12149,7 @@ include __DIR__ . "/includes/header.php";
                 if (buyButton) {
                   buyButton.textContent = `Continuar con la compra - ${totalTxt}`;
                 }
+                syncFloatCartFab(); // refresca el total del FAB al cambiar método/cupón/moneda
               };
 
               function syncCartBuyButton() {
@@ -12578,7 +12582,7 @@ include __DIR__ . "/includes/header.php";
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
     <span id="float-cart-fab-badge" class="float-cart-badge">0</span>
   </span>
-  <span class="floating-social-label">Carrito</span>
+  <span class="floating-social-label" id="float-cart-fab-label"></span>
 </button>
 <?php endif; ?>
 <?php
