@@ -8089,7 +8089,11 @@ include __DIR__ . "/includes/header.php";
   function renderPlayerFields(pack) {
     const existingValues = collectPlayerFields();
     const packRequiredFields = pack && Array.isArray(pack.requiredFields) ? pack.requiredFields : [];
-    const requiredFields = packRequiredFields.length ? packRequiredFields : getPlayerVerificationDefaultFields();
+    let requiredFields = packRequiredFields.length ? packRequiredFields : getPlayerVerificationDefaultFields();
+    if (!pack && requiredFields.length === 0 && packCards2.length > 0) {
+      const firstCardFields = parseRequiredFields(packCards2[0].dataset.requiredFields);
+      if (firstCardFields.length > 0) requiredFields = firstCardFields;
+    }
     const shouldShowPrimaryField = !isAccountSalePack(pack) && (!pack || pack.provider !== 'giftven' || requiredFields.length > 0);
     const primaryConfig = requiredFields[0] || defaultPrimaryField;
     setAccountSaleNote(pack);
