@@ -11383,12 +11383,22 @@ include __DIR__ . "/includes/header.php";
                 const cupon = normalizeCouponCode(couponInput.value);
                 couponInput.value = cupon;
                 const pack = activePack;
-                if (!pack) {
+
+                // Cart mode: validate items; single-pack mode: validate activePack
+                if (cartMode) {
+                  if (cartItems.length === 0) {
+                    showToast('Selecciona al menos un paquete antes de aplicar el cupón.', 'error');
+                    return;
+                  }
+                } else if (!pack) {
                   showToast('Selecciona un paquete antes de aplicar el cupón.', 'error');
                   return;
                 }
-                // Aseguramos que el precio sea un número puro
-                const precioNumerico = String(getPackTotalPrice(pack));
+
+                // In cart mode use cart totals; in single-pack mode use activePack
+                const effectivePack = (cartMode && cartItems.length > 0) ? cartItems[0].pack : pack;
+                const precioNumerico = cartMode ? String(cartGrandTotal()) : String(getPackTotalPrice(pack));
+
                 console.log('Enviando cupón:', cupon, 'Precio:', precioNumerico);
                 if (!cupon) {
                   showToast('Ingresa un cupón.', 'error');
@@ -11397,7 +11407,7 @@ include __DIR__ . "/includes/header.php";
                 fetch(buildAppUrl('/api/validar_cupon.php'), {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                  body: `code=${encodeURIComponent(cupon)}&pack_price=${encodeURIComponent(precioNumerico)}&currency=${encodeURIComponent(pack.moneda || '')}&game_id=${encodeURIComponent("<?= (string) ($game['id'] ?? '') ?>")}`
+                  body: `code=${encodeURIComponent(cupon)}&pack_price=${encodeURIComponent(precioNumerico)}&currency=${encodeURIComponent(effectivePack.moneda || '')}&game_id=${encodeURIComponent("<?= (string) ($game['id'] ?? '') ?>")}`
                 })
                 .then(res => res.json())
                 .then(data => {
@@ -11407,19 +11417,25 @@ include __DIR__ . "/includes/header.php";
                     couponValue = cupon;
                     appliedCouponSummary = {
                       code: cupon,
-                      discountAmount: normalizeCurrencyAmount(data.descuento, pack.showDecimals),
-                      originalAmount: normalizeCurrencyAmount(Number(data.nuevo_total || 0) + Number(data.descuento || 0), pack.showDecimals),
+                      discountAmount: normalizeCurrencyAmount(data.descuento, effectivePack.showDecimals),
+                      originalAmount: normalizeCurrencyAmount(Number(data.nuevo_total || 0) + Number(data.descuento || 0), effectivePack.showDecimals),
                       discountType: String(data.tipo_descuento || ''),
                       discountValue: Number(data.valor_descuento || 0),
                     };
-                    selectedTotalValue = normalizeCurrencyAmount(data.nuevo_total, pack.showDecimals);
-                    pack.purchaseQuantity = getOrderQuantity();
-                    updateSelectedPriceDisplay(pack);
+                    selectedTotalValue = normalizeCurrencyAmount(data.nuevo_total, effectivePack.showDecimals);
                     couponInput.disabled = true;
                     applyCouponButton.disabled = true;
-                    renderPublicOrderSummary(pack);
+                    if (cartMode) {
+                      // Lock discounted total so cartGrandTotal() returns it and updateResumenCompraCart shows it
+                      cartTotalBlindado = selectedTotalValue;
+                      updateResumenCompraCart();
+                    } else {
+                      pack.purchaseQuantity = getOrderQuantity();
+                      updateSelectedPriceDisplay(pack);
+                      renderPublicOrderSummary(pack);
+                    }
                     updateButtonState();
-                    showToast(data.message + ` Descuento: ${formatCurrencyAmount(data.descuento, pack.showDecimals)}`,'success');
+                    showToast(data.message + ` Descuento: ${formatCurrencyAmount(data.descuento, effectivePack.showDecimals)}`, 'success');
                   } else {
                     showToast(data.message, 'error');
                   }
