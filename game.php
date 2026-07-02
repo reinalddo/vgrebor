@@ -372,7 +372,7 @@ include __DIR__ . "/includes/header.php";
 </section>
 
 
-<section class="container mt-5 mb-5 p-4 bg-dark bg-opacity-75 rounded-4 shadow" data-aos="fade-up">
+<section class="container mt-3 mt-md-5 mb-2 mb-md-5 p-4 bg-dark bg-opacity-75 rounded-4 shadow" data-aos="fade-up">
   <form class="row g-3" id="order-form">
     <div class="col-12">
       <div class="row g-3" id="player-fields-row">
@@ -398,7 +398,7 @@ include __DIR__ . "/includes/header.php";
 </section>
 
 
-<section id="game-packages-section" class="container mt-4" data-aos="fade-up">
+<section id="game-packages-section" class="container mt-2 mt-md-4" data-aos="fade-up">
   <div class="row mb-2 align-items-center">
     <div class="col">
       <h2 class="page-step-title text-info mb-0">PASO 2: Seleccione su producto</h2>
