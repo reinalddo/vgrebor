@@ -11930,13 +11930,10 @@ include __DIR__ . "/includes/header.php";
               }
 
               // ── Cart price calculation ───────────────────────────────────
+              // priceValue ya viene con el drop aplicado desde updatePackPrices(); no reaplicar.
               function cartItemSubtotal(cartItem) {
-                const base  = parseFloat(cartItem.pack.priceValue || 0);
-                const drop  = Math.max(0, Math.min(99, Number(cartItem.pack.dropPercent || 0)));
-                const price = drop > 0
-                  ? normalizeCurrencyAmount(base * (1 - drop / 100), cartItem.pack.showDecimals)
-                  : normalizeCurrencyAmount(base, cartItem.pack.showDecimals);
-                return normalizeCurrencyAmount(price * cartItem.quantity, cartItem.pack.showDecimals);
+                const base = normalizeCurrencyAmount(parseFloat(cartItem.pack.priceValue || 0), cartItem.pack.showDecimals);
+                return normalizeCurrencyAmount(base * cartItem.quantity, cartItem.pack.showDecimals);
               }
 
               function cartGrandTotal() {
@@ -12703,6 +12700,21 @@ include __DIR__ . "/includes/header.php";
                 }
                 if (batchProgressFooter) batchProgressFooter.style.display = '';
               }
+
+              <?php if ($requestedPackageId > 0): ?>
+              // Auto-select GGDrop package_id en modo carrito (el init del carrito borra neon-selected del código anterior)
+              (function() {
+                if (!cartMode) return;
+                const autoCard = findPackCardById(<?= (int) $requestedPackageId ?>);
+                if (!autoCard || autoCard.dataset.accountSale === '1') return;
+                const autoPack = buildPackStateFromCard(autoCard);
+                cartItems.push({ pack: autoPack, quantity: 1 });
+                autoCard.classList.add('neon-selected');
+                syncCartHeaderButton();
+                if (typeof updateResumenCompraCart === 'function') updateResumenCompraCart();
+                setTimeout(() => autoCard.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' }), 150);
+              })();
+              <?php endif; ?>
 
               </script>
             </section>
