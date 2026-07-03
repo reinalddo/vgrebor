@@ -912,7 +912,7 @@ include __DIR__ . "/includes/header.php";
   </div>
 
   <!-- Admin API Debug Modal (solo visible para admin/root) -->
-  <div id="admin-api-debug-modal" class="app-overlay-modal" tabindex="-1" aria-hidden="true" role="dialog" style="display:none;z-index:9999;">
+  <div id="admin-api-debug-modal" class="app-overlay-modal" tabindex="-1" aria-hidden="true" role="dialog" style="z-index:99999!important;">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" style="width:min(96vw,720px);">
       <div class="modal-content bg-dark text-light rounded-4 p-0" style="border:1px solid #f59e0b;">
         <div class="d-flex align-items-center justify-content-between px-4 py-3" style="border-bottom:1px solid #f59e0b;">
@@ -9962,12 +9962,11 @@ include __DIR__ . "/includes/header.php";
   }
 
   function showAdminApiDebugModal(detail) {
-    const modal   = document.getElementById('admin-api-debug-modal');
-    const pre     = document.getElementById('admin-debug-json');
+    const modal = document.getElementById('admin-api-debug-modal');
+    const pre   = document.getElementById('admin-debug-json');
     if (!modal || !pre) return;
     pre.textContent = JSON.stringify(detail, null, 2);
-    modal.style.display = 'flex';
-    modal.setAttribute('aria-hidden', 'false');
+    setOverlayVisible(modal, true);
   }
 
   function appendAdminDebugLink(container, detail) {
@@ -11256,6 +11255,7 @@ include __DIR__ . "/includes/header.php";
                   pendingPaymentExecution = function() {
                   setPaymentFormDisabled(true);
                   setPaymentAlert('', 'info');
+                  let _lastPaymentApiData = null;
                   let checkoutWindow = null;
                   if (paymentMode === 'binance') {
                     checkoutWindow = openBinanceCheckoutPopup();
@@ -11284,6 +11284,7 @@ include __DIR__ . "/includes/header.php";
                   })
                   .then(async (response) => {
                     const data = await parseApiJsonResponse(response, 'No pudimos validar tu pago en este momento. Espera 1 minuto y vuelve a intentarlo.');
+                    _lastPaymentApiData = data;
                     if (data && data.api_error) {
                       console.log('Error API:', data.api_error);
                     }
@@ -11460,7 +11461,10 @@ include __DIR__ . "/includes/header.php";
                       'No pudimos validar tu pago en este momento. Espera 1 minuto y vuelve a intentarlo.'
                     );
                     setPaymentAlert(errorMessage, 'danger');
+                    const _apiAdminDetail = _lastPaymentApiData && _lastPaymentApiData.admin_error_detail ? _lastPaymentApiData.admin_error_detail : null;
                     renderPaymentServerFailure(errorMessage, reference, getConfirmedPaymentTotalText());
+                    appendAdminDebugLink(paymentModalReasons, _apiAdminDetail);
+                    appendAdminDebugLink(paymentStatusModalReasons, _apiAdminDetail);
                     setPaymentFormDisabled(false);
                     showPaymentStatusModal('No se pudo completar la validación', errorMessage, 'danger');
                     if (activePaymentOrder && activePaymentOrder.expiresAtMs <= Date.now()) {
@@ -12274,8 +12278,8 @@ include __DIR__ . "/includes/header.php";
               const adminDebugClose2 = document.getElementById('admin-debug-modal-close2');
               const adminDebugCopy   = document.getElementById('admin-debug-copy-btn');
               const adminDebugPre    = document.getElementById('admin-debug-json');
-              if (adminDebugClose)  adminDebugClose.addEventListener('click',  () => { if (adminDebugModal) { adminDebugModal.style.display = 'none'; adminDebugModal.setAttribute('aria-hidden', 'true'); }});
-              if (adminDebugClose2) adminDebugClose2.addEventListener('click', () => { if (adminDebugModal) { adminDebugModal.style.display = 'none'; adminDebugModal.setAttribute('aria-hidden', 'true'); }});
+              if (adminDebugClose)  adminDebugClose.addEventListener('click',  () => { if (adminDebugModal) setOverlayVisible(adminDebugModal, false); });
+              if (adminDebugClose2) adminDebugClose2.addEventListener('click', () => { if (adminDebugModal) setOverlayVisible(adminDebugModal, false); });
               if (adminDebugCopy) {
                 adminDebugCopy.addEventListener('click', () => {
                   const text = adminDebugPre ? adminDebugPre.textContent : '';
@@ -12462,14 +12466,23 @@ include __DIR__ . "/includes/header.php";
                   paymentSubmitButton.onclick = () => executeCartPurchase(ctx);
                 }
 
-                // Start payment timer
-                clearPaymentTimer();
-                updatePaymentTimer();
-                paymentTimerInterval = setInterval(updatePaymentTimer, 1000);
-
                 if (orderEmailInput && orderEmailInput.value.trim() === '') orderEmailInput.value = defaultOrderEmail || '';
-                setOverlayVisible(paymentModal, true);
-                scrollPaymentModalToTop();
+
+                // Show T&C pre-confirm modal before opening payment modal
+                pendingOpenModal = function() {
+                  clearPaymentTimer();
+                  updatePaymentTimer();
+                  paymentTimerInterval = setInterval(updatePaymentTimer, 1000);
+                  setOverlayVisible(paymentModal, true);
+                  scrollPaymentModalToTop();
+                };
+                if (preConfirmTosCheck) preConfirmTosCheck.checked = false;
+                if (preConfirmProceedBtn) {
+                  preConfirmProceedBtn.disabled = true;
+                  preConfirmProceedBtn.textContent = ctx.confirmedTotalText ? 'CONFIRMAR COMPRA - ' + ctx.confirmedTotalText : 'CONFIRMAR COMPRA';
+                }
+                setOverlayVisible(paymentPreConfirmModal, true);
+                if (paymentPreConfirmModal) paymentPreConfirmModal.scrollTop = 0;
               }
 
               // ── Execute cart purchase (after user fills payment data) ─────
@@ -12544,7 +12557,10 @@ include __DIR__ . "/includes/header.php";
                 } catch (err) {
                   setOverlayVisible(loadingModal, false);
                   paymentSubmitButton.disabled = false;
-                  showToast(normalizeApiRequestErrorMessage(err, 'Error al registrar los pedidos.'), 'error');
+                  const _batchErrMsg = normalizeApiRequestErrorMessage(err, 'Error al registrar los pedidos.');
+                  showToast(_batchErrMsg, 'error');
+                  setPaymentAlert(_batchErrMsg, 'danger');
+                  renderPaymentServerFailure(_batchErrMsg, refNumber, ctx.confirmedTotalText || '');
                   const adminDetail = _batchApiData && _batchApiData.admin_error_detail ? _batchApiData.admin_error_detail : null;
                   appendAdminDebugLink(paymentModalReasons, adminDetail);
                   return;
