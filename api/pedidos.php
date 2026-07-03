@@ -6025,6 +6025,10 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
         return null;
     }
 
+    $refSuffix = ($requiredDigits > 0 && strlen($reportedReference) > $requiredDigits)
+        ? substr($reportedReference, -$requiredDigits)
+        : $reportedReference;
+
     if ($requiredDigits > 0) {
         $stmt = $mysqli->prepare(
             "SELECT id, numero_referencia, estado
@@ -6039,7 +6043,7 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
              LIMIT 1"
         );
         if ($stmt) {
-            $stmt->bind_param('iisdd', $orderId, $requiredDigits, $reportedReference, $orderAmount, $orderAmount);
+            $stmt->bind_param('iisdd', $orderId, $requiredDigits, $refSuffix, $orderAmount, $orderAmount);
         }
     } else {
         $stmt = $mysqli->prepare(
@@ -6081,7 +6085,7 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
              ORDER BY m.id DESC"
         );
         if ($stmt) {
-            $stmt->bind_param('isdd', $requiredDigits, $reportedReference, $orderAmount, $orderAmount);
+            $stmt->bind_param('isdd', $requiredDigits, $refSuffix, $orderAmount, $orderAmount);
         }
     } else {
         $stmt = $mysqli->prepare(
