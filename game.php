@@ -11230,7 +11230,8 @@ include __DIR__ . "/includes/header.php";
                       `reference_number=${encodeURIComponent(reference)}`,
                       `phone=${encodeURIComponent(phone)}`,
                       `nombre_titular=${encodeURIComponent(paymentNombreInput ? paymentNombreInput.value.trim() : '')}`,
-                      `cedula_titular=${encodeURIComponent(paymentCedulaInput ? paymentCedulaInput.value.trim() : '')}`
+                      `cedula_titular=${encodeURIComponent(paymentCedulaInput ? paymentCedulaInput.value.trim() : '')}`,
+                      `email=${encodeURIComponent(modalEmailVal)}`
                     ].join('&')
                   })
                   .then(async (response) => {

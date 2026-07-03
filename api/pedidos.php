@@ -8343,6 +8343,17 @@ if ($action === 'submit_payment') {
         $order = fetch_order_by_id($mysqli, $orderId) ?: $order;
     }
 
+    $submittedEmail = sanitize_str($_POST['email'] ?? null, 180);
+    if ($submittedEmail !== null && $submittedEmail !== '' && filter_var($submittedEmail, FILTER_VALIDATE_EMAIL) && empty($order['email'])) {
+        $emailStmt = $mysqli->prepare('UPDATE pedidos SET email = ? WHERE id = ? LIMIT 1');
+        if ($emailStmt) {
+            $emailStmt->bind_param('si', $submittedEmail, $orderId);
+            $emailStmt->execute();
+            $emailStmt->close();
+            $order['email'] = $submittedEmail;
+        }
+    }
+
     if ($paymentMode === 'binance') {
         $discountSync = persist_order_payment_selection($mysqli, $order, 'binance');
         $order = is_array($discountSync['order'] ?? null) ? $discountSync['order'] : $order;
