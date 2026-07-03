@@ -367,12 +367,12 @@ include __DIR__ . "/includes/header.php";
   </div>
 </section>
 
-<section class="container mt-4 mb-3" data-aos="fade-up">
+<section id="player-step-section" class="container mt-4 mb-3" data-aos="fade-up">
   <h2 class="page-step-title text-info mb-0">PASO 1: Ingrese su información de jugador</h2>
 </section>
 
 
-<section class="container mt-3 mt-md-5 mb-2 mb-md-5 p-4 bg-dark bg-opacity-75 rounded-4 shadow" data-aos="fade-up">
+<section id="player-info-section" class="container mt-3 mt-md-5 mb-2 mb-md-5 p-4 bg-dark bg-opacity-75 rounded-4 shadow" data-aos="fade-up">
   <form class="row g-3" id="order-form">
     <div class="col-12">
       <div class="row g-3" id="player-fields-row">
@@ -769,7 +769,7 @@ include __DIR__ . "/includes/header.php";
   </div>
 </section>
 
-<section class="container mt-3 mb-5" data-aos="fade-up">
+<section id="payment-step-section" class="container mt-3 mb-5" data-aos="fade-up">
   <h2 class="page-step-title text-info mb-0">PASO 3: Configure su pago y continúe con la compra</h2>
   <div class="payment-coupon-shell mt-4">
     <div class="payment-coupon-panel">
@@ -5220,6 +5220,27 @@ include __DIR__ . "/includes/header.php";
   const packGrid = document.getElementById('pack-grid');
   const packCards2 = Array.from(document.querySelectorAll('.pack-card'));
   const packAccountPreviewButtons = Array.from(document.querySelectorAll('.pack-account-preview-btn'));
+
+  // Ocultar PASO 1 (ID jugador) y renumerar pasos para juegos tipo cuenta y giftcard
+  (function adjustPlayerStep() {
+    if (packCards2.length === 0) return;
+    const allNoId = packCards2.every(function(card) {
+      if (card.dataset.accountSale === '1') return true;
+      try {
+        const fields = JSON.parse(card.dataset.requiredFields || '[]');
+        return card.dataset.packageProvider === 'giftven' && fields.length === 0;
+      } catch (e) { return false; }
+    });
+    if (!allNoId) return;
+    const sec1 = document.getElementById('player-step-section');
+    const sec2 = document.getElementById('player-info-section');
+    if (sec1) sec1.style.display = 'none';
+    if (sec2) sec2.style.display = 'none';
+    const paso2Title = document.querySelector('#game-packages-section .page-step-title');
+    const paso3Title = document.querySelector('#payment-step-section .page-step-title');
+    if (paso2Title) paso2Title.textContent = paso2Title.textContent.replace('PASO 2:', 'PASO 1:');
+    if (paso3Title) paso3Title.textContent = paso3Title.textContent.replace('PASO 3:', 'PASO 2:');
+  })();
   const selectedPack = document.getElementById("selected-pack");
   const purchaseSummaryLayout = document.getElementById('purchase-summary-layout');
   const purchaseQuantityPanel = document.getElementById('purchase-quantity-panel');
