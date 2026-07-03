@@ -6205,6 +6205,16 @@ function bank_mismatch_failure_type(bool $referenceMatch, bool $amountMatch): st
     return 'server_or_data_mismatch';
 }
 
+function bank_mismatch_customer_message(string $failureType): string {
+    return match ($failureType) {
+        'reference_mismatch'      => 'Datos incorrectos o inválidos. El número de referencia ingresado no fue encontrado en el banco.',
+        'amount_mismatch'         => 'El monto de la transferencia no coincide con el total del pedido. Verifica los datos e intenta de nuevo.',
+        'expired_reference'       => 'Esta referencia ya caducó. Los pagos solo son válidos el mismo día en que se realizan.',
+        'server_partial_response' => 'Error en la respuesta del banco. Intente de nuevo en unos momentos.',
+        default                   => 'Datos incorrectos o inválidos. Verifica la referencia y el monto, e intenta de nuevo.',
+    };
+}
+
 function bank_movement_business_day(?string $movementDate): ?string {
     $parsedDate = parse_bank_movement_datetime($movementDate);
     if ($parsedDate === null) {
@@ -9612,7 +9622,7 @@ if ($action === 'submit_payment') {
         $pendingOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
         json_response([
             'ok' => true,
-            'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar',
+            'message' => bank_mismatch_customer_message($mismatch['failure_type']),
             'order_id' => $orderId,
             'estado' => 'pendiente',
             'verified' => false,
@@ -11019,9 +11029,7 @@ if ($action === 'batch_create_and_pay') {
                     'ok'              => false,
                     'verified'        => false,
                     'bank_checked'    => true,
-                    'message'         => $batchMismatch['failure_type'] === 'amount_mismatch'
-                        ? 'El monto de la transferencia no coincide con el total del carrito.'
-                        : 'Su Pago está en proceso, Espere 1 min y vuelva a intentar',
+                    'message'         => bank_mismatch_customer_message($batchMismatch['failure_type']),
                     'reasons'         => $batchMismatch['reasons'],
                     'reference_match' => $batchMismatch['reference_match'],
                     'amount_match'    => $batchMismatch['amount_match'],
