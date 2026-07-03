@@ -12120,6 +12120,7 @@ include __DIR__ . "/includes/header.php";
 
                   cartTotalBlindado = null;
                   syncCartHeaderButton(); // muestra el fab antes de animar
+                  if (typeof updateResumenCompraCart === 'function') updateResumenCompraCart();
 
                   // Animación al agregar cualquier paquete al carrito
                   if (existing < 0 && cartItems.length >= 1) flyPackToCart(card);
