@@ -10927,6 +10927,9 @@ include __DIR__ . "/includes/header.php";
     }
 
     renderAccountGalleryPreview(pack, 0);
+    if (accountGalleryModalBuy) {
+      accountGalleryModalBuy.textContent = cartMode ? 'Agregar al carrito' : 'Comprar';
+    }
     setOverlayVisible(accountGalleryModal, true);
   }
 
@@ -10983,6 +10986,14 @@ include __DIR__ . "/includes/header.php";
   }
   if (accountGalleryModalBuy) {
     accountGalleryModalBuy.addEventListener('click', () => {
+      if (cartMode && activePack) {
+        const card = findPackCardById(activePack.id);
+        if (card) {
+          closeAccountGalleryModal();
+          card.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+          return;
+        }
+      }
       triggerAccountSaleBuyFlow(accountGalleryModalBuy);
     });
   }
@@ -12113,7 +12124,7 @@ include __DIR__ . "/includes/header.php";
               packCards2.forEach(card => {
                 card.addEventListener('click', function(e) {
                   if (!cartMode) return; // normal flow handles it
-                  if (card.dataset.accountSale === '1') return; // disabled
+                  if (e.target.closest('[data-pack-preview-trigger]')) return; // let preview button open gallery modal
 
                   e.stopImmediatePropagation(); // prevent original handler
 
