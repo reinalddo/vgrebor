@@ -11115,6 +11115,55 @@ if ($action === 'batch_create_and_pay') {
                 }
             }
 
+            // Fallback: si la API bancaria no devolvió el movimiento en este request
+            // (retraso del banco), buscarlo en movimientos sincronizados previamente
+            if ($batchMatch === null && $batchUsesBankApi) {
+                try {
+                    $fbRef = $batchRefDigits > 0 ? substr($refNumber, -$batchRefDigits) : $refNumber;
+                    if ($batchRefDigits > 0) {
+                        $fbStmt = $mysqli->prepare(
+                            "SELECT referencia, monto FROM movimientos
+                             WHERE RIGHT(TRIM(referencia), ?) = ?
+                               AND ABS(monto - ?) < 0.01
+                               AND DATE(COALESCE(fecha_movimiento, creado_en)) = CURDATE()
+                               AND (pedido_id IS NULL OR pedido_id = 0)
+                               AND COALESCE(checked, 0) = 0
+                             ORDER BY id DESC LIMIT 1"
+                        );
+                        if ($fbStmt) {
+                            $fbStmt->bind_param('isd', $batchRefDigits, $fbRef, $totalBlindado);
+                            $fbStmt->execute();
+                            $fbRow = ($fbStmt->get_result())->fetch_assoc();
+                            $fbStmt->close();
+                            if ($fbRow) {
+                                $batchMatch = ['referencia' => (string) $fbRow['referencia'], 'monto' => (float) $fbRow['monto']];
+                            }
+                        }
+                    } else {
+                        $fbStmt = $mysqli->prepare(
+                            "SELECT referencia, monto FROM movimientos
+                             WHERE TRIM(referencia) = ?
+                               AND ABS(monto - ?) < 0.01
+                               AND DATE(COALESCE(fecha_movimiento, creado_en)) = CURDATE()
+                               AND (pedido_id IS NULL OR pedido_id = 0)
+                               AND COALESCE(checked, 0) = 0
+                             ORDER BY id DESC LIMIT 1"
+                        );
+                        if ($fbStmt) {
+                            $fbStmt->bind_param('sd', $refNumber, $totalBlindado);
+                            $fbStmt->execute();
+                            $fbRow = ($fbStmt->get_result())->fetch_assoc();
+                            $fbStmt->close();
+                            if ($fbRow) {
+                                $batchMatch = ['referencia' => (string) $fbRow['referencia'], 'monto' => (float) $fbRow['monto']];
+                            }
+                        }
+                    }
+                } catch (Throwable $fbErr) {
+                    error_log('TVG batch db_fallback failed: ' . $fbErr->getMessage());
+                }
+            }
+
             if ($batchMatch === null) {
                 $batchRefOnly  = find_bank_movement_by_reference($mysqli, $batchMovements, $refNumber, $batchRefDigits, 0);
                 $batchMismatch = $batchRefOnly !== null
