@@ -9986,6 +9986,7 @@ include __DIR__ . "/includes/header.php";
   }
 
   function renderPaymentFailureDetails(data, reference, totalText) {
+    console.error('[VG] verificación de pago fallida:', { failure_type: (data && data.failure_type) || null, message: (data && data.message) || null, reasons: (data && data.reasons) || null, reference, totalText, full_response: data });
     clearPaymentSupportUi();
     const failureType = String((data && data.failure_type) || 'server_or_data_mismatch');
     const reasons = extractPaymentReasons(data);
@@ -11460,6 +11461,7 @@ include __DIR__ . "/includes/header.php";
                       error,
                       'No pudimos validar tu pago en este momento. Espera 1 minuto y vuelve a intentarlo.'
                     );
+                    console.error('[VG] error en submit_payment:', { message: errorMessage, error, api_response: _lastPaymentApiData });
                     setPaymentAlert(errorMessage, 'danger');
                     const _apiAdminDetail = _lastPaymentApiData && _lastPaymentApiData.admin_error_detail ? _lastPaymentApiData.admin_error_detail : null;
                     renderPaymentServerFailure(errorMessage, reference, getConfirmedPaymentTotalText());
@@ -12579,6 +12581,7 @@ include __DIR__ . "/includes/header.php";
                   setOverlayVisible(loadingModal, false);
                   paymentSubmitButton.disabled = false;
                   const _batchErrMsg = normalizeApiRequestErrorMessage(err, 'Error al registrar los pedidos.');
+                  console.error('[VG] error en batch_create_and_pay:', { message: _batchErrMsg, error: err, api_response: _batchApiData });
                   showToast(_batchErrMsg, 'error');
                   setPaymentAlert(_batchErrMsg, 'danger');
                   renderPaymentServerFailure(_batchErrMsg, refNumber, ctx.confirmedTotalText || '');
@@ -12667,6 +12670,8 @@ include __DIR__ . "/includes/header.php";
                   const isPartial  = result && result.estado === 'pagado' && result.processing;
                   const isManual   = result && result.manual;
                   const isError    = !result || (!isDone && !isPartial && !isManual);
+
+                  if (isError) console.error('[VG] error en batch_fulfill_item order_id=' + orderId + ':', result);
 
                   if (!isDone && !isPartial) allSuccess = false;
 
