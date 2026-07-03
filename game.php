@@ -12509,6 +12509,23 @@ include __DIR__ . "/includes/header.php";
                 const payMode      = preferredSel.mode || 'money';
                 const payMethodId  = preferredSel.methodId || 0;
 
+                // Validate reference minimum digits before hitting the API
+                if (payMode === 'money') {
+                  const _selMethod = preferredSel.methods.find((m) => String(m.id) === String(payMethodId));
+                  const _reqDigits = Number(_selMethod && _selMethod.referencia_digitos ? _selMethod.referencia_digitos : 0);
+                  if (_reqDigits > 0 && refNumber.length < _reqDigits) {
+                    setPaymentAlert(`La referencia debe contener al menos ${_reqDigits} dígitos para este método de pago.`, 'danger');
+                    return;
+                  }
+                }
+                if (payMode === 'binance_pagonorte') {
+                  const _bpDigits = Number(<?= (int) $binancePagonorteReferenceDigits ?> || 0);
+                  if (_bpDigits > 0 && refNumber.length < _bpDigits) {
+                    setPaymentAlert(`Debes escribir la referencia completa o al menos los últimos ${_bpDigits} dígitos.`, 'danger');
+                    return;
+                  }
+                }
+
                 // Gather coupon
                 const couponVal = normalizeCouponCode(couponInput ? couponInput.value : '');
 

@@ -11008,7 +11008,13 @@ if ($action === 'batch_create_and_pay') {
                 'ff_bank_clave'        => store_config_get('ff_bank_clave', ''),
             ];
             $batchBinanceCfg = ['binance_pagonorte_token' => store_config_get('binance_pagonorte_token', '')];
-            $batchRefDigits  = $isBatchBinancePagonorte ? binance_pagonorte_reference_digits() : 0;
+            $batchRefDigits  = $isBatchBinancePagonorte
+                ? binance_pagonorte_reference_digits()
+                : max(0, (int) ($meth['referencia_digitos'] ?? 0));
+
+            if ($batchRefDigits > 0 && strlen($refNumber) < $batchRefDigits) {
+                json_error('Debes ingresar al menos ' . $batchRefDigits . ' dígitos en el número de referencia.');
+            }
 
             $batchRefConflict = find_reference_reuse_conflict($mysqli, $refNumber, $batchRefDigits, 0, $totalBlindado);
             if ($batchRefConflict !== null) {
