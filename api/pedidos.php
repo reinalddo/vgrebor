@@ -11035,7 +11035,7 @@ if ($action === 'batch_create_and_pay') {
                      WHERE estado = 'pagado'
                        AND cart_batch_id IS NOT NULL AND TRIM(cart_batch_id) != ''
                        AND ABS(cart_batch_total - ?) < 0.01
-                       AND DATE(created_at) = CURDATE()
+                       AND DATE(creado_en) = CURDATE()
                        AND RIGHT(TRIM(numero_referencia), ?) = ?
                      ORDER BY id ASC LIMIT 1"
                 );
@@ -11055,7 +11055,7 @@ if ($action === 'batch_create_and_pay') {
                      WHERE estado = 'pagado'
                        AND cart_batch_id IS NOT NULL AND TRIM(cart_batch_id) != ''
                        AND ABS(cart_batch_total - ?) < 0.01
-                       AND DATE(created_at) = CURDATE()
+                       AND DATE(creado_en) = CURDATE()
                        AND TRIM(numero_referencia) = ?
                      ORDER BY id ASC LIMIT 1"
                 );
