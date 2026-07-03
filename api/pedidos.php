@@ -11225,6 +11225,17 @@ if ($action === 'batch_create_and_pay') {
         $pkgProvider    = package_api_provider_from_row($pkg, ['categoria_api_discord' => $discordCmd]);
         $apiDiscordData = build_api_discord_order_insert_data($mysqli, $gameId, $pkgProvider);
 
+        $batchItemIsAccountSale = package_account_sales_is_enabled_for_package($pkg, account_sale_feature_enabled());
+        $batchItemAccountText   = null;
+        $batchItemAccountGallery = null;
+        if ($batchItemIsAccountSale) {
+            $batchSnap = package_account_sales_build_snapshot($pkg, package_account_sales_fetch_gallery($mysqli, $pkgId));
+            $batchItemAccountText = $batchSnap['account_text'] !== '' ? $batchSnap['account_text'] : null;
+            $batchEncGallery = json_encode($batchSnap['gallery'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $batchItemAccountGallery = is_string($batchEncGallery) ? $batchEncGallery : null;
+            $qty = 1;
+        }
+
         $winPointsAward = 0;
         if (win_points_enabled() && $clienteUsuarioId !== null && $clienteUsuarioId > 0) {
             $winPointsAward = win_points_package_reward($pkg) * $qty;
@@ -11264,6 +11275,9 @@ if ($action === 'batch_create_and_pay') {
                 'telefono_contacto'                  => $phone,
                 'metodo_pago'                        => $methodName,
                 'payment_method_id'                  => $payMethodId,
+                'vender_cuenta'                      => $batchItemIsAccountSale ? 1 : 0,
+                'cuenta_entrega_texto'               => $batchItemAccountText,
+                'cuenta_galeria_json'                => $batchItemAccountGallery,
                 'win_points_awarded'                 => $winPointsAward,
                 'win_points_payment_mode'            => $payMode === 'points' ? 'points' : 'money',
                 'cart_batch_id'                      => $batchId,
@@ -11320,7 +11334,7 @@ if ($action === 'batch_fulfill_item') {
 
     $currentState = trim((string) ($order['estado'] ?? ''));
     if ($currentState === 'enviado') {
-        json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Ya procesado.', 'already_done' => true]);
+        json_response(append_account_sale_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Ya procesado.', 'already_done' => true], $order));
     }
     if (!in_array($currentState, ['pendiente', 'pagado'], true)) {
         json_error('El pedido no está en estado válido para procesar.', 409);
@@ -11341,6 +11355,29 @@ if ($action === 'batch_fulfill_item') {
     $pkgApiId      = (int) ($order['paquete_api'] ?? 0);
     $orderFields   = order_player_fields_from_json((string) ($order['player_fields_json'] ?? ''));
     $qty           = order_purchase_quantity($order);
+
+    // ── Account sale ─────────────────────────────────────────────────
+    if (order_is_account_sale($order)) {
+        try {
+            $asSentOrder = mark_account_sale_as_sent(
+                $mysqli,
+                $order,
+                'pagado',
+                trim((string) ($order['numero_referencia'] ?? '')),
+                trim((string) ($order['telefono_contacto'] ?? ''))
+            );
+        } catch (Throwable $asErr) {
+            json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $asErr->getMessage()]);
+        }
+        win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+        recharge_notifications_emit_for_order($mysqli, $asSentOrder);
+        json_response(append_account_sale_response([
+            'ok'       => true,
+            'estado'   => 'enviado',
+            'order_id' => $orderId,
+            'message'  => 'Cuenta entregada correctamente.',
+        ], $asSentOrder));
+    }
 
     // ── GiftVen catalog API ──────────────────────────────────────────
     if ($pkgProvider === 'giftven' && $pkgApiId > 0) {

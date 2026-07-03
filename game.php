@@ -1466,6 +1466,7 @@ include __DIR__ . "/includes/header.php";
   .batch-progress-items { max-height: 42vh; overflow-y: auto; padding: 0.35rem 0; }
   .batch-progress-item {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.6rem;
     padding: 0.55rem 1.25rem;
@@ -1482,6 +1483,18 @@ include __DIR__ . "/includes/header.php";
   .batch-status-done { color: #4ade80; }
   .batch-status-partial { color: #fb923c; }
   .batch-status-error { color: #f87171; }
+  .batch-account-delivery { width: 100%; margin-top: 0.5rem; padding: 0.75rem; background: rgba(16,185,129,.08); border: 1px solid rgba(16,185,129,.3); border-radius: 8px; }
+  .batch-account-text { font-family: monospace; font-size: 0.78rem; color: #d1fae5; white-space: pre-wrap; word-break: break-all; margin-bottom: 0.4rem; }
+  .batch-account-copy-btn { margin-top: 0.3rem; padding: 0.25rem 0.7rem; font-size: 0.73rem; background: rgba(16,185,129,.2); color: #34d399; border: 1px solid rgba(16,185,129,.4); border-radius: 6px; cursor: pointer; }
+  .batch-account-copy-btn:hover { background: rgba(16,185,129,.35); }
+  .batch-account-gallery { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+  .batch-account-gallery img { max-width: 110px; border-radius: 6px; border: 1px solid rgba(255,255,255,.1); }
+  .batch-accounts-footer-list { margin-bottom: 0.75rem; }
+  .batch-accounts-footer-title { font-weight: 700; color: #22d3ee; font-size: 0.82rem; margin-bottom: 0.6rem; text-transform: uppercase; letter-spacing: .04em; }
+  .batch-account-summary-item { padding: 0.6rem 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .batch-account-summary-item:last-child { border-bottom: none; }
+  .batch-account-summary-name { font-size: 0.8rem; font-weight: 600; color: #94a3b8; margin-bottom: 0.35rem; }
+  .cart-account-qty-fixed { color: #34d399; font-size: 0.78rem; font-weight: 700; padding: 0 0.2rem; }
   .batch-progress-footer { padding: 0.85rem 1.25rem; border-top: 1px solid rgba(34,211,238,.2); }
   /* ── Payment modal cart summary ────────────────────────────── */
   #payment-cart-summary { display: none; }
@@ -11965,24 +11978,28 @@ include __DIR__ . "/includes/header.php";
                   return;
                 }
                 const html = cartItems.map((ci, idx) => {
-                  const sub     = cartItemSubtotal(ci);
-                  const showDec = ci.pack.showDecimals;
-                  const moneda  = ci.pack.moneda;
-                  const imgUrl  = String(ci.pack.imageUrl || '').trim();
-                  const imgHtml = imgUrl
+                  const sub       = cartItemSubtotal(ci);
+                  const showDec   = ci.pack.showDecimals;
+                  const moneda    = ci.pack.moneda;
+                  const isAccount = Boolean(ci.pack.accountSale);
+                  const imgUrl    = String(ci.pack.imageUrl || '').trim();
+                  const imgHtml   = imgUrl
                     ? `<img class="multi-cart-item-img" src="${escapePaymentHtml(imgUrl)}" alt="${escapePaymentHtml(ci.pack.name)}" loading="lazy">`
                     : `<div class="multi-cart-item-img-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg></div>`;
+                  const stepperHtml = isAccount
+                    ? `<span class="multi-cart-item-qty cart-account-qty-fixed">×1</span>`
+                    : `<div class="multi-cart-item-stepper">
+                        <button type="button" class="cart-qty-dec" data-idx="${idx}" aria-label="Disminuir">-</button>
+                        <span class="multi-cart-item-qty">${ci.quantity}</span>
+                        <button type="button" class="cart-qty-inc" data-idx="${idx}" aria-label="Aumentar">+</button>
+                      </div>`;
                   return `<div class="multi-cart-item" data-cart-idx="${idx}">
                     ${imgHtml}
                     <div>
                       <div class="multi-cart-item-name">${escapePaymentHtml(ci.pack.name)}</div>
                       <div class="multi-cart-item-sub">${moneda} ${formatCurrencyAmount(sub, showDec)}</div>
                     </div>
-                    <div class="multi-cart-item-stepper">
-                      <button type="button" class="cart-qty-dec" data-idx="${idx}" aria-label="Disminuir">-</button>
-                      <span class="multi-cart-item-qty">${ci.quantity}</span>
-                      <button type="button" class="cart-qty-inc" data-idx="${idx}" aria-label="Aumentar">+</button>
-                    </div>
+                    ${stepperHtml}
                     <button type="button" class="multi-cart-item-del" data-idx="${idx}" aria-label="Eliminar paquete">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
                     </button>
@@ -12072,12 +12089,6 @@ include __DIR__ . "/includes/header.php";
                   if (cartMode) {
                     // Hide single-pack summary widgets (quantity + selected pack)
                     if (purchaseSummaryLayout) purchaseSummaryLayout.classList.add('d-none');
-                    // Mark account-sale packs as unavailable
-                    packCards2.forEach(card => {
-                      if (card.dataset.accountSale === '1') {
-                        card.classList.add('cart-mode-account-disabled');
-                      }
-                    });
                     // Reset single-pack state and hide summary until packs are selected
                     activePack = null;
                     renderPlayerFields(null);
@@ -12629,6 +12640,7 @@ include __DIR__ . "/includes/header.php";
 
                 let doneCount = 0;
                 let allSuccess = true;
+                const deliveredAccounts = [];
 
                 for (let i = 0; i < orderIds.length; i++) {
                   const orderId = orderIds[i];
@@ -12690,6 +12702,46 @@ include __DIR__ . "/includes/header.php";
                     row.querySelector('.batch-progress-item-icon').className = `batch-progress-item-icon ${statusClass}`;
                     row.querySelector('.batch-progress-item-status').textContent = statusText;
                     row.querySelector('.batch-progress-item-status').className = `batch-progress-item-status ${statusClass}`;
+
+                    // If account sale, show credentials inline below the progress row
+                    if (isDone && result && result.account_sale && result.account_sale.enabled) {
+                      const asSale = getAccountSalePayload(result);
+                      if (asSale) {
+                        const accountText = asSale.accountText;
+                        const gallery     = asSale.gallery;
+                        const packName    = ci ? ci.pack.name : '';
+                        deliveredAccounts.push({ name: packName, accountText, gallery });
+
+                        const detailEl = document.createElement('div');
+                        detailEl.className = 'batch-account-delivery';
+                        if (accountText) {
+                          detailEl.innerHTML = `<div class="batch-account-text">${escapePaymentHtml(accountText)}</div>
+                            <button type="button" class="batch-account-copy-btn" data-copy-text="${escapePaymentHtml(accountText)}">Copiar datos</button>`;
+                          const copyBtn = detailEl.querySelector('.batch-account-copy-btn');
+                          if (copyBtn) {
+                            copyBtn.addEventListener('click', async () => {
+                              try {
+                                const ok = await copyTextToClipboard(accountText);
+                                showToast(ok ? 'Datos copiados.' : 'No se pudo copiar.', ok ? 'success' : 'error');
+                              } catch (_) { showToast('No se pudo copiar.', 'error'); }
+                            });
+                          }
+                        }
+                        if (gallery.length) {
+                          const galleryEl = document.createElement('div');
+                          galleryEl.className = 'batch-account-gallery';
+                          gallery.forEach(item => {
+                            const img = document.createElement('img');
+                            img.src = item.imageUrl;
+                            img.alt = 'Imagen de la cuenta';
+                            img.loading = 'lazy';
+                            galleryEl.appendChild(img);
+                          });
+                          detailEl.appendChild(galleryEl);
+                        }
+                        row.appendChild(detailEl);
+                      }
+                    }
                   }
 
                   // 1-second delay between items (not after last one)
@@ -12704,7 +12756,47 @@ include __DIR__ . "/includes/header.php";
                     ? `¡Listo! ${doneCount} recarga${doneCount !== 1 ? 's' : ''} procesada${doneCount !== 1 ? 's' : ''} correctamente.`
                     : `Proceso completado. Revisa el estado de cada paquete.`;
                 }
-                if (batchProgressFooter) batchProgressFooter.style.display = '';
+
+                // Show delivered accounts summary in footer if any
+                if (batchProgressFooter) {
+                  if (deliveredAccounts.length > 0) {
+                    const accountsHtml = deliveredAccounts.map((acc, idx) => {
+                      const galleryHtml = acc.gallery.length
+                        ? `<div class="batch-account-gallery">${acc.gallery.map(item => `<img src="${escapePaymentHtml(item.imageUrl)}" alt="Imagen de la cuenta" loading="lazy">`).join('')}</div>`
+                        : '';
+                      const textHtml = acc.accountText
+                        ? `<div class="batch-account-text">${escapePaymentHtml(acc.accountText)}</div>
+                           <button type="button" class="batch-account-copy-btn" id="batch-footer-copy-${idx}">Copiar datos</button>`
+                        : '';
+                      return `<div class="batch-account-summary-item">
+                        <div class="batch-account-summary-name">📦 ${escapePaymentHtml(acc.name)}</div>
+                        ${textHtml}${galleryHtml}
+                      </div>`;
+                    }).join('');
+
+                    const existingFooterContent = batchProgressFooter.querySelector('.batch-accounts-footer-list');
+                    if (!existingFooterContent) {
+                      const accountsBlock = document.createElement('div');
+                      accountsBlock.className = 'batch-accounts-footer-list';
+                      accountsBlock.innerHTML = `<div class="batch-accounts-footer-title">Cuentas entregadas</div>${accountsHtml}`;
+                      batchProgressFooter.insertBefore(accountsBlock, batchProgressFooter.firstChild);
+
+                      deliveredAccounts.forEach((acc, idx) => {
+                        if (!acc.accountText) return;
+                        const btn = batchProgressFooter.querySelector(`#batch-footer-copy-${idx}`);
+                        if (btn) {
+                          btn.addEventListener('click', async () => {
+                            try {
+                              const ok = await copyTextToClipboard(acc.accountText);
+                              showToast(ok ? 'Datos copiados.' : 'No se pudo copiar.', ok ? 'success' : 'error');
+                            } catch (_) { showToast('No se pudo copiar.', 'error'); }
+                          });
+                        }
+                      });
+                    }
+                  }
+                  batchProgressFooter.style.display = '';
+                }
               }
 
               <?php if ($requestedPackageId > 0): ?>
