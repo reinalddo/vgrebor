@@ -12457,6 +12457,12 @@ include __DIR__ . "/includes/header.php";
                   cartCtx: ctx,
                 };
 
+                // Reset payment modal state from any previous purchase
+                clearPaymentSupportUi();
+                setPaymentFormDisabled(false);
+                setPaymentAlert('', 'info');
+                if (paymentMoneyPanel) paymentMoneyPanel.classList.add('is-active');
+
                 // Render payment methods for the cart currency
                 renderPaymentMethodsByCurrency(ctx.currency || '');
 
