@@ -911,6 +911,25 @@ include __DIR__ . "/includes/header.php";
     </div>
   </div>
 
+  <!-- Admin API Debug Modal (solo visible para admin/root) -->
+  <div id="admin-api-debug-modal" class="app-overlay-modal" tabindex="-1" aria-hidden="true" role="dialog" style="display:none;z-index:9999;">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" style="width:min(96vw,720px);">
+      <div class="modal-content bg-dark text-light rounded-4 p-0" style="border:1px solid #f59e0b;">
+        <div class="d-flex align-items-center justify-content-between px-4 py-3" style="border-bottom:1px solid #f59e0b;">
+          <h5 class="mb-0 fw-bold" style="color:#f59e0b;">🔍 Debug Error API (solo admins)</h5>
+          <button type="button" id="admin-debug-modal-close" class="btn-close btn-close-white" aria-label="Cerrar"></button>
+        </div>
+        <div class="px-4 py-3" style="max-height:65vh;overflow-y:auto;">
+          <pre id="admin-debug-json" class="text-warning mb-3" style="background:#1a1a2e;border-radius:8px;padding:1rem;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:55vh;overflow-y:auto;border:1px solid #374151;"></pre>
+        </div>
+        <div class="px-4 pb-4 d-flex gap-2">
+          <button type="button" id="admin-debug-copy-btn" class="btn btn-warning fw-bold flex-grow-1">Copiar JSON</button>
+          <button type="button" id="admin-debug-modal-close2" class="btn btn-outline-secondary">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal Loading Bootstrap -->
   <div id="loading-modal" class="modal fade app-overlay-modal<?= $paymentWindowConfigEnabled ? ' payment-window-theme-enabled' : '' ?>" tabindex="-1" aria-hidden="true" data-payment-loading-state="processing">
     <div class="modal-dialog modal-dialog-centered">
@@ -5151,6 +5170,7 @@ include __DIR__ . "/includes/header.php";
   const binancePagonorteReferenceDigits = <?= json_encode((int) $binancePagonorteReferenceDigits, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const paypalPayTaxPercentage = <?= json_encode((float) $paypalPayTaxPercentage, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const accountSaleFeatureEnabled = <?= $accountSaleFeatureEnabled ? 'true' : 'false' ?>;
+  const currentUserIsAdmin = <?= json_encode(in_array($loggedUserRole, ['admin', 'root'], true)) ?>;
   const binancePayButtonLabel = 'Binance Pay';
   const binancePayImageUrl = <?= json_encode($binancePayImageUrl, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const binancePayCornerImageUrl = <?= json_encode($binancePayCornerImageUrl, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
@@ -9941,6 +9961,31 @@ include __DIR__ . "/includes/header.php";
     }
   }
 
+  function showAdminApiDebugModal(detail) {
+    const modal   = document.getElementById('admin-api-debug-modal');
+    const pre     = document.getElementById('admin-debug-json');
+    if (!modal || !pre) return;
+    pre.textContent = JSON.stringify(detail, null, 2);
+    modal.style.display = 'flex';
+    modal.setAttribute('aria-hidden', 'false');
+  }
+
+  function appendAdminDebugLink(container, detail) {
+    if (!currentUserIsAdmin || !detail || !container) return;
+    const existing = container.querySelector('.admin-debug-link-wrap');
+    if (existing) existing.remove();
+    const wrap = document.createElement('div');
+    wrap.className = 'admin-debug-link-wrap';
+    wrap.style.cssText = 'margin-top:12px;padding-top:10px;border-top:1px solid #374151;';
+    const link = document.createElement('button');
+    link.type = 'button';
+    link.textContent = '🔍 Ver motivo error (admin)';
+    link.style.cssText = 'background:none;border:none;color:#f59e0b;font-size:13px;cursor:pointer;text-decoration:underline;padding:0;';
+    link.addEventListener('click', () => showAdminApiDebugModal(detail));
+    wrap.appendChild(link);
+    container.appendChild(wrap);
+  }
+
   function renderPaymentFailureDetails(data, reference, totalText) {
     clearPaymentSupportUi();
     const failureType = String((data && data.failure_type) || 'server_or_data_mismatch');
@@ -9989,6 +10034,9 @@ include __DIR__ . "/includes/header.php";
     renderSupportCard(paymentModalReasons, title, summary, steps, displayReasons);
     renderSupportCard(paymentStatusModalReasons, title, summary, steps, displayReasons);
     renderSupportActionLinks(reference, totalText);
+    const adminDetail = data && data.admin_error_detail ? data.admin_error_detail : null;
+    appendAdminDebugLink(paymentModalReasons, adminDetail);
+    appendAdminDebugLink(paymentStatusModalReasons, adminDetail);
     scrollPaymentModalToTop();
   }
 
@@ -12220,6 +12268,34 @@ include __DIR__ . "/includes/header.php";
                 });
               }
 
+              // ── Admin API Debug Modal ────────────────────────────────────
+              const adminDebugModal  = document.getElementById('admin-api-debug-modal');
+              const adminDebugClose  = document.getElementById('admin-debug-modal-close');
+              const adminDebugClose2 = document.getElementById('admin-debug-modal-close2');
+              const adminDebugCopy   = document.getElementById('admin-debug-copy-btn');
+              const adminDebugPre    = document.getElementById('admin-debug-json');
+              if (adminDebugClose)  adminDebugClose.addEventListener('click',  () => { if (adminDebugModal) { adminDebugModal.style.display = 'none'; adminDebugModal.setAttribute('aria-hidden', 'true'); }});
+              if (adminDebugClose2) adminDebugClose2.addEventListener('click', () => { if (adminDebugModal) { adminDebugModal.style.display = 'none'; adminDebugModal.setAttribute('aria-hidden', 'true'); }});
+              if (adminDebugCopy) {
+                adminDebugCopy.addEventListener('click', () => {
+                  const text = adminDebugPre ? adminDebugPre.textContent : '';
+                  navigator.clipboard.writeText(text).then(() => {
+                    adminDebugCopy.textContent = '✓ Copiado';
+                    setTimeout(() => { adminDebugCopy.textContent = 'Copiar JSON'; }, 2000);
+                  }).catch(() => {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    ta.remove();
+                    adminDebugCopy.textContent = '✓ Copiado';
+                    setTimeout(() => { adminDebugCopy.textContent = 'Copiar JSON'; }, 2000);
+                  });
+                });
+              }
+              window.showAdminApiDebugModal = showAdminApiDebugModal;
+
               // ── Sync currency with cart ──────────────────────────────────
               // When currency changes in cart mode, recalculate cart prices
               const _origSetVisibleCurrency = setVisibleCurrency;
@@ -12428,6 +12504,7 @@ include __DIR__ . "/includes/header.php";
                 setOverlayVisible(loadingModal, true);
 
                 let batchId, orderIds;
+                let _batchApiData = null;
                 try {
                   const body = new URLSearchParams();
                   body.set('action', 'batch_create_and_pay');
@@ -12452,6 +12529,7 @@ include __DIR__ . "/includes/header.php";
                     body: body.toString(),
                   });
                   const data = await resp.json();
+                  _batchApiData = data;
 
                   if (!data || !data.ok) {
                     throw new Error((data && data.message) ? data.message : 'No se pudieron crear los pedidos.');
@@ -12467,6 +12545,8 @@ include __DIR__ . "/includes/header.php";
                   setOverlayVisible(loadingModal, false);
                   paymentSubmitButton.disabled = false;
                   showToast(normalizeApiRequestErrorMessage(err, 'Error al registrar los pedidos.'), 'error');
+                  const adminDetail = _batchApiData && _batchApiData.admin_error_detail ? _batchApiData.admin_error_detail : null;
+                  appendAdminDebugLink(paymentModalReasons, adminDetail);
                   return;
                 }
 

@@ -8353,6 +8353,8 @@ if ($action === 'submit_payment') {
         $order = fetch_order_by_id($mysqli, $orderId) ?: $order;
     }
 
+    $isAdminOrRoot = isset($_SESSION['auth_user']) && in_array(trim(strtolower((string) ($_SESSION['auth_user']['rol'] ?? ''))), ['admin', 'root'], true);
+
     $submittedEmail = sanitize_str($_POST['email'] ?? null, 180);
     if ($submittedEmail !== null && $submittedEmail !== '' && filter_var($submittedEmail, FILTER_VALIDATE_EMAIL) && empty($order['email'])) {
         $emailStmt = $mysqli->prepare('UPDATE pedidos SET email = ? WHERE id = ? LIMIT 1');
@@ -9051,7 +9053,9 @@ if ($action === 'submit_payment') {
                 ? fetch_and_sync_binance_pagonorte_movements($mysqli, $binancePagonorteConfig)
                 : fetch_and_sync_bank_movements($mysqli, $bankConfig);
         } catch (Throwable $e) {
-            json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $e->getMessage()], 502);
+            $apiErrMsg = $e->getMessage();
+            $adminDetail502 = $isAdminOrRoot ? ['context' => 'submit_payment', 'step' => 'fetch_bank_movements', 'error' => $apiErrMsg, 'reference_searched' => $referenceNumber ?? '', 'amount_searched' => (float) ($order['precio'] ?? 0), 'uses_binance' => $usesBinancePagonorteValidation] : null;
+            json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $apiErrMsg, 'admin_error_detail' => $adminDetail502], 502);
         }
 
         if ($bankFlowRequested && !$usesBankValidation && !$usesBinancePagonorteValidation) {
@@ -9155,7 +9159,9 @@ if ($action === 'submit_payment') {
                 $bankMovements = $retryResult['movements'];
                 error_log('TVG bank validation attempts for order #' . $orderId . ': ' . (int) ($retryResult['attempts'] ?? 1));
             } catch (Throwable $e) {
-                json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $e->getMessage()], 502);
+                $retryErrMsg = $e->getMessage();
+                $adminDetailRetry = $isAdminOrRoot ? ['context' => 'submit_payment', 'step' => 'retry_bank_movements', 'error' => $retryErrMsg, 'reference_searched' => $referenceNumber, 'amount_searched' => (float) ($updatedOrder['precio'] ?? 0), 'movements_before_retry' => count($bankMovements)] : null;
+                json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $retryErrMsg, 'admin_error_detail' => $adminDetailRetry], 502);
             }
         }
 
@@ -9620,6 +9626,17 @@ if ($action === 'submit_payment') {
             $mismatch = explain_bank_movement_mismatch($bankMovements, $referenceNumber, (float) ($updatedOrder['precio'] ?? 0), $referenceMatchDigits);
         }
         $pendingOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+        $adminDetailMismatch = $isAdminOrRoot ? [
+            'context'             => 'submit_payment',
+            'step'                => 'bank_mismatch',
+            'failure_type'        => $mismatch['failure_type'],
+            'reasons'             => $mismatch['reasons'],
+            'reference_searched'  => $referenceNumber,
+            'amount_searched'     => (float) ($updatedOrder['precio'] ?? 0),
+            'reference_digits'    => $referenceMatchDigits,
+            'movements_found'     => count($bankMovements),
+            'movements'           => array_values(array_slice($bankMovements, 0, 30)),
+        ] : null;
         json_response([
             'ok' => true,
             'message' => bank_mismatch_customer_message($mismatch['failure_type']),
@@ -9631,6 +9648,7 @@ if ($action === 'submit_payment') {
             'reference_match' => $mismatch['reference_match'],
             'amount_match' => $mismatch['amount_match'],
             'failure_type' => $mismatch['failure_type'],
+            'admin_error_detail' => $adminDetailMismatch,
         ], 200, static function () use ($mysqli, $pendingOrder, $paymentMethodName, $referenceNumber, $phone, $mismatch): void {
             notify_bank_payment_pending_mismatch(
                 $mysqli,
@@ -10997,12 +11015,16 @@ if ($action === 'batch_create_and_pay') {
                 json_error(reference_reuse_conflict_message($batchRefConflict), 409);
             }
 
+            $isAdminBatch = isset($_SESSION['auth_user']) && in_array(trim(strtolower((string) ($_SESSION['auth_user']['rol'] ?? ''))), ['admin', 'root'], true);
+            $batchMovements = [];
             try {
                 $batchMovements = $batchUsesBinanceApi
                     ? fetch_and_sync_binance_pagonorte_movements($mysqli, $batchBinanceCfg)
                     : fetch_and_sync_bank_movements($mysqli, $batchBankCfg);
             } catch (Throwable $e) {
-                json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $e->getMessage()], 502);
+                $batchApiErr = $e->getMessage();
+                $batchAdminErr502 = $isAdminBatch ? ['context' => 'batch_create_and_pay', 'step' => 'fetch_bank_movements', 'error' => $batchApiErr, 'reference_searched' => $refNumber, 'amount_searched' => $totalBlindado, 'currency' => $batchCurrencyNorm] : null;
+                json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $batchApiErr, 'admin_error_detail' => $batchAdminErr502], 502);
             }
 
             $batchMatch = find_matching_bank_movement($mysqli, $batchMovements, $refNumber, $totalBlindado, $batchRefDigits, 0);
@@ -11015,7 +11037,9 @@ if ($action === 'batch_create_and_pay') {
                     $batchMatch     = $batchRetry['match'];
                     $batchMovements = $batchRetry['movements'];
                 } catch (Throwable $e) {
-                    json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $e->getMessage()], 502);
+                    $batchRetryErr = $e->getMessage();
+                    $batchAdminRetry502 = $isAdminBatch ? ['context' => 'batch_create_and_pay', 'step' => 'retry_bank_movements', 'error' => $batchRetryErr, 'reference_searched' => $refNumber, 'amount_searched' => $totalBlindado, 'movements_before_retry' => count($batchMovements)] : null;
+                    json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $batchRetryErr, 'admin_error_detail' => $batchAdminRetry502], 502);
                 }
             }
 
@@ -11025,15 +11049,27 @@ if ($action === 'batch_create_and_pay') {
                     ? ['reference_match' => true, 'amount_match' => false, 'failure_type' => 'amount_mismatch',
                        'reasons' => ['La referencia fue encontrada pero el monto no coincide con el total del carrito.']]
                     : explain_bank_movement_mismatch($batchMovements, $refNumber, $totalBlindado, $batchRefDigits);
+                $batchAdminMismatch = $isAdminBatch ? [
+                    'context'            => 'batch_create_and_pay',
+                    'step'               => 'bank_mismatch',
+                    'failure_type'       => $batchMismatch['failure_type'],
+                    'reasons'            => $batchMismatch['reasons'],
+                    'reference_searched' => $refNumber,
+                    'amount_searched'    => $totalBlindado,
+                    'reference_digits'   => $batchRefDigits,
+                    'movements_found'    => count($batchMovements),
+                    'movements'          => array_values(array_slice($batchMovements, 0, 30)),
+                ] : null;
                 json_response([
-                    'ok'              => false,
-                    'verified'        => false,
-                    'bank_checked'    => true,
-                    'message'         => bank_mismatch_customer_message($batchMismatch['failure_type']),
-                    'reasons'         => $batchMismatch['reasons'],
-                    'reference_match' => $batchMismatch['reference_match'],
-                    'amount_match'    => $batchMismatch['amount_match'],
-                    'failure_type'    => $batchMismatch['failure_type'],
+                    'ok'                 => false,
+                    'verified'           => false,
+                    'bank_checked'       => true,
+                    'message'            => bank_mismatch_customer_message($batchMismatch['failure_type']),
+                    'reasons'            => $batchMismatch['reasons'],
+                    'reference_match'    => $batchMismatch['reference_match'],
+                    'amount_match'       => $batchMismatch['amount_match'],
+                    'failure_type'       => $batchMismatch['failure_type'],
+                    'admin_error_detail' => $batchAdminMismatch,
                 ]);
             }
 
