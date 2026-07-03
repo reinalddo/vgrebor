@@ -10947,6 +10947,78 @@ if ($action === 'batch_create_and_pay') {
         }
     }
 
+    // Validation: reference + amount MUST match bank API before creating any order as 'pagado'
+    $batchVerifiedReference = $refNumber;
+    if (($payMode === 'money' || $payMode === 'binance_pagonorte') && $refNumber !== '') {
+        $isBatchBinancePagonorte = $payMode === 'binance_pagonorte';
+        $batchCurrencyNorm   = normalize_currency_code((string) ($currency ?? ''));
+        $batchUsesBankApi    = !$isBatchBinancePagonorte && order_currency_uses_bank_api($batchCurrencyNorm);
+        $batchUsesBinanceApi = $isBatchBinancePagonorte && $batchCurrencyNorm === 'USDT';
+
+        if ($batchUsesBankApi || $batchUsesBinanceApi) {
+            if ($totalBlindado <= 0) {
+                json_error('El total del carrito no es válido para la verificación bancaria.');
+            }
+            $batchBankCfg    = [
+                'ff_bank_api_base_url' => store_config_get('ff_bank_api_base_url', 'https://pagonorte.net'),
+                'ff_bank_posicion'     => store_config_get('ff_bank_posicion', ''),
+                'ff_bank_token'        => store_config_get('ff_bank_token', ''),
+                'ff_bank_clave'        => store_config_get('ff_bank_clave', ''),
+            ];
+            $batchBinanceCfg = ['binance_pagonorte_token' => store_config_get('binance_pagonorte_token', '')];
+            $batchRefDigits  = $isBatchBinancePagonorte ? binance_pagonorte_reference_digits() : 0;
+
+            $batchRefConflict = find_reference_reuse_conflict($mysqli, $refNumber, $batchRefDigits, 0, $totalBlindado);
+            if ($batchRefConflict !== null) {
+                json_error(reference_reuse_conflict_message($batchRefConflict), 409);
+            }
+
+            try {
+                $batchMovements = $batchUsesBinanceApi
+                    ? fetch_and_sync_binance_pagonorte_movements($mysqli, $batchBinanceCfg)
+                    : fetch_and_sync_bank_movements($mysqli, $batchBankCfg);
+            } catch (Throwable $e) {
+                json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $e->getMessage()], 502);
+            }
+
+            $batchMatch = find_matching_bank_movement($mysqli, $batchMovements, $refNumber, $totalBlindado, $batchRefDigits, 0);
+
+            if ($batchMatch === null) {
+                try {
+                    $batchRetry     = $batchUsesBinanceApi
+                        ? find_matching_bank_movement_binance_with_retry($mysqli, $batchBinanceCfg, $refNumber, $totalBlindado, $batchRefDigits, 0, 3, 5, $batchMovements)
+                        : find_matching_bank_movement_with_retry($mysqli, $batchBankCfg, $refNumber, $totalBlindado, $batchRefDigits, 0, 3, 5, $batchMovements);
+                    $batchMatch     = $batchRetry['match'];
+                    $batchMovements = $batchRetry['movements'];
+                } catch (Throwable $e) {
+                    json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $e->getMessage()], 502);
+                }
+            }
+
+            if ($batchMatch === null) {
+                $batchRefOnly  = find_bank_movement_by_reference($mysqli, $batchMovements, $refNumber, $batchRefDigits, 0);
+                $batchMismatch = $batchRefOnly !== null
+                    ? ['reference_match' => true, 'amount_match' => false, 'failure_type' => 'amount_mismatch',
+                       'reasons' => ['La referencia fue encontrada pero el monto no coincide con el total del carrito.']]
+                    : explain_bank_movement_mismatch($batchMovements, $refNumber, $totalBlindado, $batchRefDigits);
+                json_response([
+                    'ok'              => false,
+                    'verified'        => false,
+                    'bank_checked'    => true,
+                    'message'         => $batchMismatch['failure_type'] === 'amount_mismatch'
+                        ? 'El monto de la transferencia no coincide con el total del carrito.'
+                        : 'Su Pago está en proceso, Espere 1 min y vuelva a intentar',
+                    'reasons'         => $batchMismatch['reasons'],
+                    'reference_match' => $batchMismatch['reference_match'],
+                    'amount_match'    => $batchMismatch['amount_match'],
+                    'failure_type'    => $batchMismatch['failure_type'],
+                ]);
+            }
+
+            $batchVerifiedReference = (string) ($batchMatch['referencia'] ?? $refNumber);
+        }
+    }
+
     foreach ($cartItems as $itemIdx => $cartItem) {
         $pkgId    = intval($cartItem['package_id'] ?? 0);
         $qty      = max(1, intval($cartItem['quantity'] ?? 1));
@@ -11005,7 +11077,7 @@ if ($action === 'batch_create_and_pay') {
                 'cantidad_compra'                    => $qty,
                 'cantidad'                           => $pkgAmountNum,
                 'estado'                             => 'pagado',
-                'numero_referencia'                  => $refNumber,
+                'numero_referencia'                  => $batchVerifiedReference,
                 'telefono_contacto'                  => $phone,
                 'metodo_pago'                        => $methodName,
                 'payment_method_id'                  => $payMethodId,
@@ -11024,6 +11096,10 @@ if ($action === 'batch_create_and_pay') {
 
     if (empty($orderIds)) {
         json_error('No se pudo crear ningún pedido del carrito.');
+    }
+
+    if (isset($batchMatch) && is_array($batchMatch) && $batchVerifiedReference !== '') {
+        link_movement_to_order($mysqli, $batchVerifiedReference, $orderIds[0]);
     }
 
     json_response([
