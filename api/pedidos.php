@@ -6338,6 +6338,7 @@ function find_matching_bank_movement_with_retry(
     $match = null;
 
     for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+        $mysqli = ensure_mysqli_connection($mysqli);
         if ($attempt > 1 || empty($latestMovements)) {
             $latestMovements = fetch_and_sync_bank_movements($mysqli, $bankConfig);
         }
@@ -6388,6 +6389,7 @@ function find_matching_binance_pagonorte_movement_with_retry(
     $match = null;
 
     for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+        $mysqli = ensure_mysqli_connection($mysqli);
         if ($attempt > 1 || empty($latestMovements)) {
             $latestMovements = fetch_and_sync_binance_pagonorte_movements($mysqli, $config);
         }
@@ -6437,6 +6439,7 @@ function find_bank_movement_by_reference_binance_with_retry(
     $match = null;
 
     for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+        $mysqli = ensure_mysqli_connection($mysqli);
         if ($attempt > 1 || empty($latestMovements)) {
             $latestMovements = fetch_and_sync_binance_pagonorte_movements($mysqli, $config);
         }
@@ -6486,6 +6489,7 @@ function find_matching_bank_movement_binance_with_retry(
     $match = null;
 
     for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+        $mysqli = ensure_mysqli_connection($mysqli);
         if ($attempt > 1 || empty($latestMovements)) {
             $latestMovements = fetch_and_sync_binance_pagonorte_movements($mysqli, $config);
         }
@@ -6535,6 +6539,7 @@ function find_bank_movement_by_reference_with_retry(
     $match = null;
 
     for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+        $mysqli = ensure_mysqli_connection($mysqli);
         if ($attempt > 1 || empty($latestMovements)) {
             $latestMovements = fetch_and_sync_bank_movements($mysqli, $bankConfig);
         }
@@ -11019,6 +11024,67 @@ if ($action === 'batch_create_and_pay') {
             $batchRefConflict = find_reference_reuse_conflict($mysqli, $refNumber, $batchRefDigits, 0, $totalBlindado);
             if ($batchRefConflict !== null) {
                 json_error(reference_reuse_conflict_message($batchRefConflict), 409);
+            }
+
+            // Idempotencia: si ya existe un batch pagado hoy con la misma referencia+monto, devolver sus IDs
+            $iExistingBatchId = null;
+            if ($batchRefDigits > 0) {
+                $iSuffix = substr($refNumber, -$batchRefDigits);
+                $iStmt = $mysqli->prepare(
+                    "SELECT cart_batch_id FROM pedidos
+                     WHERE estado = 'pagado'
+                       AND cart_batch_id IS NOT NULL AND TRIM(cart_batch_id) != ''
+                       AND ABS(cart_batch_total - ?) < 0.01
+                       AND DATE(created_at) = CURDATE()
+                       AND RIGHT(TRIM(numero_referencia), ?) = ?
+                     ORDER BY id ASC LIMIT 1"
+                );
+                if ($iStmt) {
+                    $iStmt->bind_param('dis', $totalBlindado, $batchRefDigits, $iSuffix);
+                    $iStmt->execute();
+                    $iRes = $iStmt->get_result();
+                    $iRow = $iRes ? $iRes->fetch_assoc() : null;
+                    $iStmt->close();
+                    if ($iRow && !empty($iRow['cart_batch_id'])) {
+                        $iExistingBatchId = (string) $iRow['cart_batch_id'];
+                    }
+                }
+            } else {
+                $iStmt = $mysqli->prepare(
+                    "SELECT cart_batch_id FROM pedidos
+                     WHERE estado = 'pagado'
+                       AND cart_batch_id IS NOT NULL AND TRIM(cart_batch_id) != ''
+                       AND ABS(cart_batch_total - ?) < 0.01
+                       AND DATE(created_at) = CURDATE()
+                       AND TRIM(numero_referencia) = ?
+                     ORDER BY id ASC LIMIT 1"
+                );
+                if ($iStmt) {
+                    $iStmt->bind_param('ds', $totalBlindado, $refNumber);
+                    $iStmt->execute();
+                    $iRes = $iStmt->get_result();
+                    $iRow = $iRes ? $iRes->fetch_assoc() : null;
+                    $iStmt->close();
+                    if ($iRow && !empty($iRow['cart_batch_id'])) {
+                        $iExistingBatchId = (string) $iRow['cart_batch_id'];
+                    }
+                }
+            }
+            if ($iExistingBatchId !== null) {
+                $iExistingOrderIds = [];
+                $iStmt2 = $mysqli->prepare("SELECT id FROM pedidos WHERE cart_batch_id = ? AND estado = 'pagado' ORDER BY id ASC");
+                if ($iStmt2) {
+                    $iStmt2->bind_param('s', $iExistingBatchId);
+                    $iStmt2->execute();
+                    $iRes2 = $iStmt2->get_result();
+                    while ($iRes2 && ($iR2 = $iRes2->fetch_assoc())) {
+                        $iExistingOrderIds[] = (int) $iR2['id'];
+                    }
+                    $iStmt2->close();
+                }
+                if (!empty($iExistingOrderIds)) {
+                    json_response(['ok' => true, 'message' => 'Pedidos del carrito creados.', 'batch_id' => $iExistingBatchId, 'order_ids' => $iExistingOrderIds, 'batch_size' => count($iExistingOrderIds), 'idempotent' => true]);
+                }
             }
 
             $isAdminBatch = isset($_SESSION['auth_user']) && in_array(trim(strtolower((string) ($_SESSION['auth_user']['rol'] ?? ''))), ['admin', 'root'], true);
