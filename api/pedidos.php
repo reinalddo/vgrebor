@@ -10948,13 +10948,27 @@ if ($action === 'batch_create_and_pay') {
     }
 
     // Validation: reference + amount MUST match bank API before creating any order as 'pagado'
+    if ($payMode === 'money' || $payMode === 'binance_pagonorte') {
+        if ($refNumber === '') {
+            json_error('Debes ingresar el número de referencia para confirmar el pago.');
+        }
+        if (preg_match('/^\d+$/', $refNumber) !== 1) {
+            json_error('El número de referencia solo puede contener dígitos.');
+        }
+        if ($phone === '') {
+            json_error('Debes ingresar el número de teléfono de contacto.');
+        }
+    }
     $batchVerifiedReference = $refNumber;
-    if (($payMode === 'money' || $payMode === 'binance_pagonorte') && $refNumber !== '') {
+    if ($payMode === 'money' || $payMode === 'binance_pagonorte') {
         $isBatchBinancePagonorte = $payMode === 'binance_pagonorte';
         $batchCurrencyNorm   = normalize_currency_code((string) ($currency ?? ''));
         $batchUsesBankApi    = !$isBatchBinancePagonorte && order_currency_uses_bank_api($batchCurrencyNorm);
         $batchUsesBinanceApi = $isBatchBinancePagonorte && $batchCurrencyNorm === 'USDT';
 
+        if (!$batchUsesBankApi && !$batchUsesBinanceApi) {
+            json_error('El método de pago seleccionado no admite verificación bancaria para la moneda del carrito. No se puede procesar el pago.');
+        }
         if ($batchUsesBankApi || $batchUsesBinanceApi) {
             if ($totalBlindado <= 0) {
                 json_error('El total del carrito no es válido para la verificación bancaria.');
