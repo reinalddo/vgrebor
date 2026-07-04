@@ -10953,6 +10953,8 @@ if ($action === 'batch_create_and_pay') {
 
     $tenantSlug      = resolve_tenant_slug();
     $clienteUsuarioId = isset($_SESSION['auth_user']['id']) ? intval($_SESSION['auth_user']['id']) : null;
+    $userRole        = strtolower(trim((string) ($_SESSION['auth_user']['rol'] ?? '')));
+    $userIsAdmin     = in_array($userRole, ['root', 'admin'], true);
     $playerFields    = parse_player_fields_request($pfjRaw);
     $playerFieldsJson = $pfjRaw !== '' ? $pfjRaw : null;
     $batchId         = bin2hex(random_bytes(16));
@@ -11291,7 +11293,7 @@ if ($action === 'batch_create_and_pay') {
             ], $apiDiscordData));
 
             if ($payMode === 'points' && $oid > 0 && $clienteUsuarioId !== null && $clienteUsuarioId > 0) {
-                win_points_assign_pending_order_redemption($mysqli, $oid, $clienteUsuarioId);
+                win_points_assign_pending_order_redemption($mysqli, $oid, $clienteUsuarioId, $userIsAdmin);
                 $paidStmt = $mysqli->prepare("UPDATE pedidos SET estado = 'pagado' WHERE id = ? AND estado = 'pendiente' LIMIT 1");
                 if ($paidStmt) {
                     $paidStmt->bind_param('i', $oid);

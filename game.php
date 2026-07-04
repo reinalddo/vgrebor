@@ -5213,13 +5213,13 @@ include __DIR__ . "/includes/header.php";
     'monthlyMinimumMet' => (bool) ($winPointsMonthlyStatus['met'] ?? true),
     'monthlyMinimumSpent' => (float) ($winPointsMonthlyStatus['spent'] ?? 0.0),
     'monthlyMinimumRequired' => (float) ($winPointsMonthlyStatus['required'] ?? 0.0),
+    'isAdmin' => in_array($loggedUserRole, ['root', 'admin'], true),
   ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const gameUsesCatalogApi = <?= $usesCatalogApi ? 'true' : 'false' ?>;
   const paymentHeaderMinimalEnabled = <?= $paymentHeaderMinimalEnabled ? 'true' : 'false' ?>;
   const packageFeatureIconSvgMap = <?= json_encode(package_feature_icon_svg_map(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const packGrid = document.getElementById('pack-grid');
   const packCards2 = Array.from(document.querySelectorAll('.pack-card'));
-  console.log('[DEBUG init] packCards2.length='+packCards2.length+' requestedPkgId=<?= $requestedPackageId ?>');
   const packAccountPreviewButtons = Array.from(document.querySelectorAll('.pack-account-preview-btn'));
 
   // Ocultar PASO 1 (ID jugador) y renumerar pasos para juegos tipo cuenta y giftcard
@@ -6645,7 +6645,6 @@ include __DIR__ . "/includes/header.php";
     }
 
     const selection = resolvePreferredCheckoutSelection(pack);
-    console.log('[DEBUG renderSummary-START] pack='+(pack?pack.id:'null')+' selMode='+selection.mode+' redeemReq='+(pack?pack.redeemRequiredPoints:'N/A')+' prefMode='+preferredCheckoutPaymentMode);
     if (!selection.mode) {
       publicOrderSummaryShell.classList.add('d-none');
       if (publicOrderSummaryPanel) {
@@ -6725,8 +6724,6 @@ include __DIR__ . "/includes/header.php";
         : (selection.mode === 'paypal'
           ? String(paypalPayButtonLabel || 'PayPal')
           : String(selectedMethod && selectedMethod.nombre ? selectedMethod.nombre : 'Método de pago')));
-
-    console.log('[DEBUG renderSummary] mode='+selection.mode+' redeemRequired='+(pack?pack.redeemRequiredPoints:'noPack')+' totalAmt='+pricing.totalAmount+' badge='+methodLabel);
 
     if (publicOrderSummaryMethod) {
       publicOrderSummaryMethod.textContent = methodLabel;
@@ -6890,10 +6887,11 @@ include __DIR__ . "/includes/header.php";
   }
 
   function canRedeemPackWithPoints(pack) {
+    const monthlyOk = winPointsState.isAdmin || winPointsState.monthlyMinimumMet !== false;
     return Boolean(
       winPointsState.enabled
       && winPointsState.loggedIn
-      && winPointsState.monthlyMinimumMet !== false
+      && monthlyOk
       && pack
       && pack.redeemActive
       && getPackRequiredPoints(pack) > 0
@@ -6959,7 +6957,6 @@ include __DIR__ . "/includes/header.php";
     const quantity = normalizeOrderQuantity(activePaymentOrder && activePaymentOrder.purchaseQuantity ? activePaymentOrder.purchaseQuantity : (pack && pack.purchaseQuantity ? pack.purchaseQuantity : getOrderQuantity()));
     if (resolvedMode === 'points') {
       const pointsRequired = getPackRequiredPoints(pack, quantity);
-      console.log('[DEBUG pricing] POINTS BLOCK! pack='+(pack?pack.id:'null')+' redeemReq='+(pack?pack.redeemRequiredPoints:'N/A')+' qty='+quantity+' pointsRequired='+pointsRequired);
       const pointsText = formatWinPointsAmount(pointsRequired);
       return {
         currencyCode: String(winPointsState.name || 'Win Points'),
@@ -7275,6 +7272,11 @@ include __DIR__ . "/includes/header.php";
       nextMode = '';
     }
 
+    // If this specific pack has no redemption rule, points mode is not valid for it
+    if (nextMode === 'points' && !hasPointsRule) {
+      nextMode = '';
+    }
+
     return {
       mode: nextMode,
       methodId: nextMode === 'money' ? nextMethodId : '',
@@ -7426,9 +7428,11 @@ include __DIR__ . "/includes/header.php";
       const pointsCornerMarkup = paymentMethodPublicCornerMarkup(String(winPointsState.paymentCornerImageUrl || '').trim());
       const pointsMarkup = paymentMethodPublicCardContent(pointsImageUrl, winPointsState.name || 'Win Points', pointsMeta);
       const isSelected = selection.mode === 'points';
+      // Disable the button entirely when this specific pack has no redemption rule (not just grayed)
+      const pointsButtonDisabled = !selection.hasPointsRule;
       cards.push(`
         <div class="payment-method-public-card${isSelected ? ' is-selected' : ''}${pointsDisabled ? ' is-disabled' : ''}">
-          <button type="button" class="payment-method-public-button" data-payment-option="points">${pointsMarkup}</button>
+          <button type="button" class="payment-method-public-button" data-payment-option="points"${pointsButtonDisabled ? ' disabled' : ''}>${pointsMarkup}</button>
           ${pointsCornerMarkup}
         </div>`);
     }
@@ -10765,7 +10769,8 @@ include __DIR__ . "/includes/header.php";
           if (!_wp.loggedIn) {
             buyButton.textContent = `Inicia sesión para usar ${_wp.name || 'Puntos'}`;
           } else if (_wp.monthlyMinimumMet === false) {
-            buyButton.textContent = `Recarga mínimo mensual para usar ${_wp.name || 'RECoins'}`;
+            const _minAmt = _wp.monthlyMinimumRequired > 0 ? ` $${Number(_wp.monthlyMinimumRequired).toFixed(2)}` : '';
+            buyButton.textContent = `Recarga mín.${_minAmt} para usar ${_wp.name || 'RECoins'}`;
           } else {
             buyButton.textContent = `${_wp.name || 'RECoins'} insuficientes`;
           }
@@ -10792,7 +10797,6 @@ include __DIR__ . "/includes/header.php";
     const pointsModeSelected = Boolean(paymentSelection && paymentSelection.mode === 'points');
     const pointsBlockedNotLoggedIn = pointsModeSelected && !winPointsState.loggedIn;
     const pointsSelectedButBlocked = Boolean(pointsModeSelected && (!paymentSelection.canUsePointsNow || !winPointsState.loggedIn));
-    console.log('[DEBUG updateBtn] mode='+(paymentSelection&&paymentSelection.mode)+' loggedIn='+winPointsState.loggedIn+' ptsModeSelected='+pointsModeSelected+' ptsBlocked='+pointsSelectedButBlocked);
     const needsPlayerVerification = requiresVerifiedPlayerForCheckout();
     const paymentDifferenceBlocked = activePack ? getPaymentDifferenceBreakdown(activePack, selectedTotalValue).blocksSelection : false;
     const blockedByGameEntryWindow = !gameEntryWindowAccepted;
@@ -10876,7 +10880,6 @@ include __DIR__ . "/includes/header.php";
     card.classList.add('neon-selected');
     card.setAttribute('aria-pressed', 'true');
     activePack = buildPackStateFromCard(card);
-    console.log('[DEBUG packSelect] activePack='+activePack.id+' redeemReq='+activePack.redeemRequiredPoints+' redeemActive='+activePack.redeemActive);
     updateResumenCompra(activePack);
     renderPlayerFields(activePack);
     handlePlayerVerificationFieldChange();
@@ -11130,7 +11133,6 @@ include __DIR__ . "/includes/header.php";
               if (paymentMethodCatalogGrid) {
                 paymentMethodCatalogGrid.addEventListener('click', function(event) {
                   const button = event.target.closest('.payment-method-public-button');
-                  console.log('[DEBUG click] target='+event.target.tagName+' class='+event.target.className+' button='+(button?button.dataset.paymentOption:'NULL')+' disabled='+(button?button.disabled:'N/A'));
                   if (!button || button.disabled) {
                     return;
                   }
@@ -11139,17 +11141,13 @@ include __DIR__ . "/includes/header.php";
                     const selectedCard = packCards2.find(c => c.classList.contains('neon-selected'));
                     if (selectedCard) {
                       activePack = buildPackStateFromCard(selectedCard);
-                      console.log('[DEBUG clickRestore] activePack restored from DOM: id='+activePack.id+' redeemReq='+activePack.redeemRequiredPoints);
                     }
                   }
                   const mode = resolveCheckoutPaymentModeFromOption(button.dataset.paymentOption);
                   const methodId = button.dataset.methodId || '';
                   const previousCurrencyCode = String(monedaActualClave || '').trim().toUpperCase();
-                  console.log('[DEBUG step1] mode='+mode+' activePack='+(activePack?activePack.id:'null'));
                   storePreferredCheckoutPayment(mode, methodId);
-                  console.log('[DEBUG step2] after store, preferredMode='+preferredCheckoutPaymentMode);
                   const switchedCurrency = syncVisibleCurrencyWithPreferredPayment(activePack, { resetCoupon: !couponApplied });
-                  console.log('[DEBUG step3] switchedCurrency='+switchedCurrency);
                   const nextCurrencyCode = String(monedaActualClave || '').trim().toUpperCase();
                   // A blank previousCurrencyCode means no payment was previously selected — not a real change
                   const currencyActuallyChanged = previousCurrencyCode !== '' && previousCurrencyCode !== nextCurrencyCode && nextCurrencyCode !== '';
@@ -11179,7 +11177,6 @@ include __DIR__ . "/includes/header.php";
                   }
 
                   if (!switchedCurrency) {
-                    console.log('[DEBUG step4] calling updateResumenCompra, activePack='+(activePack?activePack.id:'null')+' redeemReq='+(activePack?activePack.redeemRequiredPoints:'N/A'));
                     updatePackPrices();
                     updateResumenCompra(activePack);
                   } else if (currencyActuallyChanged) {
@@ -11189,7 +11186,6 @@ include __DIR__ . "/includes/header.php";
                   if (activePaymentOrder) {
                     setActivePaymentMode(mode, methodId, { expandSelected: shouldExpandSinglePaymentOption() });
                   }
-                  console.log('[DEBUG step5] about to call updateButtonState');
                   updateButtonState();
                   // In cart mode, re-sync the summary and button after payment method selection
                   if (cartMode) {
@@ -12244,7 +12240,8 @@ include __DIR__ . "/includes/header.php";
                 }
 
                 // Points (RECoins) mode: show points pricing instead of money
-                if (cartSelection.mode === 'points') {
+                // Block if any cart item has no redemption rule (required points = 0)
+                if (cartSelection.mode === 'points' && cartItems.every(ci => getPackRequiredPoints(ci.pack) > 0)) {
                   const totalRecoins = cartItems.reduce((sum, ci) => sum + getPackRequiredPoints(ci.pack, ci.quantity), 0);
                   const recoinsText = formatWinPointsAmount(totalRecoins);
                   const rowsHtmlPts = cartItems.map(ci => {
@@ -12327,7 +12324,9 @@ include __DIR__ . "/includes/header.php";
                 const cartSel    = resolvePreferredCheckoutSelection(cartItems[0] ? cartItems[0].pack : null);
                 const pointsMode = cartSel.mode === 'points';
                 const wp         = (typeof winPointsState !== 'undefined') ? winPointsState : {};
-                const pointsBlocked = pointsMode && !cartSel.canUsePointsNow;
+                // Also block if any cart item has no redemption rule
+                const cartAllHaveRules = !hasItems || cartItems.every(ci => getPackRequiredPoints(ci.pack) > 0);
+                const pointsBlocked = pointsMode && (!cartSel.canUsePointsNow || !cartAllHaveRules);
                 const requiredOk = window.__gameNoPlayerIdRequired || (() => {
                   const fields = Array.from(orderForm.querySelectorAll('[required]'));
                   return fields.every(f => f.value.trim() !== '');
@@ -12336,7 +12335,8 @@ include __DIR__ . "/includes/header.php";
                 if (pointsBlocked && !wp.loggedIn) {
                   buyButton.textContent = `Inicia sesión para usar ${wp.name || 'Puntos'}`;
                 } else if (pointsBlocked && wp.monthlyMinimumMet === false) {
-                  buyButton.textContent = `Recarga mínimo mensual para usar ${wp.name || 'RECoins'}`;
+                  const minAmt = wp.monthlyMinimumRequired > 0 ? ` $${Number(wp.monthlyMinimumRequired).toFixed(2)}` : '';
+                  buyButton.textContent = `Recarga mín.${minAmt} para usar ${wp.name || 'RECoins'}`;
                 } else if (pointsBlocked) {
                   buyButton.textContent = `${wp.name || 'RECoins'} insuficientes`;
                 } else if (hasItems) {
@@ -12490,10 +12490,11 @@ include __DIR__ . "/includes/header.php";
                 if (paymentSelection.mode === 'points') {
                   if (!paymentSelection.canUsePointsNow) {
                     const _wp = (typeof winPointsState !== 'undefined') ? winPointsState : {};
+                    const _minAmtTxt = (_wp.monthlyMinimumRequired > 0) ? ` de $${Number(_wp.monthlyMinimumRequired).toFixed(2)}` : '';
                     const _msg = !_wp.loggedIn
                       ? `Inicia sesión para usar ${_wp.name || 'RECoins'}.`
                       : _wp.monthlyMinimumMet === false
-                        ? `Necesitas alcanzar el mínimo de recarga mensual para usar ${_wp.name || 'RECoins'}.`
+                        ? `Necesitas recargar mínimo${_minAmtTxt} en los últimos 30 días para usar ${_wp.name || 'RECoins'}.`
                         : `No tienes suficientes ${_wp.name || 'RECoins'}.`;
                     showToast(_msg, 'error');
                     return;

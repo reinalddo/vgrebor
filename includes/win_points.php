@@ -1087,7 +1087,7 @@ if (!function_exists('win_points_adjust_user_balance')) {
 }
 
 if (!function_exists('win_points_assign_pending_order_redemption')) {
-    function win_points_assign_pending_order_redemption(mysqli $mysqli, int $orderId, int $userId): array {
+    function win_points_assign_pending_order_redemption(mysqli $mysqli, int $orderId, int $userId, bool $skipMonthlyCheck = false): array {
         win_points_ensure_schema();
         if (!win_points_enabled()) {
             throw new RuntimeException('El sistema de premios no está activo.');
@@ -1144,15 +1144,18 @@ if (!function_exists('win_points_assign_pending_order_redemption')) {
             }
 
             // Regla: mínimo mensual de recarga para usar puntos en recargas gratis
-            $minMonthlySpend = win_points_monthly_min_spend();
-            if ($minMonthlySpend > 0.0) {
-                $monthlySpent = win_points_user_monthly_spent($mysqli, $userId);
-                if ($monthlySpent < $minMonthlySpend) {
-                    throw new RuntimeException(
-                        'Para canjear ' . win_points_program_name() . ' en recargas gratis, necesitas haber recargado un mínimo de $' .
-                        number_format($minMonthlySpend, 2) . ' en los últimos 30 días. Llevas $' .
-                        number_format($monthlySpent, 2) . ' recargados.'
-                    );
+            // Admin/root users bypass this restriction for testing purposes
+            if (!$skipMonthlyCheck) {
+                $minMonthlySpend = win_points_monthly_min_spend();
+                if ($minMonthlySpend > 0.0) {
+                    $monthlySpent = win_points_user_monthly_spent($mysqli, $userId);
+                    if ($monthlySpent < $minMonthlySpend) {
+                        throw new RuntimeException(
+                            'Para canjear ' . win_points_program_name() . ' en recargas gratis, necesitas haber recargado un mínimo de $' .
+                            number_format($minMonthlySpend, 2) . ' en los últimos 30 días. Llevas $' .
+                            number_format($monthlySpent, 2) . ' recargados.'
+                        );
+                    }
                 }
             }
 
@@ -1530,6 +1533,19 @@ if (!function_exists('win_points_delete_redemption_rule')) {
         if ($ruleId <= 0) {
             return false;
         }
+        // Fetch paquete_id before deletion to also clear the award reward on the package
+        $paqueteId = 0;
+        $fetchStmt = $mysqli->prepare('SELECT paquete_id FROM win_points_redemption_rules WHERE id = ? LIMIT 1');
+        if ($fetchStmt) {
+            $fetchStmt->bind_param('i', $ruleId);
+            $fetchStmt->execute();
+            $fetchResult = $fetchStmt->get_result();
+            if ($fetchResult instanceof mysqli_result) {
+                $row = $fetchResult->fetch_assoc();
+                $paqueteId = (int) ($row['paquete_id'] ?? 0);
+            }
+            $fetchStmt->close();
+        }
         $stmt = $mysqli->prepare('DELETE FROM win_points_redemption_rules WHERE id = ? LIMIT 1');
         if (!$stmt) {
             return false;
@@ -1538,6 +1554,15 @@ if (!function_exists('win_points_delete_redemption_rule')) {
         $stmt->execute();
         $deleted = $stmt->affected_rows > 0;
         $stmt->close();
+        // Clear the award badge on the package so it no longer shows RECoins earned
+        if ($deleted && $paqueteId > 0) {
+            $resetStmt = $mysqli->prepare('UPDATE juego_paquetes SET win_points_reward = 0 WHERE id = ? LIMIT 1');
+            if ($resetStmt) {
+                $resetStmt->bind_param('i', $paqueteId);
+                $resetStmt->execute();
+                $resetStmt->close();
+            }
+        }
         return $deleted;
     }
 }
