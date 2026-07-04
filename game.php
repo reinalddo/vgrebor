@@ -8075,7 +8075,7 @@ include __DIR__ . "/includes/header.php";
     control.name = controlName;
     control.dataset.apiField = fieldConfig.name || '';
     control.className = hasOptions ? 'form-select bg-dark text-info border-info' : 'form-control bg-dark text-info border-info';
-    control.required = true;
+    control.required = !window.__gameNoPlayerIdRequired;
 
     return control;
   }
@@ -8100,7 +8100,7 @@ include __DIR__ . "/includes/header.php";
 
     playerPrimaryInput.name = 'user_id';
     playerPrimaryInput.dataset.apiField = normalizedConfig.name || defaultPrimaryField.name;
-    playerPrimaryInput.required = true;
+    playerPrimaryInput.required = !window.__gameNoPlayerIdRequired;
     if (playerPrimaryInput.tagName === 'SELECT') {
       playerPrimaryInput.className = 'form-select bg-dark text-info border-info';
     } else {
@@ -8166,7 +8166,7 @@ include __DIR__ . "/includes/header.php";
       playerPrimaryField.classList.toggle('d-none', !shouldShowPrimaryField);
       playerPrimaryLabel.textContent = primaryConfig.label || defaultPrimaryField.label;
       playerPrimaryInput.dataset.apiField = primaryConfig.name || defaultPrimaryField.name;
-      playerPrimaryInput.required = shouldShowPrimaryField;
+      playerPrimaryInput.required = shouldShowPrimaryField && !window.__gameNoPlayerIdRequired;
 
       const primaryFieldName = String(primaryConfig.name || defaultPrimaryField.name);
       if (shouldShowPrimaryField && existingValues[primaryFieldName] && playerPrimaryInput.value.trim() === '') {
