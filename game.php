@@ -12395,7 +12395,7 @@ include __DIR__ . "/includes/header.php";
                 const userId = playerPrimaryInput ? playerPrimaryInput.value.trim() : '';
                 const email  = orderEmailInput ? orderEmailInput.value.trim() : '';
 
-                if (!userId) { showToast('Debes ingresar tu ID de jugador.', 'error'); return; }
+                if (!userId && !window.__gameNoPlayerIdRequired) { showToast('Debes ingresar tu ID de jugador.', 'error'); return; }
 
                 // Use pack currency/showDecimals from first item
                 const refPack      = cartItems[0].pack;
