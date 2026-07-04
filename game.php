@@ -5232,6 +5232,7 @@ include __DIR__ . "/includes/header.php";
       } catch (e) { return false; }
     });
     if (!allNoId) return;
+    window.__gameNoPlayerIdRequired = true;
     const sec1 = document.getElementById('player-step-section');
     const sec2 = document.getElementById('player-info-section');
     if (sec1) sec1.style.display = 'none';
@@ -10750,7 +10751,7 @@ include __DIR__ . "/includes/header.php";
       if (buyButton) {
         const hasItems = typeof cartItems !== 'undefined' && cartItems.length > 0;
         const requiredFields = Array.from(orderForm.querySelectorAll('[required]'));
-        const requiredFilled = requiredFields.every(f => f.value.trim() !== '');
+        const requiredFilled = window.__gameNoPlayerIdRequired || requiredFields.every(f => f.value.trim() !== '');
         buyButton.disabled = !hasItems || !requiredFilled;
       }
       syncPlayerVerificationUi();
@@ -10758,12 +10759,10 @@ include __DIR__ . "/includes/header.php";
     }
     // Solo controlar el estado del botón, no mostrar mensajes de error aquí
     const requiredFields = Array.from(orderForm.querySelectorAll("[required]"));
-    let requiredFilled = true;
-    requiredFields.forEach(field => {
-      if (field.value.trim() === "" || !isCheckoutFieldValid(field)) {
-        requiredFilled = false;
-      }
-    });
+    let requiredFilled = Boolean(window.__gameNoPlayerIdRequired);
+    if (!requiredFilled) {
+      requiredFilled = requiredFields.every(f => f.value.trim() !== '' && isCheckoutFieldValid(f));
+    }
     if (!activePack) {
       selectedPack.style.color = "#f87171";
       selectedPack.textContent = "Debes seleccionar un paquete.";
@@ -12264,7 +12263,7 @@ include __DIR__ . "/includes/header.php";
                 if (!buyButton || !cartMode) return;
                 const hasItems      = cartItems.length > 0;
                 const hasPayment    = !!resolvePreferredCheckoutSelection(cartItems[0] ? cartItems[0].pack : null).mode;
-                const requiredOk    = (() => {
+                const requiredOk    = window.__gameNoPlayerIdRequired || (() => {
                   const fields = Array.from(orderForm.querySelectorAll('[required]'));
                   return fields.every(f => f.value.trim() !== '');
                 })();
