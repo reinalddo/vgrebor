@@ -5236,7 +5236,10 @@ include __DIR__ . "/includes/header.php";
     const sec1 = document.getElementById('player-step-section');
     const sec2 = document.getElementById('player-info-section');
     if (sec1) sec1.style.display = 'none';
-    if (sec2) sec2.style.display = 'none';
+    if (sec2) {
+      sec2.style.display = 'none';
+      sec2.querySelectorAll('[required]').forEach(function(el) { el.removeAttribute('required'); });
+    }
     const paso2Title = document.querySelector('#game-packages-section .page-step-title');
     const paso3Title = document.querySelector('#payment-step-section .page-step-title');
     if (paso2Title) paso2Title.textContent = paso2Title.textContent.replace('PASO 2:', 'PASO 1:');
