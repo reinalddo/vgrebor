@@ -8589,6 +8589,45 @@ if ($action === 'submit_payment') {
     }
 
     if ($paymentMode === 'points') {
+        // Bank reference + amount verification required even for RECoin purchases.
+        if ($referenceNumberRaw === '') {
+            json_error('Debes ingresar el número de referencia bancaria para confirmar el pago.');
+        }
+        if ($phoneRaw === '') {
+            json_error('Debes ingresar el número de teléfono de contacto.');
+        }
+        if (preg_match('/^\d+$/', $referenceNumberRaw) !== 1) {
+            json_error('El número de referencia solo puede contener dígitos.');
+        }
+        $pointsOrderCurrency = normalize_currency_code((string) ($order['moneda'] ?? ''));
+        if (!order_currency_uses_bank_api($pointsOrderCurrency)) {
+            json_error('El pago con RECoins no está disponible para la moneda de este pedido.');
+        }
+        $pointsBankCfg = [
+            'ff_bank_api_base_url' => store_config_get('ff_bank_api_base_url', 'https://pagonorte.net'),
+            'ff_bank_posicion'     => store_config_get('ff_bank_posicion', ''),
+            'ff_bank_token'        => store_config_get('ff_bank_token', ''),
+            'ff_bank_clave'        => store_config_get('ff_bank_clave', ''),
+        ];
+        try {
+            $pointsBankMovements = fetch_and_sync_bank_movements($mysqli, $pointsBankCfg);
+        } catch (Throwable $e) {
+            json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $e->getMessage()], 502);
+        }
+        $pointsMatch = find_matching_bank_movement(
+            $mysqli, $pointsBankMovements, $referenceNumberRaw, (float) ($order['precio'] ?? 0), 0, $orderId
+        );
+        if ($pointsMatch === null) {
+            $pointsMismatch = explain_bank_movement_mismatch($pointsBankMovements, $referenceNumberRaw, (float) ($order['precio'] ?? 0), 0);
+            json_response([
+                'ok'           => false,
+                'verified'     => false,
+                'bank_checked' => true,
+                'message'      => bank_mismatch_customer_message($pointsMismatch['failure_type']),
+                'reasons'      => $pointsMismatch['reasons'],
+            ]);
+        }
+
         if (!win_points_enabled()) {
             json_error('El sistema de premios no está activo.', 409);
         }
@@ -10985,19 +11024,18 @@ if ($action === 'batch_create_and_pay') {
     }
 
     // Validation: reference + amount MUST match bank API before creating any order as 'pagado'
-    if ($payMode === 'money' || $payMode === 'binance_pagonorte') {
-        if ($refNumber === '') {
-            json_error('Debes ingresar el número de referencia para confirmar el pago.');
-        }
-        if (preg_match('/^\d+$/', $refNumber) !== 1) {
-            json_error('El número de referencia solo puede contener dígitos.');
-        }
-        if ($phone === '') {
-            json_error('Debes ingresar el número de teléfono de contacto.');
-        }
+    // Applies to ALL payment modes — no exceptions.
+    if ($refNumber === '') {
+        json_error('Debes ingresar el número de referencia para confirmar el pago.');
+    }
+    if (preg_match('/^\d+$/', $refNumber) !== 1) {
+        json_error('El número de referencia solo puede contener dígitos.');
+    }
+    if ($phone === '') {
+        json_error('Debes ingresar el número de teléfono de contacto.');
     }
     $batchVerifiedReference = $refNumber;
-    if ($payMode === 'money' || $payMode === 'binance_pagonorte') {
+    {
         $isBatchBinancePagonorte = $payMode === 'binance_pagonorte';
         $batchCurrencyNorm   = normalize_currency_code((string) ($currency ?? ''));
         $batchUsesBankApi    = !$isBatchBinancePagonorte && order_currency_uses_bank_api($batchCurrencyNorm);

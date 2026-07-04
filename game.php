@@ -7207,31 +7207,23 @@ include __DIR__ . "/includes/header.php";
     if (mode === 'points') {
       preferredCheckoutPaymentMode = 'points';
       preferredCheckoutMethodId = '';
-      return;
-    }
-    if (mode === 'binance_pagonorte') {
+    } else if (mode === 'binance_pagonorte') {
       preferredCheckoutPaymentMode = 'binance_pagonorte';
       preferredCheckoutMethodId = '';
-      return;
-    }
-    if (mode === 'binance') {
+    } else if (mode === 'binance') {
       preferredCheckoutPaymentMode = 'binance';
       preferredCheckoutMethodId = '';
-      return;
-    }
-    if (mode === 'paypal') {
+    } else if (mode === 'paypal') {
       preferredCheckoutPaymentMode = 'paypal';
       preferredCheckoutMethodId = '';
-      return;
-    }
-    if (mode === 'money' && normalizedMethodId !== '') {
+    } else if (mode === 'money' && normalizedMethodId !== '') {
       preferredCheckoutPaymentMode = 'money';
       preferredCheckoutMethodId = normalizedMethodId;
-      return;
+    } else {
+      preferredCheckoutPaymentMode = '';
+      preferredCheckoutMethodId = '';
     }
-
-    preferredCheckoutPaymentMode = '';
-    preferredCheckoutMethodId = '';
+    updatePackPrices();
   }
 
   function resolvePreferredCheckoutSelection(pack) {
