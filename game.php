@@ -5219,6 +5219,7 @@ include __DIR__ . "/includes/header.php";
   const packageFeatureIconSvgMap = <?= json_encode(package_feature_icon_svg_map(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const packGrid = document.getElementById('pack-grid');
   const packCards2 = Array.from(document.querySelectorAll('.pack-card'));
+  console.log('[DEBUG init] packCards2.length='+packCards2.length+' requestedPkgId=<?= $requestedPackageId ?>');
   const packAccountPreviewButtons = Array.from(document.querySelectorAll('.pack-account-preview-btn'));
 
   // Ocultar PASO 1 (ID jugador) y renumerar pasos para juegos tipo cuenta y giftcard
@@ -6644,6 +6645,7 @@ include __DIR__ . "/includes/header.php";
     }
 
     const selection = resolvePreferredCheckoutSelection(pack);
+    console.log('[DEBUG renderSummary-START] pack='+(pack?pack.id:'null')+' selMode='+selection.mode+' redeemReq='+(pack?pack.redeemRequiredPoints:'N/A')+' prefMode='+preferredCheckoutPaymentMode);
     if (!selection.mode) {
       publicOrderSummaryShell.classList.add('d-none');
       if (publicOrderSummaryPanel) {
@@ -6660,7 +6662,7 @@ include __DIR__ . "/includes/header.php";
     const selectedMethod = selection.mode === 'money'
       ? (selection.methods.find((method) => String(method.id) === String(selection.methodId || '')) || selection.methods[0] || null)
       : null;
-    const pricing = resolvePaymentPricing(selection.mode, selectedMethod);
+    const pricing = resolvePaymentPricing(selection.mode, selectedMethod, pack);
     const rows = [];
     const couponDiscountAmount = (selection.mode === 'points' || pricing.couponSuppressedByPayment)
       ? 0
@@ -6723,6 +6725,8 @@ include __DIR__ . "/includes/header.php";
         : (selection.mode === 'paypal'
           ? String(paypalPayButtonLabel || 'PayPal')
           : String(selectedMethod && selectedMethod.nombre ? selectedMethod.nombre : 'Método de pago')));
+
+    console.log('[DEBUG renderSummary] mode='+selection.mode+' redeemRequired='+(pack?pack.redeemRequiredPoints:'noPack')+' totalAmt='+pricing.totalAmount+' badge='+methodLabel);
 
     if (publicOrderSummaryMethod) {
       publicOrderSummaryMethod.textContent = methodLabel;
@@ -6949,12 +6953,13 @@ include __DIR__ . "/includes/header.php";
     return 0;
   }
 
-  function resolvePaymentPricing(mode = null, method = null) {
-    const pack = activePaymentOrder && activePaymentOrder.pack ? activePaymentOrder.pack : activePack;
+  function resolvePaymentPricing(mode = null, method = null, packOverride = null) {
+    const pack = packOverride || (activePaymentOrder && activePaymentOrder.pack ? activePaymentOrder.pack : activePack);
     const resolvedMode = mode || (activePaymentOrder ? activePaymentOrder.paymentMode : 'money');
     const quantity = normalizeOrderQuantity(activePaymentOrder && activePaymentOrder.purchaseQuantity ? activePaymentOrder.purchaseQuantity : (pack && pack.purchaseQuantity ? pack.purchaseQuantity : getOrderQuantity()));
-    if (resolvedMode === 'points' && pack && getPackRequiredPoints(pack, quantity) > 0) {
+    if (resolvedMode === 'points') {
       const pointsRequired = getPackRequiredPoints(pack, quantity);
+      console.log('[DEBUG pricing] POINTS BLOCK! pack='+(pack?pack.id:'null')+' redeemReq='+(pack?pack.redeemRequiredPoints:'N/A')+' qty='+quantity+' pointsRequired='+pointsRequired);
       const pointsText = formatWinPointsAmount(pointsRequired);
       return {
         currencyCode: String(winPointsState.name || 'Win Points'),
@@ -7224,6 +7229,10 @@ include __DIR__ . "/includes/header.php";
       preferredCheckoutMethodId = '';
     }
     updatePackPrices();
+    if (activePack) {
+      updateSelectedPriceDisplay(activePack);
+      renderPublicOrderSummary(activePack);
+    }
   }
 
   function resolvePreferredCheckoutSelection(pack) {
@@ -7233,7 +7242,7 @@ include __DIR__ . "/includes/header.php";
     const hasPointsRule = Boolean(hasPack && pack.redeemActive && getPackRequiredPoints(pack) > 0);
     const requiredPoints = hasPointsRule ? getPackRequiredPoints(pack) : 0;
     const canUsePointsNow = Boolean(hasPack && canRedeemPackWithPoints(pack));
-    const showPointsOption = Boolean(winPointsState.enabled && winPointsState.gameHasAnyRule);
+    const showPointsOption = Boolean(winPointsState.gameHasAnyRule);
     const canUseBinancePagonorte = hasPack ? Boolean(canUseBinancePagonorteCheckout(pack)) : Boolean(binancePagonorteCheckoutEnabled && resolveBinancePagonorteCurrencyEntry());
     const canUseBinance = hasPack ? Boolean(canUseBinanceCheckout(pack)) : Boolean(binancePayCheckoutEnabled);
     const canUsePayPal = hasPack
@@ -10536,6 +10545,7 @@ include __DIR__ . "/includes/header.php";
   }
 
   function resetCheckoutState() {
+    console.trace('[DEBUG resetCheckoutState] called!');
     orderForm.reset();
     if (orderEmailInput) orderEmailInput.value = defaultOrderEmail || '';
     restoreStoredPurchaseDefaults(true);
@@ -10767,7 +10777,10 @@ include __DIR__ . "/includes/header.php";
     }
     const paymentSelection = activePack ? resolvePreferredCheckoutSelection(activePack) : null;
     const hasPaymentSelection = Boolean(paymentSelection && paymentSelection.mode);
-    const pointsSelectedButBlocked = Boolean(paymentSelection && paymentSelection.mode === 'points' && !paymentSelection.canUsePointsNow);
+    const pointsModeSelected = Boolean(paymentSelection && paymentSelection.mode === 'points');
+    const pointsBlockedNotLoggedIn = pointsModeSelected && !winPointsState.loggedIn;
+    const pointsSelectedButBlocked = Boolean(pointsModeSelected && (!paymentSelection.canUsePointsNow || !winPointsState.loggedIn));
+    console.log('[DEBUG updateBtn] mode='+(paymentSelection&&paymentSelection.mode)+' loggedIn='+winPointsState.loggedIn+' ptsModeSelected='+pointsModeSelected+' ptsBlocked='+pointsSelectedButBlocked);
     const needsPlayerVerification = requiresVerifiedPlayerForCheckout();
     const paymentDifferenceBlocked = activePack ? getPaymentDifferenceBreakdown(activePack, selectedTotalValue).blocksSelection : false;
     const blockedByGameEntryWindow = !gameEntryWindowAccepted;
@@ -10776,6 +10789,8 @@ include __DIR__ . "/includes/header.php";
       buyButton.textContent = paymentDifferenceBlockedBuyButtonLabel;
     } else if (activePack && !hasPaymentSelection) {
       buyButton.textContent = 'Selecciona un metodo de pago';
+    } else if (pointsBlockedNotLoggedIn) {
+      buyButton.textContent = `Inicia sesión para usar ${winPointsState.name || 'Puntos'}`;
     } else if (pointsSelectedButBlocked) {
       buyButton.textContent = `${winPointsState.name || 'Puntos'} insuficientes`;
     } else if (blockedByGameEntryWindow) {
@@ -10849,6 +10864,7 @@ include __DIR__ . "/includes/header.php";
     card.classList.add('neon-selected');
     card.setAttribute('aria-pressed', 'true');
     activePack = buildPackStateFromCard(card);
+    console.log('[DEBUG packSelect] activePack='+activePack.id+' redeemReq='+activePack.redeemRequiredPoints+' redeemActive='+activePack.redeemActive);
     updateResumenCompra(activePack);
     renderPlayerFields(activePack);
     handlePlayerVerificationFieldChange();
@@ -10984,6 +11000,11 @@ include __DIR__ . "/includes/header.php";
     if (requestedPackCard) {
       activatePackCard(requestedPackCard, { scroll: false });
       requestedPackCard.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    } else {
+      const firstRegularPack = packCards2.find(card => card.dataset.accountSale !== '1');
+      if (firstRegularPack) {
+        activatePackCard(firstRegularPack, { scroll: false });
+      }
     }
   }
   syncOrderQuantityInput(1);
@@ -11097,15 +11118,26 @@ include __DIR__ . "/includes/header.php";
               if (paymentMethodCatalogGrid) {
                 paymentMethodCatalogGrid.addEventListener('click', function(event) {
                   const button = event.target.closest('.payment-method-public-button');
+                  console.log('[DEBUG click] target='+event.target.tagName+' class='+event.target.className+' button='+(button?button.dataset.paymentOption:'NULL')+' disabled='+(button?button.disabled:'N/A'));
                   if (!button || button.disabled) {
                     return;
                   }
 
+                  if (!activePack) {
+                    const selectedCard = packCards2.find(c => c.classList.contains('neon-selected'));
+                    if (selectedCard) {
+                      activePack = buildPackStateFromCard(selectedCard);
+                      console.log('[DEBUG clickRestore] activePack restored from DOM: id='+activePack.id+' redeemReq='+activePack.redeemRequiredPoints);
+                    }
+                  }
                   const mode = resolveCheckoutPaymentModeFromOption(button.dataset.paymentOption);
                   const methodId = button.dataset.methodId || '';
                   const previousCurrencyCode = String(monedaActualClave || '').trim().toUpperCase();
+                  console.log('[DEBUG step1] mode='+mode+' activePack='+(activePack?activePack.id:'null'));
                   storePreferredCheckoutPayment(mode, methodId);
+                  console.log('[DEBUG step2] after store, preferredMode='+preferredCheckoutPaymentMode);
                   const switchedCurrency = syncVisibleCurrencyWithPreferredPayment(activePack, { resetCoupon: !couponApplied });
+                  console.log('[DEBUG step3] switchedCurrency='+switchedCurrency);
                   const nextCurrencyCode = String(monedaActualClave || '').trim().toUpperCase();
                   // A blank previousCurrencyCode means no payment was previously selected — not a real change
                   const currencyActuallyChanged = previousCurrencyCode !== '' && previousCurrencyCode !== nextCurrencyCode && nextCurrencyCode !== '';
@@ -11135,6 +11167,7 @@ include __DIR__ . "/includes/header.php";
                   }
 
                   if (!switchedCurrency) {
+                    console.log('[DEBUG step4] calling updateResumenCompra, activePack='+(activePack?activePack.id:'null')+' redeemReq='+(activePack?activePack.redeemRequiredPoints:'N/A'));
                     updatePackPrices();
                     updateResumenCompra(activePack);
                   } else if (currencyActuallyChanged) {
@@ -11144,6 +11177,7 @@ include __DIR__ . "/includes/header.php";
                   if (activePaymentOrder) {
                     setActivePaymentMode(mode, methodId, { expandSelected: shouldExpandSinglePaymentOption() });
                   }
+                  console.log('[DEBUG step5] about to call updateButtonState');
                   updateButtonState();
                   // In cart mode, re-sync the summary and button after payment method selection
                   if (cartMode) {
@@ -12197,6 +12231,27 @@ include __DIR__ . "/includes/header.php";
                   cartTotalBlindado = null;
                 }
 
+                // Points (RECoins) mode: show points pricing instead of money
+                if (cartSelection.mode === 'points') {
+                  const totalRecoins = cartItems.reduce((sum, ci) => sum + getPackRequiredPoints(ci.pack, ci.quantity), 0);
+                  const recoinsText = formatWinPointsAmount(totalRecoins);
+                  const rowsHtmlPts = cartItems.map(ci => {
+                    const packRecoins = getPackRequiredPoints(ci.pack, ci.quantity);
+                    const qLabel = ci.quantity > 1 ? ` ×${ci.quantity}` : '';
+                    return `<div class="payment-order-summary-row"><span class="payment-order-summary-row-label">${escapePaymentHtml(ci.pack.name)}${qLabel}</span><strong class="payment-order-summary-row-value">${escapePaymentHtml(formatWinPointsAmount(packRecoins))}</strong></div>`;
+                  }).join('');
+                  publicOrderSummaryRows.innerHTML = rowsHtmlPts;
+                  publicOrderSummaryTotal.textContent = recoinsText;
+                  publicCheckoutSummaryTotalText = recoinsText;
+                  publicOrderSummaryShell.classList.remove('d-none');
+                  restartPublicCheckoutSummaryAnimation(`cart:points:${recoinsText}:${cartItems.length}`);
+                  if (publicOrderSummaryMethod) {
+                    publicOrderSummaryMethod.textContent = String((typeof winPointsState !== 'undefined' && winPointsState.name) || 'Win Points');
+                    publicOrderSummaryMethod.classList.remove('d-none');
+                  }
+                  return;
+                }
+
                 // Build individual pack rows
                 const showDec  = cartItems[0].pack.showDecimals;
                 const moneda   = cartItems[0].pack.moneda;
@@ -12256,15 +12311,21 @@ include __DIR__ . "/includes/header.php";
 
               function syncCartBuyButton() {
                 if (!buyButton || !cartMode) return;
-                const hasItems      = cartItems.length > 0;
-                const hasPayment    = !!resolvePreferredCheckoutSelection(cartItems[0] ? cartItems[0].pack : null).mode;
-                const requiredOk    = window.__gameNoPlayerIdRequired || (() => {
+                const hasItems   = cartItems.length > 0;
+                const cartSel    = resolvePreferredCheckoutSelection(cartItems[0] ? cartItems[0].pack : null);
+                const pointsMode = cartSel.mode === 'points';
+                const pointsBlockedNoLogin = pointsMode && !(typeof winPointsState !== 'undefined' && winPointsState.loggedIn);
+                const requiredOk = window.__gameNoPlayerIdRequired || (() => {
                   const fields = Array.from(orderForm.querySelectorAll('[required]'));
                   return fields.every(f => f.value.trim() !== '');
                 })();
-                buyButton.disabled = !hasItems || !requiredOk;
-                if (hasItems) {
-                  const totalTxt = cartGrandTotalText();
+                buyButton.disabled = !hasItems || !requiredOk || pointsBlockedNoLogin;
+                if (pointsBlockedNoLogin) {
+                  buyButton.textContent = `Inicia sesión para usar ${(typeof winPointsState !== 'undefined' && winPointsState.name) || 'Puntos'}`;
+                } else if (hasItems) {
+                  const totalTxt = pointsMode
+                    ? formatWinPointsAmount(cartItems.reduce((sum, ci) => sum + getPackRequiredPoints(ci.pack, ci.quantity), 0))
+                    : cartGrandTotalText();
                   buyButton.textContent = `Continuar con la compra - ${totalTxt}`;
                 } else {
                   buyButton.textContent = 'Selecciona al menos un paquete';

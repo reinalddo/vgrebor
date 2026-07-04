@@ -8589,45 +8589,6 @@ if ($action === 'submit_payment') {
     }
 
     if ($paymentMode === 'points') {
-        // Bank reference + amount verification required even for RECoin purchases.
-        if ($referenceNumberRaw === '') {
-            json_error('Debes ingresar el número de referencia bancaria para confirmar el pago.');
-        }
-        if ($phoneRaw === '') {
-            json_error('Debes ingresar el número de teléfono de contacto.');
-        }
-        if (preg_match('/^\d+$/', $referenceNumberRaw) !== 1) {
-            json_error('El número de referencia solo puede contener dígitos.');
-        }
-        $pointsOrderCurrency = normalize_currency_code((string) ($order['moneda'] ?? ''));
-        if (!order_currency_uses_bank_api($pointsOrderCurrency)) {
-            json_error('El pago con RECoins no está disponible para la moneda de este pedido.');
-        }
-        $pointsBankCfg = [
-            'ff_bank_api_base_url' => store_config_get('ff_bank_api_base_url', 'https://pagonorte.net'),
-            'ff_bank_posicion'     => store_config_get('ff_bank_posicion', ''),
-            'ff_bank_token'        => store_config_get('ff_bank_token', ''),
-            'ff_bank_clave'        => store_config_get('ff_bank_clave', ''),
-        ];
-        try {
-            $pointsBankMovements = fetch_and_sync_bank_movements($mysqli, $pointsBankCfg);
-        } catch (Throwable $e) {
-            json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $e->getMessage()], 502);
-        }
-        $pointsMatch = find_matching_bank_movement(
-            $mysqli, $pointsBankMovements, $referenceNumberRaw, (float) ($order['precio'] ?? 0), 0, $orderId
-        );
-        if ($pointsMatch === null) {
-            $pointsMismatch = explain_bank_movement_mismatch($pointsBankMovements, $referenceNumberRaw, (float) ($order['precio'] ?? 0), 0);
-            json_response([
-                'ok'           => false,
-                'verified'     => false,
-                'bank_checked' => true,
-                'message'      => bank_mismatch_customer_message($pointsMismatch['failure_type']),
-                'reasons'      => $pointsMismatch['reasons'],
-            ]);
-        }
-
         if (!win_points_enabled()) {
             json_error('El sistema de premios no está activo.', 409);
         }
@@ -11023,8 +10984,9 @@ if ($action === 'batch_create_and_pay') {
         }
     }
 
-    // Validation: reference + amount MUST match bank API before creating any order as 'pagado'
-    // Applies to ALL payment modes — no exceptions.
+    // Validation: reference + amount MUST match bank API (skipped for RECoins payments).
+    $batchVerifiedReference = '';
+    if ($payMode !== 'points') {
     if ($refNumber === '') {
         json_error('Debes ingresar el número de referencia para confirmar el pago.');
     }
@@ -11239,6 +11201,7 @@ if ($action === 'batch_create_and_pay') {
             $batchVerifiedReference = (string) ($batchMatch['referencia'] ?? $refNumber);
         }
     }
+    } // end if ($payMode !== 'points')
 
     foreach ($cartItems as $itemIdx => $cartItem) {
         $pkgId    = intval($cartItem['package_id'] ?? 0);
@@ -11275,12 +11238,14 @@ if ($action === 'batch_create_and_pay') {
         }
 
         $winPointsAward = 0;
-        if (win_points_enabled() && $clienteUsuarioId !== null && $clienteUsuarioId > 0) {
+        if ($payMode !== 'points' && win_points_enabled() && $clienteUsuarioId !== null && $clienteUsuarioId > 0) {
             $winPointsAward = win_points_package_reward($pkg) * $qty;
         }
 
         $pkgAmountNum = is_numeric($packAmountText) ? intval($packAmountText) : 1;
+        $batchItemEstado = $payMode === 'points' ? 'pendiente' : 'pagado';
 
+        $oid = 0;
         try {
             $oid = pedidos_insert_order($mysqli, array_merge([
                 'tenant_slug'                        => $tenantSlug,
@@ -11308,7 +11273,7 @@ if ($action === 'batch_create_and_pay') {
                 'cupon'                              => $couponInput !== null ? normalize_coupon_code($couponInput) : null,
                 'cantidad_compra'                    => $qty,
                 'cantidad'                           => $pkgAmountNum,
-                'estado'                             => 'pagado',
+                'estado'                             => $batchItemEstado,
                 'numero_referencia'                  => $batchVerifiedReference,
                 'telefono_contacto'                  => $phone,
                 'metodo_pago'                        => $methodName,
@@ -11323,9 +11288,28 @@ if ($action === 'batch_create_and_pay') {
                 'cart_batch_index'                   => $itemIdx + 1,
                 'cart_batch_size'                    => $batchSize,
             ], $apiDiscordData));
+
+            if ($payMode === 'points' && $oid > 0 && $clienteUsuarioId !== null && $clienteUsuarioId > 0) {
+                win_points_assign_pending_order_redemption($mysqli, $oid, $clienteUsuarioId);
+                $paidStmt = $mysqli->prepare("UPDATE pedidos SET estado = 'pagado' WHERE id = ? AND estado = 'pendiente' LIMIT 1");
+                if ($paidStmt) {
+                    $paidStmt->bind_param('i', $oid);
+                    $paidStmt->execute();
+                    $paidStmt->close();
+                }
+            }
+
             $orderIds[] = $oid;
         } catch (Throwable $e) {
             error_log('TVG batch_create_and_pay item #' . ($itemIdx + 1) . ' failed: ' . $e->getMessage());
+            if ($oid > 0) {
+                $cancelStmt = $mysqli->prepare("UPDATE pedidos SET estado = 'cancelado' WHERE id = ? AND estado = 'pendiente' LIMIT 1");
+                if ($cancelStmt) {
+                    $cancelStmt->bind_param('i', $oid);
+                    $cancelStmt->execute();
+                    $cancelStmt->close();
+                }
+            }
         }
     }
 
