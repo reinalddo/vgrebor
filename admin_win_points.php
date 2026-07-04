@@ -165,13 +165,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
           $rule = win_points_upsert_redemption_rule($mysqli, $packageId, $rewardPoints, $requiredPoints, $active, $resolvedOrder);
             admin_win_points_set_flash('success', 'Regla de canje guardada para el paquete seleccionado.');
-            admin_win_points_redirect(['rule' => (int) ($rule['id'] ?? 0)]);
+            admin_win_points_redirect(['tab' => 'rules']);
         } elseif (isset($_POST['delete_win_points_rule'])) {
             $ruleId = (int) ($_POST['rule_id'] ?? 0);
             if (!win_points_delete_redemption_rule($mysqli, $ruleId)) {
                 throw new RuntimeException('No se pudo eliminar la regla de canje seleccionada.');
             }
             admin_win_points_set_flash('success', 'Regla de canje eliminada.');
+            admin_win_points_redirect(['tab' => 'rules']);
         } elseif (isset($_POST['adjust_win_points_balance'])) {
             $userId = (int) ($_POST['adjust_user_id'] ?? 0);
             $delta = win_points_normalize_delta($_POST['adjust_points_delta'] ?? 0);
@@ -190,7 +191,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         admin_win_points_set_flash('error', $exception->getMessage());
     }
 
-    admin_win_points_redirect();
+    $redirectTabRaw  = trim((string) ($_POST['_redirect_tab'] ?? ''));
+    $allowedRedirectTabs = ['overview', 'setup', 'rules', 'wallets', 'ledger'];
+    $redirectQuery   = ($redirectTabRaw !== '' && in_array($redirectTabRaw, $allowedRedirectTabs, true))
+        ? ['tab' => $redirectTabRaw]
+        : [];
+    admin_win_points_redirect($redirectQuery);
 }
 
 $winPointsConfig = win_points_config();
@@ -215,6 +221,31 @@ foreach ($packageOptions as $packageOption) {
         $packageOptionsByGame[$gameName] = [];
     }
     $packageOptionsByGame[$gameName][] = $packageOption;
+}
+
+// Build lookup of existing rules by paquete_id
+$rulesByPackageId = [];
+foreach ($adminRules as $adminRule) {
+    $rulesByPackageId[(int) ($adminRule['paquete_id'] ?? 0)] = $adminRule;
+}
+
+// Merge all packages with their rule data (if any), grouped by game
+$allPackagesByGame = [];
+foreach ($packageOptions as $pkg) {
+    $gameName = trim((string) ($pkg['juego_nombre'] ?? 'Juego'));
+    $pkgId    = (int) ($pkg['id'] ?? 0);
+    $rule     = $rulesByPackageId[$pkgId] ?? null;
+    $allPackagesByGame[$gameName][] = [
+        'id'               => $pkgId,
+        'juego_nombre'     => $gameName,
+        'paquete_nombre'   => (string) ($pkg['paquete_nombre'] ?? ''),
+        'rule_id'          => $rule ? (int) ($rule['id'] ?? 0) : 0,
+        'win_points_reward'=> $rule ? (int) ($rule['win_points_reward'] ?? 0) : 0,
+        'required_points'  => $rule ? (int) ($rule['required_points'] ?? 0) : 0,
+        'orden'            => $rule ? ($rule['orden'] ?? null) : null,
+        'activo'           => $rule ? !empty($rule['activo']) : true,
+        'has_rule'         => $rule !== null,
+    ];
 }
 
 foreach ($adminWallets as $walletRow) {
@@ -863,6 +894,7 @@ include __DIR__ . '/includes/header.php';
 
           <form method="POST" enctype="multipart/form-data" class="row g-3">
             <input type="hidden" name="save_win_points_program" value="1">
+            <input type="hidden" name="_redirect_tab" value="setup">
             <div class="col-md-7">
               <label class="form-label text-info">Nombre de la moneda</label>
               <input type="text" name="win_points_name" value="<?= htmlspecialchars($winPointsConfig['name'], ENT_QUOTES, 'UTF-8') ?>" class="form-control bg-dark text-info border-info" required>
@@ -1022,153 +1054,228 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <div class="win-points-tab-panel" data-win-points-tab-panel="rules">
-    <div class="win-points-panel" data-wp-section="rules">
+    <div class="win-points-panel">
       <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 mb-4">
         <div>
-          <h2 class="h4 text-info fw-bold mb-1">Reglas actuales</h2>
-          <p class="text-secondary mb-0">Puedes editar puntos requeridos, orden o estado directamente sobre cada regla creada.</p>
+          <h2 class="h4 text-info fw-bold mb-1">Configurar RECoins por paquete</h2>
+          <p class="text-secondary mb-0">Todos los paquetes del sistema organizados por juego. <strong class="text-info">Premio por compra</strong> y <strong class="text-info">Costo de canje</strong> deben ser mayores a cero para que RECoins aplique al paquete.</p>
         </div>
       </div>
 
-      <?php if (empty($adminRules)): ?>
-        <div class="text-secondary">Aun no hay reglas de canje creadas.</div>
+      <?php
+        $totalAllPkgs = 0;
+        foreach ($allPackagesByGame as $gPkgs) { $totalAllPkgs += count($gPkgs); }
+      ?>
+
+      <?php if (empty($allPackagesByGame)): ?>
+        <div class="text-secondary">No hay juegos ni paquetes registrados en el sistema.</div>
       <?php else: ?>
-        <div class="win-points-section-tools">
+        <div class="win-points-section-tools mb-4">
           <div class="win-points-filter-group">
             <div class="win-points-filter-field">
               <label class="form-label text-info small mb-0">Buscar</label>
-              <input type="search" class="form-control bg-dark text-info border-info" placeholder="Juego, paquete, premio o costo" data-wp-filter-search>
+              <input type="search" class="form-control bg-dark text-info border-info" placeholder="Nombre del paquete" id="wpRulesSearch">
             </div>
             <div class="win-points-filter-field win-points-filter-field--compact">
-              <label class="form-label text-info small mb-0">Estado</label>
-              <select class="form-select bg-dark text-info border-info" data-wp-filter-extra>
-                <option value="all">Todas</option>
-                <option value="active">Activas</option>
-                <option value="inactive">Inactivas</option>
+              <label class="form-label text-info small mb-0">Juego</label>
+              <select class="form-select bg-dark text-info border-info" id="wpRulesGameFilter">
+                <option value="">Todos los juegos</option>
+                <?php foreach (array_keys($allPackagesByGame) as $gn): ?>
+                  <option value="<?= htmlspecialchars(strtolower($gn), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($gn, ENT_QUOTES, 'UTF-8') ?></option>
+                <?php endforeach; ?>
               </select>
             </div>
             <div class="win-points-filter-field win-points-filter-field--compact">
-              <label class="form-label text-info small mb-0">Elementos por pagina</label>
-              <select class="form-select bg-dark text-info border-info" data-wp-filter-size>
-                <option value="5" selected>5</option>
-                <option value="10">10</option>
-                <option value="25">25</option>
-                <option value="50">50</option>
+              <label class="form-label text-info small mb-0">Estado RECoins</label>
+              <select class="form-select bg-dark text-info border-info" id="wpRulesStatusFilter">
+                <option value="">Todos</option>
+                <option value="configured">Con RECoins</option>
+                <option value="unconfigured">Sin configurar</option>
               </select>
             </div>
           </div>
           <div class="win-points-filter-actions">
-            <span class="win-points-pill" data-wp-filter-count data-wp-count-singular="regla visible" data-wp-count-plural="reglas visibles"><?= count($adminRules) ?> reglas visibles</span>
+            <span class="win-points-pill" id="wpRulesCount"><?= $totalAllPkgs ?> paquete<?= $totalAllPkgs !== 1 ? 's' : '' ?></span>
           </div>
         </div>
-        <div class="win-points-mobile-stack">
-          <?php foreach ($adminRules as $ruleIndex => $rule): ?>
-            <?php $mobileEditFormId = 'winPointsRuleMobileForm' . (int) ($rule['id'] ?? 0); ?>
-            <div class="win-points-mobile-card" data-wp-item="rules" data-wp-key="rule-<?= (int) $ruleIndex ?>" data-wp-extra="<?= !empty($rule['activo']) ? 'active' : 'inactive' ?>" data-wp-filter="<?= htmlspecialchars(trim((string) (($rule['juego_nombre'] ?? '') . ' ' . ($rule['paquete_nombre'] ?? '') . ' ' . (int) ($rule['win_points_reward'] ?? 0) . ' ' . (int) ($rule['required_points'] ?? 0) . ' ' . (isset($rule['orden']) && $rule['orden'] !== null ? (int) $rule['orden'] : ''))), ENT_QUOTES, 'UTF-8') ?>">
-              <form id="<?= htmlspecialchars($mobileEditFormId, ENT_QUOTES, 'UTF-8') ?>" method="POST" class="win-points-rule-inline-form">
-                <input type="hidden" name="save_win_points_rule" value="1">
-                <input type="hidden" name="rule_package_id" value="<?= (int) ($rule['paquete_id'] ?? 0) ?>">
-              </form>
-              <div class="win-points-mobile-field">
-                <span class="win-points-mobile-label">Juego</span>
-                <div><?= htmlspecialchars((string) ($rule['juego_nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?></div>
-              </div>
-              <div class="win-points-mobile-field">
-                <span class="win-points-mobile-label">Paquete</span>
-                <div><?= htmlspecialchars((string) ($rule['paquete_nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?></div>
-              </div>
-              <div class="row g-3">
-                <div class="col-6">
-                  <label class="form-label text-info small mb-1">Premio por compra</label>
-                  <input type="number" min="0" name="rule_reward_points" value="<?= max(0, (int) ($rule['win_points_reward'] ?? 0)) ?>" form="<?= htmlspecialchars($mobileEditFormId, ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm bg-dark text-info border-info" required>
-                </div>
-                <div class="col-6">
-                  <label class="form-label text-info small mb-1">Costo de canje</label>
-                  <input type="number" min="1" name="rule_required_points" value="<?= max(1, (int) ($rule['required_points'] ?? 0)) ?>" form="<?= htmlspecialchars($mobileEditFormId, ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm bg-dark text-info border-info" required>
-                </div>
-                <div class="col-6">
-                  <label class="form-label text-info small mb-1">Orden</label>
-                  <input type="number" min="1" name="rule_order" value="<?= isset($rule['orden']) && $rule['orden'] !== null ? (int) $rule['orden'] : '' ?>" form="<?= htmlspecialchars($mobileEditFormId, ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm bg-dark text-info border-info" placeholder="Orden">
-                </div>
-                <div class="col-6 d-flex align-items-end">
-                  <div class="form-check form-switch m-0">
-                    <input class="form-check-input" type="checkbox" name="rule_active" form="<?= htmlspecialchars($mobileEditFormId, ENT_QUOTES, 'UTF-8') ?>" <?= !empty($rule['activo']) ? 'checked' : '' ?>>
-                    <label class="form-check-label small ms-2">Activa</label>
-                  </div>
-                </div>
-              </div>
-              <div class="win-points-rule-actions">
-                <button type="submit" form="<?= htmlspecialchars($mobileEditFormId, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-outline-info fw-bold">Guardar</button>
-                <form method="POST" onsubmit="return confirm('¿Eliminar esta regla de canje?');" class="win-points-rule-inline-form">
-                  <input type="hidden" name="delete_win_points_rule" value="1">
-                  <input type="hidden" name="rule_id" value="<?= (int) ($rule['id'] ?? 0) ?>">
-                  <button type="submit" class="btn btn-sm btn-outline-danger fw-bold">Eliminar</button>
-                </form>
-              </div>
+
+        <?php foreach ($allPackagesByGame as $gName => $gPkgs): ?>
+          <div class="wp-game-group mb-4" data-game-name="<?= htmlspecialchars(strtolower($gName), ENT_QUOTES, 'UTF-8') ?>">
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <h3 class="h6 text-info fw-bold mb-0 text-uppercase" style="letter-spacing:0.06em; white-space:nowrap;"><?= htmlspecialchars($gName, ENT_QUOTES, 'UTF-8') ?></h3>
+              <div style="flex:1; height:1px; background:rgba(34,211,238,0.18);"></div>
+              <span class="win-points-pill" style="font-size:0.75rem; padding:0.2rem 0.6rem; white-space:nowrap;"><?= count($gPkgs) ?> paquete<?= count($gPkgs) !== 1 ? 's' : '' ?></span>
             </div>
-          <?php endforeach; ?>
-        </div>
-        <div class="win-points-table-responsive">
-          <table class="table table-dark table-hover align-middle win-points-table">
-            <thead>
-              <tr>
-                <th>Juego</th>
-                <th>Paquete</th>
-                <th class="text-center">Premio por compra</th>
-                <th class="text-center">Costo de canje</th>
-                <th class="text-center">Orden</th>
-                <th class="text-center">Activo</th>
-                <th class="text-end">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              <?php foreach ($adminRules as $ruleIndex => $rule): ?>
-                <?php $editFormId = 'winPointsRuleForm' . (int) ($rule['id'] ?? 0); ?>
-                <tr data-wp-item="rules" data-wp-key="rule-<?= (int) $ruleIndex ?>" data-wp-extra="<?= !empty($rule['activo']) ? 'active' : 'inactive' ?>" data-wp-filter="<?= htmlspecialchars(trim((string) (($rule['juego_nombre'] ?? '') . ' ' . ($rule['paquete_nombre'] ?? '') . ' ' . (int) ($rule['win_points_reward'] ?? 0) . ' ' . (int) ($rule['required_points'] ?? 0) . ' ' . (isset($rule['orden']) && $rule['orden'] !== null ? (int) $rule['orden'] : ''))), ENT_QUOTES, 'UTF-8') ?>">
-                  <td data-label="Juego">
-                    <form id="<?= htmlspecialchars($editFormId, ENT_QUOTES, 'UTF-8') ?>" method="POST" class="win-points-rule-inline-form">
-                      <input type="hidden" name="save_win_points_rule" value="1">
-                      <input type="hidden" name="rule_package_id" value="<?= (int) ($rule['paquete_id'] ?? 0) ?>">
-                    </form>
-                    <?= htmlspecialchars((string) ($rule['juego_nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
-                  </td>
-                  <td data-label="Paquete"><?= htmlspecialchars((string) ($rule['paquete_nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
-                  <td data-label="Premio por compra">
-                    <input type="number" min="0" name="rule_reward_points" value="<?= max(0, (int) ($rule['win_points_reward'] ?? 0)) ?>" form="<?= htmlspecialchars($editFormId, ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm bg-dark text-info border-info win-points-rule-field text-center" required>
-                  </td>
-                  <td data-label="Costo de canje">
-                    <input type="number" min="1" name="rule_required_points" value="<?= max(1, (int) ($rule['required_points'] ?? 0)) ?>" form="<?= htmlspecialchars($editFormId, ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm bg-dark text-info border-info win-points-rule-field text-center" required>
-                  </td>
-                  <td data-label="Orden">
-                    <input type="number" min="1" name="rule_order" value="<?= isset($rule['orden']) && $rule['orden'] !== null ? (int) $rule['orden'] : '' ?>" form="<?= htmlspecialchars($editFormId, ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm bg-dark text-info border-info win-points-rule-field text-center" placeholder="Orden">
-                  </td>
-                  <td class="text-center" data-label="Activo">
-                    <div class="form-check form-switch win-points-rule-active m-0">
-                      <input class="form-check-input" type="checkbox" name="rule_active" form="<?= htmlspecialchars($editFormId, ENT_QUOTES, 'UTF-8') ?>" <?= !empty($rule['activo']) ? 'checked' : '' ?>>
+
+            <!-- Desktop table -->
+            <div class="win-points-table-responsive">
+              <table class="table table-dark table-hover align-middle win-points-table">
+                <thead>
+                  <tr>
+                    <th>Paquete</th>
+                    <th class="text-center" style="min-width:130px;">Premio por compra</th>
+                    <th class="text-center" style="min-width:130px;">Costo de canje</th>
+                    <th class="text-center" style="min-width:90px;">Orden</th>
+                    <th class="text-center">Activo</th>
+                    <th style="min-width:130px;"></th>
+                    <th class="text-end" style="min-width:160px;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <?php foreach ($gPkgs as $pkg): ?>
+                    <?php
+                      $fId       = 'wpPkgForm' . (int) $pkg['id'];
+                      $premio    = (int) $pkg['win_points_reward'];
+                      $costo     = (int) $pkg['required_points'];
+                      $hasRule   = $pkg['has_rule'];
+                      $configured = $hasRule && $premio > 0 && $costo > 0;
+                      $filterTxt = strtolower($gName . ' ' . $pkg['paquete_nombre']);
+                    ?>
+                    <tr data-wp-pkg-row
+                        data-pkg-game="<?= htmlspecialchars(strtolower($gName), ENT_QUOTES, 'UTF-8') ?>"
+                        data-pkg-filter="<?= htmlspecialchars($filterTxt, ENT_QUOTES, 'UTF-8') ?>"
+                        data-pkg-status="<?= $configured ? 'configured' : 'unconfigured' ?>">
+                      <td>
+                        <form id="<?= htmlspecialchars($fId, ENT_QUOTES, 'UTF-8') ?>" method="POST" class="win-points-rule-inline-form" data-wp-pkg-form>
+                          <input type="hidden" name="save_win_points_rule" value="1">
+                          <input type="hidden" name="rule_package_id" value="<?= (int) $pkg['id'] ?>">
+                          <input type="hidden" name="_redirect_tab" value="rules">
+                        </form>
+                        <span class="fw-semibold"><?= htmlspecialchars($pkg['paquete_nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+                      </td>
+                      <td>
+                        <input type="number" min="0" name="rule_reward_points"
+                               value="<?= $premio ?>"
+                               form="<?= htmlspecialchars($fId, ENT_QUOTES, 'UTF-8') ?>"
+                               class="form-control form-control-sm bg-dark text-info border-info win-points-rule-field text-center"
+                               data-wp-premio required>
+                      </td>
+                      <td>
+                        <input type="number" min="0" name="rule_required_points"
+                               value="<?= $costo ?>"
+                               form="<?= htmlspecialchars($fId, ENT_QUOTES, 'UTF-8') ?>"
+                               class="form-control form-control-sm bg-dark text-info border-info win-points-rule-field text-center"
+                               data-wp-costo required>
+                      </td>
+                      <td>
+                        <input type="number" min="1" name="rule_order"
+                               value="<?= isset($pkg['orden']) && $pkg['orden'] !== null ? (int) $pkg['orden'] : '' ?>"
+                               form="<?= htmlspecialchars($fId, ENT_QUOTES, 'UTF-8') ?>"
+                               class="form-control form-control-sm bg-dark text-info border-info win-points-rule-field text-center"
+                               placeholder="Orden">
+                      </td>
+                      <td class="text-center">
+                        <div class="form-check form-switch win-points-rule-active m-0">
+                          <input class="form-check-input" type="checkbox" name="rule_active"
+                                 form="<?= htmlspecialchars($fId, ENT_QUOTES, 'UTF-8') ?>"
+                                 <?= $pkg['activo'] ? 'checked' : '' ?>>
+                        </div>
+                      </td>
+                      <td>
+                        <span class="wp-zero-warning text-warning small fw-semibold" data-wp-warning
+                              style="display:<?= ($premio === 0 || $costo === 0) ? 'inline-flex' : 'none' ?>; align-items:center; gap:0.3rem;">
+                          <span>⚠</span><span data-wp-warning-text>RECoins inactivo para este paquete</span>
+                        </span>
+                      </td>
+                      <td class="text-end">
+                        <div class="win-points-rule-actions">
+                          <button type="submit" form="<?= htmlspecialchars($fId, ENT_QUOTES, 'UTF-8') ?>"
+                                  class="btn btn-sm btn-outline-info fw-bold"
+                                  data-wp-save-btn>Guardar</button>
+                          <?php if ($hasRule): ?>
+                            <form method="POST" onsubmit="return confirm('¿Eliminar la configuración de RECoins para &quot;<?= htmlspecialchars(addslashes($pkg['paquete_nombre']), ENT_QUOTES, 'UTF-8') ?>&quot;?');" class="win-points-rule-inline-form">
+                              <input type="hidden" name="delete_win_points_rule" value="1">
+                              <input type="hidden" name="rule_id" value="<?= (int) $pkg['rule_id'] ?>">
+                              <button type="submit" class="btn btn-sm btn-outline-danger fw-bold">Eliminar</button>
+                            </form>
+                          <?php endif; ?>
+                        </div>
+                      </td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Mobile cards -->
+            <div class="win-points-mobile-stack">
+              <?php foreach ($gPkgs as $pkg): ?>
+                <?php
+                  $mFId      = 'wpPkgMobileForm' . (int) $pkg['id'];
+                  $premio    = (int) $pkg['win_points_reward'];
+                  $costo     = (int) $pkg['required_points'];
+                  $hasRule   = $pkg['has_rule'];
+                  $configured = $hasRule && $premio > 0 && $costo > 0;
+                  $filterTxt = strtolower($gName . ' ' . $pkg['paquete_nombre']);
+                ?>
+                <div class="win-points-mobile-card"
+                     data-wp-pkg-row
+                     data-pkg-game="<?= htmlspecialchars(strtolower($gName), ENT_QUOTES, 'UTF-8') ?>"
+                     data-pkg-filter="<?= htmlspecialchars($filterTxt, ENT_QUOTES, 'UTF-8') ?>"
+                     data-pkg-status="<?= $configured ? 'configured' : 'unconfigured' ?>">
+                  <form id="<?= htmlspecialchars($mFId, ENT_QUOTES, 'UTF-8') ?>" method="POST" class="win-points-rule-inline-form" data-wp-pkg-form>
+                    <input type="hidden" name="save_win_points_rule" value="1">
+                    <input type="hidden" name="rule_package_id" value="<?= (int) $pkg['id'] ?>">
+                    <input type="hidden" name="_redirect_tab" value="rules">
+                  </form>
+                  <div class="d-flex justify-content-between align-items-start gap-2">
+                    <span class="fw-semibold"><?= htmlspecialchars($pkg['paquete_nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+                    <span class="wp-zero-warning text-warning small fw-semibold flex-shrink-0" data-wp-warning
+                          style="display:<?= ($premio === 0 || $costo === 0) ? 'inline-flex' : 'none' ?>; align-items:center; gap:0.25rem;">
+                      <span>⚠</span><span data-wp-warning-text>RECoins inactivo</span>
+                    </span>
+                  </div>
+                  <div class="row g-3">
+                    <div class="col-6">
+                      <label class="form-label text-info small mb-1">Premio por compra</label>
+                      <input type="number" min="0" name="rule_reward_points"
+                             value="<?= $premio ?>"
+                             form="<?= htmlspecialchars($mFId, ENT_QUOTES, 'UTF-8') ?>"
+                             class="form-control form-control-sm bg-dark text-info border-info"
+                             data-wp-premio required>
                     </div>
-                  </td>
-                  <td class="text-end" data-label="Acciones">
-                    <div class="win-points-rule-actions">
-                      <button type="submit" form="<?= htmlspecialchars($editFormId, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-sm btn-outline-info fw-bold">Guardar</button>
-                      <form method="POST" onsubmit="return confirm('¿Eliminar esta regla de canje?');" class="win-points-rule-inline-form">
+                    <div class="col-6">
+                      <label class="form-label text-info small mb-1">Costo de canje</label>
+                      <input type="number" min="0" name="rule_required_points"
+                             value="<?= $costo ?>"
+                             form="<?= htmlspecialchars($mFId, ENT_QUOTES, 'UTF-8') ?>"
+                             class="form-control form-control-sm bg-dark text-info border-info"
+                             data-wp-costo required>
+                    </div>
+                    <div class="col-6">
+                      <label class="form-label text-info small mb-1">Orden</label>
+                      <input type="number" min="1" name="rule_order"
+                             value="<?= isset($pkg['orden']) && $pkg['orden'] !== null ? (int) $pkg['orden'] : '' ?>"
+                             form="<?= htmlspecialchars($mFId, ENT_QUOTES, 'UTF-8') ?>"
+                             class="form-control form-control-sm bg-dark text-info border-info"
+                             placeholder="Orden">
+                    </div>
+                    <div class="col-6 d-flex align-items-end">
+                      <div class="form-check form-switch m-0">
+                        <input class="form-check-input" type="checkbox" name="rule_active"
+                               form="<?= htmlspecialchars($mFId, ENT_QUOTES, 'UTF-8') ?>"
+                               <?= $pkg['activo'] ? 'checked' : '' ?>>
+                        <label class="form-check-label small ms-2">Activa</label>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="win-points-rule-actions">
+                    <button type="submit" form="<?= htmlspecialchars($mFId, ENT_QUOTES, 'UTF-8') ?>"
+                            class="btn btn-sm btn-outline-info fw-bold"
+                            data-wp-save-btn>Guardar</button>
+                    <?php if ($hasRule): ?>
+                      <form method="POST" onsubmit="return confirm('¿Eliminar la configuración de RECoins para &quot;<?= htmlspecialchars(addslashes($pkg['paquete_nombre']), ENT_QUOTES, 'UTF-8') ?>&quot;?');" class="win-points-rule-inline-form">
                         <input type="hidden" name="delete_win_points_rule" value="1">
-                        <input type="hidden" name="rule_id" value="<?= (int) ($rule['id'] ?? 0) ?>">
+                        <input type="hidden" name="rule_id" value="<?= (int) $pkg['rule_id'] ?>">
                         <button type="submit" class="btn btn-sm btn-outline-danger fw-bold">Eliminar</button>
                       </form>
-                    </div>
-                  </td>
-                </tr>
+                    <?php endif; ?>
+                  </div>
+                </div>
               <?php endforeach; ?>
-            </tbody>
-          </table>
-        </div>
-        <div class="win-points-pagination" data-wp-pagination>
-          <div class="text-secondary small" data-wp-pagination-info></div>
-          <div class="win-points-pagination-nav">
-            <button type="button" class="btn btn-sm btn-outline-info" data-wp-page-prev>Anterior</button>
-            <button type="button" class="btn btn-sm btn-outline-info" data-wp-page-next>Siguiente</button>
+            </div>
           </div>
-        </div>
+        <?php endforeach; ?>
       <?php endif; ?>
     </div>
     </div>
@@ -1330,6 +1437,7 @@ include __DIR__ . '/includes/header.php';
 
           <form method="POST" class="row g-3">
             <input type="hidden" name="adjust_win_points_balance" value="1">
+            <input type="hidden" name="_redirect_tab" value="wallets">
             <div class="col-12">
               <label class="form-label text-info">Buscar usuario</label>
               <input type="search" class="form-control bg-dark text-info border-info" placeholder="Escribe nombre, correo o telefono" data-win-points-user-search>
@@ -1862,16 +1970,135 @@ include __DIR__ . '/includes/header.php';
     if (tabs.length && tabPanels.length) {
       tabs.forEach(function (tabButton) {
         tabButton.addEventListener('click', function () {
-          activateTab(tabButton.dataset.winPointsTab || 'overview');
+          const targetTab = tabButton.dataset.winPointsTab || 'overview';
+          activateTab(targetTab);
+          // Update URL param without reload so the tab survives a manual refresh
+          try {
+            const url = new URL(window.location.href);
+            if (targetTab === 'overview') {
+              url.searchParams.delete('tab');
+            } else {
+              url.searchParams.set('tab', targetTab);
+            }
+            window.history.replaceState(null, '', url.toString());
+          } catch (_) {}
         });
       });
+
+      // Activate tab from URL param on page load (e.g. after save/delete redirect)
+      try {
+        const urlTab = new URL(window.location.href).searchParams.get('tab');
+        const validTabNames = tabs.map(function (t) { return t.dataset.winPointsTab || ''; });
+        if (urlTab && validTabNames.indexOf(urlTab) !== -1) {
+          activateTab(urlTab);
+        }
+      } catch (_) {}
     }
 
     initUserSelectFilter();
-    initFilterableSection('rules');
     initFilterableSection('wallets');
     initFilterableSection('ledger');
     syncBadgePreview();
+
+    // --- Rules: all-packages view ---
+    (function () {
+      const searchInput   = document.getElementById('wpRulesSearch');
+      const gameFilter    = document.getElementById('wpRulesGameFilter');
+      const statusFilter  = document.getElementById('wpRulesStatusFilter');
+      const countBadge    = document.getElementById('wpRulesCount');
+      // Desktop rows (<tr>) and mobile cards (div) share data attributes; count only desktop rows
+      const desktopRows   = Array.from(document.querySelectorAll('tr[data-wp-pkg-row]'));
+      const mobileCards   = Array.from(document.querySelectorAll('div[data-wp-pkg-row]'));
+      const allRows       = desktopRows.concat(mobileCards);
+      const gameGroups    = Array.from(document.querySelectorAll('.wp-game-group'));
+
+      function applyRulesFilters() {
+        const search  = searchInput  ? searchInput.value.trim().toLowerCase()  : '';
+        const game    = gameFilter   ? gameFilter.value.toLowerCase()           : '';
+        const status  = statusFilter ? statusFilter.value                       : '';
+
+        // Build set of visible package filters (from desktop rows for counting)
+        let visibleCount = 0;
+        desktopRows.forEach(function (row) {
+          const rowFilter = (row.dataset.pkgFilter || '').toLowerCase();
+          const rowGame   = (row.dataset.pkgGame   || '').toLowerCase();
+          const rowStatus = row.dataset.pkgStatus  || '';
+          const show = (search === '' || rowFilter.indexOf(search) !== -1)
+                    && (game   === '' || rowGame   === game)
+                    && (status === '' || rowStatus === status);
+          row.classList.toggle('win-points-hidden', !show);
+          if (show) visibleCount++;
+        });
+
+        // Sync mobile cards with same filter logic
+        mobileCards.forEach(function (row) {
+          const rowFilter = (row.dataset.pkgFilter || '').toLowerCase();
+          const rowGame   = (row.dataset.pkgGame   || '').toLowerCase();
+          const rowStatus = row.dataset.pkgStatus  || '';
+          const show = (search === '' || rowFilter.indexOf(search) !== -1)
+                    && (game   === '' || rowGame   === game)
+                    && (status === '' || rowStatus === status);
+          row.classList.toggle('win-points-hidden', !show);
+        });
+
+        if (countBadge) {
+          countBadge.textContent = visibleCount + ' paquete' + (visibleCount !== 1 ? 's' : '');
+        }
+
+        gameGroups.forEach(function (group) {
+          const gName = group.dataset.gameName || '';
+          const hasVisible = desktopRows.some(function (r) {
+            return (r.dataset.pkgGame || '') === gName && !r.classList.contains('win-points-hidden');
+          });
+          group.classList.toggle('win-points-hidden', !hasVisible);
+        });
+      }
+
+      if (searchInput)  searchInput.addEventListener('input',  applyRulesFilters);
+      if (gameFilter)   gameFilter.addEventListener('change',  applyRulesFilters);
+      if (statusFilter) statusFilter.addEventListener('change', applyRulesFilters);
+
+      // Per-package: live warning + prevent submit when both fields = 0
+      document.querySelectorAll('[data-wp-pkg-form]').forEach(function (form) {
+        const container  = form.closest('[data-wp-pkg-row]');
+        if (!container) return;
+
+        const premioInput = container.querySelector('[data-wp-premio]');
+        const costoInput  = container.querySelector('[data-wp-costo]');
+        const warningEl   = container.querySelector('[data-wp-warning]');
+        const warningTxt  = container.querySelector('[data-wp-warning-text]');
+
+        function syncWarningState() {
+          const p = parseInt(premioInput ? premioInput.value : '0', 10) || 0;
+          const c = parseInt(costoInput  ? costoInput.value  : '0', 10) || 0;
+          const warn = (p === 0 || c === 0);
+          if (warningEl) warningEl.style.display = warn ? 'inline-flex' : 'none';
+          // Keep filter status in sync after user edits
+          if (container) {
+            container.dataset.pkgStatus = (p > 0 && c > 0) ? 'configured' : 'unconfigured';
+          }
+          // Reset warning text if it was changed by submit guard
+          if (warn && warningTxt && warningTxt.textContent.indexOf('Ingresa') !== -1) {
+            warningTxt.textContent = 'RECoins inactivo para este paquete';
+          }
+        }
+
+        if (premioInput) premioInput.addEventListener('input', syncWarningState);
+        if (costoInput)  costoInput.addEventListener('input',  syncWarningState);
+
+        form.addEventListener('submit', function (e) {
+          const p = parseInt(premioInput ? premioInput.value : '0', 10) || 0;
+          const c = parseInt(costoInput  ? costoInput.value  : '0', 10) || 0;
+          if (p === 0 && c === 0) {
+            e.preventDefault();
+            if (warningEl)  warningEl.style.display = 'inline-flex';
+            if (warningTxt) warningTxt.textContent = 'Ingresa valores mayores a 0 para guardar';
+          }
+        });
+      });
+
+      applyRulesFilters();
+    })();
   })();
 </script>
 
