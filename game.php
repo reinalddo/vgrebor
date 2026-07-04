@@ -10757,7 +10757,19 @@ include __DIR__ . "/includes/header.php";
         const hasItems = typeof cartItems !== 'undefined' && cartItems.length > 0;
         const requiredFields = Array.from(orderForm.querySelectorAll('[required]'));
         const requiredFilled = window.__gameNoPlayerIdRequired || requiredFields.every(f => f.value.trim() !== '');
-        buyButton.disabled = !hasItems || !requiredFilled;
+        const cartSel = hasItems ? resolvePreferredCheckoutSelection(cartItems[0].pack) : null;
+        const cartPointsBlocked = Boolean(cartSel && cartSel.mode === 'points' && !cartSel.canUsePointsNow);
+        buyButton.disabled = !hasItems || !requiredFilled || cartPointsBlocked;
+        if (cartPointsBlocked) {
+          const _wp = (typeof winPointsState !== 'undefined') ? winPointsState : {};
+          if (!_wp.loggedIn) {
+            buyButton.textContent = `Inicia sesión para usar ${_wp.name || 'Puntos'}`;
+          } else if (_wp.monthlyMinimumMet === false) {
+            buyButton.textContent = `Recarga mínimo mensual para usar ${_wp.name || 'RECoins'}`;
+          } else {
+            buyButton.textContent = `${_wp.name || 'RECoins'} insuficientes`;
+          }
+        }
       }
       syncPlayerVerificationUi();
       return;
@@ -12314,14 +12326,19 @@ include __DIR__ . "/includes/header.php";
                 const hasItems   = cartItems.length > 0;
                 const cartSel    = resolvePreferredCheckoutSelection(cartItems[0] ? cartItems[0].pack : null);
                 const pointsMode = cartSel.mode === 'points';
-                const pointsBlockedNoLogin = pointsMode && !(typeof winPointsState !== 'undefined' && winPointsState.loggedIn);
+                const wp         = (typeof winPointsState !== 'undefined') ? winPointsState : {};
+                const pointsBlocked = pointsMode && !cartSel.canUsePointsNow;
                 const requiredOk = window.__gameNoPlayerIdRequired || (() => {
                   const fields = Array.from(orderForm.querySelectorAll('[required]'));
                   return fields.every(f => f.value.trim() !== '');
                 })();
-                buyButton.disabled = !hasItems || !requiredOk || pointsBlockedNoLogin;
-                if (pointsBlockedNoLogin) {
-                  buyButton.textContent = `Inicia sesión para usar ${(typeof winPointsState !== 'undefined' && winPointsState.name) || 'Puntos'}`;
+                buyButton.disabled = !hasItems || !requiredOk || pointsBlocked;
+                if (pointsBlocked && !wp.loggedIn) {
+                  buyButton.textContent = `Inicia sesión para usar ${wp.name || 'Puntos'}`;
+                } else if (pointsBlocked && wp.monthlyMinimumMet === false) {
+                  buyButton.textContent = `Recarga mínimo mensual para usar ${wp.name || 'RECoins'}`;
+                } else if (pointsBlocked) {
+                  buyButton.textContent = `${wp.name || 'RECoins'} insuficientes`;
                 } else if (hasItems) {
                   const totalTxt = pointsMode
                     ? formatWinPointsAmount(cartItems.reduce((sum, ci) => sum + getPackRequiredPoints(ci.pack, ci.quantity), 0))
@@ -12469,6 +12486,46 @@ include __DIR__ . "/includes/header.php";
                 const playerFields = collectPlayerFields();
                 const playerFieldsJson = JSON.stringify(playerFields);
 
+                // RECoins (points) mode: skip payment form entirely
+                if (paymentSelection.mode === 'points') {
+                  if (!paymentSelection.canUsePointsNow) {
+                    const _wp = (typeof winPointsState !== 'undefined') ? winPointsState : {};
+                    const _msg = !_wp.loggedIn
+                      ? `Inicia sesión para usar ${_wp.name || 'RECoins'}.`
+                      : _wp.monthlyMinimumMet === false
+                        ? `Necesitas alcanzar el mínimo de recarga mensual para usar ${_wp.name || 'RECoins'}.`
+                        : `No tienes suficientes ${_wp.name || 'RECoins'}.`;
+                    showToast(_msg, 'error');
+                    return;
+                  }
+                  const totalRecoins = cartItems.reduce((sum, ci) => sum + getPackRequiredPoints(ci.pack, ci.quantity), 0);
+                  const recoinsText  = formatWinPointsAmount(totalRecoins);
+                  const cartPayloadPts = cartItems.map(ci => ({
+                    package_id: ci.pack.id,
+                    quantity: ci.quantity,
+                    price: normalizeCurrencyAmount(cartItemSubtotal(ci), ci.pack.showDecimals),
+                    moneda: ci.pack.moneda,
+                  }));
+                  const cartPseudoOrderPts = {
+                    orderId: '__cart__',
+                    pack: refPack,
+                    confirmedTotalText: recoinsText,
+                    expiresAtMs: Date.now() + 30 * 60 * 1000,
+                    email,
+                    isCart: true,
+                    isPoints: true,
+                    cartPayload: cartPayloadPts,
+                    cartTotal: 0,
+                    currency,
+                    userId,
+                    playerFieldsJson,
+                    hasDiscount: false,
+                    paymentSelection,
+                  };
+                  openCartPaymentModal(cartPseudoOrderPts);
+                  return;
+                }
+
                 // Build cart items array for backend
                 const cartPayload = cartItems.map(ci => ({
                   package_id: ci.pack.id,
@@ -12505,6 +12562,21 @@ include __DIR__ . "/includes/header.php";
 
               // ── Open payment modal in cart mode ──────────────────────────
               function openCartPaymentModal(ctx) {
+                // RECoins mode: skip payment form, show pre-confirm then execute directly
+                if (ctx.isPoints) {
+                  if (preConfirmTosCheck) preConfirmTosCheck.checked = false;
+                  if (preConfirmProceedBtn) {
+                    preConfirmProceedBtn.disabled = true;
+                    preConfirmProceedBtn.textContent = ctx.confirmedTotalText ? 'CONFIRMAR CANJE - ' + ctx.confirmedTotalText : 'CONFIRMAR CANJE';
+                  }
+                  pendingOpenModal = function() {
+                    executeCartPointsPurchase(ctx);
+                  };
+                  setOverlayVisible(paymentPreConfirmModal, true);
+                  if (paymentPreConfirmModal) paymentPreConfirmModal.scrollTop = 0;
+                  return;
+                }
+
                 // Show cart summary in modal header
                 if (paymentCartSumList && ctx.cartPayload) {
                   paymentCartSumList.innerHTML = ctx.cartPayload.map(item => {
@@ -12698,6 +12770,60 @@ include __DIR__ . "/includes/header.php";
                 if (paymentSubmitButton) paymentSubmitButton.onclick = null;
 
                 // Open progress modal and process items
+                await runBatchProgress(batchId, orderIds);
+              }
+
+              // ── Execute cart purchase with RECoins (no payment form) ─────
+              async function executeCartPointsPurchase(ctx) {
+                setLoadingModalContent('Procesando canje...', 'Estamos deduciendo tus RECoins y procesando los pedidos.', 'processing');
+                setOverlayVisible(loadingModal, true);
+
+                let batchId, orderIds;
+                let _apiData = null;
+                try {
+                  const body = new URLSearchParams();
+                  body.set('action', 'batch_create_and_pay');
+                  body.set('game_id', String(<?= (int) ($game['id'] ?? 0) ?>));
+                  body.set('cart_items_json', JSON.stringify(ctx.cartPayload));
+                  body.set('user_identifier', ctx.userId || '');
+                  body.set('player_fields_json', ctx.playerFieldsJson || '');
+                  body.set('email', ctx.email || '');
+                  body.set('currency', ctx.currency || '');
+                  body.set('total_price', '0');
+                  body.set('payment_method_id', '0');
+                  body.set('payment_mode', 'points');
+                  body.set('reference_number', '');
+                  body.set('phone', '');
+                  body.set('nombre_titular', '');
+                  body.set('cedula_titular', '');
+                  body.set('coupon', '');
+
+                  const resp = await fetch(buildAppUrl('/api/pedidos.php'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: body.toString(),
+                  });
+                  const data = await resp.json();
+                  _apiData = data;
+
+                  if (!data || !data.ok) {
+                    throw new Error((data && data.message) ? data.message : 'No se pudo completar el canje.');
+                  }
+
+                  batchId  = data.batch_id;
+                  orderIds = Array.isArray(data.order_ids) ? data.order_ids : [];
+
+                  if (orderIds.length === 0) {
+                    throw new Error('No se registraron pedidos.');
+                  }
+                } catch (err) {
+                  setOverlayVisible(loadingModal, false);
+                  const errMsg = normalizeApiRequestErrorMessage(err, 'Error al procesar el canje.');
+                  showToast(errMsg, 'error');
+                  return;
+                }
+
+                setOverlayVisible(loadingModal, false);
                 await runBatchProgress(batchId, orderIds);
               }
 

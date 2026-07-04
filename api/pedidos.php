@@ -10958,6 +10958,7 @@ if ($action === 'batch_create_and_pay') {
     $batchId         = bin2hex(random_bytes(16));
     $batchSize       = count($cartItems);
     $orderIds        = [];
+    $itemErrors      = [];
 
     // Handle points payment
     if ($payMode === 'points') {
@@ -11302,6 +11303,7 @@ if ($action === 'batch_create_and_pay') {
             $orderIds[] = $oid;
         } catch (Throwable $e) {
             error_log('TVG batch_create_and_pay item #' . ($itemIdx + 1) . ' failed: ' . $e->getMessage());
+            $itemErrors[] = $e->getMessage();
             if ($oid > 0) {
                 $cancelStmt = $mysqli->prepare("UPDATE pedidos SET estado = 'cancelado' WHERE id = ? AND estado = 'pendiente' LIMIT 1");
                 if ($cancelStmt) {
@@ -11314,7 +11316,8 @@ if ($action === 'batch_create_and_pay') {
     }
 
     if (empty($orderIds)) {
-        json_error('No se pudo crear ningún pedido del carrito.');
+        $firstError = !empty($itemErrors) ? $itemErrors[0] : 'No se pudo crear ningún pedido del carrito.';
+        json_error($firstError);
     }
 
     if (isset($batchMatch) && is_array($batchMatch) && $batchVerifiedReference !== '') {
