@@ -61,6 +61,7 @@ if (!win_points_enabled()) {
 win_points_ensure_schema();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $isAjax = !empty($_POST['wp_ajax']);
     try {
         if (isset($_POST['save_win_points_program'])) {
             $programName = trim((string) ($_POST['win_points_name'] ?? ''));
@@ -164,6 +165,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $resolvedOrder = $order === '' ? null : max(1, (int) $order);
 
           $rule = win_points_upsert_redemption_rule($mysqli, $packageId, $rewardPoints, $requiredPoints, $active, $resolvedOrder);
+            if ($isAjax) {
+                header('Content-Type: application/json');
+                echo json_encode(['ok' => true, 'rule_id' => (int) ($rule['id'] ?? 0)]);
+                exit;
+            }
             admin_win_points_set_flash('success', 'Regla de canje guardada para el paquete seleccionado.');
             admin_win_points_redirect(['tab' => 'rules']);
         } elseif (isset($_POST['delete_win_points_rule'])) {
@@ -188,6 +194,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             admin_win_points_set_flash('error', 'No se reconocio la accion solicitada en Win Points.');
         }
     } catch (Throwable $exception) {
+        if ($isAjax) {
+            header('Content-Type: application/json');
+            echo json_encode(['ok' => false, 'error' => $exception->getMessage()]);
+            exit;
+        }
         admin_win_points_set_flash('error', $exception->getMessage());
     }
 
@@ -588,8 +599,35 @@ include __DIR__ . '/includes/header.php';
   .win-points-rule-actions {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
     gap: 0.5rem;
     flex-wrap: wrap;
+  }
+  .wp-autosave-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    min-width: 6rem;
+    justify-content: flex-end;
+  }
+  .wp-autosave-status.is-saving { opacity: 1; color: #8cf6ff; }
+  .wp-autosave-status.is-saved  { opacity: 1; color: #4ade80; }
+  .wp-autosave-status.is-error  { opacity: 1; color: #f87171; }
+  @keyframes wp-autosave-spin { to { transform: rotate(360deg); } }
+  .wp-autosave-spinner {
+    display: inline-block;
+    width: 0.72rem;
+    height: 0.72rem;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: wp-autosave-spin 0.65s linear infinite;
+    flex-shrink: 0;
   }
   .win-points-pill {
     display: inline-flex;
@@ -1179,13 +1217,12 @@ include __DIR__ . '/includes/header.php';
                       </td>
                       <td class="text-end">
                         <div class="win-points-rule-actions">
-                          <button type="submit" form="<?= htmlspecialchars($fId, ENT_QUOTES, 'UTF-8') ?>"
-                                  class="btn btn-sm btn-outline-info fw-bold"
-                                  data-wp-save-btn>Guardar</button>
+                          <span class="wp-autosave-status" data-wp-autosave-status></span>
                           <?php if ($hasRule): ?>
                             <form method="POST" onsubmit="return confirm('¿Eliminar la configuración de RECoins para &quot;<?= htmlspecialchars(addslashes($pkg['paquete_nombre']), ENT_QUOTES, 'UTF-8') ?>&quot;?');" class="win-points-rule-inline-form">
                               <input type="hidden" name="delete_win_points_rule" value="1">
                               <input type="hidden" name="rule_id" value="<?= (int) $pkg['rule_id'] ?>">
+                              <input type="hidden" name="_redirect_tab" value="rules">
                               <button type="submit" class="btn btn-sm btn-outline-danger fw-bold">Eliminar</button>
                             </form>
                           <?php endif; ?>
@@ -1260,13 +1297,12 @@ include __DIR__ . '/includes/header.php';
                     </div>
                   </div>
                   <div class="win-points-rule-actions">
-                    <button type="submit" form="<?= htmlspecialchars($mFId, ENT_QUOTES, 'UTF-8') ?>"
-                            class="btn btn-sm btn-outline-info fw-bold"
-                            data-wp-save-btn>Guardar</button>
+                    <span class="wp-autosave-status" data-wp-autosave-status></span>
                     <?php if ($hasRule): ?>
                       <form method="POST" onsubmit="return confirm('¿Eliminar la configuración de RECoins para &quot;<?= htmlspecialchars(addslashes($pkg['paquete_nombre']), ENT_QUOTES, 'UTF-8') ?>&quot;?');" class="win-points-rule-inline-form">
                         <input type="hidden" name="delete_win_points_rule" value="1">
                         <input type="hidden" name="rule_id" value="<?= (int) $pkg['rule_id'] ?>">
+                        <input type="hidden" name="_redirect_tab" value="rules">
                         <button type="submit" class="btn btn-sm btn-outline-danger fw-bold">Eliminar</button>
                       </form>
                     <?php endif; ?>
@@ -2058,42 +2094,84 @@ include __DIR__ . '/includes/header.php';
       if (gameFilter)   gameFilter.addEventListener('change',  applyRulesFilters);
       if (statusFilter) statusFilter.addEventListener('change', applyRulesFilters);
 
-      // Per-package: live warning + prevent submit when both fields = 0
+      // Per-package: auto-save on change (debounced 800 ms) + live warning
+      var wpAjaxUrl = window.location.pathname;
+
       document.querySelectorAll('[data-wp-pkg-form]').forEach(function (form) {
-        const container  = form.closest('[data-wp-pkg-row]');
+        var container   = form.closest('[data-wp-pkg-row]');
         if (!container) return;
 
-        const premioInput = container.querySelector('[data-wp-premio]');
-        const costoInput  = container.querySelector('[data-wp-costo]');
-        const warningEl   = container.querySelector('[data-wp-warning]');
-        const warningTxt  = container.querySelector('[data-wp-warning-text]');
+        var premioInput = container.querySelector('[data-wp-premio]');
+        var costoInput  = container.querySelector('[data-wp-costo]');
+        var warningEl   = container.querySelector('[data-wp-warning]');
+        var warningTxt  = container.querySelector('[data-wp-warning-text]');
+        var statusEl    = container.querySelector('[data-wp-autosave-status]');
+        var debounceTimer = null;
 
-        function syncWarningState() {
-          const p = parseInt(premioInput ? premioInput.value : '0', 10) || 0;
-          const c = parseInt(costoInput  ? costoInput.value  : '0', 10) || 0;
-          const warn = (p === 0 || c === 0);
+        // Block accidental normal form submission
+        form.addEventListener('submit', function (e) { e.preventDefault(); });
+
+        function syncWarning() {
+          var p = parseInt(premioInput ? premioInput.value : '0', 10) || 0;
+          var c = parseInt(costoInput  ? costoInput.value  : '0', 10) || 0;
+          var warn = (p === 0 || c === 0);
           if (warningEl) warningEl.style.display = warn ? 'inline-flex' : 'none';
-          // Keep filter status in sync after user edits
-          if (container) {
-            container.dataset.pkgStatus = (p > 0 && c > 0) ? 'configured' : 'unconfigured';
-          }
-          // Reset warning text if it was changed by submit guard
-          if (warn && warningTxt && warningTxt.textContent.indexOf('Ingresa') !== -1) {
-            warningTxt.textContent = 'RECoins inactivo para este paquete';
+          if (container) container.dataset.pkgStatus = (p > 0 && c > 0) ? 'configured' : 'unconfigured';
+        }
+
+        function setStatus(state, msg) {
+          if (!statusEl) return;
+          statusEl.className = 'wp-autosave-status' + (state ? ' is-' + state : '');
+          if (state === 'saving') {
+            statusEl.innerHTML = '<span class="wp-autosave-spinner"></span><span>' + (msg || 'Guardando...') + '</span>';
+          } else {
+            statusEl.innerHTML = msg ? '<span>' + msg + '</span>' : '';
           }
         }
 
-        if (premioInput) premioInput.addEventListener('input', syncWarningState);
-        if (costoInput)  costoInput.addEventListener('input',  syncWarningState);
+        function doAutoSave() {
+          var p = parseInt(premioInput ? premioInput.value : '0', 10) || 0;
+          var c = parseInt(costoInput  ? costoInput.value  : '0', 10) || 0;
+          if (p === 0 && c === 0) return;
 
-        form.addEventListener('submit', function (e) {
-          const p = parseInt(premioInput ? premioInput.value : '0', 10) || 0;
-          const c = parseInt(costoInput  ? costoInput.value  : '0', 10) || 0;
-          if (p === 0 && c === 0) {
-            e.preventDefault();
-            if (warningEl)  warningEl.style.display = 'inline-flex';
-            if (warningTxt) warningTxt.textContent = 'Ingresa valores mayores a 0 para guardar';
-          }
+          setStatus('saving');
+          var fd = new FormData(form);
+          fd.set('wp_ajax', '1');
+
+          fetch(wpAjaxUrl, {
+            method: 'POST',
+            body: fd,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+          })
+          .then(function (resp) { return resp.json(); })
+          .then(function (data) {
+            if (data && data.ok) {
+              setStatus('saved', '✓ Guardado');
+              setTimeout(function () { setStatus(''); }, 2500);
+            } else {
+              setStatus('error', '✗ ' + (data && data.error ? data.error : 'Error'));
+              setTimeout(function () { setStatus(''); }, 4000);
+            }
+          })
+          .catch(function () {
+            setStatus('error', '✗ Error de red');
+            setTimeout(function () { setStatus(''); }, 4000);
+          });
+        }
+
+        function scheduleAutoSave() {
+          clearTimeout(debounceTimer);
+          syncWarning();
+          debounceTimer = setTimeout(doAutoSave, 800);
+        }
+
+        // Listen to number inputs with 'input' event (Premio, Costo, Orden)
+        Array.from(container.querySelectorAll('input[type="number"]')).forEach(function (inp) {
+          inp.addEventListener('input', scheduleAutoSave);
+        });
+        // Listen to checkbox with 'change' event (Activo toggle)
+        Array.from(container.querySelectorAll('input[type="checkbox"]')).forEach(function (inp) {
+          inp.addEventListener('change', scheduleAutoSave);
         });
       });
 
