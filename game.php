@@ -7403,7 +7403,7 @@ include __DIR__ . "/includes/header.php";
     }
 
     if (selection.showPointsOption) {
-      const pointsDisabled = !selection.canUsePointsNow;
+      const pointsDisabled = false; // always full color; buy button handles the blocked state
       let pointsMeta = '';
       if (!hasPack) {
         pointsMeta = `Saldo actual: ${formatWinPointsAmount(winPointsState.balance || 0)}`;
@@ -12258,6 +12258,7 @@ include __DIR__ . "/includes/header.php";
                     publicOrderSummaryMethod.textContent = String((typeof winPointsState !== 'undefined' && winPointsState.name) || 'Win Points');
                     publicOrderSummaryMethod.classList.remove('d-none');
                   }
+                  syncCartBuyButton();
                   return;
                 }
 
@@ -12324,9 +12325,18 @@ include __DIR__ . "/includes/header.php";
                 const cartSel    = resolvePreferredCheckoutSelection(cartItems[0] ? cartItems[0].pack : null);
                 const pointsMode = cartSel.mode === 'points';
                 const wp         = (typeof winPointsState !== 'undefined') ? winPointsState : {};
-                // Also block if any cart item has no redemption rule
+                // Block if any item has no rule OR total required points exceed balance
                 const cartAllHaveRules = !hasItems || cartItems.every(ci => getPackRequiredPoints(ci.pack) > 0);
-                const pointsBlocked = pointsMode && (!cartSel.canUsePointsNow || !cartAllHaveRules);
+                const totalRequiredPoints = (hasItems && pointsMode)
+                  ? cartItems.reduce((sum, ci) => sum + getPackRequiredPoints(ci.pack, ci.quantity), 0)
+                  : 0;
+                const hasEnoughBalance = !pointsMode || Number(wp.balance || 0) >= totalRequiredPoints;
+                const pointsBlocked = pointsMode && (
+                  !cartAllHaveRules
+                  || !wp.loggedIn
+                  || (wp.monthlyMinimumMet === false && !wp.isAdmin)
+                  || !hasEnoughBalance
+                );
                 const requiredOk = window.__gameNoPlayerIdRequired || (() => {
                   const fields = Array.from(orderForm.querySelectorAll('[required]'));
                   return fields.every(f => f.value.trim() !== '');
@@ -12334,11 +12344,13 @@ include __DIR__ . "/includes/header.php";
                 buyButton.disabled = !hasItems || !requiredOk || pointsBlocked;
                 if (pointsBlocked && !wp.loggedIn) {
                   buyButton.textContent = `Inicia sesión para usar ${wp.name || 'Puntos'}`;
-                } else if (pointsBlocked && wp.monthlyMinimumMet === false) {
+                } else if (pointsBlocked && wp.monthlyMinimumMet === false && !wp.isAdmin) {
                   const minAmt = wp.monthlyMinimumRequired > 0 ? ` $${Number(wp.monthlyMinimumRequired).toFixed(2)}` : '';
                   buyButton.textContent = `Recarga mín.${minAmt} para usar ${wp.name || 'RECoins'}`;
                 } else if (pointsBlocked) {
-                  buyButton.textContent = `${wp.name || 'RECoins'} insuficientes`;
+                  const needed = totalRequiredPoints;
+                  const has = Number(wp.balance || 0);
+                  buyButton.textContent = `${wp.name || 'RECoins'} insuficientes · tienes ${has.toLocaleString('en-US')}, necesitas ${needed.toLocaleString('en-US')}`;
                 } else if (hasItems) {
                   const totalTxt = pointsMode
                     ? formatWinPointsAmount(cartItems.reduce((sum, ci) => sum + getPackRequiredPoints(ci.pack, ci.quantity), 0))
