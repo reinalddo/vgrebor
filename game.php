@@ -8971,11 +8971,13 @@ include __DIR__ . "/includes/header.php";
 
         if (isCompletedFlow) {
           clearPaymentStatusPolling();
-          paymentStatusShouldCloseAll = true;
           const successNote = buildBloodStrikeEliteDiscordSuccessNote(data);
           const completedMsg = 'Tu recarga fue procesada y enviada correctamente.';
           setPaymentAlert(completedMsg, 'success', { extraMessage: successNote });
-          clearPaymentSupportUi();
+          renderDeliveredCodes(data);
+          if (!getAccountSalePayload(data)) {
+            paymentStatusShouldCloseAll = true;
+          }
           setPaymentFormDisabled(true);
           clearPaymentTimer();
           setCancelOrderButtonMode('close');
@@ -9010,11 +9012,13 @@ include __DIR__ . "/includes/header.php";
 
         if (isCompletedFlow) {
           clearPaymentStatusPolling();
-          paymentStatusShouldCloseAll = true;
           const successNote = buildBloodStrikeEliteDiscordSuccessNote(data);
           const completedMsg = 'Tu recarga fue procesada y enviada correctamente.';
           setPaymentAlert(completedMsg, 'success', { extraMessage: successNote });
-          clearPaymentSupportUi();
+          renderDeliveredCodes(data);
+          if (!getAccountSalePayload(data)) {
+            paymentStatusShouldCloseAll = true;
+          }
           setPaymentFormDisabled(true);
           clearPaymentTimer();
           setCancelOrderButtonMode('close');
@@ -11495,6 +11499,8 @@ include __DIR__ . "/includes/header.php";
                       );
                       if (!isCompletedFlow && (hasProviderDetails || effectiveProviderFlow === 'accepted' || effectiveProviderFlow === 'tracking')) {
                         renderProviderPaymentDetails(data, reference, getConfirmedPaymentTotalText());
+                      } else if (isCompletedFlow) {
+                        renderDeliveredCodes(data);
                       } else {
                         clearPaymentSupportUi();
                       }
@@ -11502,7 +11508,7 @@ include __DIR__ . "/includes/header.php";
                       setPaymentFormDisabled(true);
                       clearPaymentTimer();
                       setCancelOrderButtonMode('close');
-                      if (isCompletedFlow) {
+                      if (isCompletedFlow && !getAccountSalePayload(data)) {
                         paymentStatusShouldCloseAll = true;
                       }
                       showPaymentStatusModal(
@@ -12867,6 +12873,7 @@ include __DIR__ . "/includes/header.php";
                 let doneCount = 0;
                 let allSuccess = true;
                 const deliveredAccounts = [];
+                const deliveredCodes = [];
 
                 for (let i = 0; i < orderIds.length; i++) {
                   const orderId = orderIds[i];
@@ -12968,6 +12975,32 @@ include __DIR__ . "/includes/header.php";
                         row.appendChild(detailEl);
                       }
                     }
+
+                    // If giftcard/voucher, show code(s) inline below the progress row
+                    if (isDone && result && !(result.account_sale && result.account_sale.enabled)) {
+                      const batchCodes = extractProviderCodes(result);
+                      if (batchCodes.length > 0) {
+                        const packName = ci ? ci.pack.name : '';
+                        deliveredCodes.push({ name: packName, codes: batchCodes });
+
+                        const codeEl = document.createElement('div');
+                        codeEl.className = 'batch-account-delivery';
+                        const codesText = batchCodes.join('\n');
+                        const copyLabel = batchCodes.length > 1 ? 'Copiar códigos' : 'Copiar código';
+                        codeEl.innerHTML = `<div class="batch-account-text">${escapePaymentHtml(codesText)}</div>
+                          <button type="button" class="batch-account-copy-btn">${escapePaymentHtml(copyLabel)}</button>`;
+                        const copyBtn = codeEl.querySelector('.batch-account-copy-btn');
+                        if (copyBtn) {
+                          copyBtn.addEventListener('click', async () => {
+                            try {
+                              const ok = await copyTextToClipboard(codesText);
+                              showToast(ok ? 'Código copiado.' : 'No se pudo copiar.', ok ? 'success' : 'error');
+                            } catch (_) { showToast('No se pudo copiar.', 'error'); }
+                          });
+                        }
+                        row.appendChild(codeEl);
+                      }
+                    }
                   }
 
                   // 1-second delay between items (not after last one)
@@ -13021,6 +13054,41 @@ include __DIR__ . "/includes/header.php";
                       });
                     }
                   }
+
+                  // Show delivered giftcard/voucher codes summary in footer if any
+                  if (deliveredCodes.length > 0) {
+                    const codesHtml = deliveredCodes.map((entry, idx) => {
+                      const codesText = entry.codes.join('\n');
+                      const copyLabel = entry.codes.length > 1 ? 'Copiar códigos' : 'Copiar código';
+                      return `<div class="batch-account-summary-item">
+                        <div class="batch-account-summary-name">🎁 ${escapePaymentHtml(entry.name)}</div>
+                        <div class="batch-account-text">${escapePaymentHtml(codesText)}</div>
+                        <button type="button" class="batch-account-copy-btn" id="batch-footer-code-copy-${idx}">${escapePaymentHtml(copyLabel)}</button>
+                      </div>`;
+                    }).join('');
+
+                    const existingCodesFooter = batchProgressFooter.querySelector('.batch-codes-footer-list');
+                    if (!existingCodesFooter) {
+                      const codesBlock = document.createElement('div');
+                      codesBlock.className = 'batch-codes-footer-list batch-accounts-footer-list';
+                      codesBlock.innerHTML = `<div class="batch-accounts-footer-title">Códigos entregados</div>${codesHtml}`;
+                      batchProgressFooter.insertBefore(codesBlock, batchProgressFooter.firstChild);
+
+                      deliveredCodes.forEach((entry, idx) => {
+                        const btn = batchProgressFooter.querySelector(`#batch-footer-code-copy-${idx}`);
+                        if (btn) {
+                          const codesText = entry.codes.join('\n');
+                          btn.addEventListener('click', async () => {
+                            try {
+                              const ok = await copyTextToClipboard(codesText);
+                              showToast(ok ? 'Código copiado.' : 'No se pudo copiar.', ok ? 'success' : 'error');
+                            } catch (_) { showToast('No se pudo copiar.', 'error'); }
+                          });
+                        }
+                      });
+                    }
+                  }
+
                   batchProgressFooter.style.display = '';
                 }
               }
