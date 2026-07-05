@@ -8216,6 +8216,8 @@ include __DIR__ . "/includes/header.php";
     syncPlayerVerificationUi();
   }
 
+  const ZONE_ID_ALIASES = ['input2', 'zone_id', 'zoneid', 'zone', 'server_id', 'serverid', 'server'];
+
   function collectPlayerFields() {
     const fields = {};
 
@@ -8231,8 +8233,15 @@ include __DIR__ . "/includes/header.php";
       extraPlayerFields.querySelectorAll('[data-api-field]').forEach((input) => {
         const fieldName = String(input.dataset.apiField || '');
         const fieldValue = input.value.trim();
-        if (fieldName !== '' && fieldValue !== '') {
-          fields[fieldName] = fieldValue;
+        if (fieldValue !== '') {
+          if (fieldName !== '') {
+            fields[fieldName] = fieldValue;
+          }
+          // If this is a zone-ID-like field, mirror its value under all aliases so
+          // a field name change between renders (e.g. zone_id → input2) still finds it.
+          if (ZONE_ID_ALIASES.includes(fieldName)) {
+            ZONE_ID_ALIASES.forEach((alias) => { fields[alias] = fieldValue; });
+          }
         }
       });
     }
