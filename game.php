@@ -3843,6 +3843,33 @@ include __DIR__ . "/includes/header.php";
     filter: drop-shadow(0 0 16px rgba(34, 197, 94, 0.42)) drop-shadow(0 12px 18px rgba(2, 6, 23, 0.48));
   }
 
+  .payment-method-public-price-badge {
+    position: absolute;
+    bottom: 0.4rem;
+    right: 0.5rem;
+    z-index: 3;
+    padding: 0.18rem 0.55rem;
+    border-radius: 0.45rem;
+    background: rgba(2, 6, 23, 0.86);
+    border: 1px solid rgba(34, 211, 238, 0.3);
+    color: #e2e8f0;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    line-height: 1.4;
+    pointer-events: none;
+    backdrop-filter: blur(6px);
+    white-space: nowrap;
+    max-width: calc(100% - 1rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .payment-method-public-card.is-selected .payment-method-public-price-badge {
+    border-color: rgba(34, 197, 94, 0.55);
+    color: #bbf7d0;
+  }
+
   .payment-method-public-text {
     display: grid;
     gap: 0.2rem;
@@ -7250,6 +7277,7 @@ include __DIR__ . "/includes/header.php";
     if (activePack) {
       updateSelectedPriceDisplay(activePack);
       renderPublicOrderSummary(activePack);
+      renderPublicPaymentMethodCatalog(activePack);
     }
   }
 
@@ -7395,6 +7423,72 @@ include __DIR__ . "/includes/header.php";
     return `<img src="${escapePaymentHtml(safeImageUrl)}" alt="${safeTitle}" class="payment-method-public-image">`;
   }
 
+  function resolveMethodCardBadgeText(mode, method, pack) {
+    if (!pack) return '';
+    const quantity = getOrderQuantity();
+
+    if (mode === 'points') {
+      const pts = getPackRequiredPoints(pack, quantity);
+      return pts > 0 ? formatWinPointsAmount(pts) : '';
+    }
+
+    let targetCode = '';
+    let targetEntry = null;
+    if (mode === 'money' && method) {
+      targetCode = String(method.moneda_clave || '').trim().toUpperCase();
+      targetEntry = findCurrencyEntryByCode(targetCode);
+    } else if (mode === 'binance_pagonorte') {
+      targetEntry = resolveBinancePagonorteCurrencyEntry();
+      targetCode = targetEntry ? String(targetEntry.clave || 'USDT').toUpperCase() : 'USDT';
+    } else if (mode === 'binance') {
+      targetEntry = resolvePreferredBinanceCurrencyEntry();
+      targetCode = targetEntry ? String(targetEntry.clave || '').toUpperCase() : '';
+    } else if (mode === 'paypal') {
+      targetEntry = resolvePreferredPayPalCurrencyEntry();
+      targetCode = targetEntry ? String(targetEntry.clave || '').toUpperCase() : '';
+    }
+    if (!targetCode) return '';
+
+    const showDecimals = targetEntry ? Boolean(targetEntry.mostrar_decimales) : true;
+    const sourceCode = String(pack.moneda || monedaActualClave || '').trim().toUpperCase();
+    const sourceBase = selectedTotalValue > 0
+      ? selectedTotalValue
+      : getPackTotalPrice(pack, quantity);
+
+    let baseInTarget = normalizeCurrencyAmount(
+      convertCurrencyAmountBetweenCodes(sourceBase, sourceCode, targetCode),
+      showDecimals
+    );
+
+    // Apply method discount if it wins over existing discounts (coupon/drop)
+    const methodDiscountPct = resolvePaymentModeDiscountPercentage(mode, method);
+    if (methodDiscountPct > 0) {
+      const couponIsActive = couponApplied && Number(appliedCouponSummary.discountAmount || 0) > 0;
+      const dropPct = Number(pack.dropPercent || 0);
+      const sourceOriginal = couponIsActive && Number(appliedCouponSummary.originalAmount || 0) > 0
+        ? Number(appliedCouponSummary.originalAmount) : sourceBase;
+      const sourceBeforeDrop = dropPct > 0 ? sourceOriginal / (1 - dropPct / 100) : sourceOriginal;
+      const beforeDropInTarget = normalizeCurrencyAmount(
+        convertCurrencyAmountBetweenCodes(sourceBeforeDrop, sourceCode, targetCode),
+        showDecimals
+      );
+      const methodSaving = normalizeCurrencyAmount(beforeDropInTarget * methodDiscountPct / 100, showDecimals);
+      const existingSaving = normalizeCurrencyAmount(Math.max(0, beforeDropInTarget - baseInTarget), showDecimals);
+      if (methodSaving > existingSaving) {
+        baseInTarget = normalizeCurrencyAmount(Math.max(0, beforeDropInTarget - methodSaving), showDecimals);
+      }
+    }
+
+    // Apply method tax
+    const methodTaxPct = resolvePaymentModeTaxPercentage(mode, method);
+    if (methodTaxPct > 0) {
+      const tax = normalizeCurrencyAmount(baseInTarget * methodTaxPct / 100, showDecimals);
+      baseInTarget = normalizeCurrencyAmount(baseInTarget + tax, showDecimals);
+    }
+
+    return formatPaymentDifferenceMoney(targetCode, baseInTarget, showDecimals);
+  }
+
   function renderPublicPaymentMethodCatalog(pack = activePack) {
     if (!paymentMethodCatalogGrid || !paymentMethodCatalogCopy) {
       return;
@@ -7415,10 +7509,12 @@ include __DIR__ . "/includes/header.php";
       const cornerMarkup = paymentMethodPublicCornerMarkup(resolvePublicImageUrl(method.corner_image_path || ''));
       const imageMarkup = paymentMethodPublicCardContent(imageUrl, method.nombre || 'Método de pago', methodMetaText);
       const isSelected = selection.mode === 'money' && methodId === String(selection.methodId || '');
+      const badgeText = hasPack ? resolveMethodCardBadgeText('money', method, pack) : '';
+      const priceBadge = badgeText ? `<span class="payment-method-public-price-badge">${escapePaymentHtml(badgeText)}</span>` : '';
       cards.push(`
         <div class="payment-method-public-card${isSelected ? ' is-selected' : ''}">
           <button type="button" class="payment-method-public-button" data-payment-option="money" data-method-id="${escapePaymentHtml(methodId)}">${imageMarkup}</button>
-          ${cornerMarkup}
+          ${cornerMarkup}${priceBadge}
         </div>`);
     });
 
@@ -7430,12 +7526,14 @@ include __DIR__ . "/includes/header.php";
       const isSelected = selection.mode === 'binance_pagonorte';
       const binancePagonorteCornerMarkup = paymentMethodPublicCornerMarkup(String(binancePagonorteCornerImageUrl || '').trim());
       const binancePagonorteMarkup = paymentMethodPublicCardContent(String(binancePagonorteImageUrl || '').trim(), binancePagonorteButtonLabel, binancePagonorteMeta);
+      const bpBadgeText = hasPack ? resolveMethodCardBadgeText('binance_pagonorte', null, pack) : '';
+      const bpPriceBadge = bpBadgeText ? `<span class="payment-method-public-price-badge">${escapePaymentHtml(bpBadgeText)}</span>` : '';
       cards.push(`
         <div class="payment-method-public-card${isSelected ? ' is-selected' : ''}">
           <button type="button" class="payment-method-public-button" data-payment-option="binance_pagonorte">
             ${binancePagonorteMarkup}
           </button>
-          ${binancePagonorteCornerMarkup}
+          ${binancePagonorteCornerMarkup}${bpPriceBadge}
         </div>`);
     }
 
@@ -7447,12 +7545,14 @@ include __DIR__ . "/includes/header.php";
       const isSelected = selection.mode === 'binance';
       const binanceCornerMarkup = paymentMethodPublicCornerMarkup(String(binancePayCornerImageUrl || '').trim());
       const binanceMarkup = paymentMethodPublicCardContent(String(binancePayImageUrl || '').trim(), binancePayButtonLabel, binanceMeta);
+      const bnBadgeText = hasPack ? resolveMethodCardBadgeText('binance', null, pack) : '';
+      const bnPriceBadge = bnBadgeText ? `<span class="payment-method-public-price-badge">${escapePaymentHtml(bnBadgeText)}</span>` : '';
       cards.push(`
         <div class="payment-method-public-card${isSelected ? ' is-selected' : ''}">
           <button type="button" class="payment-method-public-button" data-payment-option="binance">
             ${binanceMarkup}
           </button>
-          ${binanceCornerMarkup}
+          ${binanceCornerMarkup}${bnPriceBadge}
         </div>`);
     }
 
@@ -7461,12 +7561,14 @@ include __DIR__ . "/includes/header.php";
       const isSelected = selection.mode === 'paypal';
       const paypalCornerMarkup = paymentMethodPublicCornerMarkup(String(paypalPayCornerImageUrl || '').trim());
       const paypalMarkup = paymentMethodPublicCardContent(String(paypalPayImageUrl || '').trim(), paypalPayButtonLabel, paypalMeta);
+      const ppBadgeText = hasPack ? resolveMethodCardBadgeText('paypal', null, pack) : '';
+      const ppPriceBadge = ppBadgeText ? `<span class="payment-method-public-price-badge">${escapePaymentHtml(ppBadgeText)}</span>` : '';
       cards.push(`
         <div class="payment-method-public-card${isSelected ? ' is-selected' : ''}">
           <button type="button" class="payment-method-public-button" data-payment-option="paypal">
             ${paypalMarkup}
           </button>
-          ${paypalCornerMarkup}
+          ${paypalCornerMarkup}${ppPriceBadge}
         </div>`);
     }
 
@@ -7498,10 +7600,12 @@ include __DIR__ . "/includes/header.php";
       const isSelected = selection.mode === 'points';
       // Disable the button entirely when this specific pack has no redemption rule (not just grayed)
       const pointsButtonDisabled = !selection.hasPointsRule;
+      const ptsBadgeText = hasPack ? resolveMethodCardBadgeText('points', null, pack) : '';
+      const ptsPriceBadge = ptsBadgeText ? `<span class="payment-method-public-price-badge">${escapePaymentHtml(ptsBadgeText)}</span>` : '';
       cards.push(`
         <div class="payment-method-public-card${isSelected ? ' is-selected' : ''}${pointsDisabled ? ' is-disabled' : ''}">
           <button type="button" class="payment-method-public-button" data-payment-option="points"${pointsButtonDisabled ? ' disabled' : ''}>${pointsMarkup}</button>
-          ${pointsCornerMarkup}
+          ${pointsCornerMarkup}${ptsPriceBadge}
         </div>`);
     }
 
@@ -10903,7 +11007,9 @@ include __DIR__ . "/includes/header.php";
     // In cart mode, keep the cart summary visible and ignore single-pack state
     if (typeof cartMode !== 'undefined' && cartMode) {
       if (typeof updateResumenCompraCart === 'function') updateResumenCompraCart();
-      // Re-render payment method catalog with a reference pack so selection is highlighted
+      if (typeof cartGrandTotal === 'function' && typeof cartItems !== 'undefined' && cartItems.length > 0) {
+        selectedTotalValue = cartGrandTotal();
+      }
       const refPack = (typeof cartItems !== 'undefined' && cartItems.length > 0) ? cartItems[0].pack : null;
       renderPublicPaymentMethodCatalog(refPack);
       return;
@@ -11761,6 +11867,7 @@ include __DIR__ . "/includes/header.php";
                       cartTotalBlindado = selectedTotalValue;
                       syncFloatCartFab(); // actualiza el FAB con el total con descuento de inmediato
                       updateResumenCompraCart();
+                      renderPublicPaymentMethodCatalog(cartItems.length > 0 ? cartItems[0].pack : null);
                     } else {
                       pack.purchaseQuantity = getOrderQuantity();
                       updateSelectedPriceDisplay(pack);
@@ -12281,6 +12388,8 @@ include __DIR__ . "/includes/header.php";
                   cartTotalBlindado = null;
                   syncCartHeaderButton(); // muestra el fab antes de animar
                   if (typeof updateResumenCompraCart === 'function') updateResumenCompraCart();
+                  selectedTotalValue = cartItems.length > 0 ? cartGrandTotal() : 0;
+                  renderPublicPaymentMethodCatalog(cartItems.length > 0 ? cartItems[0].pack : null);
 
                   // Animación al agregar cualquier paquete al carrito
                   if (existing < 0 && cartItems.length >= 1) flyPackToCart(card);
