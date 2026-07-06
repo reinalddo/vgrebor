@@ -7065,6 +7065,24 @@ include __DIR__ . "/includes/header.php";
     const dropPercent = pack ? Number(pack.dropPercent || 0) : 0;
     const couponIsActive = couponApplied && Number(appliedCouponSummary.discountAmount || 0) > 0;
 
+    // Regla: paquetes drop mantienen su precio establecido — ningún descuento adicional aplica
+    if (dropPercent > 0) {
+      const dropBaseAmt = normalizeCurrencyAmount(getPackTotalPrice(pack, quantity), showDecimals);
+      const dropTaxPct = resolvePaymentModeTaxPercentage(resolvedMode, method);
+      const dropTaxAmt = dropTaxPct > 0 ? normalizeCurrencyAmount(dropBaseAmt * dropTaxPct / 100, showDecimals) : 0;
+      const dropTotalAmt = normalizeCurrencyAmount(dropBaseAmt + dropTaxAmt, showDecimals);
+      return {
+        currencyCode, showDecimals,
+        baseAmount: dropBaseAmt, discountPercentage: 0, discountAmount: 0,
+        taxPercentage: dropTaxPct, taxAmount: dropTaxAmt, totalAmount: dropTotalAmt,
+        couponSuppressedByPayment: couponIsActive, dropSavingsAmt: 0, discountWinnerMessage: '',
+        baseText: formatPaymentDifferenceMoney(currencyCode, dropBaseAmt, showDecimals),
+        discountText: formatPaymentDifferenceMoney(currencyCode, 0, showDecimals),
+        taxText: formatPaymentDifferenceMoney(currencyCode, dropTaxAmt, showDecimals),
+        totalText: formatPaymentDifferenceMoney(currencyCode, dropTotalAmt, true),
+      };
+    }
+
     // Cuando el cupón está activo, selectedTotalValue ya es el precio post-cupón.
     // Se recupera el precio del paquete ANTES del cupón para hacer comparaciones justas.
     const packPriceNoCoupon = couponIsActive && Number(appliedCouponSummary.originalAmount || 0) > 0
@@ -7454,8 +7472,66 @@ include __DIR__ . "/includes/header.php";
     return `<img src="${escapePaymentHtml(safeImageUrl)}" alt="${safeTitle}" class="payment-method-public-image">`;
   }
 
+  // Badge en modo carrito: calcula el total correcto separando drop vs no-drop
+  function resolveCartModeBadgeText(mode, method, refPack) {
+    if (!cartItems || cartItems.length === 0) return '';
+    if (mode === 'points') {
+      const totalPts = cartItems.reduce((s, ci) => s + getPackRequiredPoints(ci.pack, ci.quantity), 0);
+      return totalPts > 0 ? formatWinPointsAmount(totalPts) : '';
+    }
+    let targetCode = '';
+    let targetEntry = null;
+    if (mode === 'money' && method) {
+      targetCode = String(method.moneda_clave || '').trim().toUpperCase();
+      targetEntry = findCurrencyEntryByCode(targetCode);
+    } else if (mode === 'binance_pagonorte') {
+      targetEntry = resolveBinancePagonorteCurrencyEntry();
+      targetCode = targetEntry ? String(targetEntry.clave || 'USDT').toUpperCase() : 'USDT';
+    } else if (mode === 'binance') {
+      targetEntry = resolvePreferredBinanceCurrencyEntry();
+      targetCode = targetEntry ? String(targetEntry.clave || '').toUpperCase() : '';
+    } else if (mode === 'paypal') {
+      targetEntry = resolvePreferredPayPalCurrencyEntry();
+      targetCode = targetEntry ? String(targetEntry.clave || '').toUpperCase() : '';
+    }
+    if (!targetCode) return '';
+    const sourceCode = String((refPack && refPack.moneda) || monedaActualClave || '').trim().toUpperCase();
+    const tgtShow = targetEntry ? Boolean(targetEntry.mostrar_decimales) : true;
+    // Split cart
+    let nonDropSub = 0;
+    let dropSub = 0;
+    cartItems.forEach(ci => {
+      const base = normalizeCurrencyAmount(parseFloat(ci.pack.priceValue || 0), ci.pack.showDecimals);
+      const sub = normalizeCurrencyAmount(base * ci.quantity, ci.pack.showDecimals);
+      if (Number(ci.pack.dropPercent || 0) > 0) dropSub += sub;
+      else nonDropSub += sub;
+    });
+    // Winner discount for non-drop items: max(method%, coupon%)
+    const methodPct = resolvePaymentModeDiscountPercentage(mode, method);
+    const couponIsActive = couponApplied && Number(appliedCouponSummary.discountAmount || 0) > 0;
+    let couponPct = 0;
+    if (couponIsActive && nonDropSub > 0) {
+      couponPct = (Number(appliedCouponSummary.discountAmount || 0) / nonDropSub) * 100;
+    }
+    const discountPct = Math.max(methodPct, couponPct);
+    const nonDropAfter = normalizeCurrencyAmount(nonDropSub * (1 - discountPct / 100), tgtShow);
+    // Convert each part to target currency and sum
+    const nonDropConverted = normalizeCurrencyAmount(convertCurrencyAmountBetweenCodes(nonDropAfter, sourceCode, targetCode), tgtShow);
+    const dropConverted = normalizeCurrencyAmount(convertCurrencyAmountBetweenCodes(dropSub, sourceCode, targetCode), tgtShow);
+    let total = normalizeCurrencyAmount(nonDropConverted + dropConverted, tgtShow);
+    const taxPct = resolvePaymentModeTaxPercentage(mode, method);
+    if (taxPct > 0) total = normalizeCurrencyAmount(total * (1 + taxPct / 100), tgtShow);
+    return total > 0 ? formatPaymentDifferenceMoney(targetCode, total, tgtShow) : '';
+  }
+
   function resolveMethodCardBadgeText(mode, method, pack) {
     if (!pack) return '';
+
+    // Cart mode: use split calculation (drop at full price, non-drop with winner discount)
+    if (typeof cartMode !== 'undefined' && cartMode && typeof cartItems !== 'undefined' && cartItems.length > 0) {
+      return resolveCartModeBadgeText(mode, method, pack);
+    }
+
     const quantity = getOrderQuantity();
 
     if (mode === 'points') {
@@ -7491,23 +7567,29 @@ include __DIR__ . "/includes/header.php";
       showDecimals
     );
 
-    // Apply method discount if it wins over existing discounts (coupon/drop)
+    // Single-pack drop: precio fijo, sin descuentos adicionales
+    if (Number(pack.dropPercent || 0) > 0) {
+      const taxPctDrop = resolvePaymentModeTaxPercentage(mode, method);
+      if (taxPctDrop > 0) baseInTarget = normalizeCurrencyAmount(baseInTarget * (1 + taxPctDrop / 100), showDecimals);
+      return formatPaymentDifferenceMoney(targetCode, baseInTarget, showDecimals);
+    }
+
+    // Apply winner discount: max(method%, coupon%)
     const methodDiscountPct = resolvePaymentModeDiscountPercentage(mode, method);
-    if (methodDiscountPct > 0) {
-      const couponIsActive = couponApplied && Number(appliedCouponSummary.discountAmount || 0) > 0;
-      const dropPct = Number(pack.dropPercent || 0);
-      const sourceOriginal = couponIsActive && Number(appliedCouponSummary.originalAmount || 0) > 0
-        ? Number(appliedCouponSummary.originalAmount) : sourceBase;
-      const sourceBeforeDrop = dropPct > 0 ? sourceOriginal / (1 - dropPct / 100) : sourceOriginal;
-      const beforeDropInTarget = normalizeCurrencyAmount(
-        convertCurrencyAmountBetweenCodes(sourceBeforeDrop, sourceCode, targetCode),
-        showDecimals
-      );
-      const methodSaving = normalizeCurrencyAmount(beforeDropInTarget * methodDiscountPct / 100, showDecimals);
-      const existingSaving = normalizeCurrencyAmount(Math.max(0, beforeDropInTarget - baseInTarget), showDecimals);
-      if (methodSaving > existingSaving) {
-        baseInTarget = normalizeCurrencyAmount(Math.max(0, beforeDropInTarget - methodSaving), showDecimals);
-      }
+    const couponIsActiveBadge = couponApplied && Number(appliedCouponSummary.discountAmount || 0) > 0;
+    let couponPctBadge = 0;
+    if (couponIsActiveBadge && sourceBase > 0) {
+      const originalBase = Number(appliedCouponSummary.originalAmount || 0) > 0
+        ? Number(appliedCouponSummary.originalAmount)
+        : sourceBase / (1 - (Number(appliedCouponSummary.discountAmount || 0) / (sourceBase + Number(appliedCouponSummary.discountAmount || 0))));
+      couponPctBadge = originalBase > 0 ? (Number(appliedCouponSummary.discountAmount || 0) / originalBase) * 100 : 0;
+    }
+    const winnerPct = Math.max(methodDiscountPct, couponPctBadge);
+    if (winnerPct > 0) {
+      const originalInTarget = couponIsActiveBadge && Number(appliedCouponSummary.originalAmount || 0) > 0
+        ? normalizeCurrencyAmount(convertCurrencyAmountBetweenCodes(Number(appliedCouponSummary.originalAmount), sourceCode, targetCode), showDecimals)
+        : baseInTarget;
+      baseInTarget = normalizeCurrencyAmount(Math.max(0, originalInTarget * (1 - winnerPct / 100)), showDecimals);
     }
 
     // Apply method tax
@@ -11863,9 +11945,30 @@ include __DIR__ . "/includes/header.php";
                   return;
                 }
 
+                // Single-pack drop: coupons don't apply to special-price packs
+                if (!cartMode && pack && Number(pack.dropPercent || 0) > 0) {
+                  showToast('Los cupones no aplican a paquetes en oferta especial.', 'error');
+                  return;
+                }
+
                 // In cart mode use cart totals; in single-pack mode use activePack
                 const effectivePack = (cartMode && cartItems.length > 0) ? cartItems[0].pack : pack;
-                const precioNumerico = cartMode ? String(cartGrandTotal()) : String(getPackTotalPrice(pack));
+
+                // Cart mode: coupon base = non-drop items subtotal only
+                let nonDropSubtotalCoupon = 0;
+                if (cartMode) {
+                  cartItems.forEach(ci => {
+                    if (!Number(ci.pack.dropPercent || 0)) {
+                      const base = normalizeCurrencyAmount(parseFloat(ci.pack.priceValue || 0), ci.pack.showDecimals);
+                      nonDropSubtotalCoupon += normalizeCurrencyAmount(base * ci.quantity, ci.pack.showDecimals);
+                    }
+                  });
+                  if (nonDropSubtotalCoupon <= 0) {
+                    showToast('Los cupones no aplican a paquetes en oferta especial.', 'error');
+                    return;
+                  }
+                }
+                const precioNumerico = cartMode ? String(normalizeCurrencyAmount(nonDropSubtotalCoupon, effectivePack.showDecimals)) : String(getPackTotalPrice(pack));
 
                 console.log('Enviando cupón:', cupon, 'Precio:', precioNumerico);
                 if (!cupon) {
@@ -11894,8 +11997,16 @@ include __DIR__ . "/includes/header.php";
                     couponInput.disabled = true;
                     applyCouponButton.disabled = true;
                     if (cartMode) {
-                      // Lock discounted total so cartGrandTotal() returns it and updateResumenCompraCart shows it
-                      cartTotalBlindado = selectedTotalValue;
+                      // Coupon discount was calculated on non-drop subtotal only.
+                      // Add drop items at full price so cartTotalBlindado reflects the correct cart total.
+                      let dropSubtotalAfterCoupon = 0;
+                      cartItems.forEach(ci => {
+                        if (Number(ci.pack.dropPercent || 0) > 0) {
+                          const base = normalizeCurrencyAmount(parseFloat(ci.pack.priceValue || 0), ci.pack.showDecimals);
+                          dropSubtotalAfterCoupon += normalizeCurrencyAmount(base * ci.quantity, ci.pack.showDecimals);
+                        }
+                      });
+                      cartTotalBlindado = normalizeCurrencyAmount(selectedTotalValue + normalizeCurrencyAmount(dropSubtotalAfterCoupon, effectivePack.showDecimals), effectivePack.showDecimals);
                       syncFloatCartFab(); // actualiza el FAB con el total con descuento de inmediato
                       updateResumenCompraCart();
                       renderPublicPaymentMethodCatalog(cartItems.length > 0 ? cartItems[0].pack : null);
@@ -12490,29 +12601,36 @@ include __DIR__ . "/includes/header.php";
                   return `<div class="payment-order-summary-row"><span class="payment-order-summary-row-label">${escapePaymentHtml(ci.pack.name)}${qLabel}</span><strong class="payment-order-summary-row-value">${moneda} ${formatCurrencyAmount(sub, showDec)}</strong></div>`;
                 }).join('');
 
-                // Discount rows: coupon and/or payment method
+                // Discount rows: coupon and/or payment method — drop items excluded from discounts
                 const cartCouponActive = couponApplied && appliedCouponSummary && Number(appliedCouponSummary.discountAmount || 0) > 0;
                 const cartPaymentDiscPct = resolvePaymentModeDiscountPercentage(cartSelection.mode,
                   cartSelection.mode === 'money' ? (cartSelection.methods && (cartSelection.methods.find(m => String(m.id) === String(cartSelection.methodId || '')) || cartSelection.methods[0])) : null
                 );
+                let effectiveCartTotal = cartGrandTotal(); // updated below if a discount applies
                 if (cartCouponActive || cartPaymentDiscPct > 0) {
                   const itemsSum = normalizeCurrencyAmount(cartItems.reduce((s, ci) => s + cartItemSubtotal(ci), 0), showDec);
+                  // Non-drop subtotal: base for payment method discount calculation
+                  const nonDropSum = normalizeCurrencyAmount(cartItems.reduce((s, ci) => Number(ci.pack.dropPercent || 0) > 0 ? s : s + cartItemSubtotal(ci), 0), showDec);
                   // Fila de subtotal antes del descuento
                   rowsHtml += `<div class="payment-order-summary-row" style="border-top:1px solid rgba(34,211,238,.12);margin-top:0.3rem;padding-top:0.3rem;"><span class="payment-order-summary-row-label" style="color:#94a3b8;">Subtotal</span><strong class="payment-order-summary-row-value" style="color:#94a3b8;">${moneda} ${formatCurrencyAmount(itemsSum, showDec)}</strong></div>`;
                   const couponAmt = cartCouponActive ? normalizeCurrencyAmount(Number(appliedCouponSummary.discountAmount || 0), showDec) : 0;
-                  const paymentAmt = cartPaymentDiscPct > 0 ? normalizeCurrencyAmount((itemsSum * cartPaymentDiscPct) / 100, showDec) : 0;
+                  // Payment discount applies to non-drop subtotal only
+                  const paymentAmt = cartPaymentDiscPct > 0 ? normalizeCurrencyAmount((nonDropSum * cartPaymentDiscPct) / 100, showDec) : 0;
                   // Best discount wins
                   const couponWins = couponAmt >= paymentAmt;
                   if (couponWins && cartCouponActive) {
                     rowsHtml += `<div class="payment-order-summary-row"><span class="payment-order-summary-row-label">Cupón ${escapePaymentHtml(String(appliedCouponSummary.code || ''))}</span><strong class="payment-order-summary-row-value is-positive">-${moneda} ${formatCurrencyAmount(couponAmt, showDec)}</strong></div>`;
+                    // couponWins: cartTotalBlindado already reflects the discounted total
                   } else if (!couponWins && cartPaymentDiscPct > 0) {
                     rowsHtml += `<div class="payment-order-summary-row"><span class="payment-order-summary-row-label">Descuento</span><strong class="payment-order-summary-row-value is-positive">${formatDiscountPercentage(cartPaymentDiscPct)}</strong></div>`;
                     rowsHtml += `<div class="payment-order-summary-row"><span class="payment-order-summary-row-label">Tu ahorro</span><strong class="payment-order-summary-row-value is-positive">${moneda} ${formatCurrencyAmount(paymentAmt, showDec)}</strong></div>`;
+                    // Payment wins: deduct from full items sum
+                    effectiveCartTotal = normalizeCurrencyAmount(itemsSum - paymentAmt, showDec);
                   }
                 }
 
                 publicOrderSummaryRows.innerHTML = rowsHtml;
-                const total    = cartGrandTotal();
+                const total    = effectiveCartTotal;
                 const totalTxt = `${moneda} ${formatCurrencyAmount(total, showDec)}`;
                 publicOrderSummaryTotal.textContent = totalTxt;
                 publicOrderSummaryShell.classList.remove('d-none');
