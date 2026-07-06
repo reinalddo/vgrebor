@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 require_once __DIR__ . "/includes/tenant.php";
 require_once __DIR__ . "/includes/db_connect.php";
 require_once __DIR__ . "/includes/store_config.php";
@@ -12443,7 +12443,7 @@ include __DIR__ . "/includes/header.php";
                 const moneda  = cartItems.length > 0 ? cartItems[0].pack.moneda : monedaActualClave;
                 const txt     = `${moneda} ${formatCurrencyAmount(total, showDec)}`;
                 if (multiCartModalTotal) multiCartModalTotal.textContent = txt;
-                if (multiCartProceedLbl) multiCartProceedLbl.textContent = `Continuar con la compra - ${txt}`;
+                if (multiCartProceedLbl) {multiCartProceedLbl.textContent = `Continuar con la compra - ${txt}`;}
                 if (multiCartProceed) multiCartProceed.disabled = cartItems.length === 0;
               }
 
@@ -12655,6 +12655,7 @@ include __DIR__ . "/includes/header.php";
                 // Update buy button label
                 if (buyButton) {
                   buyButton.textContent = `Continuar con la compra - ${totalTxt}`;
+                  buyButton.disabled = false;
                 }
                 syncFloatCartFab(); // refresca el total del FAB al cambiar método/cupón/moneda
               };
