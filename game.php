@@ -5474,6 +5474,7 @@ include __DIR__ . "/includes/header.php";
   let cartMode = false;
   let cartItems = [];
   let cartTotalBlindado = null;
+  let cartEffectiveTotal = null;
   let updateResumenCompraCart = null;
   let activeAccountGalleryPreview = { pack: null, index: 0 };
   let selectedTotalValue = 0;
@@ -7514,7 +7515,8 @@ include __DIR__ . "/includes/header.php";
       couponPct = (Number(appliedCouponSummary.discountAmount || 0) / nonDropSub) * 100;
     }
     const discountPct = Math.max(methodPct, couponPct);
-    const nonDropAfter = normalizeCurrencyAmount(nonDropSub * (1 - discountPct / 100), tgtShow);
+    const discAmt = normalizeCurrencyAmount(nonDropSub * discountPct / 100, tgtShow);
+    const nonDropAfter = normalizeCurrencyAmount(nonDropSub - discAmt, tgtShow);
     // Convert each part to target currency and sum
     const nonDropConverted = normalizeCurrencyAmount(convertCurrencyAmountBetweenCodes(nonDropAfter, sourceCode, targetCode), tgtShow);
     const dropConverted = normalizeCurrencyAmount(convertCurrencyAmountBetweenCodes(dropSub, sourceCode, targetCode), tgtShow);
@@ -12357,7 +12359,7 @@ include __DIR__ . "/includes/header.php";
               }
 
               function cartGrandTotalText() {
-                const total   = cartGrandTotal();
+                const total   = cartEffectiveTotal !== null ? cartEffectiveTotal : cartGrandTotal();
                 const showDec = cartItems.length > 0 ? cartItems[0].pack.showDecimals : monedaActualMostrarDecimales;
                 const moneda  = cartItems.length > 0 ? cartItems[0].pack.moneda : monedaActualClave;
                 return `${moneda} ${formatCurrencyAmount(total, showDec)}`;
@@ -12629,6 +12631,7 @@ include __DIR__ . "/includes/header.php";
                   }
                 }
 
+                cartEffectiveTotal = effectiveCartTotal;
                 publicOrderSummaryRows.innerHTML = rowsHtml;
                 const total    = effectiveCartTotal;
                 const totalTxt = `${moneda} ${formatCurrencyAmount(total, showDec)}`;
@@ -12791,6 +12794,7 @@ include __DIR__ . "/includes/header.php";
               function resetCartState() {
                 cartItems = [];
                 cartTotalBlindado = null;
+                cartEffectiveTotal = null;
                 packCards2.forEach(card => card.classList.remove('neon-selected'));
                 if (multiCartCheck) multiCartCheck.checked = true;
                 cartMode = true;
@@ -12820,10 +12824,10 @@ include __DIR__ . "/includes/header.php";
                 const refPack      = cartItems[0].pack;
                 const showDec      = refPack.showDecimals;
                 const currency     = refPack.moneda;
-                const total        = cartTotalBlindado !== null ? cartTotalBlindado : cartGrandTotal();
+                const total        = cartEffectiveTotal !== null ? cartEffectiveTotal : (cartTotalBlindado !== null ? cartTotalBlindado : cartGrandTotal());
                 const totalText    = `${currency} ${formatCurrencyAmount(total, showDec)}`;
                 const rawTotal     = normalizeCurrencyAmount(cartItems.reduce((s, ci) => s + cartItemSubtotal(ci), 0), showDec);
-                const hasDiscount  = couponApplied && cartTotalBlindado !== null && rawTotal > total;
+                const hasDiscount  = rawTotal > total && (couponApplied || cartEffectiveTotal !== null);
                 const discountAmt  = hasDiscount ? normalizeCurrencyAmount(rawTotal - total, showDec) : 0;
 
                 const paymentSelection = resolvePreferredCheckoutSelection(refPack);
