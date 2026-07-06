@@ -6626,6 +6626,27 @@ include __DIR__ . "/includes/header.php";
     }
 
     if (!pack) {
+      if (preferredCheckoutPaymentMode !== '') {
+        publicOrderSummaryShell.classList.remove('d-none');
+        if (publicOrderSummaryPanel) {
+          publicOrderSummaryPanel.classList.add('is-active');
+        }
+        if (publicOrderSummaryMethod) {
+          const allMethods = getPaymentMethodsForCurrency('');
+          const selectedMethod = allMethods.find((m) => String(m.id) === String(preferredCheckoutMethodId || '')) || null;
+          const methodLabel = selectedMethod ? String(selectedMethod.nombre || '') : '';
+          publicOrderSummaryMethod.textContent = methodLabel;
+          publicOrderSummaryMethod.classList.toggle('d-none', !methodLabel);
+        }
+        if (publicOrderSummaryCoupon && publicOrderSummaryCouponCopy) {
+          publicOrderSummaryCoupon.classList.add('d-none');
+          publicOrderSummaryCouponCopy.textContent = '';
+        }
+        publicOrderSummaryRows.innerHTML = '<div class="payment-order-summary-row"><span class="payment-order-summary-row-label" style="color:#94a3b8;font-style:italic;">Selecciona un paquete para ver el precio.</span></div>';
+        publicOrderSummaryTotal.textContent = '—';
+        publicCheckoutSummaryTotalText = '';
+        return;
+      }
       publicOrderSummaryShell.classList.add('d-none');
       if (publicOrderSummaryPanel) {
         publicOrderSummaryPanel.classList.remove('is-active');
@@ -7229,6 +7250,53 @@ include __DIR__ . "/includes/header.php";
     if (activePack) {
       updateSelectedPriceDisplay(activePack);
       renderPublicOrderSummary(activePack);
+    }
+  }
+
+  function autoSelectDefaultPaymentMethod() {
+    if (preferredCheckoutPaymentMode !== '') {
+      return;
+    }
+    const gameDefaultNormalized = normalizeCurrencyAlias(monedaActualClave || '');
+    const VES_NORMALIZED = 'VES';
+    const searchOrder = [];
+    if (gameDefaultNormalized) {
+      searchOrder.push(gameDefaultNormalized);
+    }
+    if (!searchOrder.includes(VES_NORMALIZED)) {
+      searchOrder.push(VES_NORMALIZED);
+    }
+    let foundMethod = null;
+    outer:
+    for (const targetCode of searchOrder) {
+      for (const currencyKey of Object.keys(paymentMethodsByCurrency)) {
+        if (normalizeCurrencyAlias(currencyKey) === targetCode) {
+          const methods = paymentMethodsByCurrency[currencyKey] || [];
+          if (methods.length > 0) {
+            foundMethod = methods[0];
+            break outer;
+          }
+        }
+      }
+    }
+    if (!foundMethod) {
+      for (const currencyKey of Object.keys(paymentMethodsByCurrency)) {
+        const methods = paymentMethodsByCurrency[currencyKey] || [];
+        if (methods.length > 0) {
+          foundMethod = methods[0];
+          break;
+        }
+      }
+    }
+    if (!foundMethod) {
+      return;
+    }
+    storePreferredCheckoutPayment('money', String(foundMethod.id));
+    // storePreferredCheckoutPayment only re-renders when activePack is set.
+    // Switch the visible currency to match the method and force a summary render.
+    const switched = syncVisibleCurrencyWithPreferredPayment(null, { resetCoupon: false });
+    if (!switched) {
+      updateResumenCompra(null);
     }
   }
 
@@ -11023,16 +11091,12 @@ include __DIR__ . "/includes/header.php";
       openAccountGalleryModal(activePack);
     });
   });
+  autoSelectDefaultPaymentMethod();
   if (packCards2.length) {
     const requestedPackCard = findPackCardById(<?= $requestedPackageId ?>);
     if (requestedPackCard) {
       activatePackCard(requestedPackCard, { scroll: false });
       requestedPackCard.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-    } else {
-      const firstRegularPack = packCards2.find(card => card.dataset.accountSale !== '1');
-      if (firstRegularPack) {
-        activatePackCard(firstRegularPack, { scroll: false });
-      }
     }
   }
   syncOrderQuantityInput(1);
