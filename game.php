@@ -3843,31 +3843,62 @@ include __DIR__ . "/includes/header.php";
     filter: drop-shadow(0 0 16px rgba(34, 197, 94, 0.42)) drop-shadow(0 12px 18px rgba(2, 6, 23, 0.48));
   }
 
+  @keyframes badge-shine {
+    0%, 55%  { transform: translateX(-220%); opacity: 0; }
+    60%      { opacity: 1; }
+    80%      { transform: translateX(280%); opacity: 1; }
+    81%, 100%{ transform: translateX(280%); opacity: 0; }
+  }
+  @keyframes badge-glow-pulse {
+    0%, 100% { box-shadow: 0 0 5px rgba(34,211,238,.18), 0 2px 8px rgba(0,0,0,.5), inset 0 1px 0 rgba(34,211,238,.1); }
+    50%      { box-shadow: 0 0 14px rgba(34,211,238,.45), 0 2px 8px rgba(0,0,0,.5), inset 0 1px 0 rgba(34,211,238,.18); }
+  }
+
   .payment-method-public-price-badge {
     position: absolute;
     bottom: 0.4rem;
     right: 0.5rem;
     z-index: 3;
-    padding: 0.18rem 0.55rem;
+    padding: 0.22rem 0.65rem;
     border-radius: 0.45rem;
-    background: rgba(2, 6, 23, 0.86);
-    border: 1px solid rgba(34, 211, 238, 0.3);
-    color: #e2e8f0;
+    background: linear-gradient(135deg, rgba(2,8,28,.96) 0%, rgba(4,18,40,.94) 100%);
+    border: 1px solid rgba(34,211,238,.55);
+    color: #22d3ee;
     font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.03em;
+    font-weight: 800;
+    letter-spacing: 0.05em;
     line-height: 1.4;
     pointer-events: none;
-    backdrop-filter: blur(6px);
+    backdrop-filter: blur(8px);
     white-space: nowrap;
     max-width: calc(100% - 1rem);
     overflow: hidden;
     text-overflow: ellipsis;
+    text-shadow: 0 0 8px rgba(34,211,238,.9), 0 0 18px rgba(34,211,238,.4);
+    animation: badge-glow-pulse 2.8s ease-in-out infinite;
   }
+  .payment-method-public-price-badge::before {
+    content: '';
+    position: absolute;
+    top: -10%;
+    left: 0;
+    width: 44%;
+    height: 120%;
+    background: linear-gradient(105deg, transparent 0%, rgba(255,255,255,.12) 35%, rgba(255,255,255,.38) 50%, rgba(255,255,255,.12) 65%, transparent 100%);
+    transform: translateX(-220%);
+    animation: badge-shine 5.5s ease-in-out infinite;
+    pointer-events: none;
+  }
+  .payment-method-public-card:nth-child(1) .payment-method-public-price-badge::before { animation-delay: 0s; }
+  .payment-method-public-card:nth-child(2) .payment-method-public-price-badge::before { animation-delay: 1.1s; }
+  .payment-method-public-card:nth-child(3) .payment-method-public-price-badge::before { animation-delay: 2.2s; }
+  .payment-method-public-card:nth-child(4) .payment-method-public-price-badge::before { animation-delay: 3.3s; }
+  .payment-method-public-card:nth-child(5) .payment-method-public-price-badge::before { animation-delay: 4.4s; }
 
   .payment-method-public-card.is-selected .payment-method-public-price-badge {
-    border-color: rgba(34, 197, 94, 0.55);
-    color: #bbf7d0;
+    border-color: rgba(74,222,128,.7);
+    color: #4ade80;
+    text-shadow: 0 0 8px rgba(74,222,128,.9), 0 0 18px rgba(74,222,128,.4);
   }
 
   .payment-method-public-text {
