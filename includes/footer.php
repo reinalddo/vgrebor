@@ -2602,9 +2602,10 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
         $pwa_ban_logo_url = '';
     }
   ?>
+  <div id="pwa-banner-spacer" style="height:0;transition:height .36s cubic-bezier(.25,.46,.45,.94);flex-shrink:0;"></div>
   <div id="pwa-banner"
        role="status"
-       style="display:none;width:100%;
+       style="display:none;position:fixed;left:0;right:0;z-index:199;
               background:rgba(12,18,32,.97);
               border-bottom:1px solid rgba(var(--theme-primary-rgb,0,207,255),.2);
               padding:0 1.25rem;
@@ -2651,29 +2652,60 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     var ban = document.getElementById('pwa-banner');
     if (!ban) return;
 
-    function show() {
-      /* Move banner into page flow right after the site header */
+    var spacer = document.getElementById('pwa-banner-spacer');
+    var BAN_H = 58; /* aprox. banner height in px */
+
+    function getHdrBottom() {
       var hdr = document.querySelector('[data-site-topbar]') ||
                 document.querySelector('.site-header') ||
                 document.querySelector('header');
-      if (hdr && hdr.parentNode) {
-        hdr.insertAdjacentElement('afterend', ban);
+      return hdr ? Math.round(hdr.getBoundingClientRect().bottom) : 0;
+    }
+
+    function show() {
+      var hdr = document.querySelector('[data-site-topbar]') ||
+                document.querySelector('.site-header') ||
+                document.querySelector('header');
+      /* Move spacer into flow right after the header so content is pushed down */
+      if (hdr && hdr.parentNode && spacer) {
+        hdr.insertAdjacentElement('afterend', spacer);
       }
+      var hdrBottom = getHdrBottom();
+      ban.style.top = hdrBottom + 'px';
       ban.style.display = 'flex';
       ban.offsetHeight; /* force reflow so transition plays */
-      ban.style.maxHeight = '80px';
+      ban.style.maxHeight = BAN_H + 'px';
       ban.style.paddingTop = '.6rem';
       ban.style.paddingBottom = '.6rem';
+      if (spacer) spacer.style.height = BAN_H + 'px';
     }
     function hide() {
       ban.style.maxHeight = '0';
       ban.style.paddingTop = '0';
       ban.style.paddingBottom = '0';
+      if (spacer) spacer.style.height = '0';
       sessionStorage.setItem(SK, '1');
       setTimeout(function () { ban.style.display = 'none'; }, 390);
     }
 
-    setTimeout(show, 1800);
+    /* Wait for startup popup to close before showing the banner */
+    var _sp = document.getElementById('startup-popup');
+    function _spVisible(el) {
+      return el && !el.classList.contains('is-hidden') && el.getAttribute('aria-hidden') !== 'true';
+    }
+    setTimeout(function () {
+      if (_spVisible(_sp)) {
+        var _obs = new MutationObserver(function () {
+          if (!_spVisible(_sp)) {
+            _obs.disconnect();
+            setTimeout(show, 600);
+          }
+        });
+        _obs.observe(_sp, { attributes: true, attributeFilter: ['class', 'aria-hidden'] });
+      } else {
+        show();
+      }
+    }, 1800);
 
     var cb = document.getElementById('pwa-banner-close-btn');
     if (cb) cb.addEventListener('click', hide);
