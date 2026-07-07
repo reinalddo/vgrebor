@@ -2612,27 +2612,25 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   ?>
   <div id="pwa-banner"
        role="status"
-       style="display:none;position:fixed;bottom:1.25rem;left:1.25rem;right:auto;
-              max-width:min(420px,calc(100vw - 2.5rem));z-index:1045;
+       style="display:none;position:fixed;top:0;left:0;right:0;z-index:1060;
               background:rgba(12,18,32,.97);
-              border:1px solid rgba(var(--theme-primary-rgb,0,207,255),.2);
-              border-radius:.85rem;
-              padding:.65rem 1rem;
+              border-bottom:1px solid rgba(var(--theme-primary-rgb,0,207,255),.2);
+              padding:.6rem 1.25rem;
               align-items:center;gap:.9rem;
-              box-shadow:0 8px 32px rgba(0,0,0,.5),0 0 0 1px rgba(var(--theme-primary-rgb,0,207,255),.06);
-              transform:translateY(calc(100% + 1.5rem));
+              box-shadow:0 4px 24px rgba(0,0,0,.5);
+              transform:translateY(-100%);
               transition:transform .36s cubic-bezier(.25,.46,.45,.94);">
     <?php if ($pwa_ban_logo_url !== ''): ?>
     <img src="<?php echo htmlspecialchars($pwa_ban_logo_url, ENT_QUOTES, 'UTF-8'); ?>"
          alt=""
-         style="width:48px;height:48px;border-radius:.6rem;object-fit:cover;flex-shrink:0;
+         style="width:36px;height:36px;border-radius:.5rem;object-fit:cover;flex-shrink:0;
                 border:1px solid rgba(var(--theme-primary-rgb,0,207,255),.22);">
     <?php endif; ?>
     <div style="flex:1;min-width:0;">
-      <div style="font-weight:700;font-size:.9rem;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+      <div style="font-weight:700;font-size:.88rem;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
         Instalar <?php echo htmlspecialchars($pwa_ban_name, ENT_QUOTES, 'UTF-8'); ?>
       </div>
-      <div style="font-size:.73rem;color:rgba(221,230,245,.5);margin-top:.1rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+      <div style="font-size:.72rem;color:rgba(221,230,245,.5);margin-top:.05rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
         Guárdalo en tu inicio para abrirlo como app.
       </div>
     </div>
@@ -2641,7 +2639,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
             data-bs-toggle="modal"
             data-bs-target="#pwa-install-modal"
             style="background:#6c5ce7;color:#fff;border:none;border-radius:.55rem;
-                   padding:.4rem 1.05rem;font-size:.85rem;font-weight:600;
+                   padding:.38rem 1rem;font-size:.83rem;font-weight:600;
                    white-space:nowrap;flex-shrink:0;cursor:pointer;
                    box-shadow:0 0 14px rgba(108,92,231,.4);
                    transition:background .2s;">Instalar</button>
@@ -2662,12 +2660,17 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     if (!ban) return;
 
     function show() {
+      /* Position banner just below the site header */
+      var hdr = document.querySelector('[data-site-topbar]') ||
+                document.querySelector('.site-header') ||
+                document.querySelector('header');
+      ban.style.top = (hdr ? Math.round(hdr.getBoundingClientRect().bottom) : 0) + 'px';
       ban.style.display = 'flex';
-      ban.offsetHeight;
+      ban.offsetHeight; /* force reflow so transition plays */
       ban.style.transform = 'translateY(0)';
     }
     function hide() {
-      ban.style.transform = 'translateY(100%)';
+      ban.style.transform = 'translateY(-100%)';
       sessionStorage.setItem(SK, '1');
       setTimeout(function () { ban.style.display = 'none'; }, 390);
     }
