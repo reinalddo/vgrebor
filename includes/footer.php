@@ -2164,39 +2164,87 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   ?>
 
   <!-- ═══════════════════════════════════════════════
-       PWA — Modal "Instalar gestor" + "Pasos Android"
+       PWA — Modal Instalar (multi-browser)
        ═══════════════════════════════════════════════ -->
 
-  <!-- Modal 1: Instalar gestor -->
+  <!-- Modal: Instalar como aplicación -->
   <div class="modal fade" id="pwa-install-modal" tabindex="-1" aria-labelledby="pwa-install-label" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content pwa-modal-content">
         <div class="modal-header pwa-modal-header">
-          <h5 class="modal-title fw-bold" id="pwa-install-label">Instalar gestor</h5>
+          <h5 class="modal-title fw-bold" id="pwa-install-label">Instalar como aplicación</h5>
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
         </div>
-        <div class="modal-body" style="padding:1rem 1.1rem;">
-          <!-- Android section -->
-          <div class="pwa-section mb-2">
-            <div class="pwa-section-label">Android / Chrome</div>
-            <p class="pwa-section-text mb-3">Android todavia no habilito el instalador automatico. Abre esta pagina en Chrome normal, espera que cargue, y vuelve a tocar Instalar. Si usas navegador Xiaomi, Samsung, Instagram o Facebook, primero abre en Chrome.</p>
+        <div class="modal-body" style="padding:.85rem 1.1rem 1rem;">
+
+          <!-- Browser tabs -->
+          <div class="pwa-browser-tabs mb-3" role="tablist">
+            <button class="pwa-tab-btn" data-pwa-tab="chromium" role="tab" aria-selected="false">Chrome / Edge / Opera</button>
+            <button class="pwa-tab-btn" data-pwa-tab="firefox"  role="tab" aria-selected="false">Firefox</button>
+            <button class="pwa-tab-btn" data-pwa-tab="safari-ios" role="tab" aria-selected="false">Safari iPhone</button>
+            <button class="pwa-tab-btn" data-pwa-tab="safari-mac" role="tab" aria-selected="false">Safari Mac</button>
+          </div>
+
+          <!-- Pane: Chromium (Chrome / Edge / Opera) -->
+          <div class="pwa-tab-pane pwa-section" data-pwa-pane="chromium">
+            <div class="pwa-section-label">Chrome · Edge · Opera</div>
+            <p class="pwa-section-text mb-3">En Android, si el instalador automático no aparece, abre la página en Chrome (no Samsung, Xiaomi, Facebook ni Instagram), espera que cargue y toca Instalar.</p>
             <div class="d-flex flex-column gap-2">
               <button id="pwa-steps-btn" type="button" class="btn btn-outline-info rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-semibold">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="18" r=".8" fill="currentColor" stroke="none"/></svg>
                 Ver pasos Android
               </button>
-              <button id="pwa-chrome-btn" type="button" class="btn rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-bold pwa-btn-cta">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#031a0f" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="18" r=".8" fill="#031a0f" stroke="none"/></svg>
+              <button id="pwa-chrome-btn" type="button" class="btn rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-bold pwa-btn-cta" data-pwa-home="<?php echo htmlspecialchars(function_exists('app_url') ? app_url('/') : (isset($homeUrl) ? $homeUrl : '/'), ENT_QUOTES, 'UTF-8'); ?>">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#031a0f" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                 Instalar como aplicación
               </button>
-
             </div>
           </div>
-          <!-- iPhone section -->
-          <div class="pwa-section">
-            <div class="pwa-section-label">iPhone</div>
-            <p class="pwa-section-text mb-0">Abre esta pagina en Safari, toca Compartir y luego Agregar a pantalla de inicio. Apple no muestra un boton automatico de instalar dentro de la web.</p>
+
+          <!-- Pane: Firefox -->
+          <div class="pwa-tab-pane pwa-section" data-pwa-pane="firefox">
+            <div class="pwa-section-label">Firefox</div>
+            <div class="mb-3">
+              <p class="pwa-section-text pwa-sublabel">En Android</p>
+              <ol class="pwa-steps-list pwa-steps-list--sm">
+                <li>Toca el ícono de <strong style="color:#00ff9d;">Menú (3 puntos)</strong> en la esquina inferior derecha del navegador.</li>
+                <li>Selecciona <strong style="color:#00ff9d;">"Instalar"</strong> o <strong style="color:#00ff9d;">"Agregar a pantalla de inicio"</strong>.</li>
+                <li>Toca <strong style="color:#00ff9d;">Agregar</strong> para confirmar.</li>
+              </ol>
+            </div>
+            <div>
+              <p class="pwa-section-text pwa-sublabel">En escritorio</p>
+              <p class="pwa-section-text mb-2">Firefox de escritorio no instala apps web. Descarga un acceso directo, o abre esta página en Chrome / Edge para instalarla como app.</p>
+              <button id="pwa-ff-shortcut-btn" type="button" class="btn btn-outline-info rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-semibold">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                Descargar acceso directo
+              </button>
+            </div>
           </div>
+
+          <!-- Pane: Safari iOS -->
+          <div class="pwa-tab-pane pwa-section" data-pwa-pane="safari-ios">
+            <div class="pwa-section-label">Safari · iPhone / iPad</div>
+            <p class="pwa-section-text mb-3">Apple no permite instalar apps desde la web directamente; se hace desde el menú de Safari.</p>
+            <ol class="pwa-steps-list pwa-steps-list--sm">
+              <li>Toca el ícono <strong style="color:#00ff9d;">Compartir</strong> (cuadrado con flecha arriba) en la barra inferior de Safari.</li>
+              <li>Desplázate y toca <strong style="color:#00ff9d;">"Agregar a pantalla de inicio"</strong>.</li>
+              <li>Toca <strong style="color:#00ff9d;">Agregar</strong> para confirmar.</li>
+            </ol>
+          </div>
+
+          <!-- Pane: Safari macOS -->
+          <div class="pwa-tab-pane pwa-section" data-pwa-pane="safari-mac">
+            <div class="pwa-section-label">Safari · Mac (Safari 17+)</div>
+            <p class="pwa-section-text mb-3">Disponible en Safari 17 o superior (macOS Sonoma en adelante).</p>
+            <ol class="pwa-steps-list pwa-steps-list--sm">
+              <li>Abre esta página en <strong style="color:#00ff9d;">Safari 17+</strong>.</li>
+              <li>En la barra de menú ve a <strong style="color:#00ff9d;">Archivo → "Agregar al Dock…"</strong>.</li>
+              <li>Haz clic en <strong style="color:#00ff9d;">Agregar</strong> para confirmar.</li>
+            </ol>
+            <p class="pwa-section-text mt-2">En versiones anteriores: guarda como marcador con <strong>⌘D</strong>.</p>
+          </div>
+
         </div>
         <div class="modal-footer pwa-modal-footer">
           <button type="button" class="btn btn-outline-secondary rounded-3 w-100 fw-semibold" data-bs-dismiss="modal">Entendido</button>
@@ -2205,7 +2253,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     </div>
   </div>
 
-  <!-- Modal 2: Pasos Android -->
+  <!-- Modal: Pasos Android (Chrome) -->
   <div class="modal fade" id="pwa-steps-modal" tabindex="-1" aria-labelledby="pwa-steps-label" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content pwa-modal-content">
@@ -2218,9 +2266,9 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
         </div>
         <div class="modal-body" style="padding:1.4rem 1.1rem;">
           <ol class="pwa-steps-list">
-            <li>Toca el icono de <strong style="color:#00ff9d;">Menu (3 puntos)</strong> en la esquina superior derecha del navegador Chrome.</li>
-            <li>Selecciona <strong style="color:#00ff9d;">"Instalar aplicacion"</strong> o <strong style="color:#00ff9d;">"Agregar a la pantalla principal"</strong>.</li>
-            <li>Confirma la instalacion tocando <strong style="color:#00ff9d;">Instalar</strong> o <strong style="color:#00ff9d;">Agregar</strong>.</li>
+            <li>Toca el icono de <strong style="color:#00ff9d;">Menú (3 puntos)</strong> en la esquina superior derecha de Chrome.</li>
+            <li>Selecciona <strong style="color:#00ff9d;">"Instalar aplicación"</strong> o <strong style="color:#00ff9d;">"Agregar a la pantalla principal"</strong>.</li>
+            <li>Confirma tocando <strong style="color:#00ff9d;">Instalar</strong> o <strong style="color:#00ff9d;">Agregar</strong>.</li>
           </ol>
         </div>
       </div>
@@ -2256,7 +2304,15 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       text-transform: uppercase;
       color: var(--theme-primary, #00cfff);
       text-shadow: 0 0 8px rgba(var(--theme-primary-rgb, 0, 207, 255), 0.55);
-      margin-bottom: .4rem;
+      margin-bottom: .5rem;
+    }
+    .pwa-sublabel {
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--theme-primary, #00cfff);
+      margin-bottom: .45rem;
     }
     .pwa-section-text {
       font-size: .8125rem;
@@ -2275,18 +2331,81 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       background: linear-gradient(135deg, #1affa8, #00e890);
       color: #031a0f;
     }
+    /* Numbered steps list */
     .pwa-steps-list {
       list-style: none;
       padding: 0;
       margin: 0;
       display: flex;
       flex-direction: column;
-      gap: 1.4rem;
+      gap: 1.2rem;
+      counter-reset: pwa-step;
     }
     .pwa-steps-list li {
-      font-size: 1.0625rem;
-      line-height: 1.65;
+      font-size: .9375rem;
+      line-height: 1.6;
       color: var(--theme-text, #dde6f5);
+      display: flex;
+      gap: .65rem;
+      align-items: flex-start;
+    }
+    .pwa-steps-list li::before {
+      counter-increment: pwa-step;
+      content: counter(pwa-step);
+      min-width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: rgba(var(--theme-primary-rgb, 0, 207, 255), .12);
+      border: 1px solid rgba(var(--theme-primary-rgb, 0, 207, 255), .35);
+      color: var(--theme-primary, #00cfff);
+      font-size: .7rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: .18rem;
+    }
+    .pwa-steps-list--sm li           { font-size: .8125rem; gap: .55rem; }
+    .pwa-steps-list--sm li::before   { min-width: 18px; height: 18px; font-size: .63rem; margin-top: .1rem; }
+    /* Browser tab pills */
+    .pwa-browser-tabs {
+      display: flex;
+      gap: .35rem;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .pwa-browser-tabs::-webkit-scrollbar { display: none; }
+    .pwa-tab-btn {
+      flex-shrink: 0;
+      padding: .28rem .72rem;
+      font-size: .73rem;
+      font-weight: 600;
+      border-radius: 99px;
+      border: 1px solid rgba(var(--theme-primary-rgb, 0, 207, 255), .22);
+      background: transparent;
+      color: var(--theme-text-muted, #475c77);
+      cursor: pointer;
+      transition: background .16s, color .16s, border-color .16s;
+      white-space: nowrap;
+    }
+    .pwa-tab-btn:hover {
+      border-color: rgba(var(--theme-primary-rgb, 0, 207, 255), .5);
+      color: var(--theme-primary, #00cfff);
+    }
+    .pwa-tab-btn.pwa-tab-active {
+      background: rgba(var(--theme-primary-rgb, 0, 207, 255), .12);
+      border-color: rgba(var(--theme-primary-rgb, 0, 207, 255), .55);
+      color: var(--theme-primary, #00cfff);
+    }
+    .pwa-tab-pane              { display: none; }
+    .pwa-tab-pane.pwa-pane-active { display: block; }
+    .pwa-tab-btn.pwa-tab-detected::after {
+      content: ' ●';
+      color: #00ff9d;
+      font-size: .55rem;
+      vertical-align: middle;
     }
   </style>
 
@@ -2294,19 +2413,62 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   <script>
   (function () {
 
-    /* _pwaPrompt captured early in <head> via window._pwaPrompt */
-
+    /* ── Service Worker ── */
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
         navigator.serviceWorker.register('/sw.js').catch(function () {});
       });
     }
 
+    /* ── Browser detection ── */
+    function pwaDetectBrowser() {
+      var ua = navigator.userAgent;
+      var isIOS = /iPhone|iPad|iPod/.test(ua);
+      if (/OPR\/|Opera\//.test(ua))                               return 'chromium';
+      if (/Edg\//.test(ua))                                       return 'chromium';
+      if (/Firefox\//.test(ua))                                   return 'firefox';
+      if (/Safari\//.test(ua) && !/Chrome\/|Chromium\//.test(ua)) return isIOS ? 'safari-ios' : 'safari-mac';
+      return 'chromium';
+    }
+
+    /* ── Tab switching ── */
+    var _tabBtns  = document.querySelectorAll('.pwa-tab-btn');
+    var _tabPanes = document.querySelectorAll('.pwa-tab-pane');
+
+    function pwaActivateTab(id) {
+      _tabBtns.forEach(function (b) {
+        var on = b.getAttribute('data-pwa-tab') === id;
+        b.classList.toggle('pwa-tab-active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      _tabPanes.forEach(function (p) {
+        p.classList.toggle('pwa-pane-active', p.getAttribute('data-pwa-pane') === id);
+      });
+    }
+
+    _tabBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () { pwaActivateTab(btn.getAttribute('data-pwa-tab')); });
+    });
+
+    /* ── Auto-select on modal open ── */
+    var _installModal = document.getElementById('pwa-install-modal');
+    if (_installModal) {
+      _installModal.addEventListener('show.bs.modal', function () {
+        var detected = pwaDetectBrowser();
+        _tabBtns.forEach(function (b) { b.classList.remove('pwa-tab-detected'); });
+        var detBtn = document.querySelector('.pwa-tab-btn[data-pwa-tab="' + detected + '"]');
+        if (detBtn) detBtn.classList.add('pwa-tab-detected');
+        pwaActivateTab(detected);
+      });
+    }
+
+    /* ── Bootstrap modal helper ── */
     function bsModal(id) {
       var el = document.getElementById(id);
       return el ? window.bootstrap.Modal.getOrCreateInstance(el) : null;
     }
 
+    /* ── "Ver pasos Android" → steps modal ── */
     var stepsBtn = document.getElementById('pwa-steps-btn');
     if (stepsBtn) {
       stepsBtn.addEventListener('click', function () {
@@ -2321,6 +2483,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       });
     }
 
+    /* ── Steps modal back button ── */
     var backBtn = document.getElementById('pwa-steps-back');
     if (backBtn) {
       backBtn.addEventListener('click', function () {
@@ -2335,6 +2498,24 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       });
     }
 
+    /* ── Shortcut .url helper ── */
+    function pwaShortcutDownload(homeUrl) {
+      var name = (document.title || 'VirtualGaming').replace(/[^\w\s\-]/g, '').trim() || 'VirtualGaming';
+      var blob = new Blob(['[InternetShortcut]\r\nURL=' + homeUrl + '\r\n'], { type: 'text/plain' });
+      var dl = document.createElement('a');
+      dl.href = URL.createObjectURL(blob);
+      dl.download = name + '.url';
+      document.body.appendChild(dl); dl.click(); document.body.removeChild(dl);
+      URL.revokeObjectURL(dl.href);
+    }
+
+    function pwaTmpFeedback(btn, msg) {
+      var oh = btn.innerHTML;
+      btn.innerHTML = '<span style="font-size:.8rem;font-weight:600;">' + msg + '<\/span>';
+      setTimeout(function () { btn.innerHTML = oh; }, 3000);
+    }
+
+    /* ── Chromium install button ── */
     var chromeBtn = document.getElementById('pwa-chrome-btn');
     if (chromeBtn) {
       chromeBtn.addEventListener('click', function () {
@@ -2347,74 +2528,31 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
             }
           });
         } else {
-          var _isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || !!window.navigator.standalone;
-          if (_isStandalone) {
-            var _oh = chromeBtn.innerHTML;
-            chromeBtn.innerHTML = '<span style="font-size:.8rem;font-weight:600;">La app ya está instalada ✓<\/span>';
-            setTimeout(function () { chromeBtn.innerHTML = _oh; }, 3000);
+          var isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || !!window.navigator.standalone;
+          if (isStandalone) {
+            pwaTmpFeedback(chromeBtn, 'La app ya está instalada ✓');
           } else {
-            /* Fallback: descargar acceso directo .url para el escritorio */
-            var _homeUrl2 = (document.getElementById('pwa-copy-btn') || {}).getAttribute
-              ? document.getElementById('pwa-copy-btn').getAttribute('data-pwa-home') || window.location.origin
-              : window.location.origin;
-            var _storeName = (document.title || 'VirtualGaming').replace(/[^\w\s\-]/g, '').trim() || 'VirtualGaming';
-            var _shortcut = '[InternetShortcut]\r\nURL=' + _homeUrl2 + '\r\n';
-            var _blob = new Blob([_shortcut], { type: 'text/plain' });
-            var _dl = document.createElement('a');
-            _dl.href = URL.createObjectURL(_blob);
-            _dl.download = _storeName + '.url';
-            document.body.appendChild(_dl);
-            _dl.click();
-            document.body.removeChild(_dl);
-            URL.revokeObjectURL(_dl.href);
-            var _oh2 = chromeBtn.innerHTML;
-            chromeBtn.innerHTML = '<span style="font-size:.8rem;font-weight:600;">Acceso directo descargado ↓<\/span>';
-            setTimeout(function () { chromeBtn.innerHTML = _oh2; }, 3000);
+            pwaShortcutDownload(chromeBtn.getAttribute('data-pwa-home') || window.location.origin);
+            pwaTmpFeedback(chromeBtn, 'Acceso directo descargado ↓');
           }
         }
       });
     }
 
-    var copyBtn = document.getElementById('pwa-copy-btn');
-    if (copyBtn) {
-      copyBtn.addEventListener('click', function () {
-        var url  = copyBtn.getAttribute('data-pwa-home') || window.location.origin;
-        var lbl  = copyBtn.querySelector('.pwa-copy-lbl');
-        var done = copyBtn.querySelector('.pwa-copy-done');
-        function showDone() {
-          if (lbl)  lbl.style.display = 'none';
-          if (done) done.style.display = 'flex';
-          setTimeout(function () {
-            if (lbl)  lbl.style.display = 'flex';
-            if (done) done.style.display = 'none';
-          }, 2800);
-        }
-        if (navigator.clipboard && window.isSecureContext) {
-          navigator.clipboard.writeText(url).then(showDone).catch(function () {
-            pwaFallbackCopy(url); showDone();
-          });
-        } else {
-          pwaFallbackCopy(url); showDone();
-        }
+    /* ── Firefox desktop shortcut button ── */
+    var ffBtn = document.getElementById('pwa-ff-shortcut-btn');
+    if (ffBtn) {
+      ffBtn.addEventListener('click', function () {
+        var homeUrl = (chromeBtn && chromeBtn.getAttribute('data-pwa-home')) || window.location.origin;
+        pwaShortcutDownload(homeUrl);
+        pwaTmpFeedback(ffBtn, 'Acceso directo descargado ↓');
       });
-    }
-
-    function pwaFallbackCopy(text) {
-      var ta = document.createElement('textarea');
-      ta.value = text;
-      ta.setAttribute('readonly', '');
-      ta.style.cssText = 'position:fixed;left:0;top:0;width:2em;height:2em;padding:0;border:none;outline:none;background:transparent;opacity:0.01;z-index:999999;';
-      var _pwaContainer = document.getElementById('pwa-install-modal') || document.body;
-      _pwaContainer.appendChild(ta);
-      ta.focus();
-      ta.select();
-      ta.setSelectionRange(0, ta.value.length);
-      try { document.execCommand('copy'); } catch (e) {}
-      _pwaContainer.removeChild(ta);
     }
 
   }());
   </script>
+
+
 
 
   <!-- ═══════════════════════════════
