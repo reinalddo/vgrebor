@@ -2530,14 +2530,14 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   ?>
   <div id="pwa-banner"
        role="status"
-       style="display:none;position:fixed;top:0;left:0;right:0;z-index:199;
+       style="display:none;width:100%;
               background:rgba(12,18,32,.97);
               border-bottom:1px solid rgba(var(--theme-primary-rgb,0,207,255),.2);
-              padding:.6rem 1.25rem;
+              padding:0 1.25rem;
               align-items:center;gap:.9rem;
               box-shadow:0 4px 24px rgba(0,0,0,.5);
-              transform:translateY(-100%);
-              transition:transform .36s cubic-bezier(.25,.46,.45,.94);">
+              overflow:hidden;max-height:0;
+              transition:max-height .36s cubic-bezier(.25,.46,.45,.94),padding .36s cubic-bezier(.25,.46,.45,.94);">
     <?php if ($pwa_ban_logo_url !== ''): ?>
     <img src="<?php echo htmlspecialchars($pwa_ban_logo_url, ENT_QUOTES, 'UTF-8'); ?>"
          alt=""
@@ -2578,17 +2578,23 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     if (!ban) return;
 
     function show() {
-      /* Position banner just below the site header */
+      /* Move banner into page flow right after the site header */
       var hdr = document.querySelector('[data-site-topbar]') ||
                 document.querySelector('.site-header') ||
                 document.querySelector('header');
-      ban.style.top = (hdr ? Math.round(hdr.getBoundingClientRect().bottom) : 0) + 'px';
+      if (hdr && hdr.parentNode) {
+        hdr.insertAdjacentElement('afterend', ban);
+      }
       ban.style.display = 'flex';
       ban.offsetHeight; /* force reflow so transition plays */
-      ban.style.transform = 'translateY(0)';
+      ban.style.maxHeight = '80px';
+      ban.style.paddingTop = '.6rem';
+      ban.style.paddingBottom = '.6rem';
     }
     function hide() {
-      ban.style.transform = 'translateY(-100%)';
+      ban.style.maxHeight = '0';
+      ban.style.paddingTop = '0';
+      ban.style.paddingBottom = '0';
       sessionStorage.setItem(SK, '1');
       setTimeout(function () { ban.style.display = 'none'; }, 390);
     }
