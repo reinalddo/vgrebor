@@ -2207,6 +2207,18 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
               <li>Selecciona <strong style="color:#00ff9d;">"Instalar aplicación"</strong> o <strong style="color:#00ff9d;">"Agregar a la pantalla principal"</strong>.</li>
               <li>Confirma la instalación tocando <strong style="color:#00ff9d;">Instalar</strong> o <strong style="color:#00ff9d;">Agregar</strong>.</li>
             </ol>
+            <button id="pwa-otros-btn" type="button" class="btn rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-bold pwa-btn-cta mt-3">
+              <svg width="18" height="18" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M28 4 A24 24 0 0 1 48.78 16 L28 28 Z" fill="#EA4335"/>
+                <path d="M48.78 16 A24 24 0 0 1 48.78 40 L28 28 Z" fill="#34A853"/>
+                <path d="M48.78 40 A24 24 0 0 1 7.22 40 L28 28 Z" fill="#FBBC05"/>
+                <path d="M7.22 40 A24 24 0 0 1 7.22 16 L28 28 Z" fill="#EA4335"/>
+                <path d="M7.22 16 A24 24 0 0 1 28 4 L28 28 Z" fill="#FBBC05"/>
+                <circle cx="28" cy="28" r="13" fill="white"/>
+                <circle cx="28" cy="28" r="8.5" fill="#4285F4"/>
+              </svg>
+              Abrir en Chrome
+            </button>
           </div>
 
         </div>
@@ -2501,6 +2513,47 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
               pwaShortcutDownload(chromeBtn.getAttribute('data-pwa-home') || window.location.origin);
               pwaTmpFeedback(chromeBtn, 'Acceso directo descargado ↓');
             }
+          }
+        }
+      });
+    }
+
+    /* ── "Otros navegadores" → Abrir en Chrome ── */
+    var otrosBtn = document.getElementById('pwa-otros-btn');
+    if (otrosBtn) {
+      otrosBtn.addEventListener('click', function () {
+        var url = window.location.href;
+        var ua  = navigator.userAgent;
+        if (/Android/.test(ua)) {
+          /* Android: intent URL abre el enlace directamente en Chrome */
+          var m = url.match(/^https?:\/\/([^\/]+)(\/.*)?$/);
+          var host = m ? m[1] : window.location.hostname;
+          var path = (m && m[2]) ? m[2] : '/';
+          window.location.href = 'intent://' + host + path + '#Intent;scheme=https;package=com.android.chrome;end';
+        } else if (/iPhone|iPad|iPod/.test(ua)) {
+          /* iOS: googlechromes:// abre el enlace en Chrome para iPhone/iPad */
+          window.location.href = url.replace(/^https:\/\//, 'googlechromes://').replace(/^http:\/\//, 'googlechrome://');
+        } else {
+          /* Escritorio: copiar URL con execCommand (no requiere permisos) */
+          var _tmp = document.createElement('input');
+          _tmp.value = url;
+          _tmp.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+          document.body.appendChild(_tmp);
+          _tmp.focus();
+          _tmp.select();
+          var _ok = false;
+          try { _ok = document.execCommand('copy'); } catch(e) {}
+          document.body.removeChild(_tmp);
+          if (_ok) {
+            pwaTmpFeedback(otrosBtn, 'Enlace copiado ✓ — pégalo en Chrome');
+          } else if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url).then(function () {
+              pwaTmpFeedback(otrosBtn, 'Enlace copiado ✓ — pégalo en Chrome');
+            }).catch(function () {
+              pwaTmpFeedback(otrosBtn, 'Copia la URL manualmente desde la barra de direcciones');
+            });
+          } else {
+            pwaTmpFeedback(otrosBtn, 'Copia la URL manualmente desde la barra de direcciones');
           }
         }
       });
