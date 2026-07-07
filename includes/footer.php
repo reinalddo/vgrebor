@@ -2189,16 +2189,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#031a0f" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="18" r=".8" fill="#031a0f" stroke="none"/></svg>
                 Instalar como aplicación
               </button>
-              <button id="pwa-copy-btn" type="button" class="btn btn-outline-info rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-semibold" data-pwa-home="<?php echo htmlspecialchars(isset($homeUrl) ? $homeUrl : (function_exists("app_url") ? app_url("/") : "/"), ENT_QUOTES, "UTF-8"); ?>">
-                <span class="pwa-copy-lbl" style="display:flex;align-items:center;gap:8px;">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-                  Copiar enlace
-                </span>
-                <span class="pwa-copy-done" style="display:none;align-items:center;gap:8px;color:#00ff9d;">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                  Enlace copiado
-                </span>
-              </button>
+
             </div>
           </div>
           <!-- iPhone section -->
@@ -2443,13 +2434,15 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   ?>
   <div id="pwa-banner"
        role="status"
-       style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:1045;
+       style="display:none;position:fixed;bottom:1.25rem;left:1.25rem;right:auto;
+              max-width:min(420px,calc(100vw - 2.5rem));z-index:1045;
               background:rgba(12,18,32,.97);
-              border-top:1px solid rgba(var(--theme-primary-rgb,0,207,255),.2);
-              padding:.65rem 1.25rem;
+              border:1px solid rgba(var(--theme-primary-rgb,0,207,255),.2);
+              border-radius:.85rem;
+              padding:.65rem 1rem;
               align-items:center;gap:.9rem;
-              box-shadow:0 -4px 32px rgba(0,0,0,.4);
-              transform:translateY(100%);
+              box-shadow:0 8px 32px rgba(0,0,0,.5),0 0 0 1px rgba(var(--theme-primary-rgb,0,207,255),.06);
+              transform:translateY(calc(100% + 1.5rem));
               transition:transform .36s cubic-bezier(.25,.46,.45,.94);">
     <?php if ($pwa_ban_logo_url !== ''): ?>
     <img src="<?php echo htmlspecialchars($pwa_ban_logo_url, ENT_QUOTES, 'UTF-8'); ?>"
