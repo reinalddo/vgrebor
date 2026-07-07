@@ -2181,6 +2181,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
           <div class="pwa-browser-tabs mb-3" role="tablist">
             <button class="pwa-tab-btn" data-pwa-tab="chromium" role="tab" aria-selected="false">Chrome / Edge / Opera</button>
             <button class="pwa-tab-btn" data-pwa-tab="firefox"  role="tab" aria-selected="false">Firefox</button>
+            <button class="pwa-tab-btn" data-pwa-tab="opera-android" role="tab" aria-selected="false">Opera Android</button>
             <button class="pwa-tab-btn" data-pwa-tab="safari-ios" role="tab" aria-selected="false">Safari iPhone</button>
             <button class="pwa-tab-btn" data-pwa-tab="safari-mac" role="tab" aria-selected="false">Safari Mac</button>
           </div>
@@ -2207,7 +2208,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
             <div class="mb-3">
               <p class="pwa-section-text pwa-sublabel">En Android</p>
               <ol class="pwa-steps-list pwa-steps-list--sm">
-                <li>Toca el ícono de <strong style="color:#00ff9d;">Menú (3 puntos)</strong> en la esquina inferior derecha del navegador.</li>
+                <li>Toca el ícono de <strong style="color:#00ff9d;">Menú (3 puntos)</strong> en la esquina superior derecha del navegador.</li>
                 <li>Selecciona <strong style="color:#00ff9d;">"Instalar"</strong> o <strong style="color:#00ff9d;">"Agregar a pantalla de inicio"</strong>.</li>
                 <li>Toca <strong style="color:#00ff9d;">Agregar</strong> para confirmar.</li>
               </ol>
@@ -2220,6 +2221,24 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
                 Descargar acceso directo
               </button>
             </div>
+          </div>
+
+          <!-- Pane: Opera Android -->
+          <div class="pwa-tab-pane pwa-section" data-pwa-pane="opera-android">
+            <div class="pwa-section-label">Opera · Android</div>
+            <p class="pwa-section-text mb-3">Intenta la instalación automática primero. Si no aparece el diálogo, usa los pasos manuales.</p>
+            <div class="d-flex flex-column gap-2 mb-3">
+              <button id="pwa-opera-btn" type="button" class="btn rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-bold pwa-btn-cta">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#031a0f" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                Instalar automáticamente
+              </button>
+            </div>
+            <p class="pwa-section-text pwa-sublabel mb-2">Pasos manuales (si el botón no funciona)</p>
+            <ol class="pwa-steps-list pwa-steps-list--sm">
+              <li>Toca el ícono de <strong style="color:#00ff9d;">Menú</strong> (logo O o tres puntos) en la barra de Opera.</li>
+              <li>Busca <strong style="color:#00ff9d;">"Agregar a pantalla de inicio"</strong> o <strong style="color:#00ff9d;">"Instalar aplicación"</strong>.</li>
+              <li>Toca <strong style="color:#00ff9d;">Agregar</strong> para confirmar.</li>
+            </ol>
           </div>
 
           <!-- Pane: Safari iOS -->
@@ -2371,12 +2390,9 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     /* Browser tab pills */
     .pwa-browser-tabs {
       display: flex;
+      flex-wrap: wrap;
       gap: .35rem;
-      overflow-x: auto;
-      scrollbar-width: none;
-      -webkit-overflow-scrolling: touch;
     }
-    .pwa-browser-tabs::-webkit-scrollbar { display: none; }
     .pwa-tab-btn {
       flex-shrink: 0;
       padding: .28rem .72rem;
@@ -2424,7 +2440,8 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     function pwaDetectBrowser() {
       var ua = navigator.userAgent;
       var isIOS = /iPhone|iPad|iPod/.test(ua);
-      if (/OPR\/|Opera\//.test(ua))                               return 'chromium';
+      var isAndroid = /Android/.test(ua);
+      if (/OPR\/|Opera\//.test(ua))  return isAndroid ? 'opera-android' : 'chromium';
       if (/Edg\//.test(ua))                                       return 'chromium';
       if (/Firefox\//.test(ua))                                   return 'firefox';
       if (/Safari\//.test(ua) && !/Chrome\/|Chromium\//.test(ua)) return isIOS ? 'safari-ios' : 'safari-mac';
@@ -2532,8 +2549,12 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
           if (isStandalone) {
             pwaTmpFeedback(chromeBtn, 'La app ya está instalada ✓');
           } else {
-            pwaShortcutDownload(chromeBtn.getAttribute('data-pwa-home') || window.location.origin);
-            pwaTmpFeedback(chromeBtn, 'Acceso directo descargado ↓');
+            if (/Android/.test(navigator.userAgent) && stepsBtn) {
+              stepsBtn.click();
+            } else {
+              pwaShortcutDownload(chromeBtn.getAttribute('data-pwa-home') || window.location.origin);
+              pwaTmpFeedback(chromeBtn, 'Acceso directo descargado ↓');
+            }
           }
         }
       });
@@ -2546,6 +2567,25 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
         var homeUrl = (chromeBtn && chromeBtn.getAttribute('data-pwa-home')) || window.location.origin;
         pwaShortcutDownload(homeUrl);
         pwaTmpFeedback(ffBtn, 'Acceso directo descargado ↓');
+      });
+    }
+
+    /* ── Opera Android install button ── */
+    var operaBtn = document.getElementById('pwa-opera-btn');
+    if (operaBtn) {
+      operaBtn.addEventListener('click', function () {
+        if (window._pwaPrompt) {
+          window._pwaPrompt.prompt().then(function (result) {
+            if (result && result.outcome === 'accepted') {
+              window._pwaPrompt = null;
+              var m = bsModal('pwa-install-modal');
+              if (m) m.hide();
+            }
+          });
+        } else {
+          var isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || !!window.navigator.standalone;
+          pwaTmpFeedback(operaBtn, isStandalone ? 'La app ya está instalada ✓' : 'Sigue los pasos manuales ↓');
+        }
       });
     }
 
