@@ -2179,16 +2179,13 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
 
           <!-- Browser tabs -->
           <div class="pwa-browser-tabs mb-3" role="tablist">
-            <button class="pwa-tab-btn" data-pwa-tab="chromium" role="tab" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/><line x1="12" y1="3" x2="12" y2="8.5"/><line x1="3.4" y1="16.5" x2="8.2" y2="13.8"/><line x1="20.6" y1="16.5" x2="15.8" y2="13.8"/></svg>Chrome / Edge / Opera</button>
-            <button class="pwa-tab-btn" data-pwa-tab="firefox" role="tab" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2c-3 3-3 6-2 8.5C8 9 7 7 7.5 4.5 5 6 3 9 3 12a9 9 0 0018 0c0-2.5-1.5-4.5-3-5.5.5 2 0 4-1.5 5 .5-3-1-7-4.5-9.5z"/></svg>Firefox</button>
-            <button class="pwa-tab-btn" data-pwa-tab="opera-android" role="tab" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><ellipse cx="12" cy="12" rx="9" ry="9"/><ellipse cx="12" cy="12" rx="4.5" ry="9"/></svg>Opera Android</button>
-            <button class="pwa-tab-btn" data-pwa-tab="safari-ios" role="tab" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" stroke="none"/></svg>Safari iPhone</button>
-            <button class="pwa-tab-btn" data-pwa-tab="safari-mac" role="tab" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" stroke="none"/></svg>Safari Mac</button>
+            <button class="pwa-tab-btn" data-pwa-tab="chromium" role="tab" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/><line x1="12" y1="3" x2="12" y2="8.5"/><line x1="3.4" y1="16.5" x2="8.2" y2="13.8"/><line x1="20.6" y1="16.5" x2="15.8" y2="13.8"/></svg>Chrome / Edge</button>
+            <button class="pwa-tab-btn" data-pwa-tab="otros" role="tab" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3c-2.5 3-2.5 15 0 18M12 3c2.5 3 2.5 15 0 18M3 12h18"/></svg>Otros navegadores</button>
           </div>
 
-          <!-- Pane: Chromium (Chrome / Edge / Opera) -->
+          <!-- Pane: Chromium (Chrome / Edge) -->
           <div class="pwa-tab-pane pwa-section" data-pwa-pane="chromium">
-            <div class="pwa-section-label">Chrome · Edge · Opera</div>
+            <div class="pwa-section-label">Chrome · Edge</div>
             <p class="pwa-section-text mb-3">En Android, si el instalador automático no aparece, abre la página en Chrome (no Samsung, Xiaomi, Facebook ni Instagram), espera que cargue y toca Instalar.</p>
             <div class="d-flex flex-column gap-2">
               <button id="pwa-steps-btn" type="button" class="btn btn-outline-info rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-semibold">
@@ -2202,66 +2199,15 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
             </div>
           </div>
 
-          <!-- Pane: Firefox -->
-          <div class="pwa-tab-pane pwa-section" data-pwa-pane="firefox">
-            <div class="pwa-section-label">Firefox</div>
-            <div class="mb-3">
-              <p class="pwa-section-text pwa-sublabel">En Android</p>
-              <ol class="pwa-steps-list pwa-steps-list--sm">
-                <li>Toca el ícono de <strong style="color:#00ff9d;">Menú (3 puntos)</strong> en la esquina superior derecha del navegador.</li>
-                <li>Selecciona <strong style="color:#00ff9d;">"Instalar"</strong> o <strong style="color:#00ff9d;">"Agregar a pantalla de inicio"</strong>.</li>
-                <li>Toca <strong style="color:#00ff9d;">Agregar</strong> para confirmar.</li>
-              </ol>
-            </div>
-            <div>
-              <p class="pwa-section-text pwa-sublabel">En escritorio</p>
-              <p class="pwa-section-text mb-2">Firefox de escritorio no instala apps web. Descarga un acceso directo, o abre esta página en Chrome / Edge para instalarla como app.</p>
-              <button id="pwa-ff-shortcut-btn" type="button" class="btn btn-outline-info rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-semibold">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                Descargar acceso directo
-              </button>
-            </div>
-          </div>
-
-          <!-- Pane: Opera Android -->
-          <div class="pwa-tab-pane pwa-section" data-pwa-pane="opera-android">
-            <div class="pwa-section-label">Opera · Android</div>
-            <p class="pwa-section-text mb-3">Intenta la instalación automática primero. Si no aparece el diálogo, usa los pasos manuales.</p>
-            <div class="d-flex flex-column gap-2 mb-3">
-              <button id="pwa-opera-btn" type="button" class="btn rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-bold pwa-btn-cta">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#031a0f" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                Instalar automáticamente
-              </button>
-            </div>
-            <p class="pwa-section-text pwa-sublabel mb-2">Pasos manuales (si el botón no funciona)</p>
+          <!-- Pane: Otros navegadores → instalar desde menú Chrome -->
+          <div class="pwa-tab-pane pwa-section" data-pwa-pane="otros">
+            <div class="pwa-section-label">Otros navegadores</div>
+            <p class="pwa-section-text mb-3">Instala la app directamente desde el menú de Chrome en 3 pasos:</p>
             <ol class="pwa-steps-list pwa-steps-list--sm">
-              <li>Toca el ícono de <strong style="color:#00ff9d;">Menú</strong> (logo O o tres puntos) en la barra de Opera.</li>
-              <li>Busca <strong style="color:#00ff9d;">"Agregar a pantalla de inicio"</strong> o <strong style="color:#00ff9d;">"Instalar aplicación"</strong>.</li>
-              <li>Toca <strong style="color:#00ff9d;">Agregar</strong> para confirmar.</li>
+              <li>Toca los <strong style="color:#00ff9d;">tres puntos ⋮</strong> en la esquina superior derecha del navegador.</li>
+              <li>Selecciona <strong style="color:#00ff9d;">"Enviar, guardar y compartir"</strong>.</li>
+              <li>Toca <strong style="color:#00ff9d;">"Instalar página como aplicación…"</strong> y confirma.</li>
             </ol>
-          </div>
-
-          <!-- Pane: Safari iOS -->
-          <div class="pwa-tab-pane pwa-section" data-pwa-pane="safari-ios">
-            <div class="pwa-section-label">Safari · iPhone / iPad</div>
-            <p class="pwa-section-text mb-3">Apple no permite instalar apps desde la web directamente; se hace desde el menú de Safari.</p>
-            <ol class="pwa-steps-list pwa-steps-list--sm">
-              <li>Toca el ícono <strong style="color:#00ff9d;">Compartir</strong> (cuadrado con flecha arriba) en la barra inferior de Safari.</li>
-              <li>Desplázate y toca <strong style="color:#00ff9d;">"Agregar a pantalla de inicio"</strong>.</li>
-              <li>Toca <strong style="color:#00ff9d;">Agregar</strong> para confirmar.</li>
-            </ol>
-          </div>
-
-          <!-- Pane: Safari macOS -->
-          <div class="pwa-tab-pane pwa-section" data-pwa-pane="safari-mac">
-            <div class="pwa-section-label">Safari · Mac (Safari 17+)</div>
-            <p class="pwa-section-text mb-3">Disponible en Safari 17 o superior (macOS Sonoma en adelante).</p>
-            <ol class="pwa-steps-list pwa-steps-list--sm">
-              <li>Abre esta página en <strong style="color:#00ff9d;">Safari 17+</strong>.</li>
-              <li>En la barra de menú ve a <strong style="color:#00ff9d;">Archivo → "Agregar al Dock…"</strong>.</li>
-              <li>Haz clic en <strong style="color:#00ff9d;">Agregar</strong> para confirmar.</li>
-            </ol>
-            <p class="pwa-section-text mt-2">En versiones anteriores: guarda como marcador con <strong>⌘D</strong>.</p>
           </div>
 
         </div>
@@ -2388,9 +2334,6 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     .pwa-steps-list--sm li           { font-size: .8125rem; gap: .55rem; }
     .pwa-steps-list--sm li::before   { min-width: 18px; height: 18px; font-size: .63rem; margin-top: .1rem; }
     /* Browser tab pills */
-    /* Ensure site header stacks above the PWA banner so it slides out from behind */
-    [data-site-topbar], .site-header { position: relative; z-index: 200; }
-
     .pwa-browser-tabs {
       display: flex;
       flex-wrap: wrap;
@@ -2445,12 +2388,10 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     /* ── Browser detection ── */
     function pwaDetectBrowser() {
       var ua = navigator.userAgent;
-      var isIOS = /iPhone|iPad|iPod/.test(ua);
-      var isAndroid = /Android/.test(ua);
-      if (/OPR\/|Opera\//.test(ua))  return isAndroid ? 'opera-android' : 'chromium';
-      if (/Edg\//.test(ua))                                       return 'chromium';
-      if (/Firefox\//.test(ua))                                   return 'firefox';
-      if (/Safari\//.test(ua) && !/Chrome\/|Chromium\//.test(ua)) return isIOS ? 'safari-ios' : 'safari-mac';
+      if (/OPR\/|Opera\//.test(ua) && /Android/.test(ua)) return 'otros';
+      if (/Edg\/|Chrome\//.test(ua) && !/OPR\/|Opera\//.test(ua)) return 'chromium';
+      if (/Firefox\//.test(ua)) return 'otros';
+      if (/Safari\//.test(ua) && !/Chrome\/|Chromium\//.test(ua)) return 'otros';
       return 'chromium';
     }
 
@@ -2560,48 +2501,6 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
             } else {
               pwaShortcutDownload(chromeBtn.getAttribute('data-pwa-home') || window.location.origin);
               pwaTmpFeedback(chromeBtn, 'Acceso directo descargado ↓');
-            }
-          }
-        }
-      });
-    }
-
-    /* ── Firefox desktop shortcut button ── */
-    var ffBtn = document.getElementById('pwa-ff-shortcut-btn');
-    if (ffBtn) {
-      ffBtn.addEventListener('click', function () {
-        var homeUrl = (chromeBtn && chromeBtn.getAttribute('data-pwa-home')) || window.location.origin;
-        pwaShortcutDownload(homeUrl);
-        pwaTmpFeedback(ffBtn, 'Acceso directo descargado ↓');
-      });
-    }
-
-    /* ── Opera Android install button ── */
-    var operaBtn = document.getElementById('pwa-opera-btn');
-    if (operaBtn) {
-      operaBtn.addEventListener('click', function () {
-        if (window._pwaPrompt) {
-          window._pwaPrompt.prompt().then(function (result) {
-            if (result && result.outcome === 'accepted') {
-              window._pwaPrompt = null;
-              var m = bsModal('pwa-install-modal');
-              if (m) m.hide();
-            }
-          });
-        } else {
-          var isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || !!window.navigator.standalone;
-          if (isStandalone) {
-            pwaTmpFeedback(operaBtn, 'La app ya está instalada ✓');
-          } else {
-            pwaTmpFeedback(operaBtn, 'Instalador no disponible — sigue los pasos ↓');
-            var _opPane = document.querySelector('[data-pwa-pane="opera-android"]');
-            var _opSteps = _opPane ? _opPane.querySelector('.pwa-steps-list') : null;
-            if (_opSteps) {
-              _opSteps.style.outline = '2px solid rgba(var(--theme-primary-rgb,0,207,255),.7)';
-              _opSteps.style.outlineOffset = '6px';
-              _opSteps.style.borderRadius = '.4rem';
-              setTimeout(function () { _opSteps.style.outline = '2px solid transparent'; }, 2000);
-              setTimeout(function () { _opSteps.style.cssText = _opSteps.style.cssText.replace(/outline[^;]*;?/g,'').replace(/border-radius[^;]*;?/g,'').replace(/outline-offset[^;]*;?/g,''); }, 2600);
             }
           }
         }
