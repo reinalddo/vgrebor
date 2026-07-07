@@ -2162,5 +2162,357 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     echo $googleAnalyticsScript;
   }
   ?>
+
+  <!-- ═══════════════════════════════════════════════
+       PWA — Modal "Instalar gestor" + "Pasos Android"
+       ═══════════════════════════════════════════════ -->
+
+  <!-- Modal 1: Instalar gestor -->
+  <div class="modal fade" id="pwa-install-modal" tabindex="-1" aria-labelledby="pwa-install-label" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content pwa-modal-content">
+        <div class="modal-header pwa-modal-header">
+          <h5 class="modal-title fw-bold" id="pwa-install-label">Instalar gestor</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body" style="padding:1rem 1.1rem;">
+          <!-- Android section -->
+          <div class="pwa-section mb-2">
+            <div class="pwa-section-label">Android / Chrome</div>
+            <p class="pwa-section-text mb-3">Android todavia no habilito el instalador automatico. Abre esta pagina en Chrome normal, espera que cargue, y vuelve a tocar Instalar. Si usas navegador Xiaomi, Samsung, Instagram o Facebook, primero abre en Chrome.</p>
+            <div class="d-flex flex-column gap-2">
+              <button id="pwa-steps-btn" type="button" class="btn btn-outline-info rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-semibold">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="18" r=".8" fill="currentColor" stroke="none"/></svg>
+                Ver pasos Android
+              </button>
+              <button id="pwa-chrome-btn" type="button" class="btn rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-bold pwa-btn-cta">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#031a0f" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="18" r=".8" fill="#031a0f" stroke="none"/></svg>
+                Instalar como aplicación
+              </button>
+              <button id="pwa-copy-btn" type="button" class="btn btn-outline-info rounded-3 w-100 d-flex align-items-center justify-content-center gap-2 fw-semibold" data-pwa-home="<?php echo htmlspecialchars(isset($homeUrl) ? $homeUrl : (function_exists("app_url") ? app_url("/") : "/"), ENT_QUOTES, "UTF-8"); ?>">
+                <span class="pwa-copy-lbl" style="display:flex;align-items:center;gap:8px;">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                  Copiar enlace
+                </span>
+                <span class="pwa-copy-done" style="display:none;align-items:center;gap:8px;color:#00ff9d;">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  Enlace copiado
+                </span>
+              </button>
+            </div>
+          </div>
+          <!-- iPhone section -->
+          <div class="pwa-section">
+            <div class="pwa-section-label">iPhone</div>
+            <p class="pwa-section-text mb-0">Abre esta pagina en Safari, toca Compartir y luego Agregar a pantalla de inicio. Apple no muestra un boton automatico de instalar dentro de la web.</p>
+          </div>
+        </div>
+        <div class="modal-footer pwa-modal-footer">
+          <button type="button" class="btn btn-outline-secondary rounded-3 w-100 fw-semibold" data-bs-dismiss="modal">Entendido</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 2: Pasos Android -->
+  <div class="modal fade" id="pwa-steps-modal" tabindex="-1" aria-labelledby="pwa-steps-label" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content pwa-modal-content">
+        <div class="modal-header pwa-modal-header">
+          <button type="button" id="pwa-steps-back" class="btn btn-outline-info btn-sm rounded-circle d-flex align-items-center justify-content-center me-2 flex-shrink-0" style="width:30px;height:30px;" aria-label="Volver">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+          <h5 class="modal-title fw-bold" id="pwa-steps-label">Pasos Android</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body" style="padding:1.4rem 1.1rem;">
+          <ol class="pwa-steps-list">
+            <li>Toca el icono de <strong style="color:#00ff9d;">Menu (3 puntos)</strong> en la esquina superior derecha del navegador Chrome.</li>
+            <li>Selecciona <strong style="color:#00ff9d;">"Instalar aplicacion"</strong> o <strong style="color:#00ff9d;">"Agregar a la pantalla principal"</strong>.</li>
+            <li>Confirma la instalacion tocando <strong style="color:#00ff9d;">Instalar</strong> o <strong style="color:#00ff9d;">Agregar</strong>.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PWA styles -->
+  <style>
+    .pwa-modal-content {
+      background: var(--theme-surface-alt, #0c1220);
+      border: 1px solid rgba(var(--theme-primary-rgb, 0, 207, 255), 0.25);
+      border-radius: 1rem;
+      color: var(--theme-text, #dde6f5);
+    }
+    .pwa-modal-header {
+      border-bottom: 1px solid rgba(var(--theme-primary-rgb, 0, 207, 255), 0.12);
+      padding: .9rem 1.1rem;
+    }
+    .pwa-modal-footer {
+      border-top: 1px solid rgba(var(--theme-primary-rgb, 0, 207, 255), 0.12);
+      padding: .75rem 1.1rem;
+    }
+    .pwa-section {
+      background: rgba(var(--theme-primary-rgb, 0, 207, 255), 0.05);
+      border: 1px solid rgba(var(--theme-primary-rgb, 0, 207, 255), 0.12);
+      border-radius: .75rem;
+      padding: .9rem;
+    }
+    .pwa-section-label {
+      font-size: .6875rem;
+      font-weight: 700;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+      color: var(--theme-primary, #00cfff);
+      text-shadow: 0 0 8px rgba(var(--theme-primary-rgb, 0, 207, 255), 0.55);
+      margin-bottom: .4rem;
+    }
+    .pwa-section-text {
+      font-size: .8125rem;
+      color: var(--theme-text-muted, #475c77);
+      line-height: 1.6;
+    }
+    .pwa-btn-cta {
+      background: linear-gradient(135deg, #00ff9d, #00cc7e);
+      color: #031a0f;
+      border: none;
+      transition: box-shadow .2s;
+    }
+    .pwa-btn-cta:hover,
+    .pwa-btn-cta:focus {
+      box-shadow: 0 0 22px rgba(0, 255, 157, .45), 0 0 48px rgba(0, 255, 157, .12);
+      background: linear-gradient(135deg, #1affa8, #00e890);
+      color: #031a0f;
+    }
+    .pwa-steps-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 1.4rem;
+    }
+    .pwa-steps-list li {
+      font-size: 1.0625rem;
+      line-height: 1.65;
+      color: var(--theme-text, #dde6f5);
+    }
+  </style>
+
+  <!-- PWA JS -->
+  <script>
+  (function () {
+
+    /* _pwaPrompt captured early in <head> via window._pwaPrompt */
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').catch(function () {});
+      });
+    }
+
+    function bsModal(id) {
+      var el = document.getElementById(id);
+      return el ? window.bootstrap.Modal.getOrCreateInstance(el) : null;
+    }
+
+    var stepsBtn = document.getElementById('pwa-steps-btn');
+    if (stepsBtn) {
+      stepsBtn.addEventListener('click', function () {
+        var installEl = document.getElementById('pwa-install-modal');
+        var stepsEl   = document.getElementById('pwa-steps-modal');
+        if (!installEl || !stepsEl) return;
+        window.bootstrap.Modal.getOrCreateInstance(installEl).hide();
+        installEl.addEventListener('hidden.bs.modal', function once() {
+          installEl.removeEventListener('hidden.bs.modal', once);
+          window.bootstrap.Modal.getOrCreateInstance(stepsEl).show();
+        });
+      });
+    }
+
+    var backBtn = document.getElementById('pwa-steps-back');
+    if (backBtn) {
+      backBtn.addEventListener('click', function () {
+        var stepsEl   = document.getElementById('pwa-steps-modal');
+        var installEl = document.getElementById('pwa-install-modal');
+        if (!stepsEl || !installEl) return;
+        window.bootstrap.Modal.getOrCreateInstance(stepsEl).hide();
+        stepsEl.addEventListener('hidden.bs.modal', function once() {
+          stepsEl.removeEventListener('hidden.bs.modal', once);
+          window.bootstrap.Modal.getOrCreateInstance(installEl).show();
+        });
+      });
+    }
+
+    var chromeBtn = document.getElementById('pwa-chrome-btn');
+    if (chromeBtn) {
+      chromeBtn.addEventListener('click', function () {
+        if (window._pwaPrompt) {
+          window._pwaPrompt.prompt().then(function (result) {
+            if (result && result.outcome === 'accepted') {
+              window._pwaPrompt = null;
+              var m = bsModal('pwa-install-modal');
+              if (m) m.hide();
+            }
+          });
+        } else {
+          var _isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || !!window.navigator.standalone;
+          if (_isStandalone) {
+            var _oh = chromeBtn.innerHTML;
+            chromeBtn.innerHTML = '<span style="font-size:.8rem;font-weight:600;">La app ya está instalada ✓<\/span>';
+            setTimeout(function () { chromeBtn.innerHTML = _oh; }, 3000);
+          } else {
+            /* Fallback: descargar acceso directo .url para el escritorio */
+            var _homeUrl2 = (document.getElementById('pwa-copy-btn') || {}).getAttribute
+              ? document.getElementById('pwa-copy-btn').getAttribute('data-pwa-home') || window.location.origin
+              : window.location.origin;
+            var _storeName = (document.title || 'VirtualGaming').replace(/[^\w\s\-]/g, '').trim() || 'VirtualGaming';
+            var _shortcut = '[InternetShortcut]\r\nURL=' + _homeUrl2 + '\r\n';
+            var _blob = new Blob([_shortcut], { type: 'text/plain' });
+            var _dl = document.createElement('a');
+            _dl.href = URL.createObjectURL(_blob);
+            _dl.download = _storeName + '.url';
+            document.body.appendChild(_dl);
+            _dl.click();
+            document.body.removeChild(_dl);
+            URL.revokeObjectURL(_dl.href);
+            var _oh2 = chromeBtn.innerHTML;
+            chromeBtn.innerHTML = '<span style="font-size:.8rem;font-weight:600;">Acceso directo descargado ↓<\/span>';
+            setTimeout(function () { chromeBtn.innerHTML = _oh2; }, 3000);
+          }
+        }
+      });
+    }
+
+    var copyBtn = document.getElementById('pwa-copy-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', function () {
+        var url  = copyBtn.getAttribute('data-pwa-home') || window.location.origin;
+        var lbl  = copyBtn.querySelector('.pwa-copy-lbl');
+        var done = copyBtn.querySelector('.pwa-copy-done');
+        function showDone() {
+          if (lbl)  lbl.style.display = 'none';
+          if (done) done.style.display = 'flex';
+          setTimeout(function () {
+            if (lbl)  lbl.style.display = 'flex';
+            if (done) done.style.display = 'none';
+          }, 2800);
+        }
+        if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard.writeText(url).then(showDone).catch(function () {
+            pwaFallbackCopy(url); showDone();
+          });
+        } else {
+          pwaFallbackCopy(url); showDone();
+        }
+      });
+    }
+
+    function pwaFallbackCopy(text) {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;left:0;top:0;width:2em;height:2em;padding:0;border:none;outline:none;background:transparent;opacity:0.01;z-index:999999;';
+      var _pwaContainer = document.getElementById('pwa-install-modal') || document.body;
+      _pwaContainer.appendChild(ta);
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      try { document.execCommand('copy'); } catch (e) {}
+      _pwaContainer.removeChild(ta);
+    }
+
+  }());
+  </script>
+
+
+  <!-- ═══════════════════════════════
+       PWA — Barra flotante (1x sesión)
+       ═══════════════════════════════ -->
+  <?php
+    $pwa_ban_logo = (string) store_config_get('logo_tienda', '');
+    $pwa_ban_name = (string) store_config_get('nombre_tienda', 'VirtualGaming');
+    if ($pwa_ban_logo !== '') {
+        $pwa_ban_sch = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $pwa_ban_logo_url = preg_match('#^https?://#', $pwa_ban_logo)
+            ? $pwa_ban_logo
+            : $pwa_ban_sch . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . '/' . ltrim($pwa_ban_logo, '/');
+    } else {
+        $pwa_ban_logo_url = '';
+    }
+  ?>
+  <div id="pwa-banner"
+       role="status"
+       style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:1045;
+              background:rgba(12,18,32,.97);
+              border-top:1px solid rgba(var(--theme-primary-rgb,0,207,255),.2);
+              padding:.65rem 1.25rem;
+              align-items:center;gap:.9rem;
+              box-shadow:0 -4px 32px rgba(0,0,0,.4);
+              transform:translateY(100%);
+              transition:transform .36s cubic-bezier(.25,.46,.45,.94);">
+    <?php if ($pwa_ban_logo_url !== ''): ?>
+    <img src="<?php echo htmlspecialchars($pwa_ban_logo_url, ENT_QUOTES, 'UTF-8'); ?>"
+         alt=""
+         style="width:48px;height:48px;border-radius:.6rem;object-fit:cover;flex-shrink:0;
+                border:1px solid rgba(var(--theme-primary-rgb,0,207,255),.22);">
+    <?php endif; ?>
+    <div style="flex:1;min-width:0;">
+      <div style="font-weight:700;font-size:.9rem;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+        Instalar <?php echo htmlspecialchars($pwa_ban_name, ENT_QUOTES, 'UTF-8'); ?>
+      </div>
+      <div style="font-size:.73rem;color:rgba(221,230,245,.5);margin-top:.1rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+        Guárdalo en tu inicio para abrirlo como app.
+      </div>
+    </div>
+    <button type="button"
+            id="pwa-banner-install-btn"
+            data-bs-toggle="modal"
+            data-bs-target="#pwa-install-modal"
+            style="background:#6c5ce7;color:#fff;border:none;border-radius:.55rem;
+                   padding:.4rem 1.05rem;font-size:.85rem;font-weight:600;
+                   white-space:nowrap;flex-shrink:0;cursor:pointer;
+                   box-shadow:0 0 14px rgba(108,92,231,.4);
+                   transition:background .2s;">Instalar</button>
+    <button type="button"
+            id="pwa-banner-close-btn"
+            aria-label="Cerrar"
+            style="background:none;border:none;color:rgba(221,230,245,.38);
+                   font-size:1.4rem;line-height:1;padding:.05rem .3rem;
+                   cursor:pointer;flex-shrink:0;transition:color .2s;"
+            onmouseover="this.style.color='rgba(221,230,245,.8)'"
+            onmouseout="this.style.color='rgba(221,230,245,.38)'">&times;</button>
+  </div>
+  <script>
+  (function () {
+    var SK = 'pwa_ban1';
+    if (sessionStorage.getItem(SK)) return;
+    var ban = document.getElementById('pwa-banner');
+    if (!ban) return;
+
+    function show() {
+      ban.style.display = 'flex';
+      ban.offsetHeight;
+      ban.style.transform = 'translateY(0)';
+    }
+    function hide() {
+      ban.style.transform = 'translateY(100%)';
+      sessionStorage.setItem(SK, '1');
+      setTimeout(function () { ban.style.display = 'none'; }, 390);
+    }
+
+    setTimeout(show, 1800);
+
+    var cb = document.getElementById('pwa-banner-close-btn');
+    if (cb) cb.addEventListener('click', hide);
+
+    var ib = document.getElementById('pwa-banner-install-btn');
+    if (ib) ib.addEventListener('click', hide);
+
+    var mod = document.getElementById('pwa-install-modal');
+    if (mod) mod.addEventListener('show.bs.modal', hide);
+  }());
+  </script>
+
 </body>
 </html>
