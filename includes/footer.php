@@ -2219,6 +2219,16 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
               </svg>
               Abrir en Chrome
             </button>
+            <div id="pwa-url-copy-row" style="display:none;margin-top:.4rem;gap:.4rem;align-items:center;">
+              <input id="pwa-url-copy-field" type="url" readonly
+                     style="flex:1;min-width:0;font-size:.7rem;padding:.28rem .5rem;
+                            border-radius:.4rem;border:1px solid rgba(0,207,255,.35);
+                            background:rgba(0,0,0,.4);color:#dde6f5;outline:none;">
+              <button id="pwa-url-copy-btn" type="button"
+                      style="padding:.28rem .65rem;font-size:.72rem;font-weight:700;
+                             border:none;border-radius:.4rem;background:#6c5ce7;
+                             color:#fff;cursor:pointer;white-space:nowrap;flex-shrink:0;">Copiar</button>
+            </div>
           </div>
 
         </div>
@@ -2534,26 +2544,38 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
           /* iOS: googlechromes:// abre el enlace en Chrome para iPhone/iPad */
           window.location.href = url.replace(/^https:\/\//, 'googlechromes://').replace(/^http:\/\//, 'googlechrome://');
         } else {
-          /* Escritorio: copiar URL con execCommand (no requiere permisos) */
-          var _tmp = document.createElement('input');
-          _tmp.value = url;
-          _tmp.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
-          document.body.appendChild(_tmp);
-          _tmp.focus();
-          _tmp.select();
-          var _ok = false;
-          try { _ok = document.execCommand('copy'); } catch(e) {}
-          document.body.removeChild(_tmp);
-          if (_ok) {
-            pwaTmpFeedback(otrosBtn, 'Enlace copiado ✓ — pégalo en Chrome');
-          } else if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(url).then(function () {
-              pwaTmpFeedback(otrosBtn, 'Enlace copiado ✓ — pégalo en Chrome');
-            }).catch(function () {
-              pwaTmpFeedback(otrosBtn, 'Copia la URL manualmente desde la barra de direcciones');
-            });
-          } else {
-            pwaTmpFeedback(otrosBtn, 'Copia la URL manualmente desde la barra de direcciones');
+          /* Escritorio: mostrar campo con URL visible y pre-seleccionada */
+          var urlRow   = document.getElementById('pwa-url-copy-row');
+          var urlField = document.getElementById('pwa-url-copy-field');
+          var urlCpBtn = document.getElementById('pwa-url-copy-btn');
+          if (urlRow && urlField) {
+            urlField.value = url;
+            urlRow.style.display = 'flex';
+            /* Intentar copiar automáticamente */
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(url).then(function () {
+                pwaTmpFeedback(otrosBtn, 'Enlace copiado ✓ — pégalo en Chrome');
+              }).catch(function () {
+                pwaTmpFeedback(otrosBtn, 'Selecciona el enlace y cópialo');
+              });
+            } else {
+              pwaTmpFeedback(otrosBtn, 'Selecciona el enlace y cópialo');
+            }
+          }
+          if (urlCpBtn) {
+            urlCpBtn.onclick = function () {
+              if (!urlField) return;
+              urlField.select();
+              urlField.setSelectionRange(0, 99999);
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(urlField.value).then(function () {
+                  urlCpBtn.textContent = '✓ Copiado';
+                  setTimeout(function () { urlCpBtn.textContent = 'Copiar'; }, 2000);
+                }).catch(function () {});
+              } else {
+                try { document.execCommand('copy'); urlCpBtn.textContent = '✓ Copiado'; setTimeout(function () { urlCpBtn.textContent = 'Copiar'; }, 2000); } catch(e) {}
+              }
+            };
           }
         }
       });
