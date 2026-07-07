@@ -2388,6 +2388,9 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     .pwa-steps-list--sm li           { font-size: .8125rem; gap: .55rem; }
     .pwa-steps-list--sm li::before   { min-width: 18px; height: 18px; font-size: .63rem; margin-top: .1rem; }
     /* Browser tab pills */
+    /* Ensure site header stacks above the PWA banner so it slides out from behind */
+    [data-site-topbar], .site-header { position: relative; z-index: 200; }
+
     .pwa-browser-tabs {
       display: flex;
       flex-wrap: wrap;
@@ -2628,7 +2631,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   ?>
   <div id="pwa-banner"
        role="status"
-       style="display:none;position:fixed;top:0;left:0;right:0;z-index:1060;
+       style="display:none;position:fixed;top:0;left:0;right:0;z-index:199;
               background:rgba(12,18,32,.97);
               border-bottom:1px solid rgba(var(--theme-primary-rgb,0,207,255),.2);
               padding:.6rem 1.25rem;
