@@ -2179,11 +2179,11 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
 
           <!-- Browser tabs -->
           <div class="pwa-browser-tabs mb-3" role="tablist">
-            <button class="pwa-tab-btn" data-pwa-tab="chromium" role="tab" aria-selected="false">Chrome / Edge / Opera</button>
-            <button class="pwa-tab-btn" data-pwa-tab="firefox"  role="tab" aria-selected="false">Firefox</button>
-            <button class="pwa-tab-btn" data-pwa-tab="opera-android" role="tab" aria-selected="false">Opera Android</button>
-            <button class="pwa-tab-btn" data-pwa-tab="safari-ios" role="tab" aria-selected="false">Safari iPhone</button>
-            <button class="pwa-tab-btn" data-pwa-tab="safari-mac" role="tab" aria-selected="false">Safari Mac</button>
+            <button class="pwa-tab-btn" data-pwa-tab="chromium" role="tab" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/><line x1="12" y1="3" x2="12" y2="8.5"/><line x1="3.4" y1="16.5" x2="8.2" y2="13.8"/><line x1="20.6" y1="16.5" x2="15.8" y2="13.8"/></svg>Chrome / Edge / Opera</button>
+            <button class="pwa-tab-btn" data-pwa-tab="firefox" role="tab" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2c-3 3-3 6-2 8.5C8 9 7 7 7.5 4.5 5 6 3 9 3 12a9 9 0 0018 0c0-2.5-1.5-4.5-3-5.5.5 2 0 4-1.5 5 .5-3-1-7-4.5-9.5z"/></svg>Firefox</button>
+            <button class="pwa-tab-btn" data-pwa-tab="opera-android" role="tab" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><ellipse cx="12" cy="12" rx="9" ry="9"/><ellipse cx="12" cy="12" rx="4.5" ry="9"/></svg>Opera Android</button>
+            <button class="pwa-tab-btn" data-pwa-tab="safari-ios" role="tab" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" stroke="none"/></svg>Safari iPhone</button>
+            <button class="pwa-tab-btn" data-pwa-tab="safari-mac" role="tab" aria-selected="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" stroke="none"/></svg>Safari Mac</button>
           </div>
 
           <!-- Pane: Chromium (Chrome / Edge / Opera) -->
@@ -2395,8 +2395,11 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     }
     .pwa-tab-btn {
       flex-shrink: 0;
-      padding: .28rem .72rem;
-      font-size: .73rem;
+      display: inline-flex;
+      align-items: center;
+      gap: .38rem;
+      padding: .42rem 1rem;
+      font-size: .8rem;
       font-weight: 600;
       border-radius: 99px;
       border: 1px solid rgba(var(--theme-primary-rgb, 0, 207, 255), .22);
@@ -2584,7 +2587,20 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
           });
         } else {
           var isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || !!window.navigator.standalone;
-          pwaTmpFeedback(operaBtn, isStandalone ? 'La app ya está instalada ✓' : 'Sigue los pasos manuales ↓');
+          if (isStandalone) {
+            pwaTmpFeedback(operaBtn, 'La app ya está instalada ✓');
+          } else {
+            pwaTmpFeedback(operaBtn, 'Instalador no disponible — sigue los pasos ↓');
+            var _opPane = document.querySelector('[data-pwa-pane="opera-android"]');
+            var _opSteps = _opPane ? _opPane.querySelector('.pwa-steps-list') : null;
+            if (_opSteps) {
+              _opSteps.style.outline = '2px solid rgba(var(--theme-primary-rgb,0,207,255),.7)';
+              _opSteps.style.outlineOffset = '6px';
+              _opSteps.style.borderRadius = '.4rem';
+              setTimeout(function () { _opSteps.style.outline = '2px solid transparent'; }, 2000);
+              setTimeout(function () { _opSteps.style.cssText = _opSteps.style.cssText.replace(/outline[^;]*;?/g,'').replace(/border-radius[^;]*;?/g,'').replace(/outline-offset[^;]*;?/g,''); }, 2600);
+            }
+          }
         }
       });
     }
