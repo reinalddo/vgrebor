@@ -2202,11 +2202,10 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
           <!-- Pane: Otros navegadores → instalar desde menú Chrome -->
           <div class="pwa-tab-pane pwa-section" data-pwa-pane="otros">
             <div class="pwa-section-label">Otros navegadores</div>
-            <p class="pwa-section-text mb-3">Instala la app directamente desde el menú de Chrome en 3 pasos:</p>
             <ol class="pwa-steps-list pwa-steps-list--sm">
-              <li>Toca los <strong style="color:#00ff9d;">tres puntos ⋮</strong> en la esquina superior derecha del navegador.</li>
-              <li>Selecciona <strong style="color:#00ff9d;">"Enviar, guardar y compartir"</strong>.</li>
-              <li>Toca <strong style="color:#00ff9d;">"Instalar página como aplicación…"</strong> y confirma.</li>
+              <li>Toca el ícono de <strong style="color:#00ff9d;">Menú (3 puntos)</strong> en la esquina superior derecha del navegador Chrome.</li>
+              <li>Selecciona <strong style="color:#00ff9d;">"Instalar aplicación"</strong> o <strong style="color:#00ff9d;">"Agregar a la pantalla principal"</strong>.</li>
+              <li>Confirma la instalación tocando <strong style="color:#00ff9d;">Instalar</strong> o <strong style="color:#00ff9d;">Agregar</strong>.</li>
             </ol>
           </div>
 
@@ -2310,14 +2309,16 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       font-size: .9375rem;
       line-height: 1.6;
       color: var(--theme-text, #dde6f5);
-      display: flex;
-      gap: .65rem;
-      align-items: flex-start;
+      position: relative;
+      padding-left: 32px;
     }
     .pwa-steps-list li::before {
       counter-increment: pwa-step;
       content: counter(pwa-step);
-      min-width: 22px;
+      position: absolute;
+      left: 0;
+      top: .18rem;
+      width: 22px;
       height: 22px;
       border-radius: 50%;
       background: rgba(var(--theme-primary-rgb, 0, 207, 255), .12);
@@ -2328,11 +2329,9 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       display: flex;
       align-items: center;
       justify-content: center;
-      flex-shrink: 0;
-      margin-top: .18rem;
     }
-    .pwa-steps-list--sm li           { font-size: .8125rem; gap: .55rem; }
-    .pwa-steps-list--sm li::before   { min-width: 18px; height: 18px; font-size: .63rem; margin-top: .1rem; }
+    .pwa-steps-list--sm li           { font-size: .8125rem; padding-left: 26px; }
+    .pwa-steps-list--sm li::before   { width: 18px; height: 18px; font-size: .63rem; top: .1rem; }
     /* Browser tab pills */
     .pwa-browser-tabs {
       display: flex;
