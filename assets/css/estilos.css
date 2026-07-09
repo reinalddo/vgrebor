@@ -412,7 +412,7 @@ body {
     padding-right: 1.1rem;
   }
 
-  .site-header {
+  .site-header:not(.site-header-topbar) {
     align-items: flex-start !important;
     flex-wrap: wrap;
   }
@@ -448,7 +448,7 @@ body {
 }
 
 @media (max-width: 399.98px) {
-  .site-header {
+  .site-header:not(.site-header-topbar) {
     align-items: center !important;
   }
 
