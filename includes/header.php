@@ -1362,11 +1362,6 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
           </div>
         </a>
         <?php if ($topBarEnabled): ?>
-        <button id="pwa-install-btn" type="button" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center flex-shrink-0" style="width:38px;height:38px;" aria-label="Instalar como Aplicación" title="Instalar como Aplicación" data-bs-toggle="modal" data-bs-target="#pwa-install-modal">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-        </button>
-        <?php endif; ?>
-        <?php if ($topBarEnabled): ?>
           <div class="site-topbar-search" data-public-search>
             <form method="get" action="<?php echo htmlspecialchars($searchResultsUrl, ENT_QUOTES, 'UTF-8'); ?>" class="site-topbar-search-form" data-public-search-form>
               <input type="search" name="q" class="site-topbar-search-input" data-public-search-input placeholder="Buscar juegos o paquetes" autocomplete="off">
