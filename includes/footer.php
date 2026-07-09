@@ -2605,7 +2605,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   <div id="pwa-banner-spacer" style="height:0;transition:height .36s cubic-bezier(.25,.46,.45,.94);flex-shrink:0;"></div>
   <div id="pwa-banner"
        role="status"
-       style="display:none;position:fixed;left:0;right:0;z-index:199;
+       style="display:none;position:fixed;left:0;right:0;z-index:1045;
               background:rgba(12,18,32,.97);
               border-bottom:1px solid rgba(var(--theme-primary-rgb,0,207,255),.2);
               padding:0 1.25rem;
@@ -2679,42 +2679,60 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       ban.style.paddingBottom = '.6rem';
       if (spacer) spacer.style.height = BAN_H + 'px';
     }
-    function hide() {
+    function collapse() {
       ban.style.maxHeight = '0';
       ban.style.paddingTop = '0';
       ban.style.paddingBottom = '0';
       if (spacer) spacer.style.height = '0';
-      sessionStorage.setItem(SK, '1');
       setTimeout(function () { ban.style.display = 'none'; }, 390);
     }
+    function dismiss() {
+      collapse();
+      sessionStorage.setItem(SK, '1');
+    }
 
-    /* Wait for startup popup to close before showing the banner */
+    /* Wait for startup popup / any other modal to close before showing the banner,
+       and re-hide it if a modal opens on top of it later (e.g. payment modal).
+       Uses collapse() (not dismiss()) so it can come back once the modal closes. */
     var _sp = document.getElementById('startup-popup');
     function _spVisible(el) {
       return el && !el.classList.contains('is-hidden') && el.getAttribute('aria-hidden') !== 'true';
     }
-    setTimeout(function () {
-      if (_spVisible(_sp)) {
-        var _obs = new MutationObserver(function () {
-          if (!_spVisible(_sp)) {
-            _obs.disconnect();
-            setTimeout(show, 600);
-          }
-        });
-        _obs.observe(_sp, { attributes: true, attributeFilter: ['class', 'aria-hidden'] });
+    function _anyModalOpen() {
+      return !!document.querySelector('.app-overlay-modal.is-visible, .modal.show');
+    }
+    function _blocked() {
+      return _spVisible(_sp) || _anyModalOpen();
+    }
+
+    var _shown = false;
+    function _tryShow() {
+      if (_shown || sessionStorage.getItem(SK) || _blocked()) return;
+      _shown = true;
+      show();
+    }
+
+    /* Watches for modals opening/closing anywhere on the page */
+    var _obs = new MutationObserver(function () {
+      if (sessionStorage.getItem(SK)) { _obs.disconnect(); return; }
+      if (_blocked()) {
+        if (_shown) { collapse(); _shown = false; }
       } else {
-        show();
+        _tryShow();
       }
-    }, 1800);
+    });
+    _obs.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class', 'aria-hidden'] });
+
+    setTimeout(_tryShow, 1800);
 
     var cb = document.getElementById('pwa-banner-close-btn');
-    if (cb) cb.addEventListener('click', hide);
+    if (cb) cb.addEventListener('click', dismiss);
 
     var ib = document.getElementById('pwa-banner-install-btn');
-    if (ib) ib.addEventListener('click', hide);
+    if (ib) ib.addEventListener('click', dismiss);
 
     var mod = document.getElementById('pwa-install-modal');
-    if (mod) mod.addEventListener('show.bs.modal', hide);
+    if (mod) mod.addEventListener('show.bs.modal', dismiss);
   }());
   </script>
 
