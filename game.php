@@ -4649,6 +4649,9 @@ include __DIR__ . "/includes/header.php";
   #pack-grid .pack-card {
     min-height: 0;
   }
+  #pack-grid .pack-card-name {
+    min-height: 0; /* el nombre ocupa solo 1 línea, sin espacio reservado */
+  }
   @media (max-width: 767.98px) {
     #pack-grid {
       gap: 0.5rem;
