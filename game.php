@@ -9581,7 +9581,7 @@ include __DIR__ . "/includes/header.php";
   function paymentReferencePlaceholder(method) {
     const digits = Number(method && method.referencia_digitos ? method.referencia_digitos : 0);
     if (digits > 0) {
-      return `Últimos ${digits} dígitos de la referencia`;
+      return `Todos o los últimos ${digits} dígitos de la referencia`;
     }
     return 'Número de referencia del pago';
   }
@@ -9589,7 +9589,7 @@ include __DIR__ . "/includes/header.php";
   function paymentReferenceHelpText(method) {
     const digits = Number(method && method.referencia_digitos ? method.referencia_digitos : 0);
     if (digits > 0) {
-      return `Ingresa los últimos ${digits} dígitos de tu número de referencia bancaria.`;
+      return `Puedes escribir la referencia completa o solo los últimos ${digits} dígitos (mínimo ${digits}).`;
     }
     return 'Ingresa el número de referencia de tu transferencia o pago.';
   }
@@ -10597,7 +10597,7 @@ include __DIR__ . "/includes/header.php";
       const advLabel = document.getElementById('payment-adv-reference-label');
       if (advLabel) {
         advLabel.textContent = digits > 0
-          ? `Número de referencia (últimos ${digits} dígitos)`
+          ? `Número de referencia (mínimo ${digits} dígitos)`
           : 'Número de referencia del pago';
       }
       paymentAdvReferenceInput.maxLength = 120;
@@ -10823,7 +10823,7 @@ include __DIR__ . "/includes/header.php";
     const refLabel = document.getElementById('payment-reference-label');
     if (refLabel) {
       refLabel.textContent = digits > 0
-        ? `Número de referencia (últimos ${digits} dígitos)`
+        ? `Número de referencia (mínimo ${digits} dígitos)`
         : 'Número de referencia del pago';
     }
     paymentReferenceInput.maxLength = 120;

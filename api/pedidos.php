@@ -6001,21 +6001,32 @@ function sync_bank_movements(mysqli $mysqli, array $movements): void {
     $stmt->close();
 }
 
+function normalize_reference_digits(string $ref): string {
+    $stripped = ltrim($ref, '0');
+    return $stripped !== '' ? $stripped : '0';
+}
+
 function movement_reference_matches(string $fullReference, string $reportedReference, int $requiredDigits): bool {
     if ($reportedReference === '') {
         return false;
     }
 
     if ($requiredDigits > 0) {
+        /* El cliente puede escribir la referencia completa o cualquier cantidad
+           de dígitos finales >= al mínimo configurado: se comparan los últimos
+           N dígitos de ambas, tolerando ceros a la izquierda. */
         $normalizedReportedReference = strlen($reportedReference) > $requiredDigits
             ? substr($reportedReference, -$requiredDigits)
             : $reportedReference;
+        $bankSuffix = substr($fullReference, -$requiredDigits);
 
         return $fullReference === $reportedReference
-            || substr($fullReference, -$requiredDigits) === $normalizedReportedReference;
+            || $bankSuffix === $normalizedReportedReference
+            || normalize_reference_digits($bankSuffix) === normalize_reference_digits($normalizedReportedReference);
     }
 
-    return $fullReference === $reportedReference;
+    return $fullReference === $reportedReference
+        || normalize_reference_digits($fullReference) === normalize_reference_digits($reportedReference);
 }
 
 function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference, int $requiredDigits, int $orderId, float $orderAmount = 0.0): ?array {
@@ -6037,7 +6048,7 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
                AND numero_referencia IS NOT NULL
                AND TRIM(numero_referencia) <> ''
                AND estado IN ('enviado', 'cancelado')
-               AND RIGHT(TRIM(numero_referencia), ?) = ?
+               AND CAST(RIGHT(TRIM(numero_referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
                AND (? = 0 OR ABS(precio - ?) < 0.01)
              ORDER BY id DESC
              LIMIT 1"
@@ -6080,7 +6091,7 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
             "SELECT m.id, m.referencia, COALESCE(m.checked, 0) AS checked, COALESCE(m.pedido_id, 0) AS pedido_id, COALESCE(p.estado, '') AS pedido_estado
              FROM movimientos m
              LEFT JOIN pedidos p ON p.id = m.pedido_id
-             WHERE RIGHT(TRIM(m.referencia), ?) = ?
+             WHERE CAST(RIGHT(TRIM(m.referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
                AND (? = 0 OR ABS(m.monto - ?) < 0.01)
              ORDER BY m.id DESC"
         );
@@ -11043,7 +11054,7 @@ if ($action === 'batch_create_and_pay') {
                        AND cart_batch_id IS NOT NULL AND TRIM(cart_batch_id) != ''
                        AND ABS(cart_batch_total - ?) < 0.01
                        AND DATE(creado_en) = CURDATE()
-                       AND RIGHT(TRIM(numero_referencia), ?) = ?
+                       AND CAST(RIGHT(TRIM(numero_referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
                      ORDER BY id ASC LIMIT 1"
                 );
                 if ($iStmt) {
@@ -11130,7 +11141,7 @@ if ($action === 'batch_create_and_pay') {
                     if ($batchRefDigits > 0) {
                         $fbStmt = $mysqli->prepare(
                             "SELECT referencia, monto FROM movimientos
-                             WHERE RIGHT(TRIM(referencia), ?) = ?
+                             WHERE CAST(RIGHT(TRIM(referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
                                AND ABS(monto - ?) < 0.01
                                AND DATE(COALESCE(fecha_movimiento, creado_en)) = CURDATE()
                                AND (pedido_id IS NULL OR pedido_id = 0)
