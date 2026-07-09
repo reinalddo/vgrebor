@@ -4619,9 +4619,10 @@ include __DIR__ . "/includes/header.php";
 
   /* ── Tarjetas de paquetes con TAMAÑO FIJO ──────────────────────────
      Las cards no se estiran según la pantalla: mantienen un ancho fijo
-     (250px desde desktop hasta tablet, 158px en móvil) y la imagen una
-     altura fija con la proporción 16/9 de desktop en todos los tamaños.
-     Las filas acomodan tantas cards como quepan, alineadas a la izquierda. */
+     (250px desde desktop hasta tablet, 158px en móvil). La caja de la
+     imagen usa la proporción real de las imágenes de paquetes
+     (1511 × 704 ≈ 2.146:1) para que se vean SIEMPRE completas, sin
+     cortes, en todos los tamaños. Filas alineadas a la izquierda. */
   #pack-grid {
     display: flex;
     flex-wrap: wrap;
@@ -4638,9 +4639,12 @@ include __DIR__ . "/includes/header.php";
     margin-top: 0;
   }
   #pack-grid .pack-card-media {
-    height: 141px; /* 250px × 9/16 */
+    height: 116px; /* 250px × 704/1511 */
     aspect-ratio: auto;
     min-height: 0;
+  }
+  #pack-grid .pack-card-image {
+    object-fit: contain; /* imagen completa siempre visible, sin recortes */
   }
   #pack-grid .pack-card {
     min-height: 0;
@@ -4654,7 +4658,7 @@ include __DIR__ . "/includes/header.php";
       max-width: 158px;
     }
     #pack-grid .pack-card-media {
-      height: 89px; /* 158px × 9/16 — misma proporción reducida */
+      height: 74px; /* 158px × 704/1511 — misma proporción reducida */
     }
   }
 
