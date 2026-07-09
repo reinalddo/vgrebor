@@ -4652,6 +4652,11 @@ include __DIR__ . "/includes/header.php";
   @media (max-width: 767.98px) {
     #pack-grid {
       gap: 0.5rem;
+      /* Ancho exacto de 2 columnas, centrado: márgenes laterales simétricos
+         y la card impar queda alineada bajo la primera columna. */
+      max-width: calc(158px * 2 + 0.5rem);
+      margin-left: auto;
+      margin-right: auto;
     }
     #pack-grid > * {
       width: 158px;
