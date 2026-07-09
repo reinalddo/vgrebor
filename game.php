@@ -9623,7 +9623,7 @@ include __DIR__ . "/includes/header.php";
   function paymentReferencePlaceholder(method) {
     const digits = Number(method && method.referencia_digitos ? method.referencia_digitos : 0);
     if (digits > 0) {
-      return `Todos o los últimos ${digits} dígitos de la referencia`;
+      return `Últimos ${digits} dígitos de la referencia`;
     }
     return 'Número de referencia del pago';
   }
@@ -9631,14 +9631,14 @@ include __DIR__ . "/includes/header.php";
   function paymentReferenceHelpText(method) {
     const digits = Number(method && method.referencia_digitos ? method.referencia_digitos : 0);
     if (digits > 0) {
-      return `Puedes escribir la referencia completa o solo los últimos ${digits} dígitos (mínimo ${digits}).`;
+      return `Ingresa los últimos ${digits} dígitos. Si pegas la referencia completa, tomaremos los últimos ${digits} automáticamente.`;
     }
     return 'Ingresa el número de referencia de tu transferencia o pago.';
   }
   function binancePagonorteReferencePlaceholder() {
     const digits = Number(binancePagonorteReferenceDigits || 0);
     if (digits > 0) {
-      return `Inserte todos o los últimos ${digits} dígitos de referencia`;
+      return `Últimos ${digits} dígitos de la referencia`;
     }
     return 'Inserte su número de referencia para comprobar el pago';
   }
@@ -9646,7 +9646,7 @@ include __DIR__ . "/includes/header.php";
   function binancePagonorteReferenceHelpText() {
     const digits = Number(binancePagonorteReferenceDigits || 0);
     if (digits > 0) {
-      return `Puedes escribir la referencia completa o solo los últimos ${digits} dígitos para compararla con los movimientos de Binance.`;
+      return `Ingresa los últimos ${digits} dígitos. Si pegas la referencia completa, tomaremos los últimos ${digits} automáticamente.`;
     }
     return 'Inserte su número de referencia para comprobar el pago en Binance.';
   }
@@ -10639,7 +10639,7 @@ include __DIR__ . "/includes/header.php";
       const advLabel = document.getElementById('payment-adv-reference-label');
       if (advLabel) {
         advLabel.textContent = digits > 0
-          ? `Número de referencia (mínimo ${digits} dígitos)`
+          ? `Número de referencia (últimos ${digits} dígitos)`
           : 'Número de referencia del pago';
       }
       paymentAdvReferenceInput.maxLength = 120;
@@ -10703,7 +10703,30 @@ include __DIR__ . "/includes/header.php";
   }
 
   if (paymentAdvReferenceInput) {
+    /* Igual que el campo principal: solo N dígitos; pegar conserva los últimos N. */
+    let _advRefPrevLen = 0;
+    paymentAdvReferenceInput.addEventListener('paste', (e) => {
+      const requiredDigits = Number(paymentAdvReferenceInput.dataset.requiredDigits || '0');
+      if (requiredDigits <= 0) return;
+      e.preventDefault();
+      const pasted = (e.clipboardData || window.clipboardData).getData('text');
+      const digitsOnly = pasted.replace(/\D+/g, '');
+      paymentAdvReferenceInput.value = digitsOnly.slice(-requiredDigits);
+      _advRefPrevLen = paymentAdvReferenceInput.value.length;
+      if (paymentReferenceInput) {
+        paymentReferenceInput.value = paymentAdvReferenceInput.value;
+      }
+    });
     paymentAdvReferenceInput.addEventListener('input', () => {
+      const requiredDigits = Number(paymentAdvReferenceInput.dataset.requiredDigits || '0');
+      const limit = requiredDigits > 0 ? requiredDigits : 120;
+      let digitsOnly = paymentAdvReferenceInput.value.replace(/\D+/g, '');
+      if (digitsOnly.length > limit) {
+        const inserted = digitsOnly.length - _advRefPrevLen;
+        digitsOnly = inserted > 1 ? digitsOnly.slice(-limit) : digitsOnly.slice(0, limit);
+      }
+      paymentAdvReferenceInput.value = digitsOnly;
+      _advRefPrevLen = digitsOnly.length;
       if (paymentReferenceInput) {
         paymentReferenceInput.value = paymentAdvReferenceInput.value;
       }
@@ -10786,7 +10809,7 @@ include __DIR__ . "/includes/header.php";
       paymentReferenceInput.placeholder = binancePagonorteReferencePlaceholder();
       paymentReferenceHelp.textContent = binancePagonorteReferenceHelpText();
       paymentReferenceInput.maxLength = 120;
-      paymentReferenceInput.dataset.requiredDigits = '0';
+      paymentReferenceInput.dataset.requiredDigits = String(Number(binancePagonorteReferenceDigits || 0) > 0 ? Number(binancePagonorteReferenceDigits || 0) : 0);
       return;
     }
 
@@ -10865,7 +10888,7 @@ include __DIR__ . "/includes/header.php";
     const refLabel = document.getElementById('payment-reference-label');
     if (refLabel) {
       refLabel.textContent = digits > 0
-        ? `Número de referencia (mínimo ${digits} dígitos)`
+        ? `Número de referencia (últimos ${digits} dígitos)`
         : 'Número de referencia del pago';
     }
     paymentReferenceInput.maxLength = 120;
@@ -11536,18 +11559,31 @@ include __DIR__ . "/includes/header.php";
               }
 
               if (paymentReferenceInput) {
+                /* El campo acepta solo N dígitos (los configurados). Al PEGAR una
+                   referencia más larga se conservan los ÚLTIMOS N; al teclear se
+                   bloquea el exceso. Solo afecta la captura de la referencia. */
+                let _refPrevLen = 0;
                 paymentReferenceInput.addEventListener('paste', function(e) {
                   const requiredDigits = Number(paymentReferenceInput.dataset.requiredDigits || '0');
                   if (requiredDigits <= 0) return;
                   e.preventDefault();
                   const pasted = (e.clipboardData || window.clipboardData).getData('text');
                   const digitsOnly = pasted.replace(/\D+/g, '');
-                  paymentReferenceInput.value = digitsOnly.slice(0, 120);
+                  paymentReferenceInput.value = digitsOnly.slice(-requiredDigits);
+                  _refPrevLen = paymentReferenceInput.value.length;
                 });
                 paymentReferenceInput.addEventListener('input', function() {
-                  const digitsOnly = paymentReferenceInput.value.replace(/\D+/g, '');
                   const requiredDigits = Number(paymentReferenceInput.dataset.requiredDigits || '0');
-                  paymentReferenceInput.value = digitsOnly.slice(0, 120);
+                  const limit = requiredDigits > 0 ? requiredDigits : 120;
+                  let digitsOnly = paymentReferenceInput.value.replace(/\D+/g, '');
+                  if (digitsOnly.length > limit) {
+                    const inserted = digitsOnly.length - _refPrevLen;
+                    digitsOnly = inserted > 1
+                      ? digitsOnly.slice(-limit)   /* pegado sin evento paste: últimos N */
+                      : digitsOnly.slice(0, limit); /* tecleo: bloquear el excedente */
+                  }
+                  paymentReferenceInput.value = digitsOnly;
+                  _refPrevLen = digitsOnly.length;
                 });
               }
 
