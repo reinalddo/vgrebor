@@ -8753,7 +8753,17 @@ if ($action === 'submit_payment') {
                 'win_points' => win_points_response_payload($mysqli, $sessionUserId, [
                     'spent' => $requiredPoints,
                 ]),
-            ]);
+            ], 200, static function () use ($mysqli, $verifiedOrder, $providerReference, $providerMessage): void {
+                notify_free_fire_recharge_success(
+                    $mysqli,
+                    $verifiedOrder,
+                    'Canje por premios',
+                    '',
+                    trim((string) ($verifiedOrder['telefono_contacto'] ?? '')),
+                    $providerReference,
+                    $providerMessage !== '' ? $providerMessage : 'Recarga completada por el proveedor.'
+                );
+            });
         }
 
         $inventoryShortage = recharge_availability_message_indicates_inventory_shortage($providerMessage);
@@ -11414,7 +11424,15 @@ if ($action === 'batch_fulfill_item') {
             'estado'   => 'enviado',
             'order_id' => $orderId,
             'message'  => 'Cuenta entregada correctamente.',
-        ], $asSentOrder));
+        ], $asSentOrder), 200, static function () use ($mysqli, $asSentOrder): void {
+            notify_account_sale_delivery(
+                $mysqli,
+                $asSentOrder,
+                trim((string) ($asSentOrder['metodo_pago'] ?? 'Método de pago')),
+                trim((string) ($asSentOrder['numero_referencia'] ?? '')),
+                trim((string) ($asSentOrder['telefono_contacto'] ?? ''))
+            );
+        });
     }
 
     // ── GiftVen catalog API ──────────────────────────────────────────
@@ -11448,7 +11466,17 @@ if ($action === 'batch_fulfill_item') {
             $updOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
             win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
             recharge_notifications_emit_for_order($mysqli, $updOrder);
-            json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Recarga completada.', 'provider_reference' => $ppRef, 'provider_code' => $ppCode]);
+            json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Recarga completada.', 'provider_reference' => $ppRef, 'provider_code' => $ppCode], 200, static function () use ($mysqli, $updOrder, $ppRef, $ppMsg): void {
+                notify_free_fire_recharge_success(
+                    $mysqli,
+                    $updOrder,
+                    trim((string) ($updOrder['metodo_pago'] ?? 'Método de pago')),
+                    trim((string) ($updOrder['numero_referencia'] ?? '')),
+                    trim((string) ($updOrder['telefono_contacto'] ?? '')),
+                    $ppRef,
+                    $ppMsg !== '' ? $ppMsg : 'Recarga completada por el proveedor.'
+                );
+            });
         }
 
         if (!empty($res['accepted'])) {
@@ -11458,8 +11486,9 @@ if ($action === 'batch_fulfill_item') {
                 $upd2->execute();
                 $upd2->close();
             }
-            continue_provider_follow_up_in_background($orderId);
-            json_response(['ok' => true, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Pedido recibido y procesándose.', 'provider_reference' => $ppRef, 'processing' => true]);
+            json_response(['ok' => true, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Pedido recibido y procesándose.', 'provider_reference' => $ppRef, 'processing' => true], 200, static function () use ($mysqli, $orderId): void {
+                continue_provider_follow_up_in_background($mysqli, $orderId, 8, 8);
+            });
         }
 
         json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $ppMsg ?: 'La recarga no fue procesada por el proveedor.', 'provider_message' => $ppMsg]);
@@ -11480,7 +11509,20 @@ if ($action === 'batch_fulfill_item') {
             win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
             recharge_notifications_emit_for_order($mysqli, $updOrder);
         }
-        json_response(['ok' => $finalSt === 'enviado', 'estado' => $finalSt, 'order_id' => $orderId, 'message' => $finalSt === 'enviado' ? 'Pedido enviado por Discord.' : 'En espera de confirmación de Discord.']);
+        json_response(['ok' => $finalSt === 'enviado', 'estado' => $finalSt, 'order_id' => $orderId, 'message' => $finalSt === 'enviado' ? 'Pedido enviado por Discord.' : 'En espera de confirmación de Discord.'], 200, static function () use ($mysqli, $updOrder, $finalSt, $dispatchResult): void {
+            if ($finalSt !== 'enviado') {
+                return;
+            }
+            notify_free_fire_recharge_success(
+                $mysqli,
+                $updOrder,
+                trim((string) ($updOrder['metodo_pago'] ?? 'Método de pago')),
+                trim((string) ($updOrder['numero_referencia'] ?? '')),
+                trim((string) ($updOrder['telefono_contacto'] ?? '')),
+                trim((string) ($dispatchResult['provider_reference'] ?? '')),
+                trim((string) ($dispatchResult['provider_message'] ?? '')) ?: 'Pedido enviado por Discord.'
+            );
+        });
     }
 
     // ── No auto-recharge (manual / free_fire legacy) ─────────────────
