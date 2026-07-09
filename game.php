@@ -402,6 +402,7 @@ include __DIR__ . "/includes/header.php";
   <div class="row mb-2 align-items-center">
     <div class="col">
       <h2 class="page-step-title text-info mb-0">PASO 2: Seleccione su producto</h2>
+      <br>
     </div>
     <div class="col-auto">
       <span class="text-uppercase text-secondary small">elige</span>
@@ -4614,6 +4615,47 @@ include __DIR__ . "/includes/header.php";
 
   .neon-selected .pack-card-footer {
     border-top-color: rgba(var(--theme-button-secondary-rgb), 0.48);
+  }
+
+  /* ── Tarjetas de paquetes con TAMAÑO FIJO ──────────────────────────
+     Las cards no se estiran según la pantalla: mantienen un ancho fijo
+     (250px desde desktop hasta tablet, 158px en móvil) y la imagen una
+     altura fija con la proporción 16/9 de desktop en todos los tamaños.
+     Las filas acomodan tantas cards como quepan, alineadas a la izquierda. */
+  #pack-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 1rem;
+    margin-left: 0;
+    margin-right: 0;
+  }
+  #pack-grid > * {
+    flex: 0 0 auto;
+    width: 250px;
+    max-width: 250px;
+    padding: 0;
+    margin-top: 0;
+  }
+  #pack-grid .pack-card-media {
+    height: 141px; /* 250px × 9/16 */
+    aspect-ratio: auto;
+    min-height: 0;
+  }
+  #pack-grid .pack-card {
+    min-height: 0;
+  }
+  @media (max-width: 767.98px) {
+    #pack-grid {
+      gap: 0.5rem;
+    }
+    #pack-grid > * {
+      width: 158px;
+      max-width: 158px;
+    }
+    #pack-grid .pack-card-media {
+      height: 89px; /* 158px × 9/16 — misma proporción reducida */
+    }
   }
 
   @media (max-width: 575.98px) {
