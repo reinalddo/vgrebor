@@ -480,7 +480,7 @@ include __DIR__ . "/includes/header.php";
   ?>
   <?php $gameMarkupPct = floatval($game['precio_markup_pct'] ?? 0); ?>
   <?php $priceSyncQueue = []; ?>
-  <div class="row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3 mb-4" id="pack-grid">
+  <div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 g-2 g-sm-3 mb-4" id="pack-grid">
     <?php foreach ($paquetes as $pack):
         $packApiId = (int) ($pack['paquete_api'] ?? 0);
         $packManualOverride = !empty($pack['precio_manual_override']);
