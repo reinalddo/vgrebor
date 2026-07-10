@@ -809,7 +809,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['package_feature_catal
     if ($catalogAction === 'create') {
         $catalogAppliedFeatureId = package_feature_catalog_find_or_create($mysqli, $featureName, $featureIcon);
     } elseif ($catalogAction === 'update' && $featureId > 0) {
-        package_feature_catalog_update($mysqli, $featureId, $featureName, $featureIcon);
+        $featureUseCustomStyle = trim((string) ($_POST['package_feature_use_style'] ?? '')) === '1';
+        $featureBgColor = $featureUseCustomStyle ? (string) ($_POST['package_feature_bg_color'] ?? '') : '';
+        $featureTextColor = $featureUseCustomStyle ? (string) ($_POST['package_feature_text_color'] ?? '') : '';
+        $featureRadius = $featureUseCustomStyle ? ($_POST['package_feature_border_radius'] ?? '') : '';
+        package_feature_catalog_update($mysqli, $featureId, $featureName, $featureIcon, $featureBgColor, $featureTextColor, $featureRadius);
         $catalogAppliedFeatureId = $featureId;
     } elseif ($catalogAction === 'delete' && $featureId > 0) {
         package_feature_catalog_delete($mysqli, $featureId);
@@ -1513,6 +1517,19 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
         </form>
         <div class="d-grid gap-3">
             <?php foreach ($packageFeatureCatalog as $feature): ?>
+                <?php
+                    $featureBg = (string) ($feature['bg_color'] ?? '');
+                    $featureText = (string) ($feature['text_color'] ?? '');
+                    $featureRadius = $feature['border_radius'] ?? null;
+                    $featureHasStyle = $featureBg !== '' || $featureText !== '' || $featureRadius !== null;
+                    $previewStyle = 'background:rgba(15,23,42,0.92);border:1px solid rgba(34,211,238,0.28);color:#d8fbff;';
+                    if ($featureHasStyle) {
+                        $previewStyle = 'border:1px solid rgba(34,211,238,0.28);'
+                            . ($featureBg !== '' ? 'background:' . htmlspecialchars($featureBg, ENT_QUOTES, 'UTF-8') . ';' : 'background:rgba(15,23,42,0.92);')
+                            . ($featureText !== '' ? 'color:' . htmlspecialchars($featureText, ENT_QUOTES, 'UTF-8') . ';' : 'color:#d8fbff;')
+                            . ($featureRadius !== null ? 'border-radius:' . (int) $featureRadius . 'px !important;' : '');
+                    }
+                ?>
                 <form method="post" class="row g-2 align-items-center rounded-4 p-3" style="background:#101826;border:1px solid rgba(34,211,238,0.14);">
                     <input type="hidden" name="package_feature_id" value="<?= (int) ($feature['id'] ?? 0) ?>">
                     <div class="col-md-3">
@@ -1527,7 +1544,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                         <input type="text" name="package_feature_name" value="<?= htmlspecialchars((string) ($feature['name'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" class="form-control" required style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
                     </div>
                     <div class="col-md-2 text-center">
-                        <span class="badge rounded-pill d-inline-flex align-items-center gap-2 px-3 py-2" style="background:rgba(15,23,42,0.92);border:1px solid rgba(34,211,238,0.28);color:#d8fbff;">
+                        <span class="badge rounded-pill d-inline-flex align-items-center gap-2 px-3 py-2" style="<?= $previewStyle ?>">
                             <?= package_feature_render_icon((string) ($feature['icon'] ?? 'sparkles'), 'package-feature-badge-icon') ?>
                             <span>ID <?= (int) ($feature['id'] ?? 0) ?></span>
                         </span>
@@ -1535,6 +1552,27 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                     <div class="col-md-2 d-flex gap-2">
                         <button type="submit" name="package_feature_catalog_action" value="update" class="btn neon-btn-info btn-sm flex-fill">Actualizar</button>
                         <button type="submit" name="package_feature_catalog_action" value="delete" class="btn btn-danger btn-sm flex-fill" onclick="return confirm('¿Eliminar esta caracteristica del catalogo?')">Borrar</button>
+                    </div>
+                    <div class="col-12">
+                        <div class="d-flex flex-wrap align-items-end gap-3 rounded-3 p-2" style="background:#0d1420;border:1px dashed rgba(34,211,238,0.2);">
+                            <div class="form-check mb-1">
+                                <input class="form-check-input" type="checkbox" name="package_feature_use_style" value="1" id="feature-style-<?= (int) ($feature['id'] ?? 0) ?>" <?= $featureHasStyle ? 'checked' : '' ?>>
+                                <label class="form-check-label small text-neon" for="feature-style-<?= (int) ($feature['id'] ?? 0) ?>">Estilo personalizado</label>
+                            </div>
+                            <div>
+                                <label class="form-label small mb-1" style="color:#8be9fd;">Fondo</label>
+                                <input type="color" name="package_feature_bg_color" value="<?= htmlspecialchars($featureBg !== '' ? $featureBg : '#0f172a', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-color form-control-sm" style="background:#222c3a;border:1px solid #22d3ee;">
+                            </div>
+                            <div>
+                                <label class="form-label small mb-1" style="color:#8be9fd;">Texto</label>
+                                <input type="color" name="package_feature_text_color" value="<?= htmlspecialchars($featureText !== '' ? $featureText : '#f8fbff', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-color form-control-sm" style="background:#222c3a;border:1px solid #22d3ee;">
+                            </div>
+                            <div>
+                                <label class="form-label small mb-1" style="color:#8be9fd;">Radio borde (px)</label>
+                                <input type="number" name="package_feature_border_radius" min="0" max="999" value="<?= $featureRadius !== null ? (int) $featureRadius : '' ?>" placeholder="999" class="form-control form-control-sm" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;max-width:120px;">
+                            </div>
+                            <div class="small mb-1" style="color:#64748b;">Desmarca la casilla y actualiza para volver al estilo por defecto.</div>
+                        </div>
                     </div>
                 </form>
             <?php endforeach; ?>

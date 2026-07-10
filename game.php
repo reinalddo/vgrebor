@@ -578,7 +578,8 @@ include __DIR__ . "/includes/header.php";
             <?php if (!empty($packFeatures)): ?>
               <div class="pack-card-features" aria-hidden="true">
                 <?php foreach ($packFeatures as $feature): ?>
-                  <span class="pack-card-feature-badge">
+                  <?php $featureStyleAttr = package_feature_badge_style_attr($feature); ?>
+                  <span class="pack-card-feature-badge"<?= $featureStyleAttr !== '' ? ' style="' . htmlspecialchars($featureStyleAttr, ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
                     <?= package_feature_render_icon((string) ($feature['icon'] ?? 'sparkles'), 'pack-card-feature-icon') ?>
                     <span class="pack-card-feature-text"><?= htmlspecialchars((string) ($feature['name'] ?? ''), ENT_QUOTES, 'UTF-8') ?></span>
                   </span>
@@ -4442,13 +4443,13 @@ include __DIR__ . "/includes/header.php";
   .pack-card-features {
     position: absolute;
     top: -0.72rem;
-    right: -0.55rem;
-    left: auto;
+    left: -0.55rem;
+    right: auto;
     z-index: 4;
     display: flex;
     flex-wrap: wrap;
     gap: 0.42rem;
-    justify-content: flex-end;
+    justify-content: flex-start;
     transition: transform 0.36s cubic-bezier(0.22, 1, 0.36, 1), filter 0.3s ease;
     align-items: flex-start;
     align-content: flex-start;
@@ -4470,6 +4471,28 @@ include __DIR__ . "/includes/header.php";
     color: #f8fbff;
     box-shadow: 0 12px 26px rgba(0, 0, 0, 0.34), 0 0 18px rgba(var(--theme-button-primary-rgb), 0.24), 0 0 32px rgba(var(--theme-button-secondary-rgb), 0.14), inset 0 0 12px rgba(var(--theme-button-primary-rgb), 0.12);
     transition: transform 0.24s ease, box-shadow 0.24s ease, background 0.24s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Destello de luz que recorre el badge de izquierda a derecha cada 5s */
+  .pack-card-feature-badge::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -80%;
+    width: 55%;
+    background: linear-gradient(105deg, transparent 0%, rgba(255, 255, 255, 0.06) 30%, rgba(255, 255, 255, 0.55) 50%, rgba(255, 255, 255, 0.06) 70%, transparent 100%);
+    transform: skewX(-20deg);
+    animation: packBadgeShine 5s linear infinite;
+    pointer-events: none;
+  }
+
+  @keyframes packBadgeShine {
+    0%   { left: -80%; }
+    14%  { left: 140%; }
+    100% { left: 140%; }
   }
 
   .pack-card:hover .pack-card-feature-badge,
@@ -4891,8 +4914,8 @@ include __DIR__ . "/includes/header.php";
 
     .pack-card-features {
       top: -0.55rem;
-      right: -0.38rem;
-      left: auto;
+      left: -0.38rem;
+      right: auto;
       gap: 0.28rem;
       max-width: calc(100% - 0.9rem);
     }

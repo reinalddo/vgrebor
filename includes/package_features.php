@@ -27,6 +27,66 @@ CREATE TABLE IF NOT EXISTS paquete_caracteristicas_asignadas (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 SQL;
         $mysqli->query($assignSql);
+
+        // Estilos personalizados por badge (color fondo, color texto, radio de borde)
+        $styleColumns = [
+            'bg_color' => "ALTER TABLE paquete_caracteristicas_catalogo ADD COLUMN bg_color VARCHAR(30) NULL AFTER icono",
+            'text_color' => "ALTER TABLE paquete_caracteristicas_catalogo ADD COLUMN text_color VARCHAR(30) NULL AFTER bg_color",
+            'border_radius' => "ALTER TABLE paquete_caracteristicas_catalogo ADD COLUMN border_radius INT NULL AFTER text_color",
+        ];
+        foreach ($styleColumns as $columnName => $alterSql) {
+            $check = $mysqli->query("SHOW COLUMNS FROM paquete_caracteristicas_catalogo LIKE '" . $mysqli->real_escape_string($columnName) . "'");
+            $exists = $check instanceof mysqli_result && $check->num_rows > 0;
+            if ($check instanceof mysqli_result) {
+                $check->free();
+            }
+            if (!$exists) {
+                $mysqli->query($alterSql);
+            }
+        }
+    }
+}
+
+if (!function_exists('package_feature_normalize_color')) {
+    function package_feature_normalize_color(?string $value): string {
+        $normalized = trim((string) $value);
+        if ($normalized === '') {
+            return '';
+        }
+        if (preg_match('/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/', $normalized) === 1) {
+            return strtolower($normalized);
+        }
+        return '';
+    }
+}
+
+if (!function_exists('package_feature_normalize_radius')) {
+    function package_feature_normalize_radius($value): ?int {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        return max(0, min(999, (int) $value));
+    }
+}
+
+if (!function_exists('package_feature_badge_style_attr')) {
+    /* Genera los overrides de estilo inline para un badge según su configuración.
+       Solo agrega las propiedades definidas; lo demás usa el estilo por defecto. */
+    function package_feature_badge_style_attr(array $feature): string {
+        $style = '';
+        $bg = package_feature_normalize_color((string) ($feature['bg_color'] ?? ''));
+        $text = package_feature_normalize_color((string) ($feature['text_color'] ?? ''));
+        $radius = package_feature_normalize_radius($feature['border_radius'] ?? null);
+        if ($bg !== '') {
+            $style .= 'background:' . $bg . ';';
+        }
+        if ($text !== '') {
+            $style .= 'color:' . $text . ';';
+        }
+        if ($radius !== null) {
+            $style .= 'border-radius:' . $radius . 'px;';
+        }
+        return $style;
     }
 }
 
@@ -190,7 +250,7 @@ if (!function_exists('package_feature_render_icon')) {
 if (!function_exists('package_feature_catalog_all')) {
     function package_feature_catalog_all(mysqli $mysqli): array {
         package_features_ensure_schema($mysqli);
-        $result = $mysqli->query('SELECT id, nombre, icono FROM paquete_caracteristicas_catalogo ORDER BY nombre ASC, id ASC');
+        $result = $mysqli->query('SELECT id, nombre, icono, bg_color, text_color, border_radius FROM paquete_caracteristicas_catalogo ORDER BY nombre ASC, id ASC');
         if (!($result instanceof mysqli_result)) {
             return [];
         }
@@ -201,6 +261,9 @@ if (!function_exists('package_feature_catalog_all')) {
                 'id' => (int) ($row['id'] ?? 0),
                 'name' => trim((string) ($row['nombre'] ?? '')),
                 'icon' => package_feature_normalize_icon((string) ($row['icono'] ?? 'sparkles')),
+                'bg_color' => package_feature_normalize_color((string) ($row['bg_color'] ?? '')),
+                'text_color' => package_feature_normalize_color((string) ($row['text_color'] ?? '')),
+                'border_radius' => package_feature_normalize_radius($row['border_radius'] ?? null),
             ];
         }
 
@@ -235,7 +298,7 @@ if (!function_exists('package_feature_catalog_find_or_create')) {
 }
 
 if (!function_exists('package_feature_catalog_update')) {
-    function package_feature_catalog_update(mysqli $mysqli, int $featureId, string $name, string $icon): bool {
+    function package_feature_catalog_update(mysqli $mysqli, int $featureId, string $name, string $icon, ?string $bgColor = null, ?string $textColor = null, $borderRadius = null): bool {
         package_features_ensure_schema($mysqli);
         if ($featureId <= 0) {
             return false;
@@ -247,12 +310,29 @@ if (!function_exists('package_feature_catalog_update')) {
         }
 
         $normalizedIcon = package_feature_normalize_icon($icon);
-        $stmt = $mysqli->prepare('UPDATE paquete_caracteristicas_catalogo SET nombre = ?, icono = ? WHERE id = ? LIMIT 1');
+
+        if ($bgColor === null && $textColor === null && $borderRadius === null) {
+            $stmt = $mysqli->prepare('UPDATE paquete_caracteristicas_catalogo SET nombre = ?, icono = ? WHERE id = ? LIMIT 1');
+            if (!$stmt) {
+                return false;
+            }
+            $stmt->bind_param('ssi', $normalizedName, $normalizedIcon, $featureId);
+            $ok = $stmt->execute();
+            $stmt->close();
+            return $ok;
+        }
+
+        $normalizedBg = package_feature_normalize_color($bgColor);
+        $normalizedText = package_feature_normalize_color($textColor);
+        $normalizedRadius = package_feature_normalize_radius($borderRadius);
+        $bgValue = $normalizedBg !== '' ? $normalizedBg : null;
+        $textValue = $normalizedText !== '' ? $normalizedText : null;
+
+        $stmt = $mysqli->prepare('UPDATE paquete_caracteristicas_catalogo SET nombre = ?, icono = ?, bg_color = ?, text_color = ?, border_radius = ? WHERE id = ? LIMIT 1');
         if (!$stmt) {
             return false;
         }
-
-        $stmt->bind_param('ssi', $normalizedName, $normalizedIcon, $featureId);
+        $stmt->bind_param('ssssii', $normalizedName, $normalizedIcon, $bgValue, $textValue, $normalizedRadius, $featureId);
         $ok = $stmt->execute();
         $stmt->close();
 
@@ -437,7 +517,7 @@ if (!function_exists('package_features_for_packages')) {
 
         $placeholders = implode(',', array_fill(0, count($normalizedIds), '?'));
         $types = str_repeat('i', count($normalizedIds));
-        $sql = 'SELECT a.paquete_id, c.id AS caracteristica_id, c.nombre, c.icono '
+        $sql = 'SELECT a.paquete_id, c.id AS caracteristica_id, c.nombre, c.icono, c.bg_color, c.text_color, c.border_radius '
             . 'FROM paquete_caracteristicas_asignadas a '
             . 'INNER JOIN paquete_caracteristicas_catalogo c ON c.id = a.caracteristica_id '
             . 'WHERE a.paquete_id IN (' . $placeholders . ') '
@@ -464,6 +544,9 @@ if (!function_exists('package_features_for_packages')) {
                     'id' => (int) ($row['caracteristica_id'] ?? 0),
                     'name' => trim((string) ($row['nombre'] ?? '')),
                     'icon' => package_feature_normalize_icon((string) ($row['icono'] ?? 'sparkles')),
+                    'bg_color' => package_feature_normalize_color((string) ($row['bg_color'] ?? '')),
+                    'text_color' => package_feature_normalize_color((string) ($row['text_color'] ?? '')),
+                    'border_radius' => package_feature_normalize_radius($row['border_radius'] ?? null),
                 ];
             }
         }
