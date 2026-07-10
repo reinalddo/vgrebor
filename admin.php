@@ -455,8 +455,8 @@ function admin_user_filters_from_input(array $input): array {
     ];
 }
 
-function admin_fetch_users(PDO $pdo, array $filters): array {
-    $sql = "SELECT * FROM usuarios WHERE 1=1 AND COALESCE(rol, 'usuario') <> 'root'";
+function admin_users_filter_sql(array $filters): array {
+    $sql = " FROM usuarios WHERE 1=1 AND COALESCE(rol, 'usuario') <> 'root'";
     $params = [];
 
     if ($filters['nombre'] !== '') {
@@ -484,7 +484,20 @@ function admin_fetch_users(PDO $pdo, array $filters): array {
         $params[] = $filters['fecha_hasta'];
     }
 
-    $sql .= ' ORDER BY creado_en DESC';
+    return [$sql, $params];
+}
+
+function admin_count_users(PDO $pdo, array $filters): int {
+    [$whereSql, $params] = admin_users_filter_sql($filters);
+    $stmt = $pdo->prepare('SELECT COUNT(*)' . $whereSql);
+    $stmt->execute($params);
+
+    return (int) $stmt->fetchColumn();
+}
+
+function admin_fetch_users(PDO $pdo, array $filters, int $perPage = 15, int $offset = 0): array {
+    [$whereSql, $params] = admin_users_filter_sql($filters);
+    $sql = 'SELECT *' . $whereSql . ' ORDER BY creado_en DESC LIMIT ' . (int) $perPage . ' OFFSET ' . (int) $offset;
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
@@ -1301,12 +1314,35 @@ function admin_build_influencer_sales_identity_filter(array $user): array {
     return ['clauses' => $clauses, 'params' => $params];
 }
 
-function admin_render_users_results(array $usuarios): string {
+function admin_render_users_results(array $usuarios, array $pagination = []): string {
     ob_start();
 
     if (count($usuarios) === 0) {
         echo '<div class="text-secondary">No hay usuarios registrados con esos filtros.</div>';
         return (string) ob_get_clean();
+    }
+
+    if (!empty($pagination)) {
+        $summaryTotal = (int) ($pagination['total'] ?? count($usuarios));
+        $summaryPage = max(1, (int) ($pagination['page'] ?? 1));
+        $summaryPerPage = max(1, (int) ($pagination['per_page'] ?? 15));
+        $summaryTotalPages = max(1, (int) ($pagination['total_pages'] ?? 1));
+        $summaryOffset = ($summaryPage - 1) * $summaryPerPage;
+        $summaryRangeStart = $summaryTotal > 0 ? $summaryOffset + 1 : 0;
+        $summaryRangeEnd = $summaryTotal > 0 ? min($summaryOffset + count($usuarios), $summaryTotal) : 0;
+
+        echo '<div class="mb-3" style="background:linear-gradient(135deg, rgba(0,255,247,0.14), rgba(0,255,179,0.08)); border:1px solid rgba(0,255,247,0.35); border-radius:16px; padding:1rem 1.1rem; box-shadow:0 0 18px rgba(0,255,247,0.12);">';
+        echo '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2">';
+        echo '<div>';
+        echo '<div class="text-uppercase small fw-semibold" style="color:#7dd3fc; letter-spacing:0.08em;">Rango visible</div>';
+        echo '<div class="fw-bold" style="color:#00fff7; font-size:1.05rem;">Mostrando ' . $summaryRangeStart . ' - ' . $summaryRangeEnd . ' de ' . $summaryTotal . '</div>';
+        echo '</div>';
+        echo '<div class="text-end">';
+        echo '<div class="text-uppercase small fw-semibold" style="color:#7dd3fc; letter-spacing:0.08em;">Paginación</div>';
+        echo '<div class="fw-semibold" style="color:#b2f6ff;">Página ' . $summaryPage . ' de ' . $summaryTotalPages . '</div>';
+        echo '</div>';
+        echo '</div>';
+        echo '</div>';
     }
 
     echo '<div class="table-responsive mb-4 d-none d-md-block" style="background:#10141a; border-radius:16px; border:2px solid #00fff7; box-shadow:0 0 24px #00fff733; padding:1rem;">';
@@ -1433,6 +1469,50 @@ function admin_render_users_results(array $usuarios): string {
         echo '</div>';
     }
     echo '</div>';
+
+    $totalPages = max(1, (int) ($pagination['total_pages'] ?? 1));
+    $currentPage = max(1, (int) ($pagination['page'] ?? 1));
+    if ($totalPages > 1) {
+        $path = (string) ($pagination['path'] ?? '');
+        $baseQuery = (array) ($pagination['base_query'] ?? []);
+        $total = (int) ($pagination['total'] ?? 0);
+        $perPage = (int) ($pagination['per_page'] ?? 15);
+
+        echo '<div class="mt-1" style="background:#181f2a; border-radius:16px; border:1px solid rgba(0,255,247,0.3); box-shadow:0 0 18px rgba(0,255,247,0.08); padding:1rem;">';
+        echo '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">';
+        echo '<div class="text-secondary small">Página actual: ' . $currentPage . ' / ' . $totalPages . '</div>';
+        echo '<div class="text-secondary small">Total: ' . $total . ' usuarios</div>';
+        echo '</div>';
+        echo '<div class="d-grid d-sm-flex flex-wrap justify-content-center gap-2">';
+
+        $previousQuery = $baseQuery;
+        $previousQuery['pagina'] = max(1, $currentPage - 1);
+        $nextQuery = $baseQuery;
+        $nextQuery['pagina'] = min($totalPages, $currentPage + 1);
+
+        if ($currentPage > 1) {
+            echo '<a href="' . htmlspecialchars(admin_build_url($path, $previousQuery)) . '" class="btn btn-outline-info btn-sm fw-semibold" style="min-width:110px; border-color:#00fff7; color:#00fff7; background:#181f2a;">Anterior</a>';
+        }
+
+        $pageStart = max(1, $currentPage - 2);
+        $pageEnd = min($totalPages, $currentPage + 2);
+        for ($pageNumber = $pageStart; $pageNumber <= $pageEnd; $pageNumber++) {
+            $pageQuery = $baseQuery;
+            $pageQuery['pagina'] = $pageNumber;
+            $isActivePage = $pageNumber === $currentPage;
+            $pageStyle = $isActivePage
+                ? 'background:#00fff7; color:#181f2a; border:1px solid #00fff7; box-shadow:0 0 8px #00fff7;'
+                : 'border-color:#00fff7; color:#00fff7; background:#181f2a;';
+            echo '<a href="' . htmlspecialchars(admin_build_url($path, $pageQuery)) . '" class="btn btn-sm fw-semibold ' . ($isActivePage ? 'btn-info' : 'btn-outline-info') . '" style="min-width:44px; ' . $pageStyle . '">' . $pageNumber . '</a>';
+        }
+
+        if ($currentPage < $totalPages) {
+            echo '<a href="' . htmlspecialchars(admin_build_url($path, $nextQuery)) . '" class="btn btn-outline-info btn-sm fw-semibold" style="min-width:110px; border-color:#00fff7; color:#00fff7; background:#181f2a;">Siguiente</a>';
+        }
+
+        echo '</div>';
+        echo '</div>';
+    }
 
     return (string) ob_get_clean();
 }
@@ -3715,11 +3795,30 @@ if ($seccion === 'usuarios' && admin_is_ajax_request() && isset($_GET['usuarios_
     require_once __DIR__ . '/includes/db.php';
 
     $userFilters = admin_user_filters_from_input($_GET);
-    $usuarios = admin_fetch_users($pdo, $userFilters);
+    $userPerPage = admin_normalize_per_page($_GET['por_pagina'] ?? 15);
+    $userTotal = admin_count_users($pdo, $userFilters);
+    $userTotalPages = max(1, (int) ceil($userTotal / $userPerPage));
+    $userPage = min($userTotalPages, admin_normalize_positive_page($_GET['pagina'] ?? 1));
+    $userOffset = ($userPage - 1) * $userPerPage;
+    $usuarios = admin_fetch_users($pdo, $userFilters, $userPerPage, $userOffset);
 
     admin_json_response([
         'ok' => true,
-        'html' => admin_render_users_results($usuarios),
+        'html' => admin_render_users_results($usuarios, [
+            'total' => $userTotal,
+            'total_pages' => $userTotalPages,
+            'page' => $userPage,
+            'per_page' => $userPerPage,
+            'path' => app_path('/admin/usuarios'),
+            'base_query' => array_merge([
+                'seccion' => 'usuarios',
+                'filtro_nombre' => $userFilters['nombre'],
+                'filtro_correo' => $userFilters['correo'],
+                'filtro_rol' => $userFilters['rol'],
+                'filtro_fecha_desde' => $userFilters['fecha_desde'],
+                'filtro_fecha_hasta' => $userFilters['fecha_hasta'],
+            ], ['por_pagina' => $userPerPage]),
+        ]),
     ]);
 }
 
@@ -3810,7 +3909,28 @@ require_once __DIR__ . '/includes/header.php';
                     }
                 }
                         $userFilters = admin_user_filters_from_input($_GET);
-                        $usuarios = admin_fetch_users($pdo, $userFilters);
+                        $userPerPage = admin_normalize_per_page($_GET['por_pagina'] ?? 15);
+                        $userTotal = admin_count_users($pdo, $userFilters);
+                        $userTotalPages = max(1, (int) ceil($userTotal / $userPerPage));
+                        $userPage = min($userTotalPages, admin_normalize_positive_page($_GET['pagina'] ?? 1));
+                        $userOffset = ($userPage - 1) * $userPerPage;
+                        $usuarios = admin_fetch_users($pdo, $userFilters, $userPerPage, $userOffset);
+                        $userPagination = [
+                            'total' => $userTotal,
+                            'total_pages' => $userTotalPages,
+                            'page' => $userPage,
+                            'per_page' => $userPerPage,
+                            'path' => app_path('/admin/usuarios'),
+                            'base_query' => [
+                                'seccion' => 'usuarios',
+                                'filtro_nombre' => $userFilters['nombre'],
+                                'filtro_correo' => $userFilters['correo'],
+                                'filtro_rol' => $userFilters['rol'],
+                                'filtro_fecha_desde' => $userFilters['fecha_desde'],
+                                'filtro_fecha_hasta' => $userFilters['fecha_hasta'],
+                                'por_pagina' => $userPerPage,
+                            ],
+                        ];
 
                                 echo '<form method="GET" action="' . htmlspecialchars(app_path('/admin/usuarios')) . '" class="row g-3 mb-4 align-items-end" data-user-filter-form="1" style="background:#10141a; border-radius:16px; border:2px solid #00fff7; box-shadow:0 0 24px #00fff733; padding:1rem;">';
                                 echo '<input type="hidden" name="seccion" value="usuarios">';
@@ -3845,7 +3965,7 @@ require_once __DIR__ . '/includes/header.php';
                                 echo '</div>';
                                 echo '</form>';
 
-                                echo '<div data-user-results="1">' . admin_render_users_results($usuarios) . '</div>';
+                                echo '<div data-user-results="1">' . admin_render_users_results($usuarios, $userPagination) . '</div>';
                                 echo '<script>
 (() => {
     const form = document.querySelector("[data-user-filter-form=\"1\"]");
