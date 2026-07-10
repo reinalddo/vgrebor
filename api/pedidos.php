@@ -11003,6 +11003,17 @@ if ($action === 'batch_create_and_pay') {
     $userIsAdmin     = in_array($userRole, ['root', 'admin'], true);
     $playerFields    = parse_player_fields_request($pfjRaw);
     $playerFieldsJson = $pfjRaw !== '' ? $pfjRaw : null;
+
+    /* ID de jugador bloqueado: aplica a TODOS los juegos también en el carrito */
+    $batchBlockedPlayerIds = blocked_players_get_all_ids();
+    $batchPlayerIdToCheck = trim((string) $userIdRaw);
+    if ($batchPlayerIdToCheck === '') {
+        $batchPlayerIdToCheck = trim((string) primary_player_identifier_from_fields($playerFields));
+    }
+    if ($batchPlayerIdToCheck !== '' && in_array($batchPlayerIdToCheck, $batchBlockedPlayerIds, true)) {
+        json_error('Este ID de jugador ha sido suspendido por actividades ilícitas. Comunícate con el administrador si crees que es un error.', 403);
+    }
+
     $batchId         = bin2hex(random_bytes(16));
     $batchSize       = count($cartItems);
     $orderIds        = [];

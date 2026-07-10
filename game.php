@@ -12933,6 +12933,17 @@ include __DIR__ . "/includes/header.php";
 
                 if (!userId && !window.__gameNoPlayerIdRequired) { showToast('Debes ingresar tu ID de jugador.', 'error'); return; }
 
+                /* ID de jugador bloqueado: mismo chequeo que la compra individual */
+                const CART_BLOCKED_PLAYER_IDS = <?= json_encode(blocked_players_get_all_ids(), JSON_UNESCAPED_UNICODE) ?>;
+                if (userId && CART_BLOCKED_PLAYER_IDS.includes(userId)) {
+                  showPaymentStatusModal(
+                    '⚠️ Advertencia de Actividades Ilícitas',
+                    'Este ID de jugador ha sido suspendido temporalmente por actividades ilícitas. Si crees que es un error, comunícate con el administrador.',
+                    'danger'
+                  );
+                  return;
+                }
+
                 // Use pack currency/showDecimals from first item
                 const refPack      = cartItems[0].pack;
                 const showDec      = refPack.showDecimals;
