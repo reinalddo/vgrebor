@@ -69,6 +69,59 @@ if (!function_exists('package_feature_normalize_radius')) {
     }
 }
 
+if (!function_exists('package_info_sanitize_html')) {
+    /* Sanitiza el HTML generado por el editor de "Información del paquete".
+       Solo permite las etiquetas/estilos que producen los botones del editor
+       (negrita, cursiva, subrayado, color y tamaño). Todo lo demás se elimina. */
+    function package_info_sanitize_html(?string $html): string {
+        $html = trim((string) $html);
+        if ($html === '') {
+            return '';
+        }
+
+        $html = strip_tags($html, '<b><strong><i><em><u><p><br><div><span><font>');
+
+        $html = preg_replace_callback(
+            '/<(b|strong|i|em|u|p|br|div|span|font)((?:\s[^<>]*?)?)(\/?)>/i',
+            static function (array $m): string {
+                $tag = strtolower($m[1]);
+                $attrs = (string) $m[2];
+                $keep = '';
+
+                if (preg_match('/style\s*=\s*"([^"]*)"/i', $attrs, $sm) === 1) {
+                    $declarations = [];
+                    foreach (explode(';', $sm[1]) as $decl) {
+                        if (preg_match('/^\s*(color|font-size|font-weight|font-style|text-decoration(?:-line)?|text-align)\s*:\s*([#a-zA-Z0-9(),.%\s-]+?)\s*$/i', $decl, $dm) === 1) {
+                            $declarations[] = strtolower(trim($dm[1])) . ':' . trim($dm[2]);
+                        }
+                    }
+                    if (!empty($declarations)) {
+                        $keep .= ' style="' . htmlspecialchars(implode(';', $declarations), ENT_QUOTES, 'UTF-8') . '"';
+                    }
+                }
+
+                if (($tag === 'div' || $tag === 'p') && preg_match('/align\s*=\s*"?(left|center|right|justify)"?/i', $attrs, $am) === 1) {
+                    $keep .= ' align="' . strtolower($am[1]) . '"';
+                }
+
+                if ($tag === 'font') {
+                    if (preg_match('/color\s*=\s*"?(#?[a-zA-Z0-9]{1,20})"?/i', $attrs, $cm) === 1) {
+                        $keep .= ' color="' . htmlspecialchars($cm[1], ENT_QUOTES, 'UTF-8') . '"';
+                    }
+                    if (preg_match('/size\s*=\s*"?([1-7])"?/i', $attrs, $zm) === 1) {
+                        $keep .= ' size="' . $zm[1] . '"';
+                    }
+                }
+
+                return '<' . $tag . $keep . ($m[3] !== '' ? ' /' : '') . '>';
+            },
+            $html
+        ) ?? '';
+
+        return mb_substr(trim($html), 0, 20000, 'UTF-8');
+    }
+}
+
 if (!function_exists('package_feature_badge_style_attr')) {
     /* Genera los overrides de estilo inline para un badge según su configuración.
        Solo agrega las propiedades definidas; lo demás usa el estilo por defecto. */

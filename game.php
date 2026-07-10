@@ -574,6 +574,15 @@ include __DIR__ . "/includes/header.php";
               <?php else: ?>
                 <span class="pack-card-placeholder">PK</span>
               <?php endif; ?>
+              <?php $packInfoHtml = package_info_sanitize_html((string) ($pack['info_html'] ?? '')); ?>
+              <?php if ($packInfoHtml !== ''): ?>
+                <button type="button" class="pack-info-btn"
+                        data-pack-info="<?= htmlspecialchars($packInfoHtml, ENT_QUOTES, 'UTF-8') ?>"
+                        data-pack-info-title="<?= htmlspecialchars($pack['nombre'], ENT_QUOTES, 'UTF-8') ?>"
+                        aria-label="Información del paquete <?= htmlspecialchars($pack['nombre'], ENT_QUOTES, 'UTF-8') ?>">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                </button>
+              <?php endif; ?>
             </div>
             <?php if (!empty($packFeatures)): ?>
               <div class="pack-card-features" aria-hidden="true">
@@ -988,6 +997,19 @@ include __DIR__ . "/includes/header.php";
       </div>
     </div>
   </div>
+  <!-- Modal Información del Paquete (ícono i) -->
+  <div id="pack-info-modal" class="app-overlay-modal" tabindex="-1" aria-hidden="true" role="dialog" aria-label="Información del paquete">
+    <div class="modal-dialog modal-dialog-centered" style="width:min(94vw, 480px);">
+      <div class="modal-content bg-dark text-light rounded-4 p-4" style="border:1px solid rgba(var(--theme-primary-rgb), 0.6); box-shadow:0 0 28px rgba(var(--theme-primary-rgb), 0.18);">
+        <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+          <h5 id="pack-info-modal-title" class="text-info fw-bold mb-0" style="font-family:'Oxanium',sans-serif;"></h5>
+          <button type="button" id="pack-info-modal-close" class="btn btn-outline-info rounded-circle d-inline-flex align-items-center justify-content-center flex-shrink-0" style="width:38px;height:38px;" aria-label="Cerrar">&times;</button>
+        </div>
+        <div id="pack-info-modal-body" class="pack-info-modal-body" style="max-height:60vh;overflow-y:auto;line-height:1.65;"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal Cupón Bootstrap -->
   <div id="coupon-modal" class="modal fade app-overlay-modal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -4494,6 +4516,38 @@ include __DIR__ . "/includes/header.php";
     14%  { left: 140%; }
     100% { left: 140%; }
   }
+
+  /* ── Botón "i" de información del paquete ── */
+  .pack-info-btn {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    z-index: 5;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    background: rgba(8, 15, 26, 0.72);
+    color: #e8f6ff;
+    cursor: pointer;
+    padding: 0;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+    transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+  }
+  .pack-info-btn:hover,
+  .pack-info-btn:focus-visible {
+    transform: scale(1.12);
+    background: rgba(var(--theme-primary-rgb), 0.28);
+    border-color: rgba(var(--theme-primary-rgb), 0.8);
+  }
+
+  #pack-info-modal .pack-info-modal-body font[size="1"] { font-size: 0.78rem; }
+  #pack-info-modal .pack-info-modal-body font[size="4"] { font-size: 1.2rem; }
+  #pack-info-modal .pack-info-modal-body font[size="6"] { font-size: 1.6rem; }
 
   .pack-card:hover .pack-card-feature-badge,
   .pack-card:focus-visible .pack-card-feature-badge {
@@ -12647,6 +12701,7 @@ include __DIR__ . "/includes/header.php";
                 card.addEventListener('click', function(e) {
                   if (!cartMode) return; // normal flow handles it
                   if (e.target.closest('[data-pack-preview-trigger]')) return; // let preview button open gallery modal
+                  if (e.target.closest('.pack-info-btn')) return; // let the "i" button open its info modal
 
                   e.stopImmediatePropagation(); // prevent original handler
 
@@ -13610,3 +13665,42 @@ include __DIR__ . "/includes/footer.php";
   <span class="floating-social-label" id="float-cart-fab-label"></span>
 </button>
 <script>if (typeof syncFloatCartFab === 'function') syncFloatCartFab();</script>
+<script>
+/* ── Ventana de información del paquete (ícono "i") ─────────────────────── */
+(function () {
+  const modal = document.getElementById('pack-info-modal');
+  if (!modal) return;
+  const title = document.getElementById('pack-info-modal-title');
+  const body = document.getElementById('pack-info-modal-body');
+  const closeBtn = document.getElementById('pack-info-modal-close');
+
+  function openInfoModal(btn) {
+    if (title) title.textContent = btn.getAttribute('data-pack-info-title') || 'Información del paquete';
+    /* El HTML viene sanitizado desde el servidor (solo formato del editor) */
+    if (body) body.innerHTML = btn.getAttribute('data-pack-info') || '';
+    modal.classList.add('is-visible');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeInfoModal() {
+    modal.classList.remove('is-visible');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  document.querySelectorAll('.pack-info-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      /* No seleccionar el paquete al tocar la "i" */
+      e.preventDefault();
+      e.stopPropagation();
+      openInfoModal(btn);
+    });
+    btn.addEventListener('keydown', (e) => { e.stopPropagation(); });
+  });
+
+  if (closeBtn) closeBtn.addEventListener('click', closeInfoModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeInfoModal(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.classList.contains('is-visible')) closeInfoModal();
+  });
+}());
+</script>

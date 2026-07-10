@@ -204,6 +204,13 @@ function ensure_juego_paquetes_api_source_key_column(mysqli $mysqli): void {
     }
 }
 
+function ensure_juego_paquetes_info_html_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'info_html'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN info_html TEXT NULL AFTER imagen_icono");
+    }
+}
+
 function ensure_juego_paquetes_cantidad_text_column(mysqli $mysqli): void {
     $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'cantidad'");
     if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
@@ -444,6 +451,61 @@ function admin_package_feature_icon_options_html(array $iconOptions, string $sel
     return $html;
 }
 
+function admin_package_info_editor_html(string $fieldName, string $currentHtml): string {
+    $sanitized = package_info_sanitize_html($currentHtml);
+    $editorId = 'pkg-info-editor-' . preg_replace('/[^a-z0-9_-]/i', '', $fieldName);
+    ob_start();
+    ?>
+    <div data-pkg-info-editor style="border:1px solid rgba(34,211,238,0.35);border-radius:0.6rem;overflow:hidden;background:#0d1420;">
+        <div class="d-flex flex-wrap align-items-center gap-1 p-2" style="background:#131c2b;border-bottom:1px solid rgba(34,211,238,0.2);">
+            <button type="button" data-pkg-cmd="bold" class="btn btn-sm btn-outline-info fw-bold" title="Negrita" style="min-width:36px;">B</button>
+            <button type="button" data-pkg-cmd="italic" class="btn btn-sm btn-outline-info fst-italic" title="Cursiva" style="min-width:36px;">I</button>
+            <button type="button" data-pkg-cmd="underline" class="btn btn-sm btn-outline-info text-decoration-underline" title="Subrayado" style="min-width:36px;">S</button>
+            <span class="mx-1" style="width:1px;height:22px;background:rgba(34,211,238,0.3);"></span>
+            <button type="button" data-pkg-cmd="justifyLeft" class="btn btn-sm btn-outline-info" title="Alinear a la izquierda" style="min-width:36px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="14" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg>
+            </button>
+            <button type="button" data-pkg-cmd="justifyCenter" class="btn btn-sm btn-outline-info" title="Centrar" style="min-width:36px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+            </button>
+            <button type="button" data-pkg-cmd="justifyRight" class="btn btn-sm btn-outline-info" title="Alinear a la derecha" style="min-width:36px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/></svg>
+            </button>
+            <label class="d-inline-flex align-items-center gap-1 ms-2 mb-0 small" style="color:#8be9fd;cursor:pointer;">
+                Color
+                <input type="color" data-pkg-cmd-color value="#22d3ee" title="Color de texto" style="width:34px;height:28px;border:1px solid rgba(34,211,238,0.4);border-radius:0.35rem;background:#222c3a;padding:2px;cursor:pointer;">
+            </label>
+            <label class="d-inline-flex align-items-center gap-1 ms-2 mb-0 small" style="color:#8be9fd;">
+                Tamaño
+                <select data-pkg-cmd-size class="form-select form-select-sm" style="width:auto;background:#222c3a;color:#22d3ee;border:1px solid rgba(34,211,238,0.4);">
+                    <option value="">Normal</option>
+                    <option value="1">Pequeño</option>
+                    <option value="4">Grande</option>
+                    <option value="6">Muy grande</option>
+                </select>
+            </label>
+            <button type="button" data-pkg-cmd="removeFormat" class="btn btn-sm btn-outline-secondary ms-2" title="Quitar formato">Limpiar</button>
+        </div>
+        <div id="<?= htmlspecialchars($editorId, ENT_QUOTES, 'UTF-8') ?>" contenteditable="true" data-pkg-info-area
+             style="min-height:110px;max-height:260px;overflow-y:auto;padding:0.75rem 0.9rem;color:#e2e8f0;line-height:1.6;outline:none;"><?= $sanitized ?></div>
+        <textarea name="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" data-pkg-info-field class="d-none"><?= htmlspecialchars($sanitized, ENT_QUOTES, 'UTF-8') ?></textarea>
+    </div>
+    <?php
+    return trim((string) ob_get_clean());
+}
+
+function admin_package_feature_badge_inline_style(array $feature): string {
+    $style = 'background:rgba(15,23,42,0.9);border:1px solid rgba(34,211,238,0.28);color:#d8fbff;';
+    $custom = function_exists('package_feature_badge_style_attr') ? package_feature_badge_style_attr($feature) : '';
+    if ($custom !== '') {
+        $style .= $custom;
+        if (strpos($custom, 'border-radius:') !== false) {
+            $style .= 'border-radius:' . (int) ($feature['border_radius'] ?? 0) . 'px !important;';
+        }
+    }
+    return $style;
+}
+
 function admin_package_feature_badges_html(array $features): string {
     if (empty($features)) {
         return '';
@@ -453,7 +515,7 @@ function admin_package_feature_badges_html(array $features): string {
     ?>
     <div class="d-flex flex-wrap gap-2 mt-2">
         <?php foreach ($features as $feature): ?>
-            <span class="badge rounded-pill d-inline-flex align-items-center gap-2 px-3 py-2" style="background:rgba(15,23,42,0.9);border:1px solid rgba(34,211,238,0.28);color:#d8fbff;">
+            <span class="badge rounded-pill d-inline-flex align-items-center gap-2 px-3 py-2" style="<?= htmlspecialchars(admin_package_feature_badge_inline_style($feature), ENT_QUOTES, 'UTF-8') ?>">
                 <?= package_feature_render_icon((string) ($feature['icon'] ?? 'sparkles'), 'package-feature-badge-icon') ?>
                 <span><?= htmlspecialchars((string) ($feature['name'] ?? ''), ENT_QUOTES, 'UTF-8') ?></span>
             </span>
@@ -569,6 +631,7 @@ ensure_juego_paquetes_activo_column($mysqli);
 ensure_juego_paquetes_paquete_api_column($mysqli);
 ensure_juego_paquetes_api_provider_column($mysqli);
 ensure_juego_paquetes_api_source_key_column($mysqli);
+ensure_juego_paquetes_info_html_column($mysqli);
 ensure_juego_paquetes_cantidad_text_column($mysqli);
 ensure_juego_paquetes_orden_column($mysqli);
 ensure_juego_paquetes_destacado_column($mysqli);
@@ -1014,6 +1077,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     }
     $stmt->execute();
     $stmt->close();
+    $editInfoHtml = package_info_sanitize_html((string) ($_POST['edit_info_paquete_html'] ?? ''));
+    $stmtEditInfo = $mysqli->prepare("UPDATE juego_paquetes SET info_html = NULLIF(?, '') WHERE id = ?");
+    if ($stmtEditInfo) {
+        $stmtEditInfo->bind_param('si', $editInfoHtml, $edit_id);
+        $stmtEditInfo->execute();
+        $stmtEditInfo->close();
+    }
     if ($accountSaleFeatureEnabled) {
         package_account_sales_replace_gallery($mysqli, $edit_id, $editGalleryPayload['items']);
         foreach ($editGalleryPayload['delete_paths'] as $deletePath) {
@@ -1107,6 +1177,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $stmt->execute();
     $newPackageId = (int) $mysqli->insert_id;
     $stmt->close();
+    $infoHtml = package_info_sanitize_html((string) ($_POST['info_paquete_html'] ?? ''));
+    $stmtInfo = $mysqli->prepare("UPDATE juego_paquetes SET info_html = NULLIF(?, '') WHERE id = ?");
+    if ($stmtInfo) {
+        $stmtInfo->bind_param('si', $infoHtml, $newPackageId);
+        $stmtInfo->execute();
+        $stmtInfo->close();
+    }
     if ($accountSaleFeatureEnabled) {
         package_account_sales_replace_gallery($mysqli, $newPackageId, $newGalleryPayload['items']);
     }
@@ -1432,6 +1509,13 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
         <?php endif; ?>
         <div class="col-12">
             <div class="rounded-4 p-3" style="background:#101826;border:1px solid rgba(34,211,238,0.18);">
+                <div class="text-neon fw-semibold mb-1">Información del paquete (ícono "i")</div>
+                <div class="small mb-2" style="color:#8be9fd;">Este texto se mostrará en una ventana al tocar el ícono "i" del paquete en la tienda. Si lo dejas vacío, el ícono no aparece.</div>
+                <?= admin_package_info_editor_html('info_paquete_html', '') ?>
+            </div>
+        </div>
+        <div class="col-12">
+            <div class="rounded-4 p-3" style="background:#101826;border:1px solid rgba(34,211,238,0.18);">
                 <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-3">
                     <div>
                         <div class="text-neon fw-semibold">Caracteristicas reutilizables</div>
@@ -1445,7 +1529,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                             <div class="d-inline-flex flex-wrap align-items-center gap-2" data-package-feature-apply-scope>
                                 <input type="hidden" name="package_catalog_feature_id[]" value="<?= (int) ($feature['id'] ?? 0) ?>">
                                 <input type="hidden" name="package_feature_apply_mode[]" value="" data-package-feature-apply-input>
-                                <label class="badge rounded-pill d-inline-flex align-items-center gap-2 px-3 py-2" style="cursor:pointer;background:rgba(15,23,42,0.92);border:1px solid rgba(34,211,238,0.28);color:#d8fbff;">
+                                <label class="badge rounded-pill d-inline-flex align-items-center gap-2 px-3 py-2" style="cursor:pointer;<?= htmlspecialchars(admin_package_feature_badge_inline_style($feature), ENT_QUOTES, 'UTF-8') ?>">
                                     <input type="checkbox" name="package_feature_ids[]" value="<?= (int) ($feature['id'] ?? 0) ?>" class="form-check-input mt-0 me-1" style="float:none;" data-package-feature-select-checkbox>
                                     <?= package_feature_render_icon((string) ($feature['icon'] ?? 'sparkles'), 'package-feature-badge-icon') ?>
                                     <span><?= htmlspecialchars((string) ($feature['name'] ?? ''), ENT_QUOTES, 'UTF-8') ?></span>
@@ -2143,6 +2227,11 @@ if (isset($_GET['editar'])) {
         </div>
         <?php endif; ?>
         <div class="mb-3 rounded-4 p-3" style="background:#101826;border:1px solid rgba(34,211,238,0.18);">
+            <div class="text-neon fw-semibold mb-1">Información del paquete (ícono "i")</div>
+            <div class="small mb-2" style="color:#8be9fd;">Este texto se mostrará en una ventana al tocar el ícono "i" del paquete en la tienda. Si lo dejas vacío, el ícono no aparece.</div>
+            <?= admin_package_info_editor_html('edit_info_paquete_html', (string) ($paq_edit['info_html'] ?? '')) ?>
+        </div>
+        <div class="mb-3 rounded-4 p-3" style="background:#101826;border:1px solid rgba(34,211,238,0.18);">
             <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-3">
                 <div>
                     <div class="text-neon fw-semibold">Caracteristicas del paquete</div>
@@ -2156,7 +2245,7 @@ if (isset($_GET['editar'])) {
                         <div class="d-inline-flex flex-wrap align-items-center gap-2" data-package-feature-apply-scope>
                             <input type="hidden" name="edit_catalog_feature_id[]" value="<?= (int) ($feature['id'] ?? 0) ?>">
                             <input type="hidden" name="edit_catalog_feature_apply_mode[]" value="" data-package-feature-apply-input>
-                            <label class="badge rounded-pill d-inline-flex align-items-center gap-2 px-3 py-2" style="cursor:pointer;background:rgba(15,23,42,0.92);border:1px solid rgba(34,211,238,0.28);color:#d8fbff;">
+                            <label class="badge rounded-pill d-inline-flex align-items-center gap-2 px-3 py-2" style="cursor:pointer;<?= htmlspecialchars(admin_package_feature_badge_inline_style($feature), ENT_QUOTES, 'UTF-8') ?>">
                                 <input type="checkbox" name="edit_package_feature_ids[]" value="<?= (int) ($feature['id'] ?? 0) ?>" class="form-check-input mt-0 me-1" style="float:none;" <?= in_array((int) ($feature['id'] ?? 0), $paqEditFeatureIds, true) ? 'checked' : '' ?> data-package-feature-select-checkbox>
                                 <?= package_feature_render_icon((string) ($feature['icon'] ?? 'sparkles'), 'package-feature-badge-icon') ?>
                                 <span><?= htmlspecialchars((string) ($feature['name'] ?? ''), ENT_QUOTES, 'UTF-8') ?></span>
@@ -3234,6 +3323,51 @@ window.adminPackageOrderChange = async function(input) {
         input.readOnly = false;
     }
 };
+
+/* ── Editor visual de "Información del paquete" (ícono i) ─────────────── */
+(function () {
+    document.querySelectorAll('[data-pkg-info-editor]').forEach((editor) => {
+        const area = editor.querySelector('[data-pkg-info-area]');
+        const field = editor.querySelector('[data-pkg-info-field]');
+        if (!area || !field) return;
+
+        const sync = () => { field.value = area.innerHTML; };
+
+        editor.querySelectorAll('[data-pkg-cmd]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                area.focus();
+                document.execCommand(btn.dataset.pkgCmd, false, null);
+                sync();
+            });
+        });
+
+        const colorInput = editor.querySelector('[data-pkg-cmd-color]');
+        if (colorInput) {
+            colorInput.addEventListener('input', () => {
+                area.focus();
+                document.execCommand('foreColor', false, colorInput.value);
+                sync();
+            });
+        }
+
+        const sizeSelect = editor.querySelector('[data-pkg-cmd-size]');
+        if (sizeSelect) {
+            sizeSelect.addEventListener('change', () => {
+                area.focus();
+                document.execCommand('fontSize', false, sizeSelect.value !== '' ? sizeSelect.value : '3');
+                sync();
+            });
+        }
+
+        area.addEventListener('input', sync);
+        area.addEventListener('blur', sync);
+
+        const form = editor.closest('form');
+        if (form) {
+            form.addEventListener('submit', sync);
+        }
+    });
+}());
 </script>
 
 <?php include '../includes/footer.php'; ?>
