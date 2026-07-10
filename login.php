@@ -1,13 +1,15 @@
 <?php
 require_once __DIR__ . "/includes/tenant.php";
 require_once __DIR__ . "/includes/db_connect.php";
+require_once __DIR__ . "/includes/auth.php";
 
-$openLoginModalWithError = static function (string $message, string $emailValue = ''): void {
+$openLoginModalWithError = static function (string $message, string $emailValue = '', bool $blocked = false): void {
   tenant_start_session();
   $_SESSION["auth_modal_state"] = [
     "mode" => "login",
     "message" => $message,
     "email" => $emailValue,
+    "blocked" => $blocked,
   ];
 
   header("Location: " . app_path('/'));
@@ -26,7 +28,8 @@ if ($email === "" || $password === "") {
   $openLoginModalWithError("Completa el correo y la contraseña.", $email);
 }
 
-$stmt = $mysqli->prepare("SELECT id, username, password, nombre, email, telefono, foto_perfil, rol FROM usuarios WHERE email = ? LIMIT 1");
+auth_ensure_profile_columns($mysqli);
+$stmt = $mysqli->prepare("SELECT id, username, password, nombre, email, telefono, foto_perfil, rol, COALESCE(bloqueado, 0) AS bloqueado FROM usuarios WHERE email = ? LIMIT 1");
 $stmt->bind_param('s', $email);
 $stmt->execute();
 $res = $stmt->get_result();
@@ -35,6 +38,10 @@ $stmt->close();
 
 if ($user === null || empty($user["password"]) || !password_verify($password, $user["password"])) {
   $openLoginModalWithError("Credenciales inválidas.", $email);
+}
+
+if ((int) ($user["bloqueado"] ?? 0) === 1) {
+  $openLoginModalWithError("Usuario Bloqueado, Contacte al administrador para más información", $email, true);
 }
 
 tenant_start_session();

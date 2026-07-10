@@ -9187,6 +9187,23 @@ include __DIR__ . "/includes/header.php";
     }, 120);
   }
 
+  /* Si la API respondió que el usuario está bloqueado, muestra el aviso con
+     el botón de WhatsApp del administrador y detiene el flujo de compra. */
+  function handleBlockedUserResponse(data) {
+    if (!data || !data.blocked) {
+      return false;
+    }
+    const waUrl = String(data.whatsapp_url || '').trim();
+    const msg = String(data.message || 'Usuario Bloqueado, Contacte al administrador para más información');
+    renderPaymentActionButtons(waUrl !== '' ? [{
+      label: 'Contactar al administrador por WhatsApp',
+      className: 'btn-success',
+      onClick: () => window.open(waUrl, '_blank', 'noopener')
+    }] : []);
+    showPaymentStatusModal('Usuario Bloqueado', msg, 'danger');
+    return true;
+  }
+
   function showPaymentStatusModal(title, message, type, options = {}) {
     const normalizedType = type === 'success' || type === 'danger' ? type : 'info';
     const successExtraMessage = normalizedType === 'success'
@@ -11759,6 +11776,11 @@ include __DIR__ . "/includes/header.php";
                       console.log('Error API:', data.api_error);
                     }
                     if (!response.ok || !data.ok) {
+                      if (handleBlockedUserResponse(data)) {
+                        setOverlayVisible(loadingModal, false);
+                        setPaymentFormDisabled(false);
+                        return;
+                      }
                       throw new Error((data && data.message) ? data.message : 'No se pudieron guardar los datos del pago.');
                     }
 
@@ -12317,7 +12339,7 @@ include __DIR__ . "/includes/header.php";
                     if (opened) {
                       showToast('Pedido registrado. Completa ahora los datos del pago.', 'success');
                     }
-                  } else {
+                  } else if (!handleBlockedUserResponse(data)) {
                     showToast((data && data.message) ? data.message : 'Error al registrar pedido', 'error');
                   }
                 })
@@ -13183,6 +13205,11 @@ include __DIR__ . "/includes/header.php";
                   _batchApiData = data;
 
                   if (!data || !data.ok) {
+                    if (handleBlockedUserResponse(data)) {
+                      setOverlayVisible(loadingModal, false);
+                      paymentSubmitButton.disabled = false;
+                      return;
+                    }
                     throw new Error((data && data.message) ? data.message : 'No se pudieron crear los pedidos.');
                   }
 

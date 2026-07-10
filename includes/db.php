@@ -59,6 +59,12 @@ try {
         $pdo->exec("ALTER TABLE usuarios ADD COLUMN last_purchase_phone VARCHAR(50) NULL AFTER last_purchase_user_identifier");
     }
 
+    $blockedColumnStmt = $pdo->query("SHOW COLUMNS FROM usuarios LIKE 'bloqueado'");
+    $blockedColumn = $blockedColumnStmt ? $blockedColumnStmt->fetch() : false;
+    if (!$blockedColumn) {
+        $pdo->exec("ALTER TABLE usuarios ADD COLUMN bloqueado TINYINT(1) NOT NULL DEFAULT 0 AFTER rol");
+    }
+
     $extraFeatureColumns = [
         'mostrar_a_cliente' => "ALTER TABLE configuracion_general ADD COLUMN mostrar_a_cliente TINYINT(1) DEFAULT 0 NULL AFTER actualizado_en",
         'funcion_venta' => "ALTER TABLE configuracion_general ADD COLUMN funcion_venta VARCHAR(255) NULL AFTER mostrar_a_cliente",

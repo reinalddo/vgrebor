@@ -15,8 +15,39 @@ function auth_ensure_profile_columns(mysqli $connection): void {
     if (!$has) {
       $connection->query("ALTER TABLE usuarios ADD COLUMN foto_perfil VARCHAR(255) NULL AFTER email");
     }
+
+    $res = $connection->query("SHOW COLUMNS FROM usuarios LIKE 'bloqueado'");
+    $hasBlocked = $res instanceof mysqli_result && $res->num_rows > 0;
+    if ($res instanceof mysqli_result) {
+      $res->free();
+    }
+    if (!$hasBlocked) {
+      $connection->query("ALTER TABLE usuarios ADD COLUMN bloqueado TINYINT(1) NOT NULL DEFAULT 0 AFTER rol");
+    }
   } catch (Throwable $ex) {
     // ignore failures - best effort
+  }
+}
+
+function auth_user_is_blocked(mysqli $connection, int $userId): bool {
+  if ($userId <= 0) {
+    return false;
+  }
+
+  try {
+    auth_ensure_profile_columns($connection);
+    $stmt = $connection->prepare('SELECT COALESCE(bloqueado, 0) AS bloqueado FROM usuarios WHERE id = ? LIMIT 1');
+    if (!$stmt) {
+      return false;
+    }
+    $stmt->bind_param('i', $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+    return (int) ($row['bloqueado'] ?? 0) === 1;
+  } catch (Throwable $ex) {
+    return false;
   }
 }
 

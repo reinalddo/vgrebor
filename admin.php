@@ -1319,6 +1319,7 @@ function admin_render_users_results(array $usuarios): string {
     echo '<th style="color:#00fff7; background:#181f2a;">Teléfono</th>';
     echo '<th style="color:#00fff7; background:#181f2a;">Rol</th>';
     echo '<th style="color:#00fff7; background:#181f2a;">Creado</th>';
+    echo '<th style="color:#00fff7; background:#181f2a;">Acceso</th>';
     echo '<th style="color:#00fff7; background:#181f2a;">Acciones</th>';
     echo '</tr>';
     echo '</thead>';
@@ -1347,6 +1348,20 @@ function admin_render_users_results(array $usuarios): string {
         echo '</form>';
         echo '</td>';
         echo '<td style="color:#00fff7; background:#181f2a;">' . htmlspecialchars($usuario['creado_en']) . '</td>';
+        $usuarioBloqueado = (int) ($usuario['bloqueado'] ?? 0) === 1;
+        echo '<td style="background:#181f2a;">';
+        if ($usuario['id'] != 1) {
+            if ($usuarioBloqueado) {
+                echo '<span class="badge d-block mb-1" style="background:#ff0059; color:#fff;">Bloqueado</span>';
+                echo '<a href="?seccion=usuarios&toggle_bloqueo=' . urlencode((string) $usuario['id']) . '&estado=0" class="btn btn-sm w-100" style="background:#22c55e; color:#052e16; font-weight:700; border:none;" onclick="return confirm(\'¿Desbloquear el acceso de este usuario?\')">Desbloquear</a>';
+            } else {
+                echo '<span class="badge d-block mb-1" style="background:#22c55e; color:#052e16;">Activo</span>';
+                echo '<a href="?seccion=usuarios&toggle_bloqueo=' . urlencode((string) $usuario['id']) . '&estado=1" class="btn btn-sm w-100" style="background:#f59e0b; color:#451a03; font-weight:700; border:none;" onclick="return confirm(\'¿Bloquear el acceso de este usuario? No podrá iniciar sesión ni realizar recargas.\')">Bloquear</a>';
+            }
+        } else {
+            echo '<span class="text-secondary">Admin</span>';
+        }
+        echo '</td>';
         echo '<td style="background:#181f2a;">';
         if ($usuario['id'] != 1) {
             echo '<a href="?seccion=usuarios&borrar_usuario=' . urlencode((string) $usuario['id']) . '" class="btn btn-outline-danger btn-sm" style="border-color:#ff0059; color:#ff0059; background:#181f2a;" onmouseover="this.style.background=\'#ff0059\';this.style.color=\'#fff\'" onmouseout="this.style.background=\'#181f2a\';this.style.color=\'#ff0059\'" onclick="return confirm(\'¿Eliminar este usuario?\')">Eliminar</a>';
@@ -1392,6 +1407,19 @@ function admin_render_users_results(array $usuarios): string {
         }
         echo '</select>';
         echo '</div>';
+        $usuarioBloqueadoMovil = (int) ($usuario['bloqueado'] ?? 0) === 1;
+        if ($usuario['id'] != 1) {
+            echo '<div class="mb-2">';
+            echo '<label class="form-label text-info">Acceso</label>';
+            if ($usuarioBloqueadoMovil) {
+                echo '<div><span class="badge mb-2" style="background:#ff0059; color:#fff;">Bloqueado</span></div>';
+                echo '<a href="?seccion=usuarios&toggle_bloqueo=' . urlencode((string) $usuario['id']) . '&estado=0" class="btn btn-success w-100" onclick="return confirm(\'¿Desbloquear el acceso de este usuario?\')">Desbloquear</a>';
+            } else {
+                echo '<div><span class="badge mb-2" style="background:#22c55e; color:#052e16;">Activo</span></div>';
+                echo '<a href="?seccion=usuarios&toggle_bloqueo=' . urlencode((string) $usuario['id']) . '&estado=1" class="btn btn-warning w-100" onclick="return confirm(\'¿Bloquear el acceso de este usuario? No podrá iniciar sesión ni realizar recargas.\')">Bloquear</a>';
+            }
+            echo '</div>';
+        }
         echo '<div class="d-flex gap-2 mt-2">';
         echo '<button type="submit" class="btn btn-info flex-fill">Guardar</button>';
         if ($usuario['id'] != 1) {
@@ -3756,6 +3784,17 @@ require_once __DIR__ . '/includes/header.php';
                         echo '<div class="text-green-400 mb-2">Usuario eliminado.</div>';
                     } else {
                         echo '<div class="text-danger mb-2">No puedes eliminar este usuario protegido.</div>';
+                    }
+                }
+                // Bloquear / desbloquear acceso del usuario
+                if (isset($_GET['toggle_bloqueo'])) {
+                    $id = intval($_GET['toggle_bloqueo']);
+                    $estadoBloqueo = intval($_GET['estado'] ?? 0) === 1 ? 1 : 0;
+                    if (admin_is_protected_user($pdo, $id)) {
+                        echo '<div class="text-danger mb-2">No puedes bloquear este usuario protegido.</div>';
+                    } elseif ($id > 0) {
+                        $pdo->prepare('UPDATE usuarios SET bloqueado = ? WHERE id = ?')->execute([$estadoBloqueo, $id]);
+                        echo '<div class="text-green-400 mb-2">' . ($estadoBloqueo === 1 ? 'Usuario bloqueado. Ya no podrá iniciar sesión ni realizar recargas.' : 'Usuario desbloqueado.') . '</div>';
                     }
                 }
                 // Edición de usuario (solo nombre y rol)

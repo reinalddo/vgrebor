@@ -66,9 +66,20 @@ try {
         throw new RuntimeException('Google no devolvió un correo verificado para esta cuenta.');
     }
 
-    $stmt = $pdo->prepare('SELECT id, username, nombre, email, telefono, foto_perfil, rol FROM usuarios WHERE email = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, username, nombre, email, telefono, foto_perfil, rol, COALESCE(bloqueado, 0) AS bloqueado FROM usuarios WHERE email = ? LIMIT 1');
     $stmt->execute([$email]);
     $user = $stmt->fetch();
+
+    if ($user && (int) ($user['bloqueado'] ?? 0) === 1) {
+        $_SESSION['auth_modal_state'] = [
+            'mode' => 'login',
+            'message' => 'Usuario Bloqueado, Contacte al administrador para más información',
+            'email' => $email,
+            'blocked' => true,
+        ];
+        header('Location: ' . google_oauth_home_url());
+        exit;
+    }
 
     if ($user) {
         $userId = (int) $user['id'];

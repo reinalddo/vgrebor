@@ -1807,6 +1807,28 @@ function json_error(string $message, int $code = 400): void {
     json_response(['ok' => false, 'message' => $message], $code);
 }
 
+/* Si el usuario logueado está bloqueado por el administrador, se rechaza
+   cualquier intento de compra/recarga con el aviso y el enlace de WhatsApp. */
+function blocked_user_guard(mysqli $mysqli): void {
+    $sessionUser = $_SESSION['auth_user'] ?? null;
+    $userId = is_array($sessionUser) ? (int) ($sessionUser['id'] ?? 0) : 0;
+    if ($userId <= 0) {
+        return;
+    }
+
+    require_once __DIR__ . '/../includes/auth.php';
+    if (!auth_user_is_blocked($mysqli, $userId)) {
+        return;
+    }
+
+    json_response([
+        'ok' => false,
+        'blocked' => true,
+        'message' => 'Usuario Bloqueado, Contacte al administrador para más información',
+        'whatsapp_url' => store_config_whatsapp_link((string) store_config_get('whatsapp', '')),
+    ], 403);
+}
+
 function json_response(array $payload, int $code = 200, ?callable $afterSend = null): void {
     http_response_code($code);
     $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -7872,6 +7894,7 @@ try {
 }
 
 if ($action === 'create') {
+    blocked_user_guard($mysqli);
     $game_id = isset($_POST['game_id']) ? intval($_POST['game_id']) : null;
     $package_id = isset($_POST['package_id']) ? intval($_POST['package_id']) : 0;
     // Si no viene game_name, intentar obtenerlo por ID
@@ -8338,6 +8361,7 @@ if ($action === 'create') {
 
 if ($action === 'submit_payment') {
     $mysqli = ensure_mysqli_connection($mysqli);
+    blocked_user_guard($mysqli);
 
     $orderId = intval($_POST['order_id'] ?? 0);
     $paymentMode = trim((string) ($_POST['payment_mode'] ?? 'money'));
@@ -10923,6 +10947,7 @@ if ($action === 'update_status') {
 // ──────────────────────────────────────────────────────────────────────
 if ($action === 'batch_create_and_pay') {
     $mysqli = ensure_mysqli_connection($mysqli);
+    blocked_user_guard($mysqli);
 
     $gameId       = intval($_POST['game_id'] ?? 0);
     $cartJson     = trim((string) ($_POST['cart_items_json'] ?? ''));
@@ -11363,6 +11388,7 @@ if ($action === 'batch_create_and_pay') {
 // ──────────────────────────────────────────────────────────────────────
 if ($action === 'batch_fulfill_item') {
     $mysqli = ensure_mysqli_connection($mysqli);
+    blocked_user_guard($mysqli);
 
     $orderId = intval($_POST['order_id'] ?? 0);
     $batchId = trim((string) ($_POST['batch_id'] ?? ''));
