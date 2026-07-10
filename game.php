@@ -580,7 +580,7 @@ include __DIR__ . "/includes/header.php";
                         data-pack-info="<?= htmlspecialchars($packInfoHtml, ENT_QUOTES, 'UTF-8') ?>"
                         data-pack-info-title="<?= htmlspecialchars($pack['nombre'], ENT_QUOTES, 'UTF-8') ?>"
                         aria-label="Información del paquete <?= htmlspecialchars($pack['nombre'], ENT_QUOTES, 'UTF-8') ?>">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="10"/><line x1="12" y1="6.5" x2="12.01" y2="6.5"/></svg>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="18" x2="12" y2="10"/><line x1="12" y1="5.6" x2="12.01" y2="5.6"/></svg>
                 </button>
               <?php endif; ?>
             </div>
@@ -4529,13 +4529,13 @@ include __DIR__ . "/includes/header.php";
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.35);
-    background: rgba(8, 15, 26, 0.72);
-    color: #e8f6ff;
+    border: 2px solid rgba(255, 255, 255, 0.8);
+    background: rgba(8, 15, 26, 0.82);
+    color: #ffffff;
     cursor: pointer;
     padding: 0;
     backdrop-filter: blur(4px);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), 0 0 8px rgba(255, 255, 255, 0.18);
     transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
   }
   .pack-info-btn:hover,
