@@ -580,7 +580,7 @@ include __DIR__ . "/includes/header.php";
                         data-pack-info="<?= htmlspecialchars($packInfoHtml, ENT_QUOTES, 'UTF-8') ?>"
                         data-pack-info-title="<?= htmlspecialchars($pack['nombre'], ENT_QUOTES, 'UTF-8') ?>"
                         aria-label="Información del paquete <?= htmlspecialchars($pack['nombre'], ENT_QUOTES, 'UTF-8') ?>">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="10"/><line x1="12" y1="6.5" x2="12.01" y2="6.5"/></svg>
                 </button>
               <?php endif; ?>
             </div>
@@ -4507,13 +4507,13 @@ include __DIR__ . "/includes/header.php";
     width: 55%;
     background: linear-gradient(105deg, transparent 0%, rgba(255, 255, 255, 0.06) 30%, rgba(255, 255, 255, 0.55) 50%, rgba(255, 255, 255, 0.06) 70%, transparent 100%);
     transform: skewX(-20deg);
-    animation: packBadgeShine 5s linear infinite;
+    animation: packBadgeShine 2s linear infinite;
     pointer-events: none;
   }
 
   @keyframes packBadgeShine {
     0%   { left: -80%; }
-    14%  { left: 140%; }
+    35%  { left: 140%; }
     100% { left: 140%; }
   }
 

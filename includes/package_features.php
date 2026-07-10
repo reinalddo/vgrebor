@@ -252,7 +252,18 @@ if (!function_exists('package_feature_normalize_icon')) {
             $normalized = $aliases[$normalized];
         }
         $options = package_feature_icon_options();
-        return array_key_exists($normalized, $options) ? $normalized : 'sparkles';
+        if (array_key_exists($normalized, $options)) {
+            return $normalized;
+        }
+
+        /* Emoji/símbolo personalizado escrito por el admin: se conserva tal cual,
+           limpio de HTML y limitado en longitud. */
+        $custom = trim((string) $value);
+        $custom = strip_tags($custom);
+        $custom = str_replace(['"', "'", '<', '>', '&', '\\'], '', $custom);
+        $custom = mb_substr($custom, 0, 8, 'UTF-8');
+
+        return $custom !== '' ? $custom : 'sparkles';
     }
 }
 
@@ -285,7 +296,7 @@ if (!function_exists('package_feature_render_icon')) {
         $svgMap = package_feature_icon_svg_map();
         $normalizedIcon = package_feature_normalize_icon($icon);
         $visualStyles = package_feature_icon_visual_styles($normalizedIcon);
-        $svg = $svgMap[$normalizedIcon] ?? $svgMap['sparkles'];
+        $svg = $svgMap[$normalizedIcon] ?? '<span aria-hidden="true" style="display:inline-block;font-size:1.05rem;line-height:1;">' . htmlspecialchars($normalizedIcon, ENT_QUOTES, 'UTF-8') . '</span>';
         $isSvg = stripos($svg, '<svg') !== false;
         if ($isSvg) {
             $svg = preg_replace('/<svg\s+/i', '<svg style="width:100%;height:100%;display:block;" ', $svg, 1) ?? $svg;

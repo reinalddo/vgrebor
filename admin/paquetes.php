@@ -866,6 +866,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['package_feature_catal
     $featureId = (int) ($_POST['package_feature_id'] ?? 0);
     $featureName = (string) ($_POST['package_feature_name'] ?? '');
     $featureIcon = (string) ($_POST['package_feature_icon'] ?? 'sparkles');
+    $featureIconCustom = trim((string) ($_POST['package_feature_icon_custom'] ?? ''));
+    if ($featureIconCustom !== '') {
+        $featureIcon = $featureIconCustom;
+    }
     $catalogApplyMode = admin_package_normalize_apply_mode((string) ($_POST['package_feature_apply_mode'] ?? ''));
     $catalogAppliedFeatureId = 0;
 
@@ -1585,6 +1589,8 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                     <select name="package_feature_icon" data-package-feature-icon-select class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;"><?= $packageFeatureIconOptionsHtml ?></select>
                     <span data-package-feature-icon-preview class="d-inline-flex align-items-center justify-content-center rounded-3 flex-shrink-0" style="width:44px;height:44px;background:#0f172a;border:1px solid rgba(34,211,238,0.22);color:#67e8f9;"><?= package_feature_render_icon('sparkles') ?></span>
                 </div>
+                <input type="text" name="package_feature_icon_custom" data-package-feature-icon-custom maxlength="8" placeholder="…o escribe tu propio emoji" class="form-control form-control-sm mt-2" style="background:#222c3a;color:#22d3ee;border:1px dashed rgba(34,211,238,0.5);">
+                <div class="form-text" style="color:#64748b;">Si escribes un emoji aquí, se usará en lugar del ícono de la lista.</div>
             </div>
             <div class="col-md-5">
                 <label class="form-label text-neon">Nombre</label>
@@ -1614,6 +1620,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                             . ($featureRadius !== null ? 'border-radius:' . (int) $featureRadius . 'px !important;' : '');
                     }
                 ?>
+                <?php $featureIconIsCustom = !array_key_exists((string) ($feature['icon'] ?? 'sparkles'), $packageFeatureIconOptions); ?>
                 <form method="post" class="row g-2 align-items-center rounded-4 p-3" style="background:#101826;border:1px solid rgba(34,211,238,0.14);">
                     <input type="hidden" name="package_feature_id" value="<?= (int) ($feature['id'] ?? 0) ?>">
                     <div class="col-md-3">
@@ -1622,6 +1629,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                             <select name="package_feature_icon" data-package-feature-icon-select class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;"><?= admin_package_feature_icon_options_html($packageFeatureIconOptions, (string) ($feature['icon'] ?? 'sparkles')) ?></select>
                             <span data-package-feature-icon-preview class="d-inline-flex align-items-center justify-content-center rounded-3 flex-shrink-0" style="width:44px;height:44px;background:#0f172a;border:1px solid rgba(34,211,238,0.22);color:#67e8f9;"><?= package_feature_render_icon((string) ($feature['icon'] ?? 'sparkles')) ?></span>
                         </div>
+                        <input type="text" name="package_feature_icon_custom" data-package-feature-icon-custom maxlength="8" placeholder="…o tu propio emoji" value="<?= $featureIconIsCustom ? htmlspecialchars((string) ($feature['icon'] ?? ''), ENT_QUOTES, 'UTF-8') : '' ?>" class="form-control form-control-sm mt-2" style="background:#222c3a;color:#22d3ee;border:1px dashed rgba(34,211,238,0.5);">
                     </div>
                     <div class="col-md-5">
                         <label class="form-label text-neon small mb-1">Nombre</label>
@@ -2292,6 +2300,12 @@ if (isset($_GET['editar'])) {
 <script>
 const adminPackageFeatureIconMap = <?= json_encode(package_feature_icon_svg_map(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 
+function packageFeatureCustomIconInputFor(select) {
+    const editor = select ? select.closest('[data-package-feature-editor]') : null;
+    const scope = editor ? editor.parentElement : null;
+    return scope ? scope.querySelector('[data-package-feature-icon-custom]') : null;
+}
+
 function updatePackageFeatureIconPreview(select) {
     if (!select) {
         return;
@@ -2300,6 +2314,18 @@ function updatePackageFeatureIconPreview(select) {
     const editor = select.closest('[data-package-feature-editor]');
     const preview = editor ? editor.querySelector('[data-package-feature-icon-preview]') : null;
     if (!preview) {
+        return;
+    }
+
+    const customInput = packageFeatureCustomIconInputFor(select);
+    const customValue = customInput ? customInput.value.trim() : '';
+    if (customValue !== '') {
+        preview.innerHTML = '';
+        const span = document.createElement('span');
+        span.setAttribute('aria-hidden', 'true');
+        span.style.cssText = 'display:inline-block;font-size:1.05rem;line-height:1;';
+        span.textContent = customValue;
+        preview.appendChild(span);
         return;
     }
 
@@ -2318,6 +2344,12 @@ function bindPackageFeatureIconPreview(root = document) {
         select.addEventListener('change', function() {
             updatePackageFeatureIconPreview(this);
         });
+        const customInput = packageFeatureCustomIconInputFor(select);
+        if (customInput) {
+            customInput.addEventListener('input', function() {
+                updatePackageFeatureIconPreview(select);
+            });
+        }
         updatePackageFeatureIconPreview(select);
     });
 }
