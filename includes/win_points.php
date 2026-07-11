@@ -1383,6 +1383,14 @@ if (!function_exists('win_points_handle_order_status_change')) {
         } elseif ($status === 'cancelado') {
             win_points_apply_order_cancelled($mysqli, $orderId);
         }
+
+        /* La misión diaria de compra se marca cuando el pedido queda pagado o
+           enviado. Cubre las aprobaciones manuales del admin sobre pagos
+           reportados que no pasaron por la verificación automática. Idempotente. */
+        if (($status === 'pagado' || $status === 'enviado')
+            && function_exists('daily_missions_mark_purchase_for_order')) {
+            daily_missions_mark_purchase_for_order($mysqli, $orderId);
+        }
     }
 }
 

@@ -1547,6 +1547,44 @@ if (!function_exists('daily_missions_record_task_completion')) {
     }
 }
 
+if (!function_exists('daily_missions_mark_purchase_for_order')) {
+    /* Marca la tarea diaria "Realiza una compra" (purchase_any) para el usuario
+       dueño de un pedido ya pagado/verificado. Es idempotente (si ya estaba
+       completada no hace nada) y nunca interrumpe el flujo de compra. Debe
+       llamarse fuera de una transacción abierta, porque abre la suya propia. */
+    function daily_missions_mark_purchase_for_order(mysqli $mysqli, int $orderId, ?int $userId = null): void {
+        if ($orderId <= 0 || !daily_missions_enabled()) {
+            return;
+        }
+
+        try {
+            if ($userId === null) {
+                $stmt = $mysqli->prepare('SELECT cliente_usuario_id FROM pedidos WHERE id = ? LIMIT 1');
+                if (!$stmt) {
+                    return;
+                }
+                $stmt->bind_param('i', $orderId);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $row = $result instanceof mysqli_result ? $result->fetch_assoc() : null;
+                $stmt->close();
+                $userId = (int) ($row['cliente_usuario_id'] ?? 0);
+            }
+
+            if ($userId <= 0) {
+                return;
+            }
+
+            daily_missions_record_task_completion($mysqli, $userId, 'purchase_any', [
+                'order_id' => $orderId,
+                'source'   => 'purchase_verified',
+            ]);
+        } catch (Throwable $exception) {
+            error_log('daily_missions_mark_purchase_for_order error: ' . $exception->getMessage());
+        }
+    }
+}
+
 if (!function_exists('daily_missions_touch_state_row')) {
     function daily_missions_touch_state_row(mysqli $mysqli, int $userId, array $updates): void {
         if ($userId <= 0 || empty($updates)) {

@@ -46,6 +46,18 @@ if ($action === 'complete_task') {
         daily_missions_api_error('Debes indicar una misión válida.', 422);
     }
 
+    /* Cierre de seguridad: las tareas de tipo "compra" solo se marcan desde el
+       flujo real de compra en el servidor. Vía esta API pública únicamente se
+       permiten a admin/root (para el botón "Simular compra" de pruebas), evitando
+       que un usuario complete la tarea sin comprar. */
+    $requestedTask = daily_missions_fetch_task_by_key($mysqli, $missionKey);
+    if ($requestedTask && trim((string) ($requestedTask['task_type'] ?? '')) === 'purchase') {
+        $requesterRole = strtolower(trim((string) ($authUser['rol'] ?? '')));
+        if (!in_array($requesterRole, ['admin', 'root'], true)) {
+            daily_missions_api_error('Esta tarea se completa automáticamente al realizar una compra.', 403);
+        }
+    }
+
     $result = daily_missions_record_task_completion($mysqli, $authUserId, $missionKey, [
         'source' => 'api_daily_missions',
     ]);

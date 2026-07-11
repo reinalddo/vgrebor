@@ -9282,6 +9282,11 @@ if ($action === 'submit_payment') {
                 }
             }
 
+            /* Pago verificado y suficiente: la compra cuenta para la misión diaria. */
+            if (function_exists('daily_missions_mark_purchase_for_order')) {
+                daily_missions_mark_purchase_for_order($mysqli, $orderId);
+            }
+
             if (order_is_account_sale($updatedOrder)) {
                 try {
                     $sentOrder = mark_account_sale_as_sent($mysqli, $updatedOrder, 'pendiente', $verifiedReference, $phone);
@@ -11381,6 +11386,13 @@ if ($action === 'batch_create_and_pay') {
 
     if (isset($batchMatch) && is_array($batchMatch) && $batchVerifiedReference !== '') {
         link_movement_to_order($mysqli, $batchVerifiedReference, $orderIds[0]);
+    }
+
+    /* Pago del carrito verificado: marca la misión diaria de compra. El pago
+       con RECoins ya la marca por pedido vía win_points_assign_pending_order_redemption. */
+    if ($payMode !== 'points' && $clienteUsuarioId !== null && $clienteUsuarioId > 0
+        && function_exists('daily_missions_mark_purchase_for_order')) {
+        daily_missions_mark_purchase_for_order($mysqli, $orderIds[0], $clienteUsuarioId);
     }
 
     json_response([
