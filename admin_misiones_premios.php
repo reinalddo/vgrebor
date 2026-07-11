@@ -132,6 +132,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
+        case 'complete_today_tasks': {
+            $targetUserId = (int) ($_POST['user_id'] ?? 0);
+            if ($targetUserId <= 0) { echo json_encode(['ok' => false, 'error' => 'Usuario inválido.']); exit; }
+
+            $result = daily_missions_complete_all_today_for_user($mysqli, $targetUserId);
+            if (empty($result['ok'])) {
+                echo json_encode(['ok' => false, 'error' => (string) ($result['message'] ?? 'No se pudieron completar las tareas.')]);
+                exit;
+            }
+            echo json_encode($result);
+            exit;
+        }
+
         // ── Ruleta ─────────────────────────────────────────────────────
         case 'rlt_get_data': {
             roulette_ensure_schema();
@@ -635,13 +648,40 @@ include __DIR__ . '/includes/header.php';
   .save-feedback.err { color: #f87171; }
   /* Modal */
   #modalHistorial { z-index: 14000 !important; }
+  #modalConfirmComplete { z-index: 14050 !important; }
   .modal-backdrop { z-index: 13900 !important; }
-  #modalHistorial .modal-content {
+  #modalHistorial .modal-content,
+  #modalConfirmComplete .modal-content {
     background: linear-gradient(180deg,#080f1c 0%,#0d1627 100%);
     border: 1px solid rgba(34,211,238,.25); border-radius: 1.5rem;
   }
-  #modalHistorial .modal-header { border-bottom: 1px solid rgba(34,211,238,.18); }
-  #modalHistorial .modal-footer { border-top: 1px solid rgba(34,211,238,.18); }
+  #modalHistorial .modal-header,
+  #modalConfirmComplete .modal-header { border-bottom: 1px solid rgba(34,211,238,.18); }
+  #modalHistorial .modal-footer,
+  #modalConfirmComplete .modal-footer { border-top: 1px solid rgba(34,211,238,.18); }
+  #modalConfirmComplete .modal-content {
+    box-shadow: 0 0 40px rgba(52,211,153,.14), 0 20px 60px rgba(2,6,15,.6);
+  }
+  #modalConfirmComplete .confirm-icon {
+    width: 52px; height: 52px; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, rgba(52,211,153,.28), rgba(52,211,153,.08));
+    border: 1px solid rgba(52,211,153,.5);
+    color: #4ade80;
+    box-shadow: 0 0 18px rgba(52,211,153,.28);
+  }
+  #modalConfirmComplete .btn-confirm-accept {
+    border: 1px solid rgba(52,211,153,.6);
+    background: linear-gradient(135deg, rgba(52,211,153,.9), rgba(16,185,129,.9));
+    color: #04150c; letter-spacing:.02em;
+    box-shadow: 0 0 16px rgba(52,211,153,.32);
+    transition: filter .15s, box-shadow .15s;
+  }
+  #modalConfirmComplete .btn-confirm-accept:hover:not(:disabled) {
+    filter: brightness(1.08);
+    box-shadow: 0 0 24px rgba(52,211,153,.5);
+  }
   .missions-modal-stat {
     border-radius: 1rem; border: 1px solid rgba(34,211,238,.16);
     background: rgba(8,15,28,.86); padding: .9rem 1rem;
@@ -932,14 +972,27 @@ include __DIR__ . '/includes/header.php';
                       <td class="text-secondary small"><?php echo htmlspecialchars((string) ($uRow['creado_en'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
                       <td class="text-end">
                         <?php $hasPending = isset($pendingStreamingUserIds[(int) ($uRow['id'] ?? 0)]); ?>
-                        <button type="button"
-                                class="btn btn-outline-info btn-sm rounded-pill fw-bold btn-ver-historial"
-                                data-user-id="<?php echo (int) ($uRow['id'] ?? 0); ?>"
-                                data-user-name="<?php echo htmlspecialchars((string) ($uRow['nombre'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
-                                data-user-rol="<?php echo htmlspecialchars(strtoupper((string) ($uRow['rol'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>"
-                                data-user-email="<?php echo htmlspecialchars((string) ($uRow['email'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
-                          Ver historial<?php if ($hasPending): ?> <span class="badge bg-warning text-dark ms-1" title="Tiene un ticket streaming pendiente">▶ Pendiente</span><?php endif; ?>
-                        </button>
+                        <div class="d-inline-flex flex-column gap-2 align-items-stretch" style="min-width:148px;">
+                          <button type="button"
+                                  class="btn btn-outline-info btn-sm rounded-pill fw-bold btn-ver-historial"
+                                  data-user-id="<?php echo (int) ($uRow['id'] ?? 0); ?>"
+                                  data-user-name="<?php echo htmlspecialchars((string) ($uRow['nombre'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+                                  data-user-rol="<?php echo htmlspecialchars(strtoupper((string) ($uRow['rol'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>"
+                                  data-user-email="<?php echo htmlspecialchars((string) ($uRow['email'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                            Ver historial<?php if ($hasPending): ?> <span class="badge bg-warning text-dark ms-1" title="Tiene un ticket streaming pendiente">▶ Pendiente</span><?php endif; ?>
+                          </button>
+                          <button type="button"
+                                  class="btn rounded-pill fw-semibold btn-completar-tareas-hoy d-inline-flex align-items-center justify-content-center gap-1"
+                                  title="Completa las tareas diarias del día actual y desbloquea el cofre"
+                                  style="font-size:0.7rem; padding:0.26rem 0.7rem; border:1px solid rgba(52,211,153,0.55); background:rgba(52,211,153,0.1); color:#4ade80; transition:background .15s, box-shadow .15s;"
+                                  onmouseover="this.style.background='rgba(52,211,153,0.2)';this.style.boxShadow='0 0 10px rgba(52,211,153,0.25)';"
+                                  onmouseout="this.style.background='rgba(52,211,153,0.1)';this.style.boxShadow='none';"
+                                  data-user-id="<?php echo (int) ($uRow['id'] ?? 0); ?>"
+                                  data-user-name="<?php echo htmlspecialchars((string) ($uRow['nombre'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                            Completar Tareas
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   <?php endforeach; ?>
@@ -1578,6 +1631,30 @@ include __DIR__ . '/includes/header.php';
   </div>
 </div>
 
+<!-- Modal confirmación: completar tareas de hoy -->
+<div class="modal fade" id="modalConfirmComplete" tabindex="-1" aria-labelledby="modalConfirmCompleteLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header px-4 pt-4 pb-3">
+        <h5 class="modal-title missions-admin-title mb-0" id="modalConfirmCompleteLabel">Completar tareas de hoy</h5>
+        <button type="button" class="btn-close btn-close-white ms-3" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body p-4">
+        <div class="d-flex align-items-center gap-3">
+          <span class="confirm-icon" aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+          </span>
+          <p class="mb-0 text-light" id="modalConfirmCompleteText" style="line-height:1.55;"></p>
+        </div>
+      </div>
+      <div class="modal-footer px-4 pb-4 pt-3 justify-content-end gap-2">
+        <button type="button" class="btn btn-outline-secondary rounded-pill px-4 fw-bold" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-confirm-accept rounded-pill px-4 fw-bold" id="modalConfirmCompleteAccept">Completar tareas</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   const ajaxBase = <?php echo json_encode($ajaxUrl); ?>;
@@ -1662,10 +1739,52 @@ include __DIR__ . '/includes/header.php';
     return '<td class="bg-transparent border-bottom border-info-subtle">' + inner + '</td>';
   }
 
-  // Move modal to body to escape stacking context issues
+  // Move modals to body to escape stacking context issues
   const _modalEl = document.getElementById('modalHistorial');
   if (_modalEl && _modalEl.parentElement !== document.body) {
     document.body.appendChild(_modalEl);
+  }
+  const _modalConfirmEl = document.getElementById('modalConfirmComplete');
+  if (_modalConfirmEl && _modalConfirmEl.parentElement !== document.body) {
+    document.body.appendChild(_modalConfirmEl);
+  }
+
+  // Botón (fila) pendiente de completar tareas, se resuelve al aceptar en el modal
+  let pendingCompleteBtn = null;
+
+  const _confirmAcceptBtn = document.getElementById('modalConfirmCompleteAccept');
+  if (_confirmAcceptBtn) {
+    _confirmAcceptBtn.addEventListener('click', function () {
+      const rowBtn = pendingCompleteBtn;
+      if (!rowBtn) { return; }
+      const userId = rowBtn.dataset.userId;
+
+      bootstrap.Modal.getOrCreateInstance(document.getElementById('modalConfirmComplete')).hide();
+
+      const originalHtml = rowBtn.innerHTML;
+      rowBtn.disabled = true;
+      rowBtn.textContent = 'Completando…';
+
+      const fd = new FormData();
+      fd.append('action', 'complete_today_tasks');
+      fd.append('user_id', userId);
+
+      fetch(ajaxBase, { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+          if (!data.ok) { throw new Error(data.error || 'No se pudieron completar las tareas.'); }
+          rowBtn.textContent = data.chest_unlocked ? 'Cofre desbloqueado ✓' : 'Tareas completadas ✓';
+          rowBtn.style.background = 'rgba(52,211,153,0.28)';
+          rowBtn.style.color = '#bbf7d0';
+        })
+        .catch(err => {
+          window.alert(err.message || 'No se pudieron completar las tareas.');
+          rowBtn.disabled = false;
+          rowBtn.innerHTML = originalHtml;
+        });
+
+      pendingCompleteBtn = null;
+    });
   }
 
   document.addEventListener('click', function (e) {
@@ -1700,6 +1819,18 @@ include __DIR__ . '/includes/header.php';
           document.getElementById('modalHistorialBody').innerHTML =
             '<div class="text-center text-danger py-5">Error de conexión. Intenta de nuevo.</div>';
         });
+      return;
+    }
+
+    // Completar las tareas diarias de HOY para un usuario (abre modal de confirmación)
+    const completeBtn = e.target.closest('.btn-completar-tareas-hoy');
+    if (completeBtn) {
+      const userName = completeBtn.dataset.userName || 'este usuario';
+      pendingCompleteBtn = completeBtn;
+      document.getElementById('modalConfirmCompleteText').innerHTML =
+        'Se marcarán las <strong class="text-info">tareas diarias de hoy</strong> para '
+        + '<strong>' + esc(userName) + '</strong> y quedará <strong class="text-success">el cofre del día desbloqueado</strong> para que pueda abrirlo.';
+      bootstrap.Modal.getOrCreateInstance(document.getElementById('modalConfirmComplete')).show();
       return;
     }
 

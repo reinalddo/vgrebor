@@ -1585,6 +1585,55 @@ if (!function_exists('daily_missions_mark_purchase_for_order')) {
     }
 }
 
+if (!function_exists('daily_missions_complete_all_today_for_user')) {
+    /* Marca TODAS las tareas activas del día actual para un usuario (uso admin).
+       Reutiliza el registro idempotente de cada tarea; al completarse todas, el
+       día queda con is_completed = 1, dejando el cofre disponible para abrir. */
+    function daily_missions_complete_all_today_for_user(mysqli $mysqli, int $userId): array {
+        daily_missions_ensure_schema();
+        if ($userId <= 0) {
+            return ['ok' => false, 'message' => 'Usuario inválido.'];
+        }
+
+        $tasks = daily_missions_fetch_tasks($mysqli, true);
+        if (empty($tasks)) {
+            return ['ok' => false, 'message' => 'No hay tareas activas configuradas.'];
+        }
+
+        $missionDate = daily_missions_today();
+        $marked = 0;
+        $already = 0;
+        foreach ($tasks as $task) {
+            $missionKey = trim((string) ($task['mission_key'] ?? ''));
+            if ($missionKey === '') {
+                continue;
+            }
+            $res = daily_missions_record_task_completion($mysqli, $userId, $missionKey, [
+                'mission_date' => $missionDate,
+                'source'       => 'admin_complete_today',
+            ]);
+            if (!empty($res['ok'])) {
+                if (!empty($res['already_completed'])) {
+                    $already++;
+                } else {
+                    $marked++;
+                }
+            }
+        }
+
+        $day = daily_missions_fetch_user_day($mysqli, $userId, $missionDate);
+
+        return [
+            'ok'                => true,
+            'marked'            => $marked,
+            'already_completed' => $already,
+            'total_tasks'       => count($tasks),
+            'day_completed'     => !empty($day['is_completed']),
+            'chest_unlocked'    => !empty($day['is_completed']) && empty($day['chest_claimed_at']),
+        ];
+    }
+}
+
 if (!function_exists('daily_missions_touch_state_row')) {
     function daily_missions_touch_state_row(mysqli $mysqli, int $userId, array $updates): void {
         if ($userId <= 0 || empty($updates)) {
