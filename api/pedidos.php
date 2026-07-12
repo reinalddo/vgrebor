@@ -3913,6 +3913,16 @@ function sync_local_order_with_binance_payload(mysqli $mysqli, array $order, arr
             ];
         }
 
+        // Ya fue rechazado por falta de stock/saldo: no reintentar
+        // automáticamente, solo un admin puede reenviarlo manualmente.
+        if (order_recharge_dispatch_is_locked($updatedOrder)) {
+            return [
+                'order' => $updatedOrder,
+                'local_status' => 'pagado',
+                'provider_flow' => 'inventory_shortage',
+            ];
+        }
+
         $packageApiId = (int) ($updatedOrder['paquete_api'] ?? 0);
         $orderPlayerFields = order_player_fields_from_json((string) ($updatedOrder['player_fields_json'] ?? ''));
 
@@ -4308,6 +4318,16 @@ function sync_local_order_with_paypal_payload(mysqli $mysqli, array $order, arra
                 'order' => $updatedOrder,
                 'local_status' => trim((string) ($updatedOrder['estado'] ?? $latestLocalStatus)),
                 'provider_flow' => order_provider_flow_from_row($updatedOrder),
+            ];
+        }
+
+        // Ya fue rechazado por falta de stock/saldo: no reintentar
+        // automáticamente, solo un admin puede reenviarlo manualmente.
+        if (order_recharge_dispatch_is_locked($updatedOrder)) {
+            return [
+                'order' => $updatedOrder,
+                'local_status' => 'pagado',
+                'provider_flow' => 'inventory_shortage',
             ];
         }
 
@@ -6069,7 +6089,7 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
              WHERE id <> ?
                AND numero_referencia IS NOT NULL
                AND TRIM(numero_referencia) <> ''
-               AND estado IN ('enviado', 'cancelado')
+               AND estado IN ('pagado', 'enviado', 'cancelado')
                AND CAST(RIGHT(TRIM(numero_referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
                AND (? = 0 OR ABS(precio - ?) < 0.01)
              ORDER BY id DESC
@@ -6084,7 +6104,7 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
              FROM pedidos
              WHERE id <> ?
                AND numero_referencia = ?
-               AND estado IN ('enviado', 'cancelado')
+               AND estado IN ('pagado', 'enviado', 'cancelado')
              ORDER BY id DESC
              LIMIT 1"
         );
@@ -6159,7 +6179,7 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
             ];
         }
 
-        if ($linkedOrderId > 0 && in_array($linkedStatus, ['enviado', 'cancelado'], true)) {
+        if ($linkedOrderId > 0 && in_array($linkedStatus, ['pagado', 'enviado', 'cancelado'], true)) {
             $stmt->close();
             return [
                 'type' => 'closed_order_movement',
@@ -7309,6 +7329,35 @@ function notify_provider_inventory_shortage(
     if ($adminEmail !== null) {
         send_app_mail($adminEmail, "Disponibilidad insuficiente #{$orderId}", $adminHtml, null, $brandingImages);
     }
+}
+
+/**
+ * Un pedido "pagado" cuyo intento de recarga fue rechazado por falta de
+ * stock/saldo del proveedor (inventory_shortage) NUNCA debe volver a
+ * despacharse automáticamente. Solo el admin puede reenviarlo manualmente
+ * (botón "Reenviar" en el panel de pedidos -> accion admin_retry_recharge).
+ *
+ * Un rechazo por falta de stock no deja recargas_api_pedido_id ni
+ * ff_api_referencia (el proveedor nunca llega a crear una transacción), por
+ * lo que los chequeos existentes basados en "ya tiene tracking del
+ * proveedor" no detectan este caso. Esta función sí lo detecta de forma
+ * explícita para que cualquier punto de despacho automático pueda frenar.
+ */
+function order_recharge_dispatch_is_locked(array $order): bool {
+    if (strtolower(trim((string) ($order['estado'] ?? ''))) !== 'pagado') {
+        return false;
+    }
+
+    if (trim((string) ($order['recargas_api_pedido_id'] ?? '')) !== '') {
+        return false;
+    }
+
+    $providerStatus = strtolower(trim((string) ($order['recargas_api_estado'] ?? '')));
+    if ($providerStatus === 'inventory_shortage') {
+        return true;
+    }
+
+    return recharge_availability_message_indicates_inventory_shortage((string) ($order['ff_api_mensaje'] ?? ''));
 }
 
 function mark_order_inventory_shortage_review(
@@ -10312,6 +10361,22 @@ if ($action === 'admin_retry_recharge') {
             json_error('Este pedido no tiene un producto API configurado.', 409);
         }
 
+        // Reserva atómica: evita que un doble clic o una solicitud duplicada
+        // disparen dos despachos al proveedor en paralelo para el mismo pedido.
+        // Cada desenlace de abajo (éxito, seguimiento, sin stock o error) libera
+        // esta reserva sobrescribiendo recargas_api_estado con el resultado real.
+        $retryClaimStmt = $mysqli->prepare("UPDATE pedidos SET recargas_api_estado = 'admin_retry_in_progress' WHERE id = ? AND estado = 'pagado' AND (recargas_api_pedido_id IS NULL OR recargas_api_pedido_id = '') AND COALESCE(recargas_api_estado, '') <> 'admin_retry_in_progress'");
+        if (!$retryClaimStmt) {
+            json_error('No se pudo reservar el pedido para el reenvío.', 500);
+        }
+        $retryClaimStmt->bind_param('i', $orderId);
+        $retryClaimStmt->execute();
+        $retryClaimed = $retryClaimStmt->affected_rows > 0;
+        $retryClaimStmt->close();
+        if (!$retryClaimed) {
+            json_error('Este pedido ya está siendo reenviado en este momento. Actualiza la página e intenta de nuevo en unos segundos.', 409);
+        }
+
         $orderPlayerFields = order_player_fields_from_json((string) ($order['player_fields_json'] ?? ''));
 
         try {
@@ -10485,7 +10550,9 @@ if ($action === 'admin_retry_recharge') {
             ]);
         }
 
-        $stmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_historial_json = ? WHERE id = ? AND estado = 'pagado'");
+        // Se libera la reserva atómica (recargas_api_estado) para que un
+        // próximo reenvío manual no quede bloqueado por este intento fallido.
+        $stmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_estado = 'failed', recargas_api_historial_json = ? WHERE id = ? AND estado = 'pagado'");
         if (!$stmt) {
             json_error('No se pudo guardar el intento de recarga.', 500);
         }
@@ -11446,6 +11513,12 @@ if ($action === 'batch_fulfill_item') {
             $clm->close();
         }
         $order = fetch_order_by_id($mysqli, $orderId) ?: $order;
+    }
+
+    // Un pedido ya rechazado por falta de stock/saldo no se vuelve a
+    // despachar automáticamente: solo un admin puede reenviarlo manualmente.
+    if (order_recharge_dispatch_is_locked($order)) {
+        json_response(['ok' => true, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Tu pago fue verificado. Tu recarga quedó pendiente por disponibilidad del proveedor; el administrador la procesará en cuanto haya stock.', 'provider_flow' => 'inventory_shortage', 'provider_status' => 'inventory_shortage', 'pending_review' => true]);
     }
 
     $pkgProvider   = strtolower(trim((string) ($order['api_provider'] ?? '')));
