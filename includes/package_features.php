@@ -122,6 +122,114 @@ if (!function_exists('package_info_sanitize_html')) {
     }
 }
 
+if (!function_exists('package_info_editor_html')) {
+    /* Editor de texto enriquecido reutilizable (mismos botones que paquetes):
+       negrita, cursiva, subrayado, alineación, color y tamaño. Genera un
+       contenteditable + textarea oculto que se envía en el formulario.
+       Requiere imprimir una vez package_info_editor_script() en la página. */
+    function package_info_editor_html(string $fieldName, string $currentHtml): string {
+        $sanitized = package_info_sanitize_html($currentHtml);
+        $editorId = 'info-editor-' . preg_replace('/[^a-z0-9_-]/i', '', $fieldName);
+        ob_start();
+        ?>
+        <div data-pkg-info-editor style="border:1px solid rgba(34,211,238,0.35);border-radius:0.6rem;overflow:hidden;background:#0d1420;">
+            <div class="d-flex flex-wrap align-items-center gap-1 p-2" style="background:#131c2b;border-bottom:1px solid rgba(34,211,238,0.2);">
+                <button type="button" data-pkg-cmd="bold" class="btn btn-sm btn-outline-info fw-bold" title="Negrita" style="min-width:36px;">B</button>
+                <button type="button" data-pkg-cmd="italic" class="btn btn-sm btn-outline-info fst-italic" title="Cursiva" style="min-width:36px;">I</button>
+                <button type="button" data-pkg-cmd="underline" class="btn btn-sm btn-outline-info text-decoration-underline" title="Subrayado" style="min-width:36px;">S</button>
+                <span class="mx-1" style="width:1px;height:22px;background:rgba(34,211,238,0.3);"></span>
+                <button type="button" data-pkg-cmd="justifyLeft" class="btn btn-sm btn-outline-info" title="Alinear a la izquierda" style="min-width:36px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="14" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg>
+                </button>
+                <button type="button" data-pkg-cmd="justifyCenter" class="btn btn-sm btn-outline-info" title="Centrar" style="min-width:36px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+                </button>
+                <button type="button" data-pkg-cmd="justifyRight" class="btn btn-sm btn-outline-info" title="Alinear a la derecha" style="min-width:36px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <label class="d-inline-flex align-items-center gap-1 ms-2 mb-0 small" style="color:#8be9fd;cursor:pointer;">
+                    Color
+                    <input type="color" data-pkg-cmd-color value="#22d3ee" title="Color de texto" style="width:34px;height:28px;border:1px solid rgba(34,211,238,0.4);border-radius:0.35rem;background:#222c3a;padding:2px;cursor:pointer;">
+                </label>
+                <label class="d-inline-flex align-items-center gap-1 ms-2 mb-0 small" style="color:#8be9fd;">
+                    Tamaño
+                    <select data-pkg-cmd-size class="form-select form-select-sm" style="width:auto;background:#222c3a;color:#22d3ee;border:1px solid rgba(34,211,238,0.4);">
+                        <option value="">Normal</option>
+                        <option value="1">Pequeño</option>
+                        <option value="4">Grande</option>
+                        <option value="6">Muy grande</option>
+                    </select>
+                </label>
+                <button type="button" data-pkg-cmd="removeFormat" class="btn btn-sm btn-outline-secondary ms-2" title="Quitar formato">Limpiar</button>
+            </div>
+            <div id="<?= htmlspecialchars($editorId, ENT_QUOTES, 'UTF-8') ?>" contenteditable="true" data-pkg-info-area
+                 style="min-height:110px;max-height:260px;overflow-y:auto;padding:0.75rem 0.9rem;color:#e2e8f0;line-height:1.6;outline:none;"><?= $sanitized ?></div>
+            <textarea name="<?= htmlspecialchars($fieldName, ENT_QUOTES, 'UTF-8') ?>" data-pkg-info-field class="d-none"><?= htmlspecialchars($sanitized, ENT_QUOTES, 'UTF-8') ?></textarea>
+        </div>
+        <?php
+        return trim((string) ob_get_clean());
+    }
+}
+
+if (!function_exists('package_info_editor_script')) {
+    /* Imprime (una sola vez por página) el JS que activa los editores enriquecidos. */
+    function package_info_editor_script(): string {
+        static $printed = false;
+        if ($printed) {
+            return '';
+        }
+        $printed = true;
+
+        return <<<'HTML'
+<script>
+(function () {
+    document.querySelectorAll('[data-pkg-info-editor]').forEach(function (editor) {
+        if (editor.dataset.pkgInfoBound === '1') { return; }
+        editor.dataset.pkgInfoBound = '1';
+        var area = editor.querySelector('[data-pkg-info-area]');
+        var field = editor.querySelector('[data-pkg-info-field]');
+        if (!area || !field) { return; }
+
+        var sync = function () { field.value = area.innerHTML; };
+
+        editor.querySelectorAll('[data-pkg-cmd]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                area.focus();
+                document.execCommand(btn.dataset.pkgCmd, false, null);
+                sync();
+            });
+        });
+
+        var colorInput = editor.querySelector('[data-pkg-cmd-color]');
+        if (colorInput) {
+            colorInput.addEventListener('input', function () {
+                area.focus();
+                document.execCommand('foreColor', false, colorInput.value);
+                sync();
+            });
+        }
+
+        var sizeSelect = editor.querySelector('[data-pkg-cmd-size]');
+        if (sizeSelect) {
+            sizeSelect.addEventListener('change', function () {
+                area.focus();
+                document.execCommand('fontSize', false, sizeSelect.value !== '' ? sizeSelect.value : '3');
+                sync();
+            });
+        }
+
+        area.addEventListener('input', sync);
+        area.addEventListener('blur', sync);
+
+        var form = editor.closest('form');
+        if (form) { form.addEventListener('submit', sync); }
+    });
+}());
+</script>
+HTML;
+    }
+}
+
 if (!function_exists('package_feature_badge_style_attr')) {
     /* Genera los overrides de estilo inline para un badge según su configuración.
        Solo agrega las propiedades definidas; lo demás usa el estilo por defecto. */

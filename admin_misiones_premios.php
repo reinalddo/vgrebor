@@ -4,6 +4,7 @@ tenant_start_session();
 
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/db_connect.php';
+require_once __DIR__ . '/includes/package_features.php';
 require_once __DIR__ . '/includes/daily_missions.php';
 require_once __DIR__ . '/includes/win_points.php';
 require_once __DIR__ . '/includes/roulette.php';
@@ -45,6 +46,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $accBgBorderColor     = substr(preg_replace('/[^#a-fA-F0-9]/', '', (string) ($_POST['accordion_bg_border_color'] ?? '')), 0, 30);
             $accBgBorderWidth     = max(1, min(12, (int) ($_POST['accordion_bg_border_width'] ?? 2)));
 
+            $infoHtml = function_exists('package_info_sanitize_html')
+                ? package_info_sanitize_html((string) ($_POST['info_html'] ?? ''))
+                : trim(strip_tags((string) ($_POST['info_html'] ?? '')));
+
             $stmt = $mysqli->prepare(
                 'UPDATE win_points_daily_mission_settings SET
                     enabled=?, title=?, subtitle=?,
@@ -55,16 +60,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     accordion_base_color1=?, accordion_base_color2=?,
                     accordion_bg_color1=?, accordion_bg_color2=?,
                     accordion_base_border_enabled=?, accordion_base_border_color=?, accordion_base_border_width=?,
-                    accordion_bg_border_enabled=?, accordion_bg_border_color=?, accordion_bg_border_width=?
+                    accordion_bg_border_enabled=?, accordion_bg_border_color=?, accordion_bg_border_width=?,
+                    info_html=?
                  WHERE id=1'
             );
             if (!$stmt) { echo json_encode(['ok' => false, 'error' => $mysqli->error]); exit; }
-            $stmt->bind_param('issddiiiiissssisiisi', $enabled, $title, $subtitle,
+            $stmt->bind_param('issddiiiiissssisiisis', $enabled, $title, $subtitle,
                 $day20Mult, $monthEndMult, $exploreTimer, $shareTimer,
                 $immunityDays, $couponDiscount, $couponExpiration,
                 $accBase1, $accBase2, $accBg1, $accBg2,
                 $accBaseBorderOn, $accBaseBorderColor, $accBaseBorderWidth,
-                $accBgBorderOn, $accBgBorderColor, $accBgBorderWidth
+                $accBgBorderOn, $accBgBorderColor, $accBgBorderWidth,
+                $infoHtml
             );
             $stmt->execute();
             $stmt->close();
@@ -1080,6 +1087,11 @@ include __DIR__ . '/includes/header.php';
             <label class="missions-admin-label mb-1">Subtítulo</label>
             <input type="text" name="subtitle" value="<?php echo htmlspecialchars((string) ($settings['subtitle'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" class="missions-form-input">
           </div>
+          <div class="col-12">
+            <label class="missions-admin-label mb-1">Información del ícono "i" (Misiones diarias)</label>
+            <div class="text-secondary small mb-2">Se mostrará en una ventana al tocar el ícono "i" en la esquina superior izquierda de la barra de Misión diaria en el inicio. Si lo dejas vacío, el ícono no aparece.</div>
+            <?php echo package_info_editor_html('info_html', (string) ($settings['info_html'] ?? '')); ?>
+          </div>
           <div class="col-6 col-md-3">
             <label class="missions-admin-label mb-1">Timer explorar (seg)</label>
             <input type="number" name="explore_timer_seconds" min="0" max="300" value="<?php echo (int) ($settings['explore_timer_seconds'] ?? 7); ?>" class="missions-form-input">
@@ -1572,7 +1584,12 @@ include __DIR__ . '/includes/header.php';
               </div>
             </div>
           </div>
-          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">
+          <div style="margin-top:1rem;">
+            <div style="font-size:.64rem;color:#94a3b8;margin-bottom:.42rem;text-transform:uppercase;letter-spacing:.08em;">Información del ícono "i" (Ruleta)</div>
+            <div class="text-secondary small mb-2" style="font-size:.72rem;">Se mostrará al tocar el ícono "i" en la esquina superior izquierda de la ruleta en el inicio. Si lo dejas vacío, el ícono no aparece.</div>
+            <?php echo package_info_editor_html('rlt_info_html', (string) (roulette_fetch_config($mysqli)['info_html'] ?? '')); ?>
+          </div>
+          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:1rem;">
             <button type="button" class="rlt2-save-btn" id="rlt2SaveConfigBtn">Guardar configuración</button>
             <span class="rlt2-msg" id="rlt2CfgMsg"></span>
           </div>
@@ -2109,6 +2126,12 @@ include __DIR__ . '/includes/header.php';
     set('rlt2CfgTitle', cfg.title ?? 'Ruleta de Premios');
     set('rlt2CfgSubtitle', cfg.subtitle ?? '');
     set('rlt2CfgExpDays', cfg.coupon_expiration_days ?? 30);
+    // Editor "Información del ícono i" (Ruleta)
+    var rltInfoArea = document.getElementById('info-editor-rlt_info_html');
+    var rltInfoField = document.querySelector('[name="rlt_info_html"]');
+    var rltInfoVal = cfg.info_html ?? '';
+    if (rltInfoArea) { rltInfoArea.innerHTML = rltInfoVal; }
+    if (rltInfoField) { rltInfoField.value = rltInfoVal; }
     const rc = cfg.ring_color ?? '#6366f1';
     set('rlt2CfgRingColor', rc);
     set('rlt2CfgRingColorHex', rc);
@@ -2293,6 +2316,7 @@ include __DIR__ . '/includes/header.php';
         btn_emoji:              document.getElementById('rlt2CfgBtnEmoji')?.value ?? '🎰',
         btn_image_url:          btnImgUrl,
         btn_image_size:         document.getElementById('rlt2CfgBtnImgSize')?.value ?? 'medium',
+        info_html:              document.getElementById('info-editor-rlt_info_html')?.innerHTML ?? '',
       }, function (data) {
         saveConfigBtn.disabled = false;
         showMsg(cfgMsg, data.ok ? '✓ Guardado' : ('✗ ' + (data.error||'Error')), data.ok);
@@ -2562,5 +2586,7 @@ include __DIR__ . '/includes/header.php';
   }
 })();
 </script>
+
+<?php echo package_info_editor_script(); ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

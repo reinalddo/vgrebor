@@ -2466,7 +2466,16 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           data-user-id="<?php echo $dailyMissionsUserId; ?>"
         >
           <div class="accordion" id="daily-missions-accordion">
-            <div class="accordion-item daily-mission-panel">
+            <div class="accordion-item daily-mission-panel" style="position:relative;">
+              <?php $dmInfoHtml = package_info_sanitize_html((string) ($dailyMissionsSettings['info_html'] ?? '')); ?>
+              <?php if ($dmInfoHtml !== ''): ?>
+              <button type="button" class="home-info-btn home-info-btn--daily"
+                      data-info-html="<?php echo htmlspecialchars($dmInfoHtml, ENT_QUOTES, 'UTF-8'); ?>"
+                      data-info-title="<?php echo htmlspecialchars((string) ($dailyMissionsSettings['title'] ?? 'Misión diaria'), ENT_QUOTES, 'UTF-8'); ?>"
+                      aria-label="Información de misiones diarias">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="18" x2="12" y2="10"/><line x1="12" y1="5.6" x2="12.01" y2="5.6"/></svg>
+              </button>
+              <?php endif; ?>
               <h2 class="accordion-header" id="daily-missions-heading">
                 <button class="accordion-button collapsed daily-mission-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#daily-missions-collapse" aria-expanded="false" aria-controls="daily-missions-collapse">
                   <div class="daily-mission-header-copy">
@@ -3046,7 +3055,16 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
       </style>
 
       <section class="mt-5 roulette-shell" id="roulette-shell" data-aos="fade-up">
-        <div class="roulette-banner">
+        <div class="roulette-banner" style="position:relative;">
+          <?php $rltInfoHtml = package_info_sanitize_html((string) ($rouletteConfig['info_html'] ?? '')); ?>
+          <?php if ($rltInfoHtml !== ''): ?>
+          <button type="button" class="home-info-btn home-info-btn--roulette"
+                  data-info-html="<?php echo htmlspecialchars($rltInfoHtml, ENT_QUOTES, 'UTF-8'); ?>"
+                  data-info-title="<?php echo htmlspecialchars((string) ($rouletteConfig['title'] ?? 'Ruleta de Premios'), ENT_QUOTES, 'UTF-8'); ?>"
+                  aria-label="Información de la ruleta">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="18" x2="12" y2="10"/><line x1="12" y1="5.6" x2="12.01" y2="5.6"/></svg>
+          </button>
+          <?php endif; ?>
           <!-- Wheel side -->
           <div class="roulette-wheel-side">
             <div class="roulette-pointer" aria-hidden="true">▼</div>
@@ -5131,6 +5149,96 @@ RLTSCRIPT;
 ?>
 <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
 <script>AOS.init({duration:750,easing:'ease-out-cubic',once:true,offset:60});</script>
+
+<!-- Botón "i" e info modal (Misiones diarias / Ruleta) -->
+<style>
+  .home-info-btn {
+    position: absolute; top: 0.6rem; left: 0.6rem; z-index: 20;
+    width: 30px; height: 30px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.8);
+    background: rgba(8,15,26,0.82);
+    color: #ffffff; cursor: pointer; padding: 0;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.45), 0 0 8px rgba(255,255,255,0.18);
+    transition: transform .18s ease, background .18s ease, border-color .18s ease;
+  }
+  .home-info-btn:hover, .home-info-btn:focus-visible {
+    transform: scale(1.12);
+    background: rgba(34,211,238,0.28);
+    border-color: rgba(34,211,238,0.9);
+    outline: none;
+  }
+  .home-info-modal {
+    position: fixed; inset: 0; z-index: 13000; display: none;
+    align-items: center; justify-content: center; padding: 1rem;
+    background: rgba(3,9,17,0.72); backdrop-filter: blur(6px);
+  }
+  .home-info-modal.is-open { display: flex; }
+  .home-info-modal-card {
+    width: min(94vw, 460px);
+    background: linear-gradient(180deg,#080f1c 0%,#0d1627 100%);
+    border: 1px solid rgba(34,211,238,0.5); border-radius: 1.25rem;
+    box-shadow: 0 0 40px rgba(34,211,238,0.18), 0 20px 60px rgba(2,6,15,0.6);
+    overflow: hidden;
+  }
+  .home-info-modal-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: 1rem 1.25rem; border-bottom: 1px solid rgba(34,211,238,0.18);
+  }
+  .home-info-modal-head h5 { margin: 0; color: #22d3ee; font-family: 'Oxanium','Space Grotesk',sans-serif; font-weight: 700; font-size: 1.15rem; }
+  .home-info-modal-head button { background: none; border: none; color: #94a3b8; font-size: 1.7rem; line-height: 1; cursor: pointer; padding: 0 0.3rem; }
+  .home-info-modal-head button:hover { color: #e2e8f0; }
+  .home-info-modal-body { padding: 1.25rem; color: #e2e8f0; line-height: 1.65; max-height: 60vh; overflow-y: auto; }
+  .home-info-modal-body font[size="1"] { font-size: 0.82rem; }
+  .home-info-modal-body font[size="4"] { font-size: 1.2rem; }
+  .home-info-modal-body font[size="6"] { font-size: 1.6rem; }
+</style>
+<div id="home-info-modal" class="home-info-modal" aria-hidden="true" role="dialog" aria-label="Información">
+  <div class="home-info-modal-card">
+    <div class="home-info-modal-head">
+      <h5 id="home-info-modal-title"></h5>
+      <button type="button" id="home-info-modal-close" aria-label="Cerrar">&times;</button>
+    </div>
+    <div id="home-info-modal-body" class="home-info-modal-body"></div>
+  </div>
+</div>
+<script>
+(function () {
+  var modal = document.getElementById('home-info-modal');
+  if (!modal) return;
+  var titleEl = document.getElementById('home-info-modal-title');
+  var bodyEl  = document.getElementById('home-info-modal-body');
+  var closeEl = document.getElementById('home-info-modal-close');
+
+  function openModal(btn) {
+    if (titleEl) titleEl.textContent = btn.getAttribute('data-info-title') || 'Información';
+    /* El HTML viene sanitizado desde el servidor (solo formato del editor). */
+    if (bodyEl) bodyEl.innerHTML = btn.getAttribute('data-info-html') || '';
+    modal.classList.add('is-open');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+  function closeModal() {
+    modal.classList.remove('is-open');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  document.querySelectorAll('.home-info-btn').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      /* No togglear el acordeón ni activar la ruleta al tocar la "i" */
+      e.preventDefault();
+      e.stopPropagation();
+      openModal(btn);
+    });
+  });
+  if (closeEl) closeEl.addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && modal.classList.contains('is-open')) closeModal();
+  });
+}());
+</script>
 
 <?php
 include __DIR__ . "/includes/footer.php";

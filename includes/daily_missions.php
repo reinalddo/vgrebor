@@ -53,6 +53,7 @@ if (!function_exists('daily_missions_default_settings')) {
             'accordion_bg_border_enabled' => 0,
             'accordion_bg_border_color' => '',
             'accordion_bg_border_width' => 2,
+            'info_html' => '',
         ];
     }
 }
@@ -313,6 +314,7 @@ if (!function_exists('daily_missions_fetch_settings')) {
             $settings['accordion_bg_border_enabled'] = (int) ($row['accordion_bg_border_enabled'] ?? 0);
             $settings['accordion_bg_border_color'] = (string) ($row['accordion_bg_border_color'] ?? '');
             $settings['accordion_bg_border_width'] = max(1, min(12, (int) ($row['accordion_bg_border_width'] ?? 2)));
+            $settings['info_html'] = (string) ($row['info_html'] ?? '');
             $settings['created_at'] = (string) ($row['created_at'] ?? '');
             $settings['updated_at'] = (string) ($row['updated_at'] ?? '');
         }
@@ -582,6 +584,7 @@ if (!function_exists('daily_missions_normalize_settings_row')) {
             'coupon_discount_percent' => max(0, min(100, (int) ($row['coupon_discount_percent'] ?? $defaults['coupon_discount_percent']))),
             'coupon_expiration_days' => max(1, (int) ($row['coupon_expiration_days'] ?? $defaults['coupon_expiration_days'])),
             'streaming_user_id' => (int) ($row['streaming_user_id'] ?? 0) > 0 ? (int) $row['streaming_user_id'] : null,
+            'info_html' => (string) ($row['info_html'] ?? ''),
             'created_at' => trim((string) ($row['created_at'] ?? '')),
             'updated_at' => trim((string) ($row['updated_at'] ?? '')),
         ];
@@ -799,6 +802,11 @@ if (!function_exists('daily_missions_ensure_schema')) {
         }
         if (!in_array('accordion_bg_border_width', $existingBorderCols)) {
             $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN accordion_bg_border_width TINYINT NOT NULL DEFAULT 2");
+        }
+
+        $infoCheck = $mysqli->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='$dbName' AND TABLE_NAME='win_points_daily_mission_settings' AND COLUMN_NAME='info_html'");
+        if (!($infoCheck instanceof mysqli_result) || $infoCheck->num_rows === 0) {
+            $mysqli->query("ALTER TABLE win_points_daily_mission_settings ADD COLUMN info_html TEXT NULL DEFAULT NULL");
         }
 
         $colCheck = $mysqli->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='$dbName' AND TABLE_NAME='win_points_daily_mission_tasks' AND COLUMN_NAME IN ('day20_multiplier','month_end_multiplier')");

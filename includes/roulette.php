@@ -105,6 +105,10 @@ if (!function_exists('roulette_ensure_schema')) {
         if ($chkBtnImgSize instanceof mysqli_result && (int)($chkBtnImgSize->fetch_assoc()['n'] ?? 0) === 0) {
             $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN btn_image_size VARCHAR(10) NOT NULL DEFAULT 'medium' AFTER btn_image_url");
         }
+        $chkInfoHtml = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_config' AND COLUMN_NAME='info_html'");
+        if ($chkInfoHtml instanceof mysqli_result && (int)($chkInfoHtml->fetch_assoc()['n'] ?? 0) === 0) {
+            $mysqli->query("ALTER TABLE win_points_roulette_config ADD COLUMN info_html TEXT NULL DEFAULT NULL AFTER btn_image_size");
+        }
 
         // Migrations: section columns
         $chkFontSize = $mysqli->query("SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='win_points_roulette_sections' AND COLUMN_NAME='font_size'");
@@ -251,6 +255,7 @@ if (!function_exists('roulette_fetch_config')) {
             'btn_emoji'        => trim((string) ($row['btn_emoji'] ?? '🎰')) ?: '🎰',
             'btn_image_url'    => trim((string) ($row['btn_image_url'] ?? '')),
             'btn_image_size'   => in_array(trim((string) ($row['btn_image_size'] ?? '')), ['small','medium','large'], true) ? trim((string) $row['btn_image_size']) : 'medium',
+            'info_html'        => (string) ($row['info_html'] ?? ''),
         ];
     }
 }
@@ -575,10 +580,13 @@ if (!function_exists('roulette_admin_save_config')) {
         $btnEmoji     = trim((string) ($data['btn_emoji'] ?? '🎰')) ?: '🎰';
         $btnImgUrl    = trim((string) ($data['btn_image_url'] ?? ''));
         $btnImgSize   = in_array(trim((string) ($data['btn_image_size'] ?? '')), ['small','medium','large'], true) ? trim((string) $data['btn_image_size']) : 'medium';
+        $infoHtml     = function_exists('package_info_sanitize_html')
+            ? package_info_sanitize_html((string) ($data['info_html'] ?? ''))
+            : trim(strip_tags((string) ($data['info_html'] ?? '')));
 
         $stmt = $mysqli->prepare(
-            'INSERT INTO win_points_roulette_config (id, enabled, spin_cost, title, subtitle, coupon_expiration_days, streaming_user_id, ring_color, ring_width, ring_neon, center_emoji, center_image_url, center_size, btn_emoji, btn_image_url, btn_image_size)
-             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            'INSERT INTO win_points_roulette_config (id, enabled, spin_cost, title, subtitle, coupon_expiration_days, streaming_user_id, ring_color, ring_width, ring_neon, center_emoji, center_image_url, center_size, btn_emoji, btn_image_url, btn_image_size, info_html)
+             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE enabled=VALUES(enabled), spin_cost=VALUES(spin_cost),
                title=VALUES(title), subtitle=VALUES(subtitle),
                coupon_expiration_days=VALUES(coupon_expiration_days),
@@ -586,13 +594,14 @@ if (!function_exists('roulette_admin_save_config')) {
                ring_color=VALUES(ring_color), ring_width=VALUES(ring_width), ring_neon=VALUES(ring_neon),
                center_emoji=VALUES(center_emoji), center_image_url=VALUES(center_image_url),
                center_size=VALUES(center_size), btn_emoji=VALUES(btn_emoji),
-               btn_image_url=VALUES(btn_image_url), btn_image_size=VALUES(btn_image_size)'
+               btn_image_url=VALUES(btn_image_url), btn_image_size=VALUES(btn_image_size),
+               info_html=VALUES(info_html)'
         );
         if (!$stmt) {
             return;
         }
-        // i=int s=string: enabled,spinCost,title,subtitle,expDays,streamId,ringColor,ringWidth,ringNeon,centerEmoji,centerImgUrl,centerSize,btnEmoji,btnImgUrl,btnImgSize
-        $stmt->bind_param('iissiisiissssss', $enabled, $spinCost, $title, $subtitle, $expDays, $streamId, $ringColor, $ringWidth, $ringNeon, $centerEmoji, $centerImgUrl, $centerSize, $btnEmoji, $btnImgUrl, $btnImgSize);
+        // i=int s=string: enabled,spinCost,title,subtitle,expDays,streamId,ringColor,ringWidth,ringNeon,centerEmoji,centerImgUrl,centerSize,btnEmoji,btnImgUrl,btnImgSize,infoHtml
+        $stmt->bind_param('iissiisiisssssss', $enabled, $spinCost, $title, $subtitle, $expDays, $streamId, $ringColor, $ringWidth, $ringNeon, $centerEmoji, $centerImgUrl, $centerSize, $btnEmoji, $btnImgUrl, $btnImgSize, $infoHtml);
         $stmt->execute();
         $stmt->close();
     }
