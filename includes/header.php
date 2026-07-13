@@ -249,7 +249,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       --site-topbar-height: 60px;
     }
     body.site-topbar-enabled.catbar-active {
-      --site-topbar-height: 100px;
+      --site-topbar-height: 128px;
     }
     body.site-media-background-active {
       background: var(--theme-bg-main);
@@ -659,7 +659,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         --site-topbar-height: 60px;
       }
       body.site-topbar-enabled.catbar-active {
-        --site-topbar-height: 100px;
+        --site-topbar-height: 128px;
       }
       .site-header-topbar {
         padding: 0;
@@ -759,7 +759,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         --site-topbar-height: 52px;
       }
       body.site-topbar-enabled.catbar-active {
-        --site-topbar-height: 92px;
+        --site-topbar-height: 120px;
       }
       .site-topbar-enabled .store-shell {
         padding-top: calc(var(--site-topbar-height) + 1rem) !important;
@@ -905,7 +905,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     .catbar-inner {
       display: flex;
       align-items: center;
-      height: 40px;
+      height: 68px;
       padding: 0 0.4rem;
       gap: 0.2rem;
     }
@@ -913,11 +913,11 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     .catbar-track {
       display: flex;
       align-items: center;
-      gap: 0.4rem;
+      gap: 0.6rem;
       overflow-x: auto;
       scroll-behavior: smooth;
       scrollbar-width: none;
-      padding: 0.2rem 0.1rem;
+      padding: 0.3rem 0.2rem;
       transition: opacity 0.18s ease;
       justify-content: center;
       justify-content: safe center;
@@ -927,34 +927,50 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     .catbar-item {
       display: inline-flex;
       align-items: center;
-      gap: 0.28rem;
-      white-space: nowrap;
-      padding: 0.15rem 0.6rem;
-      border-radius: 2rem;
+      justify-content: center;
+      width: 52px;
+      height: 52px;
+      padding: 0;
+      border-radius: 50%;
       border: 1px solid rgba(var(--theme-primary-rgb, 0 255 247), 0.22);
       background: rgba(var(--theme-primary-rgb, 0 255 247), 0.06);
       color: var(--theme-text, #e2e8f0);
-      font-size: 0.75rem;
-      font-weight: 500;
       cursor: pointer;
-      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      transition: background 0.15s, border-color 0.15s;
       text-decoration: none;
       flex-shrink: 0;
-      line-height: 1.3;
+      overflow: hidden;
     }
     .catbar-item:hover,
     .catbar-item:focus-visible {
       background: rgba(var(--theme-primary-rgb, 0 255 247), 0.16);
       border-color: rgba(var(--theme-primary-rgb, 0 255 247), 0.55);
-      color: var(--theme-primary, #00fff7);
       outline: none;
     }
     .catbar-item img {
-      width: 18px;
-      height: 18px;
+      width: 100%;
+      height: 100%;
       object-fit: cover;
-      border-radius: 3px;
+      border-radius: 50%;
       flex-shrink: 0;
+      transition: transform 0.18s ease;
+    }
+    .catbar-item-fallback {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: var(--theme-primary, #00fff7);
+      transition: transform 0.18s ease;
+    }
+    .catbar-item:hover img,
+    .catbar-item:hover .catbar-item-fallback {
+      transform: scale(1.12);
     }
     .catbar-arrow {
       display: none;
@@ -1454,21 +1470,31 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         </div><!-- /.site-header-main-row -->
         <?php
         // ── Catbar (segunda fila dentro del header, solo frontend) ──────────
-        $catbarCategories = [];
-        if (!$headerIsAdminInterface && isset($mysqli) && function_exists('game_category_list_for_menu')) {
-            $catbarCategories = game_category_list_for_menu($mysqli);
-        } elseif (!$headerIsAdminInterface && isset($mysqli)) {
-            $gcatIncPath = __DIR__ . '/game_categories.php';
-            if (is_file($gcatIncPath)) {
-                require_once $gcatIncPath;
-                if (function_exists('game_category_list_for_menu')) {
-                    $catbarCategories = game_category_list_for_menu($mysqli);
+        // Muestra directo todos los juegos activos en iconos circulares;
+        // al elegir un juego se listan sus paquetes (ya no hay nivel de categorías aquí).
+        $catbarGames = [];
+        if (!$headerIsAdminInterface && isset($mysqli)) {
+            if (!function_exists('game_route_path')) {
+                $slugifyIncPath = __DIR__ . '/slugify.php';
+                if (is_file($slugifyIncPath)) require_once $slugifyIncPath;
+            }
+            $cbGamesResult = $mysqli->query(
+                "SELECT id, nombre, slug, imagen FROM juegos WHERE COALESCE(activo, 1) = 1 ORDER BY orden ASC, id ASC"
+            );
+            if ($cbGamesResult instanceof mysqli_result) {
+                while ($cbGameRow = $cbGamesResult->fetch_assoc()) {
+                    $catbarGames[] = [
+                        'id'     => (int) $cbGameRow['id'],
+                        'nombre' => (string) $cbGameRow['nombre'],
+                        'imagen' => (string) ($cbGameRow['imagen'] ?? ''),
+                        'url'    => function_exists('game_route_path') ? app_path(game_route_path($cbGameRow)) : '#',
+                    ];
                 }
             }
         }
-        if ($catbarCategories !== []):
+        if ($catbarGames !== []):
         ?>
-        <div class="catbar-wrap" id="siteCatbar" aria-label="Navegación por categorías">
+        <div class="catbar-wrap" id="siteCatbar" aria-label="Navegación de juegos">
           <div class="catbar-inner">
             <button class="catbar-back-btn" id="catbarBack" aria-label="Atrás">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
@@ -1478,22 +1504,16 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
             <button class="catbar-arrow" id="catbarPrev" aria-label="Anterior" tabindex="-1">&#8249;</button>
             <div class="catbar-track-wrap">
               <div class="catbar-track" id="catbarTrack">
-                <?php foreach ($catbarCategories as $cbc):
-                  $cbMode    = $cbc['mostrar_menu'];
-                  $cbShowImg = in_array($cbMode, ['imagen', 'imagen_texto'], true);
-                  $cbShowTxt = in_array($cbMode, ['texto', 'imagen_texto'], true);
-                ?>
+                <?php foreach ($catbarGames as $cbg): ?>
                 <button class="catbar-item" type="button"
-                        data-catbar-cat-id="<?= (int) $cbc['id'] ?>"
-                        aria-label="<?= htmlspecialchars($cbc['nombre'], ENT_QUOTES, 'UTF-8') ?>">
-                  <?php if ($cbShowImg && $cbc['imagen'] !== ''): ?>
-                    <img src="/<?= htmlspecialchars($cbc['imagen'], ENT_QUOTES, 'UTF-8') ?>"
-                         alt="<?= htmlspecialchars($cbc['nombre'], ENT_QUOTES, 'UTF-8') ?>">
-                  <?php elseif ($cbShowImg && $cbc['icono'] !== ''): ?>
-                    <span aria-hidden="true"><?= htmlspecialchars($cbc['icono'], ENT_QUOTES, 'UTF-8') ?></span>
-                  <?php endif; ?>
-                  <?php if ($cbShowTxt): ?>
-                    <span><?= ($cbc['icono'] !== '' && !$cbShowImg ? htmlspecialchars($cbc['icono'], ENT_QUOTES, 'UTF-8') . ' ' : '') . htmlspecialchars($cbc['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+                        data-catbar-game-id="<?= (int) $cbg['id'] ?>"
+                        data-catbar-game-url="<?= htmlspecialchars($cbg['url'], ENT_QUOTES, 'UTF-8') ?>"
+                        title="<?= htmlspecialchars($cbg['nombre'], ENT_QUOTES, 'UTF-8') ?>"
+                        aria-label="<?= htmlspecialchars($cbg['nombre'], ENT_QUOTES, 'UTF-8') ?>">
+                  <?php if ($cbg['imagen'] !== ''): ?>
+                    <img src="/<?= htmlspecialchars($cbg['imagen'], ENT_QUOTES, 'UTF-8') ?>" alt="">
+                  <?php else: ?>
+                    <span class="catbar-item-fallback" aria-hidden="true"><?= htmlspecialchars(mb_strtoupper(mb_substr($cbg['nombre'], 0, 2, 'UTF-8'), 'UTF-8'), ENT_QUOTES, 'UTF-8') ?></span>
                   <?php endif; ?>
                 </button>
                 <?php endforeach; ?>
@@ -1513,9 +1533,8 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
           var back    = document.getElementById('catbarBack');
           if (!wrap || !track) return;
           document.body.classList.add('catbar-active');
-          var state      = 'cats';
-          var activeCatId = null;
-          var catsHtml   = track.innerHTML;
+          var state     = 'games';
+          var gamesHtml = track.innerHTML;
           function updateArrows() {
             var sl = track.scrollLeft, mw = track.scrollWidth - track.clientWidth;
             if (prev) prev.style.opacity = sl > 4 ? '0.85' : '0.25';
@@ -1525,8 +1544,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
           if (prev) prev.addEventListener('click', function () { track.scrollBy({ left: -180, behavior: 'smooth' }); });
           if (next) next.addEventListener('click', function () { track.scrollBy({ left: 180, behavior: 'smooth' }); });
           if (back) back.addEventListener('click', function () {
-            if (state === 'games') showCats();
-            else if (state === 'packages') showGames(activeCatId);
+            if (state === 'packages') showGamesList();
           });
           function setBack(show) {
             if (back) back.style.display = show ? 'flex' : 'none';
@@ -1556,32 +1574,14 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
           function escHtml(s) {
             return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
           }
-          async function showCats() {
-            state = 'cats'; activeCatId = null;
+          async function showGamesList() {
+            state = 'games';
             setBack(false);
             await fadeOut();
-            await fadeIn(catsHtml);
+            await fadeIn(gamesHtml);
           }
-          async function showGames(catId) {
-            state = 'games'; activeCatId = catId;
-            setBack(true);
-            await fadeOut();
-            await fadeIn(loadingHtml());
-            try {
-              var r = await fetch(API + '?action=games&cat_id=' + catId);
-              var j = await r.json();
-              if (!j.ok || !j.games || j.games.length === 0) {
-                await fadeIn(emptyHtml('Sin juegos en esta categor\xeda'));
-                return;
-              }
-              var html = j.games.map(function (g) {
-                var img = g.imagen ? '<img src="/' + escHtml(g.imagen) + '" alt="">' : '';
-                return '<button class="catbar-item" type="button" data-catbar-game-id="' + escHtml(g.id) + '" data-catbar-game-url="' + escHtml(g.url) + '">' + img + '<span>' + escHtml(g.nombre) + '</span></button>';
-              }).join('');
-              await fadeIn(html);
-            } catch (e) {
-              await fadeIn(emptyHtml('Error al cargar'));
-            }
+          function fallbackSpan(nombre) {
+            return '<span class="catbar-item-fallback" aria-hidden="true">' + escHtml(nombre.slice(0, 2).toUpperCase()) + '</span>';
           }
           async function showPackages(gameId, gameUrl) {
             state = 'packages';
@@ -1597,8 +1597,8 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                 return;
               }
               var html = j.packages.map(function (p) {
-                var img = p.imagen_icono ? '<img src="/' + escHtml(p.imagen_icono) + '" alt="">' : '';
-                return '<a class="catbar-item" href="' + escHtml(p.url) + '">' + img + '<span>' + escHtml(p.nombre) + '</span></a>';
+                var img = p.imagen_icono ? '<img src="/' + escHtml(p.imagen_icono) + '" alt="">' : fallbackSpan(p.nombre);
+                return '<a class="catbar-item" href="' + escHtml(p.url) + '" title="' + escHtml(p.nombre) + '" aria-label="' + escHtml(p.nombre) + '">' + img + '</a>';
               }).join('');
               await fadeIn(html);
             } catch (e) {
@@ -1606,9 +1606,6 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
             }
           }
           function bindItems() {
-            track.querySelectorAll('[data-catbar-cat-id]').forEach(function (btn) {
-              btn.addEventListener('click', function () { showGames(btn.dataset.catbarCatId); });
-            });
             track.querySelectorAll('[data-catbar-game-id]').forEach(function (btn) {
               btn.addEventListener('click', function () { showPackages(btn.dataset.catbarGameId, btn.dataset.catbarGameUrl); });
             });
