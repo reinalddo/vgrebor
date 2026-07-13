@@ -16,6 +16,7 @@ require_once __DIR__ . "/includes/win_points.php";
 require_once __DIR__ . "/includes/binance_pay.php";
 require_once __DIR__ . "/includes/paypal_pay.php";
 require_once __DIR__ . "/includes/package_account_sales.php";
+require_once __DIR__ . "/includes/bs_pass_stock.php";
 currency_ensure_schema();
 if (trim((string) store_config_get('binance_pagonorte_activo', '0')) === '1') {
   currency_ensure_code('USDT', 'Tether USD', 1.0, true, true);
@@ -481,6 +482,7 @@ include __DIR__ . "/includes/header.php";
   ?>
   <?php $gameMarkupPct = floatval($game['precio_markup_pct'] ?? 0); ?>
   <?php $priceSyncQueue = []; ?>
+  <?php $bsPassStockPackageIds = []; ?>
   <div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 g-2 g-sm-3 mb-4" id="pack-grid">
     <?php foreach ($paquetes as $pack):
         $packApiId = (int) ($pack['paquete_api'] ?? 0);
@@ -517,6 +519,15 @@ include __DIR__ . "/includes/header.php";
             $packApiProvider = 'free_fire';
           } elseif (!empty($game['categoria_api_discord'])) {
             $packApiProvider = 'discord';
+          }
+        }
+        if ($packApiProvider === 'giftven' && $packApiId > 0) {
+          $bsPassCategory = trim((string) ($pack['api_source_key'] ?? ''));
+          if ($bsPassCategory === '' && isset($apiProductsById[$packApiId])) {
+            $bsPassCategory = trim((string) ($apiProductsById[$packApiId]['categoria'] ?? ''));
+          }
+          if (bs_pass_stock_is_pass_category($bsPassCategory)) {
+            $bsPassStockPackageIds[] = $packId;
           }
         }
         $packAccountGallery = $packIsAccountSale ? ($packageAccountSaleGalleryMap[$packId] ?? []) : [];
@@ -4518,6 +4529,41 @@ include __DIR__ . "/includes/header.php";
   }
 
   /* ── Botón "i" de información del paquete ── */
+  /* Pase sin stock (BLOOD STRIKE PASS) */
+  .pack-card.bs-pass-blocked {
+    position: relative;
+    cursor: not-allowed;
+  }
+  .pack-card.bs-pass-blocked > * {
+    filter: grayscale(0.55) brightness(0.6);
+  }
+  .bs-pass-stock-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(5, 10, 20, 0.55);
+    border-radius: inherit;
+    filter: none !important;
+    pointer-events: auto;
+  }
+  .bs-pass-stock-overlay span {
+    display: inline-block;
+    padding: 0.35rem 0.7rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 94, 138, 0.9);
+    background: rgba(58, 10, 26, 0.92);
+    color: #ff9db8;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-align: center;
+    text-transform: uppercase;
+    box-shadow: 0 0 14px rgba(255, 0, 89, 0.45);
+    transform: rotate(-8deg);
+  }
   .pack-info-btn {
     position: absolute;
     top: 0.4rem;
@@ -5473,6 +5519,11 @@ include __DIR__ . "/includes/header.php";
   const verifyPlayerButton = document.getElementById('verify-player-button');
   const playerVerificationFeedback = document.getElementById('player-verification-feedback');
   const playerVerificationConfig = <?= json_encode($playerVerificationConfig, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+  const bsPassStockConfig = <?= json_encode([
+    'enabled' => bs_pass_stock_is_configured() && !empty($bsPassStockPackageIds) && $playerVerificationConfig !== null,
+    'packageIds' => array_map('strval', $bsPassStockPackageIds ?? []),
+    'gameId' => (int) ($game['id'] ?? 0),
+  ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const couponInput = document.getElementById('coupon-input');
   const couponModal = document.getElementById('coupon-modal');
   const loadingModal = document.getElementById('loading-modal');
@@ -8767,6 +8818,7 @@ include __DIR__ . "/includes/header.php";
     if (clearFeedback) {
       clearPlayerVerificationFeedback();
     }
+    clearBsPassStock();
   }
 
   function setPlayerVerificationUnavailableState(signature, message) {
@@ -8779,6 +8831,7 @@ include __DIR__ . "/includes/header.php";
       pending: false,
       serverUnavailable: true,
     };
+    clearBsPassStock();
 
     const baseMessage = String(message || 'No se pudo verificar el jugador en este momento.').trim();
     setPlayerVerificationFeedback('info', `${baseMessage} Puedes continuar con la recarga normal.`);
@@ -8963,6 +9016,7 @@ include __DIR__ . "/includes/header.php";
           serverUnavailable: false,
         };
         setPlayerVerificationFeedback('success', String(data.message || 'Jugador encontrado.'));
+        runBsPassStockCheck(payload.userIdentifier);
         window.setTimeout(() => {
           const packSection = document.getElementById('game-packages-section');
           if (packSection) scrollViewportToElement(packSection, { duration: 560, offset: 18 });
@@ -8990,6 +9044,184 @@ include __DIR__ . "/includes/header.php";
       playerVerificationState.pending = false;
       syncPlayerVerificationUi();
       updateButtonState();
+    }
+  }
+
+  // ── Stock de pases BLOOD STRIKE PASS ────────────────────────────────────
+  // Tras verificar el ID del jugador, consulta en segundo plano qué pases
+  // (categoría BLOOD STRIKE PASS de giftven) están disponibles. Los agotados
+  // se bloquean con un aviso; cualquier falla del validador = no bloquear.
+  let bsPassStockSeq = 0;
+  let bsPassBlockedIds = new Set();
+  let bsPassStockNote = null;
+
+  function getBsPassStockNote() {
+    if (bsPassStockNote || !playerVerificationFeedback) {
+      return bsPassStockNote;
+    }
+    bsPassStockNote = document.createElement('div');
+    bsPassStockNote.id = 'bs-pass-stock-note';
+    bsPassStockNote.className = 'd-none mt-2';
+    playerVerificationFeedback.insertAdjacentElement('afterend', bsPassStockNote);
+    return bsPassStockNote;
+  }
+
+  function setBsPassStockNote(kind, message) {
+    if (!message && !bsPassStockNote) {
+      return;
+    }
+    const note = getBsPassStockNote();
+    if (!note) {
+      return;
+    }
+    if (!message) {
+      note.className = 'd-none mt-2';
+      note.textContent = '';
+      return;
+    }
+    note.className = `alert alert-${kind} py-2 px-3 mt-2 mb-0 small fw-semibold`;
+    note.textContent = message;
+  }
+
+  function blockPackCardForStock(card) {
+    if (!card || card.classList.contains('bs-pass-blocked')) {
+      return;
+    }
+    card.classList.add('bs-pass-blocked');
+    card.setAttribute('aria-disabled', 'true');
+    if (!card.querySelector('.bs-pass-stock-overlay')) {
+      const overlay = document.createElement('div');
+      overlay.className = 'bs-pass-stock-overlay';
+      overlay.innerHTML = '<span>STOCK NO DISPONIBLE</span>';
+      card.appendChild(overlay);
+    }
+  }
+
+  function unblockPackCardForStock(card) {
+    if (!card) {
+      return;
+    }
+    card.classList.remove('bs-pass-blocked');
+    card.removeAttribute('aria-disabled');
+    const overlay = card.querySelector('.bs-pass-stock-overlay');
+    if (overlay) {
+      overlay.remove();
+    }
+  }
+
+  function deselectBlockedActivePack() {
+    packCards2.forEach((item) => {
+      item.classList.remove('neon-selected');
+      item.setAttribute('aria-pressed', 'false');
+    });
+    activePack = null;
+    updateResumenCompra(null);
+    updateButtonState();
+  }
+
+  function applyBsPassStock(blockedIds) {
+    bsPassBlockedIds = new Set((blockedIds || []).map(String));
+    bsPassStockConfig.packageIds.forEach((packageId) => {
+      const card = findPackCardById(packageId);
+      if (!card) {
+        return;
+      }
+      if (bsPassBlockedIds.has(String(packageId))) {
+        blockPackCardForStock(card);
+      } else {
+        unblockPackCardForStock(card);
+      }
+    });
+
+    let deselected = false;
+    if (activePack && bsPassBlockedIds.has(String(activePack.id))) {
+      deselectBlockedActivePack();
+      deselected = true;
+    }
+
+    document.dispatchEvent(new CustomEvent('bs-pass-stock-blocked', {
+      detail: { blockedIds: Array.from(bsPassBlockedIds) },
+    }));
+
+    return deselected;
+  }
+
+  function clearBsPassStock() {
+    bsPassStockSeq += 1;
+    if (!bsPassStockConfig || !bsPassStockConfig.enabled) {
+      return;
+    }
+    setBsPassStockNote('', '');
+    if (bsPassBlockedIds.size === 0) {
+      return;
+    }
+    bsPassBlockedIds = new Set();
+    bsPassStockConfig.packageIds.forEach((packageId) => {
+      unblockPackCardForStock(findPackCardById(packageId));
+    });
+  }
+
+  async function runBsPassStockCheck(playerIdentifier) {
+    if (!bsPassStockConfig || !bsPassStockConfig.enabled) {
+      return;
+    }
+    const playerId = String(playerIdentifier || '').trim();
+    if (!/^[0-9]{4,20}$/.test(playerId)) {
+      return;
+    }
+
+    const requestId = ++bsPassStockSeq;
+    setBsPassStockNote('info', 'Comprobando disponibilidad de pases…');
+
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const abortTimer = controller ? window.setTimeout(() => controller.abort(), 90000) : null;
+
+    try {
+      const requestBody = new URLSearchParams();
+      requestBody.set('game_id', String(bsPassStockConfig.gameId));
+      requestBody.set('player_id', playerId);
+
+      const response = await fetch(buildAppUrl('/api/bs_pass_stock.php'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: requestBody.toString(),
+        signal: controller ? controller.signal : undefined,
+      });
+
+      let data = null;
+      try {
+        data = await response.json();
+      } catch (error) {
+        data = null;
+      }
+
+      if (requestId !== bsPassStockSeq) {
+        return;
+      }
+
+      if (data && data.ok && data.applicable) {
+        const blocked = Array.isArray(data.blocked) ? data.blocked : [];
+        const deselected = applyBsPassStock(blocked);
+        if (deselected) {
+          setBsPassStockNote('warning', 'El pase que habías seleccionado no tiene stock disponible; elige otro paquete.');
+        } else if (blocked.length > 0) {
+          setBsPassStockNote('warning', 'Algunos pases de este juego no tienen stock disponible en este momento.');
+        } else {
+          setBsPassStockNote('', '');
+        }
+      } else {
+        applyBsPassStock([]);
+        setBsPassStockNote('', '');
+      }
+    } catch (error) {
+      if (requestId === bsPassStockSeq) {
+        applyBsPassStock([]);
+        setBsPassStockNote('', '');
+      }
+    } finally {
+      if (abortTimer) {
+        window.clearTimeout(abortTimer);
+      }
     }
   }
 
@@ -11345,6 +11577,9 @@ include __DIR__ . "/includes/header.php";
     if (!card) {
       return;
     }
+    if (card.classList.contains('bs-pass-blocked')) {
+      return;
+    }
 
     packCards2.forEach((item) => {
       item.classList.remove('neon-selected');
@@ -12656,6 +12891,18 @@ include __DIR__ . "/includes/header.php";
                 syncCartBuyButton();
               }
 
+              // Si el chequeo de stock de pases bloquea paquetes que ya
+              // estaban en el carrito, se retiran automáticamente.
+              document.addEventListener('bs-pass-stock-blocked', (event) => {
+                const blockedIds = new Set(((event.detail && event.detail.blockedIds) || []).map(String));
+                if (!blockedIds.size || !cartItems.length) return;
+                for (let i = cartItems.length - 1; i >= 0; i--) {
+                  if (blockedIds.has(String(cartItems[i].pack.id))) {
+                    removeCartItemByIndex(i);
+                  }
+                }
+              });
+
               // ── Cart mode toggle ─────────────────────────────────────────
               if (multiCartCheck) {
                 multiCartCheck.checked = true;
@@ -12702,6 +12949,7 @@ include __DIR__ . "/includes/header.php";
                   if (!cartMode) return; // normal flow handles it
                   if (e.target.closest('[data-pack-preview-trigger]')) return; // let preview button open gallery modal
                   if (e.target.closest('.pack-info-btn')) return; // let the "i" button open its info modal
+                  if (card.classList.contains('bs-pass-blocked')) { e.stopImmediatePropagation(); return; } // pase sin stock
 
                   e.stopImmediatePropagation(); // prevent original handler
 

@@ -1631,6 +1631,11 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                     <label class="form-label">API KEY</label>
                     <input type="text" name="recargas_api_key" value="<?= htmlspecialchars($cfg['recargas_api_key'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control" placeholder="Pega aquí tu API KEY">
                   </div>
+                  <div class="col-12">
+                    <label class="form-label">API KEY Validación Blood Strike Pass</label>
+                    <input type="text" name="bs_pass_stock_api_key" value="<?= htmlspecialchars($cfg['bs_pass_stock_api_key'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control" placeholder="Pega aquí la API KEY del validador de pases">
+                    <div class="form-text mt-2">Verifica el stock de los paquetes de la categoría <strong>BLOOD STRIKE PASS</strong> al verificar el ID del jugador. Los pases agotados se bloquean con el aviso "Stock no disponible". Déjalo vacío para desactivar esta función.</div>
+                  </div>
                 </div>
               </div>
 
