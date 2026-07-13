@@ -915,15 +915,12 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       align-items: center;
       gap: 0.6rem;
       overflow-x: auto;
-      scroll-behavior: smooth;
       scrollbar-width: none;
       padding: 0.3rem 0.2rem;
-      transition: opacity 0.18s ease;
       justify-content: center;
       justify-content: safe center;
     }
     .catbar-track::-webkit-scrollbar { display: none; }
-    .catbar-track.is-fading { opacity: 0; pointer-events: none; }
     .catbar-item {
       display: inline-flex;
       align-items: center;
@@ -987,21 +984,6 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       flex-shrink: 0;
     }
     .catbar-arrow:hover { color: var(--theme-primary, #00fff7); }
-    .catbar-back-btn {
-      display: none;
-      align-items: center;
-      justify-content: center;
-      background: transparent;
-      border: none;
-      color: rgba(var(--theme-primary-rgb, 0 255 247), 0.7);
-      padding: 0.2rem 0.5rem;
-      cursor: pointer;
-      flex-shrink: 0;
-      border-right: 1px solid rgba(var(--theme-primary-rgb, 0 255 247), 0.15);
-      margin-right: 0.2rem;
-      transition: color 0.15s;
-    }
-    .catbar-back-btn:hover { color: var(--theme-primary, #00fff7); }
     @media (min-width: 768px) {
       .catbar-arrow { display: flex; }
     }
@@ -1470,8 +1452,9 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         </div><!-- /.site-header-main-row -->
         <?php
         // ── Catbar (segunda fila dentro del header, solo frontend) ──────────
-        // Muestra directo todos los juegos activos en iconos circulares;
-        // al elegir un juego se listan sus paquetes (ya no hay nivel de categorías aquí).
+        // Muestra todos los juegos activos como iconos circulares con enlace
+        // directo a la página del juego, en un carrusel infinito hacia la
+        // izquierda. Usa imagen_catbar si existe; si no, la imagen del juego.
         $catbarGames = [];
         if (!$headerIsAdminInterface && isset($mysqli)) {
             if (!function_exists('game_route_path')) {
@@ -1482,15 +1465,27 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                 $gcatIncPath = __DIR__ . '/game_categories.php';
                 if (is_file($gcatIncPath)) require_once $gcatIncPath;
             }
-            $cbGamesResult = $mysqli->query(
-                "SELECT id, nombre, slug, imagen FROM juegos WHERE COALESCE(activo, 1) = 1 ORDER BY orden ASC, id ASC"
-            );
+            // orden_catbar/imagen_catbar se crean desde admin/juegos; si aún no
+            // existen en la BD, se usa la consulta anterior como respaldo.
+            try {
+                $cbGamesResult = $mysqli->query(
+                    "SELECT id, nombre, slug, imagen, imagen_catbar FROM juegos WHERE COALESCE(activo, 1) = 1
+                     ORDER BY CASE WHEN COALESCE(orden_catbar, 0) > 0 THEN 0 ELSE 1 END, orden_catbar ASC,
+                              CASE WHEN orden IS NULL THEN 1 ELSE 0 END, orden ASC, id ASC"
+                );
+            } catch (mysqli_sql_exception $cbEx) {
+                $cbGamesResult = $mysqli->query(
+                    "SELECT id, nombre, slug, imagen FROM juegos WHERE COALESCE(activo, 1) = 1
+                     ORDER BY CASE WHEN orden IS NULL THEN 1 ELSE 0 END, orden ASC, id ASC"
+                );
+            }
             if ($cbGamesResult instanceof mysqli_result) {
                 while ($cbGameRow = $cbGamesResult->fetch_assoc()) {
+                    $cbCatbarImg = trim((string) ($cbGameRow['imagen_catbar'] ?? ''));
                     $catbarGames[] = [
                         'id'     => (int) $cbGameRow['id'],
                         'nombre' => (string) $cbGameRow['nombre'],
-                        'imagen' => (string) ($cbGameRow['imagen'] ?? ''),
+                        'imagen' => $cbCatbarImg !== '' ? $cbCatbarImg : (string) ($cbGameRow['imagen'] ?? ''),
                         'url'    => function_exists('game_route_path') ? app_path(game_route_path($cbGameRow)) : '#',
                     ];
                 }
@@ -1500,26 +1495,19 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         ?>
         <div class="catbar-wrap" id="siteCatbar" aria-label="Navegación de juegos">
           <div class="catbar-inner">
-            <button class="catbar-back-btn" id="catbarBack" aria-label="Atrás">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
-              </svg>
-            </button>
             <button class="catbar-arrow" id="catbarPrev" aria-label="Anterior" tabindex="-1">&#8249;</button>
             <div class="catbar-track-wrap">
               <div class="catbar-track" id="catbarTrack">
                 <?php foreach ($catbarGames as $cbg): ?>
-                <button class="catbar-item" type="button"
-                        data-catbar-game-id="<?= (int) $cbg['id'] ?>"
-                        data-catbar-game-url="<?= htmlspecialchars($cbg['url'], ENT_QUOTES, 'UTF-8') ?>"
-                        title="<?= htmlspecialchars($cbg['nombre'], ENT_QUOTES, 'UTF-8') ?>"
-                        aria-label="<?= htmlspecialchars($cbg['nombre'], ENT_QUOTES, 'UTF-8') ?>">
+                <a class="catbar-item" href="<?= htmlspecialchars($cbg['url'], ENT_QUOTES, 'UTF-8') ?>"
+                   title="<?= htmlspecialchars($cbg['nombre'], ENT_QUOTES, 'UTF-8') ?>"
+                   aria-label="<?= htmlspecialchars($cbg['nombre'], ENT_QUOTES, 'UTF-8') ?>">
                   <?php if ($cbg['imagen'] !== ''): ?>
                     <img src="/<?= htmlspecialchars($cbg['imagen'], ENT_QUOTES, 'UTF-8') ?>" alt="">
                   <?php else: ?>
                     <span class="catbar-item-fallback" aria-hidden="true"><?= htmlspecialchars(mb_strtoupper(mb_substr($cbg['nombre'], 0, 2, 'UTF-8'), 'UTF-8'), ENT_QUOTES, 'UTF-8') ?></span>
                   <?php endif; ?>
-                </button>
+                </a>
                 <?php endforeach; ?>
               </div>
             </div>
@@ -1529,93 +1517,106 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         <script>
         (function () {
           'use strict';
-          var API     = <?= json_encode(app_path('/api/catbar.php'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
-          var wrap    = document.getElementById('siteCatbar');
-          var track   = document.getElementById('catbarTrack');
-          var prev    = document.getElementById('catbarPrev');
-          var next    = document.getElementById('catbarNext');
-          var back    = document.getElementById('catbarBack');
+          var wrap  = document.getElementById('siteCatbar');
+          var track = document.getElementById('catbarTrack');
+          var prev  = document.getElementById('catbarPrev');
+          var next  = document.getElementById('catbarNext');
           if (!wrap || !track) return;
           document.body.classList.add('catbar-active');
-          var state     = 'games';
-          var gamesHtml = track.innerHTML;
-          function updateArrows() {
-            var sl = track.scrollLeft, mw = track.scrollWidth - track.clientWidth;
-            if (prev) prev.style.opacity = sl > 4 ? '0.85' : '0.25';
-            if (next) next.style.opacity = sl < mw - 4 ? '0.85' : '0.25';
+          // El rAF asigna scrollLeft cada frame: el smooth del CSS lo haría
+          // "perseguir" el valor y vibrar, por eso se fuerza auto aquí.
+          track.style.scrollBehavior = 'auto';
+
+          var originals = Array.prototype.slice.call(track.children);
+          if (originals.length === 0) return;
+
+          // Ancho de un set completo (items + separaciones) para el bucle sin costura.
+          function measureSetWidth() {
+            var last = originals[originals.length - 1];
+            var gap = parseFloat(getComputedStyle(track).columnGap);
+            if (isNaN(gap)) gap = parseFloat(getComputedStyle(track).gap);
+            if (isNaN(gap)) gap = 0;
+            return last.offsetLeft + last.offsetWidth - originals[0].offsetLeft + gap;
           }
-          track.addEventListener('scroll', updateArrows, { passive: true });
-          if (prev) prev.addEventListener('click', function () { track.scrollBy({ left: -180, behavior: 'smooth' }); });
-          if (next) next.addEventListener('click', function () { track.scrollBy({ left: 180, behavior: 'smooth' }); });
-          if (back) back.addEventListener('click', function () {
-            if (state === 'packages') showGamesList();
-          });
-          function setBack(show) {
-            if (back) back.style.display = show ? 'flex' : 'none';
-          }
-          function fadeOut() {
-            track.classList.add('is-fading');
-            return new Promise(function (res) { setTimeout(res, 180); });
-          }
-          function fadeIn(html) {
-            track.innerHTML = html;
-            track.scrollLeft = 0;
-            bindItems();
-            return new Promise(function (res) {
-              requestAnimationFrame(function () {
-                track.classList.remove('is-fading');
-                updateArrows();
-                res();
-              });
-            });
-          }
-          function loadingHtml() {
-            return '<span style="opacity:.45;font-size:.75rem;padding:.15rem .55rem;">Cargando…</span>';
-          }
-          function emptyHtml(msg) {
-            return '<span style="opacity:.45;font-size:.75rem;padding:.15rem .55rem;">' + escHtml(msg) + '</span>';
-          }
-          function escHtml(s) {
-            return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-          }
-          async function showGamesList() {
-            state = 'games';
-            setBack(false);
-            await fadeOut();
-            await fadeIn(gamesHtml);
-          }
-          function fallbackSpan(nombre) {
-            return '<span class="catbar-item-fallback" aria-hidden="true">' + escHtml(nombre.slice(0, 2).toUpperCase()) + '</span>';
-          }
-          async function showPackages(gameId, gameUrl) {
-            state = 'packages';
-            setBack(true);
-            await fadeOut();
-            await fadeIn(loadingHtml());
-            try {
-              var r = await fetch(API + '?action=packages&game_id=' + gameId);
-              var j = await r.json();
-              if (!j.ok || !j.packages || j.packages.length === 0) {
-                if (gameUrl) window.location.href = gameUrl;
-                else await fadeIn(emptyHtml('Sin paquetes disponibles'));
-                return;
-              }
-              var html = j.packages.map(function (p) {
-                var img = p.imagen_icono ? '<img src="/' + escHtml(p.imagen_icono) + '" alt="">' : fallbackSpan(p.nombre);
-                return '<a class="catbar-item" href="' + escHtml(p.url) + '" title="' + escHtml(p.nombre) + '" aria-label="' + escHtml(p.nombre) + '">' + img + '</a>';
-              }).join('');
-              await fadeIn(html);
-            } catch (e) {
-              await fadeIn(emptyHtml('Error al cargar'));
+
+          var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          var setWidth = 0;
+          var marqueeOn = false;
+
+          function ensureClones() {
+            if (setWidth <= 0) {
+              setWidth = measureSetWidth();
             }
+            if (!setWidth || setWidth <= 0) return;
+            // Duplicar el set hasta cubrir viewport + envoltura sin hueco.
+            var guard = 0;
+            while (track.scrollWidth < track.clientWidth + setWidth * 2 && guard < 24) {
+              originals.forEach(function (el) {
+                var clone = el.cloneNode(true);
+                clone.setAttribute('aria-hidden', 'true');
+                clone.setAttribute('tabindex', '-1');
+                track.appendChild(clone);
+              });
+              guard++;
+            }
+            marqueeOn = true;
           }
-          function bindItems() {
-            track.querySelectorAll('[data-catbar-game-id]').forEach(function (btn) {
-              btn.addEventListener('click', function () { showPackages(btn.dataset.catbarGameId, btn.dataset.catbarGameUrl); });
-            });
+          ensureClones();
+
+          var paused = false;
+          var resumeTimer = null;
+          var pos = 0;
+          var SPEED = 0.5; // px por frame (~30 px/s)
+
+          function pause() {
+            paused = true;
+            if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
           }
-          bindItems();
-          updateArrows();
+          function resumeAfter(ms) {
+            if (resumeTimer) clearTimeout(resumeTimer);
+            resumeTimer = setTimeout(function () { paused = false; }, ms);
+          }
+
+          // Pausa con el ratón encima; reanuda al salir.
+          track.addEventListener('mouseenter', pause);
+          track.addEventListener('mouseleave', function () { resumeAfter(150); });
+          // Pausa con el dedo (y permite arrastrar nativo); reanuda al soltar.
+          track.addEventListener('touchstart', pause, { passive: true });
+          track.addEventListener('touchend', function () { resumeAfter(1200); }, { passive: true });
+          track.addEventListener('touchcancel', function () { resumeAfter(1200); }, { passive: true });
+
+          if (prev) prev.addEventListener('click', function () {
+            pause();
+            track.scrollBy({ left: -180, behavior: 'smooth' });
+            resumeAfter(1500);
+          });
+          if (next) next.addEventListener('click', function () {
+            pause();
+            track.scrollBy({ left: 180, behavior: 'smooth' });
+            resumeAfter(1500);
+          });
+
+          function step() {
+            if (marqueeOn) {
+              if (paused) {
+                // Sincroniza con el desplazamiento manual (dedo/flechas).
+                pos = track.scrollLeft;
+              } else {
+                pos += SPEED;
+              }
+              if (setWidth > 0) {
+                while (pos >= setWidth) pos -= setWidth;
+                while (pos < 0) pos += setWidth;
+              }
+              if (!paused) track.scrollLeft = pos;
+            }
+            requestAnimationFrame(step);
+          }
+          if (!reduceMotion) {
+            requestAnimationFrame(step);
+          }
+
+          window.addEventListener('resize', ensureClones);
         })();
         </script>
         <?php endif; ?>

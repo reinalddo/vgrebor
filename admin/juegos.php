@@ -105,6 +105,20 @@ function ensure_juegos_orden_column(mysqli $mysqli): void {
     }
 }
 
+function ensure_juegos_orden_catbar_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juegos LIKE 'orden_catbar'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juegos ADD COLUMN orden_catbar INT NULL AFTER orden");
+    }
+}
+
+function ensure_juegos_imagen_catbar_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juegos LIKE 'imagen_catbar'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juegos ADD COLUMN imagen_catbar VARCHAR(255) NULL AFTER imagen_hero");
+    }
+}
+
 function ensure_juegos_categoria_api_2_column(mysqli $mysqli): void {
     $result = $mysqli->query("SHOW COLUMNS FROM juegos LIKE 'categoria_api_2'");
     if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
@@ -236,8 +250,10 @@ ensure_juegos_categoria_api_3_column($mysqli);
 ensure_juegos_categoria_api_discord_3_column($mysqli);
 ensure_juegos_precio_markup_pct_column($mysqli);
 ensure_juegos_orden_column($mysqli);
+ensure_juegos_orden_catbar_column($mysqli);
 ensure_juegos_slug_column($mysqli);
 ensure_juegos_imagen_hero_column($mysqli);
+ensure_juegos_imagen_catbar_column($mysqli);
 game_sticker_ensure_schema($mysqli);
 
 $adminGamesUrl = app_path('/admin/juegos');
@@ -305,6 +321,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_orden_juego'],
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_orden_catbar_juego'], $_POST['juego_id'], $_POST['orden'])) {
+    $gameId = intval($_POST['juego_id']);
+    $order = max(1, intval($_POST['orden']));
+    if ($gameId > 0) {
+        $stmtOrder = $mysqli->prepare("UPDATE juegos SET orden_catbar = ? WHERE id = ?");
+        $stmtOrder->bind_param('ii', $order, $gameId);
+        $stmtOrder->execute();
+        $stmtOrder->close();
+        if (admin_games_is_ajax_request()) {
+            admin_games_json_response(['ok' => true, 'id' => $gameId, 'orden' => $order]);
+        }
+    }
+    header('Location: ' . $adminGamesUrl);
+    exit;
+}
+
 // Procesar eliminación de juego (antes de cualquier salida)
 if (isset($_GET['eliminar'])) {
     $del_id = intval($_GET['eliminar']);
@@ -328,10 +360,10 @@ if (isset($_GET['eliminar'])) {
     $stmt->bind_param('i', $del_id);
     $stmt->execute();
     // Eliminar imagen del juego
-    $stmt_img = $mysqli->prepare("SELECT imagen, imagen_hero, imagen_paquete, sticker_imagen FROM juegos WHERE id=?");
+    $stmt_img = $mysqli->prepare("SELECT imagen, imagen_hero, imagen_paquete, imagen_catbar, sticker_imagen FROM juegos WHERE id=?");
     $stmt_img->bind_param('i', $del_id);
     $stmt_img->execute();
-    $stmt_img->bind_result($img_juego, $img_juego_hero, $img_juego_paquete, $img_sticker);
+    $stmt_img->bind_result($img_juego, $img_juego_hero, $img_juego_paquete, $img_juego_catbar, $img_sticker);
     $stmt_img->fetch();
     $stmt_img->close();
     if ($img_juego) {
@@ -342,6 +374,9 @@ if (isset($_GET['eliminar'])) {
     }
     if ($img_juego_paquete) {
         admin_game_delete_upload((string) $img_juego_paquete);
+    }
+    if ($img_juego_catbar) {
+        admin_game_delete_upload((string) $img_juego_catbar);
     }
     if ($img_sticker) {
         game_sticker_delete_image((string) $img_sticker);
@@ -358,7 +393,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
     $edit_id = intval($_POST['edit_juego_id']);
     $currentGame = null;
     if ($edit_id > 0) {
-        $currentGameStmt = $mysqli->prepare("SELECT categoria_api_discord, imagen, imagen_paquete, imagen_hero, sticker_imagen FROM juegos WHERE id = ? LIMIT 1");
+        $currentGameStmt = $mysqli->prepare("SELECT categoria_api_discord, imagen, imagen_paquete, imagen_hero, imagen_catbar, sticker_imagen FROM juegos WHERE id = ? LIMIT 1");
         if ($currentGameStmt) {
             $currentGameStmt->bind_param('i', $edit_id);
             $currentGameStmt->execute();
@@ -389,10 +424,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
     $edit_imagen = admin_game_store_upload($_FILES['edit_imagen'] ?? [], 'juego_');
     $edit_imagen_hero = admin_game_store_upload($_FILES['edit_imagen_hero'] ?? [], 'juegohero_');
     $edit_imagen_paquete = admin_game_store_upload($_FILES['edit_imagen_paquete'] ?? [], 'juegopaq_');
+    $edit_imagen_catbar = admin_game_store_upload($_FILES['edit_imagen_catbar'] ?? [], 'juegocatbar_');
     $remove_edit_imagen_hero = isset($_POST['remove_edit_imagen_hero']);
+    $remove_edit_imagen_catbar = isset($_POST['remove_edit_imagen_catbar']);
     $currentImage = (string) ($currentGame['imagen'] ?? '');
     $currentHeroImage = (string) ($currentGame['imagen_hero'] ?? '');
     $currentPackageImage = (string) ($currentGame['imagen_paquete'] ?? '');
+    $currentCatbarImage = (string) ($currentGame['imagen_catbar'] ?? '');
 
     if ($edit_imagen !== null && $currentImage !== '') {
         admin_game_delete_upload($currentImage);
@@ -403,13 +441,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
     if ($edit_imagen_paquete !== null && $currentPackageImage !== '') {
         admin_game_delete_upload($currentPackageImage);
     }
+    if ($edit_imagen_catbar !== null && $currentCatbarImage !== '') {
+        admin_game_delete_upload($currentCatbarImage);
+    }
     if ($remove_edit_imagen_hero && $currentHeroImage !== '' && $edit_imagen_hero === null) {
         admin_game_delete_upload($currentHeroImage);
+    }
+    if ($remove_edit_imagen_catbar && $currentCatbarImage !== '' && $edit_imagen_catbar === null) {
+        admin_game_delete_upload($currentCatbarImage);
     }
 
     $nextImage = $edit_imagen ?? $currentImage;
     $nextHeroImage = $remove_edit_imagen_hero ? '' : ($edit_imagen_hero ?? $currentHeroImage);
     $nextPackageImage = $edit_imagen_paquete ?? $currentPackageImage;
+    $nextCatbarImage = $remove_edit_imagen_catbar ? '' : ($edit_imagen_catbar ?? $currentCatbarImage);
 
     $edit_sticker_ico_custom = trim((string) ($_POST['edit_sticker_icono_custom'] ?? ''));
     $edit_sticker_ico_preset = trim((string) ($_POST['edit_sticker_icono_select'] ?? ''));
@@ -434,9 +479,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
         $edit_sticker_imagen = $currentStickerImage;
     }
 
-    $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_2=?, categoria_api_3=?, categoria_api_discord=?, categoria_api_discord_2=?, categoria_api_discord_3=?, activo=?, moneda_fija_id=?, sticker_texto=?, sticker_icono=?, sticker_color_fondo=?, sticker_imagen=?, precio_markup_pct=? WHERE id=?");
-    // Types: 6s + 2i + 6s(cat_api..cat_discord3) + 2i(activo,moneda) + 4s(stickers) + 1d(markup) + 1i(WHERE id) = 22
-    $stmt->bind_param('ssssss'.'ii'.'ssssss'.'ii'.'ssss'.'di', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_2, $edit_categoria_api_3, $edit_categoria_api_discord, $edit_categoria_api_discord_2, $edit_categoria_api_discord_3, $edit_activo, $edit_moneda_fija_id, $edit_sticker_texto, $edit_sticker_icono, $edit_sticker_color_fondo, $edit_sticker_imagen, $edit_precio_markup_pct, $edit_id);
+    $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, imagen_catbar=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_2=?, categoria_api_3=?, categoria_api_discord=?, categoria_api_discord_2=?, categoria_api_discord_3=?, activo=?, moneda_fija_id=?, sticker_texto=?, sticker_icono=?, sticker_color_fondo=?, sticker_imagen=?, precio_markup_pct=? WHERE id=?");
+    // Types: 7s + 2i + 6s(cat_api..cat_discord3) + 2i(activo,moneda) + 4s(stickers) + 1d(markup) + 1i(WHERE id) = 23
+    $stmt->bind_param('sssssss'.'ii'.'ssssss'.'ii'.'ssss'.'di', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $nextCatbarImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_2, $edit_categoria_api_3, $edit_categoria_api_discord, $edit_categoria_api_discord_2, $edit_categoria_api_discord_3, $edit_activo, $edit_moneda_fija_id, $edit_sticker_texto, $edit_sticker_icono, $edit_sticker_color_fondo, $edit_sticker_imagen, $edit_precio_markup_pct, $edit_id);
     $stmt->execute();
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
     game_set_categories($mysqli, $edit_id, $catIds);
@@ -467,6 +512,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $imagen = admin_game_store_upload($_FILES['imagen'] ?? [], 'juego_');
     $imagen_hero = admin_game_store_upload($_FILES['imagen_hero'] ?? [], 'juegohero_');
     $imagen_paquete = admin_game_store_upload($_FILES['imagen_paquete'] ?? [], 'juegopaq_');
+    $imagen_catbar = admin_game_store_upload($_FILES['imagen_catbar'] ?? [], 'juegocatbar_');
     $sticker_ico_custom   = trim((string) ($_POST['sticker_icono_custom'] ?? ''));
     $sticker_ico_preset   = trim((string) ($_POST['sticker_icono_select'] ?? ''));
     $sticker_icono        = $sticker_ico_custom !== '' ? $sticker_ico_custom : $sticker_ico_preset;
@@ -475,9 +521,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $sticker_color_fondo  = preg_match('/^#[0-9a-fA-F]{3,6}$/', $rawStickerColorC) ? $rawStickerColorC : '#0f1a2e';
     $stickerUploadC       = game_sticker_store_upload($_FILES['sticker_imagen'] ?? []);
     $sticker_imagen       = ($stickerUploadC['ok'] && $stickerUploadC['path'] !== '') ? $stickerUploadC['path'] : '';
-    $stmt = $mysqli->prepare("INSERT INTO juegos (nombre, imagen, imagen_hero, imagen_paquete, descripcion, slug, moneda_fija_id, popular, api_free_fire, categoria_api, categoria_api_2, categoria_api_3, categoria_api_discord, categoria_api_discord_2, categoria_api_discord_3, activo, orden, sticker_texto, sticker_icono, sticker_color_fondo, sticker_imagen, precio_markup_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    // Types: 6s + 3i(moneda,popular,api_ff) + 6s(cat_api..cat_discord3) + 2i(activo,orden) + 4s(stickers) + 1d(markup) = 22
-    $stmt->bind_param('ssssss'.'iii'.'ssssss'.'ii'.'ssss'.'d', $nombre, $imagen, $imagen_hero, $imagen_paquete, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_2, $categoria_api_3, $categoria_api_discord, $categoria_api_discord_2, $categoria_api_discord_3, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen, $precio_markup_pct);
+    $stmt = $mysqli->prepare("INSERT INTO juegos (nombre, imagen, imagen_hero, imagen_paquete, imagen_catbar, descripcion, slug, moneda_fija_id, popular, api_free_fire, categoria_api, categoria_api_2, categoria_api_3, categoria_api_discord, categoria_api_discord_2, categoria_api_discord_3, activo, orden, sticker_texto, sticker_icono, sticker_color_fondo, sticker_imagen, precio_markup_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    // Types: 7s + 3i(moneda,popular,api_ff) + 6s(cat_api..cat_discord3) + 2i(activo,orden) + 4s(stickers) + 1d(markup) = 23
+    $stmt->bind_param('sssssss'.'iii'.'ssssss'.'ii'.'ssss'.'d', $nombre, $imagen, $imagen_hero, $imagen_paquete, $imagen_catbar, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_2, $categoria_api_3, $categoria_api_discord, $categoria_api_discord_2, $categoria_api_discord_3, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen, $precio_markup_pct);
     $stmt->execute();
     $juego_id = $mysqli->insert_id;
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
@@ -698,6 +744,21 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     <img src="/<?= htmlspecialchars($juego_edit['imagen_paquete']) ?>" alt="Imagen paquete actual" class="mb-2 rounded" style="max-width:80px;max-height:80px;border:2px solid #00fff7;background:#222c3a;box-shadow:0 0 8px #00fff7;">
                 <?php endif; ?>
                 <input type="file" name="edit_imagen_paquete" accept="image/*" class="form-control mt-2" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+            </div>
+            <div class="mb-3">
+                <label class="form-label text-neon">Imagen para barra de categorías (header):</label><br>
+                <?php if (!empty($juego_edit['imagen_catbar'])): ?>
+                    <img src="/<?= htmlspecialchars($juego_edit['imagen_catbar']) ?>" alt="Imagen barra actual" class="mb-2 rounded-circle" style="width:64px;height:64px;object-fit:cover;border:2px solid #00fff7;background:#222c3a;box-shadow:0 0 8px #00fff7;">
+                <?php else: ?>
+                    <div class="small mb-2" style="color:#8be9fd;">Si no cargas una imagen, en la barra del header se usará la imagen principal del juego.</div>
+                <?php endif; ?>
+                <input type="file" name="edit_imagen_catbar" accept="image/*" class="form-control mt-2" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                <?php if (!empty($juego_edit['imagen_catbar'])): ?>
+                <div class="form-check mt-2">
+                    <input type="checkbox" name="remove_edit_imagen_catbar" class="form-check-input" id="removeEditCatbarImage">
+                    <label class="form-check-label text-neon" for="removeEditCatbarImage">Usar la imagen principal en la barra</label>
+                </div>
+                <?php endif; ?>
             </div>
             <!-- STICKER / BADGE -->
             <?php
@@ -1078,6 +1139,14 @@ if ($gcatAssignResult instanceof mysqli_result) {
             </div>
         </div>
         <div class="col-md-6">
+            <label class="form-label" style="color:#00fff7;">Imagen para barra de categorías (header)</label>
+            <input type="file" name="imagen_catbar" accept="image/*" class="form-control" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;" onchange="previewImagenCatbarJuego(event)">
+            <div class="form-text mt-2" style="color:#8be9fd;">Si queda vacía, en la barra del header se mostrará la imagen principal del juego.</div>
+            <div class="text-center mt-2">
+                <img id="preview-juego-img-catbar" src="#" alt="Previsualización Barra" style="display:none;width:72px;height:72px;object-fit:cover;border-radius:50%;box-shadow:0 0 0.5rem #00fff7; border:2px solid #00fff7;" />
+            </div>
+        </div>
+        <div class="col-md-6">
             <label class="form-label" style="color:#00fff7;">Moneda fija</label>
             <select name="moneda_fija_id" class="form-select" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;">
                 <option value="">Moneda variable (usuario elige)</option>
@@ -1164,7 +1233,7 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     <th style="color:#00fff7; background:#181f2a;">Imagen</th>
                     <th style="color:#00fff7; background:#181f2a;">Nombre</th>
                     <th style="color:#00fff7; background:#181f2a;">Orden</th>
-                    <th style="color:#00fff7; background:#181f2a;">Popular</th>
+                    <th style="color:#00fff7; background:#181f2a;" title="Orden en la barra de categorías del header">Orden categoría</th>
                     <th style="color:#00fff7; background:#181f2a;">Activo</th>
                     <th style="color:#00fff7; background:#181f2a;">Imagen Paquete</th>
                     <th style="color:#00fff7; background:#181f2a;">Descripción</th>
@@ -1206,11 +1275,12 @@ if ($gcatAssignResult instanceof mysqli_result) {
                         </form>
                     </td>
                     <td class="text-center" style="background:#181f2a;">
-                        <?php if (!empty($j['popular'])): ?>
-                                <span title="Popular" style="color:#00fff7; font-size:1.2em;">★</span>
-                            <?php else: ?>
-                                <span style="color:#444;">—</span>
-                            <?php endif; ?>
+                        <form method="post" action="<?= htmlspecialchars($adminGamesUrl, ENT_QUOTES, 'UTF-8') ?>" class="d-inline-flex align-items-center gap-2 m-0 js-ajax-order-form">
+                            <input type="hidden" name="ajax" value="1">
+                            <input type="hidden" name="update_orden_catbar_juego" value="1">
+                            <input type="hidden" name="juego_id" value="<?= (int) $j['id'] ?>">
+                            <input type="number" name="orden" min="1" value="<?= (int) ($j['orden_catbar'] ?? 0) > 0 ? (int) $j['orden_catbar'] : '' ?>" placeholder="—" title="Orden en la barra de categorías del header" class="form-control form-control-sm text-center js-ajax-order-input" style="width:84px;background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                        </form>
                         </td>
                         <td class="text-center" style="background:#181f2a;">
                             <form method="get" action="<?= htmlspecialchars($adminGamesUrl, ENT_QUOTES, 'UTF-8') ?>" class="m-0 d-inline-block js-ajax-toggle-form">
@@ -1327,6 +1397,13 @@ if ($gcatAssignResult instanceof mysqli_result) {
                         <input type="hidden" name="juego_id" value="<?= (int) $j['id'] ?>">
                         <label class="small" style="color:#b2f6ff;">Orden</label>
                         <input type="number" name="orden" min="1" value="<?= max(1, (int) ($j['orden'] ?? 0)) ?>" class="form-control form-control-sm js-ajax-order-input" style="width:96px;background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                    </form>
+                    <form method="post" action="<?= htmlspecialchars($adminGamesUrl, ENT_QUOTES, 'UTF-8') ?>" class="mt-2 d-flex align-items-center gap-2 flex-wrap js-ajax-order-form">
+                        <input type="hidden" name="ajax" value="1">
+                        <input type="hidden" name="update_orden_catbar_juego" value="1">
+                        <input type="hidden" name="juego_id" value="<?= (int) $j['id'] ?>">
+                        <label class="small" style="color:#b2f6ff;">Orden categoría</label>
+                        <input type="number" name="orden" min="1" value="<?= (int) ($j['orden_catbar'] ?? 0) > 0 ? (int) $j['orden_catbar'] : '' ?>" placeholder="—" title="Orden en la barra de categorías del header" class="form-control form-control-sm js-ajax-order-input" style="width:96px;background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
                     </form>
                     <div class="mt-3 d-flex gap-3 flex-wrap">
                         <a href="/admin/juegos?editar=<?= $j['id'] ?>" style="color:#22d3ee; text-decoration:underline; font-weight:bold;">Editar</a>
@@ -1582,6 +1659,25 @@ function previewImagenHeroJuego(event) {
         reader.onload = function(e) {
             img.src = e.target.result;
             img.style.display = 'block';
+        };
+        reader.readAsDataURL(input.files[0]);
+    } else {
+        img.src = '#';
+        img.style.display = 'none';
+    }
+}
+
+function previewImagenCatbarJuego(event) {
+    const input = event.target;
+    const img = document.getElementById('preview-juego-img-catbar');
+    if (!img) {
+        return;
+    }
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            img.src = e.target.result;
+            img.style.display = 'inline-block';
         };
         reader.readAsDataURL(input.files[0]);
     } else {
