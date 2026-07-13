@@ -65,6 +65,28 @@ function bs_pass_stock_catalog(): array {
 }
 
 /**
+ * Mapeo directo producto giftven (juego_paquetes.paquete_api) => id del
+ * validador. Es la vía PRINCIPAL de emparejamiento (determinista, verificada
+ * contra el catálogo real de giftven); el matching por nombre queda solo
+ * como respaldo para productos futuros aún no mapeados aquí.
+ */
+function bs_pass_stock_provider_id_map(): array {
+    return [
+        294 => 'levelup_pass',        // Level-Up Pass
+        295 => 'strike_pass_elite',   // Pase Élite de Strike
+        296 => 'strike_pass_premium', // Pase Premium Strike
+        297 => 'deal_049',            // Cofre Suerte Ultra Skin
+        325 => 'lucky_bag_opm',       // Semana de la Bolsa de la Suerte
+        326 => 'season_pass_opm',     // Pase de Temporada (Season Pass)
+        348 => 'lucky_bag_exclusive', // Semana exclusiva de la bolsa de la suerte de One-Punch Man
+        349 => 'valor_voucher_opm',   // One-Punch Man Vale Destacado x10
+        350 => 'upgrade_chest_opm',   // Cofre de la suerte de Punto de Mejora (OPM) x10
+        351 => 'enzo',                // "Enzo: El Siguiente" Cofre de la Suerte de Puntos de Mejora
+        352 => 'maestro_voucher',     // Vale de reserva destacado de Maestro x10
+    ];
+}
+
+/**
  * Empareja un nombre normalizado contra el catálogo (id => [alias normalizados]).
  * Prioriza igualdad exacta; con contención (en cualquiera de las dos
  * direcciones) gana el alias más largo. Empate entre ids distintos = ambiguo
@@ -214,6 +236,7 @@ function bs_pass_stock_game_pass_packages(mysqli $mysqli, int $gameId): array {
 
         $passPackages[] = [
             'id' => (int) $row['id'],
+            'api_id' => $apiId,
             'nombre' => trim((string) ($row['nombre'] ?? '')),
             'giftven_name' => $giftvenName,
         ];
@@ -235,11 +258,12 @@ function bs_pass_stock_check(mysqli $mysqli, int $gameId, string $playerId): arr
     }
 
     // Caché corto por jugador: el validador tarda 20-35s, evita repetirlo
-    // si el cliente re-verifica el mismo ID en pocos minutos.
+    // si el cliente re-verifica el mismo ID enseguida. Se mantiene corto
+    // (60s) para que una compra recién hecha se refleje pronto.
     $cacheKey = $gameId . '_' . $playerId;
     if (isset($_SESSION) && is_array($_SESSION['bs_pass_stock_cache'][$cacheKey] ?? null)) {
         $cached = $_SESSION['bs_pass_stock_cache'][$cacheKey];
-        if ((time() - (int) ($cached['t'] ?? 0)) < 180 && is_array($cached['result'] ?? null)) {
+        if ((time() - (int) ($cached['t'] ?? 0)) < 60 && is_array($cached['result'] ?? null)) {
             return $cached['result'];
         }
     }
@@ -312,16 +336,22 @@ function bs_pass_stock_check(mysqli $mysqli, int $gameId, string $playerId): arr
     $blocked = [];
     $available = [];
     $unmatched = [];
+    $providerIdMap = bs_pass_stock_provider_id_map();
     foreach ($passPackages as $passPackage) {
-        $matchId = null;
-        foreach ([$passPackage['giftven_name'], $passPackage['nombre']] as $candidate) {
-            $normalizedCandidate = bs_pass_stock_normalize_name((string) $candidate);
-            if ($normalizedCandidate === '') {
-                continue;
-            }
-            $matchId = bs_pass_stock_match_catalog_id($normalizedCandidate, $normalizedCatalog);
-            if ($matchId !== null) {
-                break;
+        // Vía principal: mapeo exacto por id del producto giftven.
+        $matchId = $providerIdMap[$passPackage['api_id']] ?? null;
+
+        // Respaldo (productos futuros sin mapear): matching por nombre.
+        if ($matchId === null) {
+            foreach ([$passPackage['giftven_name'], $passPackage['nombre']] as $candidate) {
+                $normalizedCandidate = bs_pass_stock_normalize_name((string) $candidate);
+                if ($normalizedCandidate === '') {
+                    continue;
+                }
+                $matchId = bs_pass_stock_match_catalog_id($normalizedCandidate, $normalizedCatalog);
+                if ($matchId !== null) {
+                    break;
+                }
             }
         }
 

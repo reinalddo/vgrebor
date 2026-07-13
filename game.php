@@ -4529,41 +4529,6 @@ include __DIR__ . "/includes/header.php";
   }
 
   /* ── Botón "i" de información del paquete ── */
-  /* Pase sin stock (BLOOD STRIKE PASS) */
-  .pack-card.bs-pass-blocked {
-    position: relative;
-    cursor: not-allowed;
-  }
-  .pack-card.bs-pass-blocked > * {
-    filter: grayscale(0.55) brightness(0.6);
-  }
-  .bs-pass-stock-overlay {
-    position: absolute;
-    inset: 0;
-    z-index: 8;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(5, 10, 20, 0.55);
-    border-radius: inherit;
-    filter: none !important;
-    pointer-events: auto;
-  }
-  .bs-pass-stock-overlay span {
-    display: inline-block;
-    padding: 0.35rem 0.7rem;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 94, 138, 0.9);
-    background: rgba(58, 10, 26, 0.92);
-    color: #ff9db8;
-    font-size: 0.72rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-align: center;
-    text-transform: uppercase;
-    box-shadow: 0 0 14px rgba(255, 0, 89, 0.45);
-    transform: rotate(-8deg);
-  }
   .pack-info-btn {
     position: absolute;
     top: 0.4rem;
@@ -9083,18 +9048,17 @@ include __DIR__ . "/includes/header.php";
     note.textContent = message;
   }
 
+  // El validador indica compras previas del jugador: los pases que ya
+  // adquirió en el ciclo/evento actual se OCULTAN por completo de la grilla
+  // y reaparecen cuando el validador vuelva a listarlos como disponibles.
   function blockPackCardForStock(card) {
     if (!card || card.classList.contains('bs-pass-blocked')) {
       return;
     }
     card.classList.add('bs-pass-blocked');
     card.setAttribute('aria-disabled', 'true');
-    if (!card.querySelector('.bs-pass-stock-overlay')) {
-      const overlay = document.createElement('div');
-      overlay.className = 'bs-pass-stock-overlay';
-      overlay.innerHTML = '<span>STOCK NO DISPONIBLE</span>';
-      card.appendChild(overlay);
-    }
+    const column = card.closest('.col') || card;
+    column.classList.add('d-none');
   }
 
   function unblockPackCardForStock(card) {
@@ -9103,10 +9067,8 @@ include __DIR__ . "/includes/header.php";
     }
     card.classList.remove('bs-pass-blocked');
     card.removeAttribute('aria-disabled');
-    const overlay = card.querySelector('.bs-pass-stock-overlay');
-    if (overlay) {
-      overlay.remove();
-    }
+    const column = card.closest('.col') || card;
+    column.classList.remove('d-none');
   }
 
   function deselectBlockedActivePack() {
@@ -9203,9 +9165,7 @@ include __DIR__ . "/includes/header.php";
         const blocked = Array.isArray(data.blocked) ? data.blocked : [];
         const deselected = applyBsPassStock(blocked);
         if (deselected) {
-          setBsPassStockNote('warning', 'El pase que habías seleccionado no tiene stock disponible; elige otro paquete.');
-        } else if (blocked.length > 0) {
-          setBsPassStockNote('warning', 'Algunos pases de este juego no tienen stock disponible en este momento.');
+          setBsPassStockNote('warning', 'El pase que habías seleccionado ya fue adquirido en esta cuenta; elige otro paquete.');
         } else {
           setBsPassStockNote('', '');
         }
