@@ -249,7 +249,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       --site-topbar-height: 60px;
     }
     body.site-topbar-enabled.catbar-active {
-      --site-topbar-height: 128px;
+      --site-topbar-height: 100px;
     }
     body.site-media-background-active {
       background: var(--theme-bg-main);
@@ -659,7 +659,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         --site-topbar-height: 60px;
       }
       body.site-topbar-enabled.catbar-active {
-        --site-topbar-height: 128px;
+        --site-topbar-height: 100px;
       }
       .site-header-topbar {
         padding: 0;
@@ -759,7 +759,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         --site-topbar-height: 52px;
       }
       body.site-topbar-enabled.catbar-active {
-        --site-topbar-height: 120px;
+        --site-topbar-height: 92px;
       }
       .site-topbar-enabled .store-shell {
         padding-top: calc(var(--site-topbar-height) + 1rem) !important;
@@ -1477,6 +1477,10 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
             if (!function_exists('game_route_path')) {
                 $slugifyIncPath = __DIR__ . '/slugify.php';
                 if (is_file($slugifyIncPath)) require_once $slugifyIncPath;
+            }
+            if (!function_exists('game_category_list_destacadas')) {
+                $gcatIncPath = __DIR__ . '/game_categories.php';
+                if (is_file($gcatIncPath)) require_once $gcatIncPath;
             }
             $cbGamesResult = $mysqli->query(
                 "SELECT id, nombre, slug, imagen FROM juegos WHERE COALESCE(activo, 1) = 1 ORDER BY orden ASC, id ASC"
