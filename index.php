@@ -13,6 +13,7 @@ require_once __DIR__ . "/includes/package_features.php";
 require_once __DIR__ . "/includes/game_sticker.php";
 currency_ensure_schema();
 game_sticker_ensure_schema($mysqli);
+game_badge2_ensure_schema($mysqli);
 $pageTitle = store_config_get('nombre_tienda', 'TVirtualGaming') . " | " . store_config_get('nombre_tienda_subtitulo', 'Tienda de monedas digitales');
 $startupPopupConfig = store_config_all();
 $startupPopupNormalEnabled = trim((string) ($startupPopupConfig['inicio_popup_activo'] ?? '1')) === '1';
@@ -239,6 +240,7 @@ $showDestSection  = $todosActivo || $destacadaCategories !== [];
 $destDefaultCat   = $todosActivo ? 'all' : (!empty($destacadaCategories) ? (string)(int)$destacadaCategories[0]['id'] : 'all');
 $gameCardsForJs = array_values(array_map(function ($gc) {
   $sticker = game_sticker_from_row($gc);
+  $badge2  = game_badge2_from_row($gc);
   return [
     'id'                 => (int)$gc['id'],
     'nombre'             => (string)($gc['nombre'] ?? ''),
@@ -248,6 +250,7 @@ $gameCardsForJs = array_values(array_map(function ($gc) {
     'popular'            => !empty($gc['popular']),
     'min_price_label'    => (string)($gc['min_price_label'] ?? ''),
     'sticker_html'       => game_sticker_render($sticker),
+    'badge2_html'        => game_badge2_render($badge2),
   ];
 }, $gameCards));
 
@@ -432,6 +435,23 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         }
         .game-sticker-icon { font-style: normal; line-height: 1; }
         .game-sticker-img  { width: 1.1rem; height: 1.1rem; object-fit: contain; }
+        .game-badge2 {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.22rem;
+          padding: 0.16rem 0.42rem;
+          border-radius: 0.4rem;
+          background: var(--badge2-bg, #2f8fff);
+          color: #fff;
+          font-size: 0.66rem;
+          font-weight: 700;
+          line-height: 1.15;
+          box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+        .game-badge2-icon { font-style: normal; line-height: 1; }
+        .game-badge2-img  { width: 0.95rem; height: 0.95rem; object-fit: contain; }
         .startup-popup-logo {
           width: 58px;
           height: 58px;
@@ -3363,6 +3383,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         <div class="mt-4 row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3">
           <?php foreach ($popularGames as $game): ?>
             <?php $gameSticker = game_sticker_from_row($game); ?>
+            <?php $gameBadge2 = game_badge2_from_row($game); ?>
             <div class="col">
               <a href="<?= htmlspecialchars(app_path(game_route_path($game)), ENT_QUOTES, 'UTF-8') ?>" class="store-game-card d-block rounded-4 border bg-dark p-2 h-100 text-decoration-none">
                 <div class="position-relative rounded-3" style="aspect-ratio:1/1;overflow:visible;">
@@ -3376,13 +3397,16 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
                   <p class="store-game-title fw-semibold d-flex align-items-center mb-1" style="font-size:1rem;">
                     <?= htmlspecialchars($game['nombre'] ?? '', ENT_QUOTES, 'UTF-8') ?>
                   </p>
-                  <p class="store-game-price-prefix small mb-0">
-                    <?php if (!empty($game['imagen_paquete'])): ?>
-                      <img src="<?= htmlspecialchars(app_path('/' . ltrim((string) $game['imagen_paquete'], '/')), ENT_QUOTES, 'UTF-8') ?>" alt="Paquete" class="img-fluid rounded me-1 align-middle" style="height:20px;width:20px;display:inline-block;" />
-                    <?php endif; ?>
-                    <?php if (!empty($game['min_price_label'])): ?>
-                      Desde <span class="store-game-price"><?= htmlspecialchars($game['min_price_label'], ENT_QUOTES, 'UTF-8') ?></span>
-                    <?php endif; ?>
+                  <p class="store-game-price-prefix small mb-0 d-flex align-items-center justify-content-between gap-1">
+                    <span class="d-inline-flex align-items-center flex-wrap">
+                      <?php if (!empty($game['imagen_paquete'])): ?>
+                        <img src="<?= htmlspecialchars(app_path('/' . ltrim((string) $game['imagen_paquete'], '/')), ENT_QUOTES, 'UTF-8') ?>" alt="Paquete" class="img-fluid rounded me-1 align-middle" style="height:20px;width:20px;display:inline-block;" />
+                      <?php endif; ?>
+                      <?php if (!empty($game['min_price_label'])): ?>
+                        Desde <span class="store-game-price"><?= htmlspecialchars($game['min_price_label'], ENT_QUOTES, 'UTF-8') ?></span>
+                      <?php endif; ?>
+                    </span>
+                    <?= game_badge2_render($gameBadge2) ?>
                   </p>
                 </div>
               </a>
@@ -3487,9 +3511,12 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           h += (g.sticker_html || '');
           h += '</div><div class="mt-2">';
           h += '<p class="store-game-title fw-semibold d-flex align-items-center mb-1" style="font-size:1rem;">' + esc(g.nombre) + '</p>';
-          h += '<p class="store-game-price-prefix small mb-0">';
+          h += '<p class="store-game-price-prefix small mb-0 d-flex align-items-center justify-content-between gap-1">';
+          h += '<span class="d-inline-flex align-items-center flex-wrap">';
           if (g.imagen_paquete_url) h += '<img src="' + esc(g.imagen_paquete_url) + '" alt="Paquete" class="img-fluid rounded me-1 align-middle" style="height:20px;width:20px;display:inline-block;">';
           if (g.min_price_label) h += 'Desde <span class="store-game-price">' + esc(g.min_price_label) + '</span>';
+          h += '</span>';
+          h += (g.badge2_html || '');
           h += '</p></div></a></div>';
           return h;
         }
@@ -3532,6 +3559,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         <div class="mt-4 row row-cols-3 row-cols-sm-3 row-cols-lg-4 g-2 g-sm-3">
           <?php foreach ($moreGames as $game): ?>
             <?php $gameSticker = game_sticker_from_row($game); ?>
+            <?php $gameBadge2 = game_badge2_from_row($game); ?>
             <div class="col">
               <a href="<?= htmlspecialchars(app_path(game_route_path($game)), ENT_QUOTES, 'UTF-8') ?>" class="store-game-card d-block rounded-4 border bg-dark p-2 h-100 text-decoration-none">
                 <div class="position-relative rounded-3" style="aspect-ratio:1/1;overflow:visible;">
@@ -3547,13 +3575,16 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
                   <p class="store-game-title fw-semibold d-flex align-items-center mb-1" style="font-size:1rem;">
                     <?= htmlspecialchars($game['nombre'] ?? '', ENT_QUOTES, 'UTF-8') ?>
                   </p>
-                  <p class="store-game-price-prefix small mb-0">
-                    <?php if (!empty($game['imagen_paquete'])): ?>
-                      <img src="<?= htmlspecialchars(app_path('/' . ltrim((string) $game['imagen_paquete'], '/')), ENT_QUOTES, 'UTF-8') ?>" alt="Paquete" class="img-fluid rounded me-1 align-middle" style="height:20px;width:20px;display:inline-block;" />
-                    <?php endif; ?>
-                    <?php if (!empty($game['min_price_label'])): ?>
-                      Desde <span class="store-game-price"><?= htmlspecialchars($game['min_price_label'], ENT_QUOTES, 'UTF-8') ?></span>
-                    <?php endif; ?>
+                  <p class="store-game-price-prefix small mb-0 d-flex align-items-center justify-content-between gap-1">
+                    <span class="d-inline-flex align-items-center flex-wrap">
+                      <?php if (!empty($game['imagen_paquete'])): ?>
+                        <img src="<?= htmlspecialchars(app_path('/' . ltrim((string) $game['imagen_paquete'], '/')), ENT_QUOTES, 'UTF-8') ?>" alt="Paquete" class="img-fluid rounded me-1 align-middle" style="height:20px;width:20px;display:inline-block;" />
+                      <?php endif; ?>
+                      <?php if (!empty($game['min_price_label'])): ?>
+                        Desde <span class="store-game-price"><?= htmlspecialchars($game['min_price_label'], ENT_QUOTES, 'UTF-8') ?></span>
+                      <?php endif; ?>
+                    </span>
+                    <?= game_badge2_render($gameBadge2) ?>
                   </p>
                 </div>
               </a>

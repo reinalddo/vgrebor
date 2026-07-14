@@ -255,6 +255,7 @@ ensure_juegos_slug_column($mysqli);
 ensure_juegos_imagen_hero_column($mysqli);
 ensure_juegos_imagen_catbar_column($mysqli);
 game_sticker_ensure_schema($mysqli);
+game_badge2_ensure_schema($mysqli);
 
 $adminGamesUrl = app_path('/admin/juegos');
 $adminPackagesBaseUrl = app_path('/admin/paquetes');
@@ -360,10 +361,10 @@ if (isset($_GET['eliminar'])) {
     $stmt->bind_param('i', $del_id);
     $stmt->execute();
     // Eliminar imagen del juego
-    $stmt_img = $mysqli->prepare("SELECT imagen, imagen_hero, imagen_paquete, imagen_catbar, sticker_imagen FROM juegos WHERE id=?");
+    $stmt_img = $mysqli->prepare("SELECT imagen, imagen_hero, imagen_paquete, imagen_catbar, sticker_imagen, badge2_imagen FROM juegos WHERE id=?");
     $stmt_img->bind_param('i', $del_id);
     $stmt_img->execute();
-    $stmt_img->bind_result($img_juego, $img_juego_hero, $img_juego_paquete, $img_juego_catbar, $img_sticker);
+    $stmt_img->bind_result($img_juego, $img_juego_hero, $img_juego_paquete, $img_juego_catbar, $img_sticker, $img_badge2);
     $stmt_img->fetch();
     $stmt_img->close();
     if ($img_juego) {
@@ -381,6 +382,9 @@ if (isset($_GET['eliminar'])) {
     if ($img_sticker) {
         game_sticker_delete_image((string) $img_sticker);
     }
+    if ($img_badge2) {
+        game_sticker_delete_image((string) $img_badge2);
+    }
     // Eliminar el juego
     $stmt = $mysqli->prepare("DELETE FROM juegos WHERE id=?");
     $stmt->bind_param('i', $del_id);
@@ -393,7 +397,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
     $edit_id = intval($_POST['edit_juego_id']);
     $currentGame = null;
     if ($edit_id > 0) {
-        $currentGameStmt = $mysqli->prepare("SELECT categoria_api_discord, imagen, imagen_paquete, imagen_hero, imagen_catbar, sticker_imagen FROM juegos WHERE id = ? LIMIT 1");
+        $currentGameStmt = $mysqli->prepare("SELECT categoria_api_discord, imagen, imagen_paquete, imagen_hero, imagen_catbar, sticker_imagen, badge2_imagen FROM juegos WHERE id = ? LIMIT 1");
         if ($currentGameStmt) {
             $currentGameStmt->bind_param('i', $edit_id);
             $currentGameStmt->execute();
@@ -479,9 +483,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
         $edit_sticker_imagen = $currentStickerImage;
     }
 
-    $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, imagen_catbar=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_2=?, categoria_api_3=?, categoria_api_discord=?, categoria_api_discord_2=?, categoria_api_discord_3=?, activo=?, moneda_fija_id=?, sticker_texto=?, sticker_icono=?, sticker_color_fondo=?, sticker_imagen=?, precio_markup_pct=? WHERE id=?");
-    // Types: 7s + 2i + 6s(cat_api..cat_discord3) + 2i(activo,moneda) + 4s(stickers) + 1d(markup) + 1i(WHERE id) = 23
-    $stmt->bind_param('sssssss'.'ii'.'ssssss'.'ii'.'ssss'.'di', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $nextCatbarImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_2, $edit_categoria_api_3, $edit_categoria_api_discord, $edit_categoria_api_discord_2, $edit_categoria_api_discord_3, $edit_activo, $edit_moneda_fija_id, $edit_sticker_texto, $edit_sticker_icono, $edit_sticker_color_fondo, $edit_sticker_imagen, $edit_precio_markup_pct, $edit_id);
+    $edit_badge2_ico_custom = trim((string) ($_POST['edit_badge2_icono_custom'] ?? ''));
+    $edit_badge2_ico_preset = trim((string) ($_POST['edit_badge2_icono_select'] ?? ''));
+    $edit_badge2_icono       = $edit_badge2_ico_custom !== '' ? $edit_badge2_ico_custom : $edit_badge2_ico_preset;
+    $edit_badge2_texto       = mb_substr(trim((string) ($_POST['edit_badge2_texto'] ?? '')), 0, 80, 'UTF-8');
+    $rawBadge2Color          = trim((string) ($_POST['edit_badge2_color_fondo'] ?? ''));
+    $edit_badge2_color_fondo = preg_match('/^#[0-9a-fA-F]{3,6}$/', $rawBadge2Color) ? $rawBadge2Color : '#0f1a2e';
+    $currentBadge2Image      = (string) ($currentGame['badge2_imagen'] ?? '');
+    $badge2Upload            = game_badge2_store_upload($_FILES['edit_badge2_imagen'] ?? []);
+    $removeBadge2Img         = isset($_POST['remove_edit_badge2_imagen']);
+    if ($badge2Upload['ok'] && $badge2Upload['path'] !== '') {
+        if ($currentBadge2Image !== '') {
+            game_sticker_delete_image($currentBadge2Image);
+        }
+        $edit_badge2_imagen = $badge2Upload['path'];
+    } elseif ($removeBadge2Img) {
+        if ($currentBadge2Image !== '') {
+            game_sticker_delete_image($currentBadge2Image);
+        }
+        $edit_badge2_imagen = '';
+    } else {
+        $edit_badge2_imagen = $currentBadge2Image;
+    }
+
+    $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, imagen_catbar=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_2=?, categoria_api_3=?, categoria_api_discord=?, categoria_api_discord_2=?, categoria_api_discord_3=?, activo=?, moneda_fija_id=?, sticker_texto=?, sticker_icono=?, sticker_color_fondo=?, sticker_imagen=?, badge2_texto=?, badge2_icono=?, badge2_color_fondo=?, badge2_imagen=?, precio_markup_pct=? WHERE id=?");
+    // Types: 7s + 2i + 6s(cat_api..cat_discord3) + 2i(activo,moneda) + 4s(stickers) + 4s(badge2) + 1d(markup) + 1i(WHERE id) = 27
+    $stmt->bind_param('sssssss'.'ii'.'ssssss'.'ii'.'ssss'.'ssss'.'di', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $nextCatbarImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_2, $edit_categoria_api_3, $edit_categoria_api_discord, $edit_categoria_api_discord_2, $edit_categoria_api_discord_3, $edit_activo, $edit_moneda_fija_id, $edit_sticker_texto, $edit_sticker_icono, $edit_sticker_color_fondo, $edit_sticker_imagen, $edit_badge2_texto, $edit_badge2_icono, $edit_badge2_color_fondo, $edit_badge2_imagen, $edit_precio_markup_pct, $edit_id);
     $stmt->execute();
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
     game_set_categories($mysqli, $edit_id, $catIds);
@@ -521,9 +548,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $sticker_color_fondo  = preg_match('/^#[0-9a-fA-F]{3,6}$/', $rawStickerColorC) ? $rawStickerColorC : '#0f1a2e';
     $stickerUploadC       = game_sticker_store_upload($_FILES['sticker_imagen'] ?? []);
     $sticker_imagen       = ($stickerUploadC['ok'] && $stickerUploadC['path'] !== '') ? $stickerUploadC['path'] : '';
-    $stmt = $mysqli->prepare("INSERT INTO juegos (nombre, imagen, imagen_hero, imagen_paquete, imagen_catbar, descripcion, slug, moneda_fija_id, popular, api_free_fire, categoria_api, categoria_api_2, categoria_api_3, categoria_api_discord, categoria_api_discord_2, categoria_api_discord_3, activo, orden, sticker_texto, sticker_icono, sticker_color_fondo, sticker_imagen, precio_markup_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    // Types: 7s + 3i(moneda,popular,api_ff) + 6s(cat_api..cat_discord3) + 2i(activo,orden) + 4s(stickers) + 1d(markup) = 23
-    $stmt->bind_param('sssssss'.'iii'.'ssssss'.'ii'.'ssss'.'d', $nombre, $imagen, $imagen_hero, $imagen_paquete, $imagen_catbar, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_2, $categoria_api_3, $categoria_api_discord, $categoria_api_discord_2, $categoria_api_discord_3, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen, $precio_markup_pct);
+    $badge2_ico_custom   = trim((string) ($_POST['badge2_icono_custom'] ?? ''));
+    $badge2_ico_preset   = trim((string) ($_POST['badge2_icono_select'] ?? ''));
+    $badge2_icono        = $badge2_ico_custom !== '' ? $badge2_ico_custom : $badge2_ico_preset;
+    $badge2_texto        = mb_substr(trim((string) ($_POST['badge2_texto'] ?? '')), 0, 80, 'UTF-8');
+    $rawBadge2ColorC     = trim((string) ($_POST['badge2_color_fondo'] ?? ''));
+    $badge2_color_fondo  = preg_match('/^#[0-9a-fA-F]{3,6}$/', $rawBadge2ColorC) ? $rawBadge2ColorC : '#0f1a2e';
+    $badge2UploadC       = game_badge2_store_upload($_FILES['badge2_imagen'] ?? []);
+    $badge2_imagen       = ($badge2UploadC['ok'] && $badge2UploadC['path'] !== '') ? $badge2UploadC['path'] : '';
+    $stmt = $mysqli->prepare("INSERT INTO juegos (nombre, imagen, imagen_hero, imagen_paquete, imagen_catbar, descripcion, slug, moneda_fija_id, popular, api_free_fire, categoria_api, categoria_api_2, categoria_api_3, categoria_api_discord, categoria_api_discord_2, categoria_api_discord_3, activo, orden, sticker_texto, sticker_icono, sticker_color_fondo, sticker_imagen, badge2_texto, badge2_icono, badge2_color_fondo, badge2_imagen, precio_markup_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    // Types: 7s + 3i(moneda,popular,api_ff) + 6s(cat_api..cat_discord3) + 2i(activo,orden) + 4s(stickers) + 4s(badge2) + 1d(markup) = 27
+    $stmt->bind_param('sssssss'.'iii'.'ssssss'.'ii'.'ssss'.'ssss'.'d', $nombre, $imagen, $imagen_hero, $imagen_paquete, $imagen_catbar, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_2, $categoria_api_3, $categoria_api_discord, $categoria_api_discord_2, $categoria_api_discord_3, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen, $badge2_texto, $badge2_icono, $badge2_color_fondo, $badge2_imagen, $precio_markup_pct);
     $stmt->execute();
     $juego_id = $mysqli->insert_id;
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
@@ -809,6 +844,57 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     </div>
                     <?php endif; ?>
                     <input type="file" name="edit_sticker_imagen" accept="image/*" class="form-control" style="background:#1a0a30;color:#c77dff;border:1px solid #7b2fff;">
+                </div>
+            </div>
+            <!-- BADGE INFERIOR -->
+            <?php
+            $editBadge2Symbols     = game_sticker_icon_symbols();
+            $editBadge2CurrentIcon = (string) ($juego_edit['badge2_icono'] ?? '');
+            $editBadge2IsPreset    = isset($editBadge2Symbols[$editBadge2CurrentIcon]);
+            $editBadge2PresetVal   = $editBadge2IsPreset ? $editBadge2CurrentIcon : '';
+            $editBadge2CustomVal   = $editBadge2IsPreset ? '' : $editBadge2CurrentIcon;
+            ?>
+            <div class="mb-3 p-3" style="border:1px solid #2f8fff;border-radius:8px;background:#081b30;">
+                <div class="mb-2 fw-bold" style="color:#7dc2ff;font-size:0.9rem;letter-spacing:0.04em;">BADGE INFERIOR</div>
+                <div class="row g-2 mb-2">
+                    <div class="col-sm-6">
+                        <label class="form-label" style="color:#7dc2ff;font-size:0.85rem;">Icono predefinido</label>
+                        <select name="edit_badge2_icono_select" class="form-select" style="background:#0a2140;color:#7dc2ff;border:1px solid #2f8fff;font-size:0.92rem;">
+                            <option value="">— Sin icono —</option>
+                            <?php foreach ($editBadge2Symbols as $symKey => $symEmoji): ?>
+                                <option value="<?= htmlspecialchars($symKey, ENT_QUOTES, 'UTF-8') ?>" <?= $editBadge2PresetVal === $symKey ? 'selected' : '' ?>>
+                                    <?= $symEmoji ?> <?= htmlspecialchars(ucwords(str_replace('_', ' ', $symKey)), ENT_QUOTES, 'UTF-8') ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-sm-6">
+                        <label class="form-label" style="color:#7dc2ff;font-size:0.85rem;">Emoji propio <span style="color:#8be9fd;font-weight:400;">(sobreescribe el predefinido, deja vacío para no usar emoji)</span></label>
+                        <input type="text" name="edit_badge2_icono_custom" value="<?= htmlspecialchars($editBadge2CustomVal, ENT_QUOTES, 'UTF-8') ?>" class="form-control" style="background:#0a2140;color:#7dc2ff;border:1px solid #2f8fff;" placeholder="ej: 🔥 💎 ⚡">
+                    </div>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-sm-8">
+                        <label class="form-label" style="color:#7dc2ff;font-size:0.85rem;">Texto del badge</label>
+                        <input type="text" name="edit_badge2_texto" value="<?= htmlspecialchars((string) ($juego_edit['badge2_texto'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" class="form-control" style="background:#0a2140;color:#7dc2ff;border:1px solid #2f8fff;" placeholder="Envío rápido, Exclusivo…" maxlength="80">
+                    </div>
+                    <div class="col-sm-4">
+                        <label class="form-label" style="color:#7dc2ff;font-size:0.85rem;">Color de fondo</label>
+                        <input type="color" name="edit_badge2_color_fondo" value="<?= htmlspecialchars(!empty($juego_edit['badge2_color_fondo']) ? $juego_edit['badge2_color_fondo'] : '#2f8fff', ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-color w-100" style="background:#0a2140;border:1px solid #2f8fff;height:38px;padding:2px 4px;">
+                    </div>
+                </div>
+                <div>
+                    <label class="form-label" style="color:#7dc2ff;font-size:0.85rem;">Imagen del badge <span style="color:#8be9fd;font-weight:400;">PNG/WebP con transparencia · max 2 MB</span></label>
+                    <?php if (!empty($juego_edit['badge2_imagen'])): ?>
+                    <div class="mb-2 d-flex align-items-center gap-3">
+                        <img src="/<?= htmlspecialchars(ltrim((string) $juego_edit['badge2_imagen'], '/'), ENT_QUOTES, 'UTF-8') ?>" alt="Badge actual" style="max-width:60px;max-height:60px;border:1px solid #2f8fff;border-radius:6px;background:#0a2140;object-fit:contain;">
+                        <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;color:#ff6b6b;font-size:0.85rem;">
+                            <input type="checkbox" name="remove_edit_badge2_imagen" style="accent-color:#ff6b6b;width:1rem;height:1rem;">
+                            Eliminar imagen del badge
+                        </label>
+                    </div>
+                    <?php endif; ?>
+                    <input type="file" name="edit_badge2_imagen" accept="image/*" class="form-control" style="background:#0a2140;color:#7dc2ff;border:1px solid #2f8fff;">
                 </div>
             </div>
             <?php if ($allCategories !== []): ?>
@@ -1204,6 +1290,43 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 <div>
                     <label class="form-label" style="color:#c77dff;font-size:0.85rem;">Imagen del sticker <span style="color:#8be9fd;font-weight:400;">PNG/WebP con transparencia · max 2 MB</span></label>
                     <input type="file" name="sticker_imagen" accept="image/*" class="form-control" style="background:#1a0a30;color:#c77dff;border:1px solid #7b2fff;">
+                </div>
+            </div>
+        </div>
+        <!-- BADGE INFERIOR -->
+        <div class="col-12">
+            <div class="p-3" style="border:1px solid #2f8fff;border-radius:8px;background:#081b30;">
+                <div class="mb-2 fw-bold" style="color:#7dc2ff;font-size:0.9rem;letter-spacing:0.04em;">BADGE INFERIOR</div>
+                <div class="row g-2 mb-2">
+                    <div class="col-sm-6">
+                        <label class="form-label" style="color:#7dc2ff;font-size:0.85rem;">Icono predefinido</label>
+                        <select name="badge2_icono_select" class="form-select" style="background:#0a2140;color:#7dc2ff;border:1px solid #2f8fff;font-size:0.92rem;">
+                            <option value="">— Sin icono —</option>
+                            <?php foreach (game_sticker_icon_symbols() as $symKey => $symEmoji): ?>
+                                <option value="<?= htmlspecialchars($symKey, ENT_QUOTES, 'UTF-8') ?>">
+                                    <?= $symEmoji ?> <?= htmlspecialchars(ucwords(str_replace('_', ' ', $symKey)), ENT_QUOTES, 'UTF-8') ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-sm-6">
+                        <label class="form-label" style="color:#7dc2ff;font-size:0.85rem;">Emoji propio <span style="color:#8be9fd;font-weight:400;">(sobreescribe el predefinido, deja vacío para no usar emoji)</span></label>
+                        <input type="text" name="badge2_icono_custom" class="form-control" style="background:#0a2140;color:#7dc2ff;border:1px solid #2f8fff;" placeholder="ej: 🔥 💎 ⚡">
+                    </div>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-sm-8">
+                        <label class="form-label" style="color:#7dc2ff;font-size:0.85rem;">Texto del badge</label>
+                        <input type="text" name="badge2_texto" class="form-control" style="background:#0a2140;color:#7dc2ff;border:1px solid #2f8fff;" placeholder="Envío rápido, Exclusivo…" maxlength="80">
+                    </div>
+                    <div class="col-sm-4">
+                        <label class="form-label" style="color:#7dc2ff;font-size:0.85rem;">Color de fondo</label>
+                        <input type="color" name="badge2_color_fondo" value="#2f8fff" class="form-control form-control-color w-100" style="background:#0a2140;border:1px solid #2f8fff;height:38px;padding:2px 4px;">
+                    </div>
+                </div>
+                <div>
+                    <label class="form-label" style="color:#7dc2ff;font-size:0.85rem;">Imagen del badge <span style="color:#8be9fd;font-weight:400;">PNG/WebP con transparencia · max 2 MB</span></label>
+                    <input type="file" name="badge2_imagen" accept="image/*" class="form-control" style="background:#0a2140;color:#7dc2ff;border:1px solid #2f8fff;">
                 </div>
             </div>
         </div>
