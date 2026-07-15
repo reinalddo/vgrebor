@@ -13397,8 +13397,34 @@ include __DIR__ . "/includes/header.php";
                 setPaymentAlert('', 'info');
                 if (paymentMoneyPanel) paymentMoneyPanel.classList.add('is-active');
 
-                // Render payment methods for the cart currency
-                renderPaymentMethodsByCurrency(ctx.currency || '');
+                // Render los datos del método SELECCIONADO en el catálogo.
+                // Antes siempre se mostraba el método manual de la moneda
+                // (ej. Pago Móvil) aunque el cliente hubiera elegido Binance.
+                const cartSelectedMode = normalizeCheckoutPaymentMode(
+                  ctx.paymentSelection && ctx.paymentSelection.mode ? ctx.paymentSelection.mode : 'money'
+                );
+                activePaymentOrder.paymentMode = cartSelectedMode;
+                activePaymentOrder.currency = ctx.currency || '';
+                activePaymentOrder.baseAmount = Number(ctx.cartTotal || 0);
+                if (cartSelectedMode === 'money') {
+                  renderPaymentMethodsByCurrency(ctx.currency || '');
+                } else {
+                  renderPaymentMethodDetails(null, { mode: cartSelectedMode });
+                  // El carrito captura la referencia en el formulario avanzado:
+                  // reflejar ahí el placeholder/ayuda del modo elegido.
+                  if (cartSelectedMode === 'binance_pagonorte' && paymentAdvReferenceInput) {
+                    paymentAdvReferenceInput.placeholder = binancePagonorteReferencePlaceholder();
+                    if (paymentAdvReferenceHelp) paymentAdvReferenceHelp.textContent = binancePagonorteReferenceHelpText();
+                    const advRefLabel = document.getElementById('payment-adv-reference-label');
+                    const bpDigits = Number(paymentReferenceInput && paymentReferenceInput.dataset.requiredDigits ? paymentReferenceInput.dataset.requiredDigits : 0);
+                    if (advRefLabel) {
+                      advRefLabel.textContent = bpDigits > 0
+                        ? `Número de referencia (últimos ${bpDigits} dígitos)`
+                        : 'Número de referencia del pago';
+                    }
+                    paymentAdvReferenceInput.dataset.requiredDigits = String(bpDigits > 0 ? bpDigits : 0);
+                  }
+                }
 
                 // Set the submit button to handle cart flow
                 if (paymentSubmitButton) {
