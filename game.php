@@ -8948,6 +8948,12 @@ include __DIR__ . "/includes/header.php";
     setPlayerVerificationFeedback('info', 'Verificando nombre del jugador...');
     updateButtonState();
 
+    // Consulta de pases EN PARALELO con la verificación del nombre: ambas
+    // peticiones viajan a la vez desde que el cliente escribe el ID, en vez
+    // de esperar a que la verificación termine. Si el ID resulta inválido,
+    // el reset de la verificación descarta el resultado en vuelo.
+    runBsPassStockCheck(payload.userIdentifier);
+
     try {
       const requestBody = new URLSearchParams();
       requestBody.set('game_id', "<?= (string) ($game['id'] ?? '') ?>");
@@ -8981,7 +8987,6 @@ include __DIR__ . "/includes/header.php";
           serverUnavailable: false,
         };
         setPlayerVerificationFeedback('success', String(data.message || 'Jugador encontrado.'));
-        runBsPassStockCheck(payload.userIdentifier);
         window.setTimeout(() => {
           const packSection = document.getElementById('game-packages-section');
           if (packSection) scrollViewportToElement(packSection, { duration: 560, offset: 18 });
@@ -9013,12 +9018,16 @@ include __DIR__ . "/includes/header.php";
   }
 
   // ── Stock de pases BLOOD STRIKE PASS ────────────────────────────────────
-  // Tras verificar el ID del jugador, consulta en segundo plano qué pases
-  // (categoría BLOOD STRIKE PASS de giftven) están disponibles. Los agotados
-  // se bloquean con un aviso; cualquier falla del validador = no bloquear.
+  // Se dispara en paralelo con la verificación del nombre (desde que el
+  // cliente escribe el ID) y consulta qué pases (categoría BLOOD STRIKE PASS
+  // de giftven) puede comprar ese jugador. Los ya adquiridos se ocultan;
+  // cualquier falla del validador = no ocultar nada (fail-open).
   let bsPassStockSeq = 0;
   let bsPassBlockedIds = new Set();
   let bsPassStockNote = null;
+  let bsPassCheckedPlayerId = '';
+  let bsPassCheckedAt = 0;
+  let bsPassPendingPlayerId = '';
 
   function getBsPassStockNote() {
     if (bsPassStockNote || !playerVerificationFeedback) {
@@ -9110,6 +9119,9 @@ include __DIR__ . "/includes/header.php";
 
   function clearBsPassStock() {
     bsPassStockSeq += 1;
+    bsPassCheckedPlayerId = '';
+    bsPassCheckedAt = 0;
+    bsPassPendingPlayerId = '';
     if (!bsPassStockConfig || !bsPassStockConfig.enabled) {
       return;
     }
@@ -9131,6 +9143,14 @@ include __DIR__ . "/includes/header.php";
     if (!/^[0-9]{4,20}$/.test(playerId)) {
       return;
     }
+    // Ya consultado hace menos de 60s (o en vuelo) para este mismo ID: no
+    // repetir la llamada. Pasados 60s se permite refrescar (mismo TTL que
+    // el caché del servidor), por si el jugador acaba de comprar un pase.
+    const recentlyChecked = playerId === bsPassCheckedPlayerId && (Date.now() - bsPassCheckedAt) < 60000;
+    if (recentlyChecked || playerId === bsPassPendingPlayerId) {
+      return;
+    }
+    bsPassPendingPlayerId = playerId;
 
     const requestId = ++bsPassStockSeq;
     setBsPassStockNote('info', 'Comprobando disponibilidad de pases…');
@@ -9162,6 +9182,8 @@ include __DIR__ . "/includes/header.php";
       }
 
       if (data && data.ok && data.applicable) {
+        bsPassCheckedPlayerId = playerId;
+        bsPassCheckedAt = Date.now();
         const blocked = Array.isArray(data.blocked) ? data.blocked : [];
         const deselected = applyBsPassStock(blocked);
         if (deselected) {
@@ -9179,6 +9201,9 @@ include __DIR__ . "/includes/header.php";
         setBsPassStockNote('', '');
       }
     } finally {
+      if (bsPassPendingPlayerId === playerId) {
+        bsPassPendingPlayerId = '';
+      }
       if (abortTimer) {
         window.clearTimeout(abortTimer);
       }
