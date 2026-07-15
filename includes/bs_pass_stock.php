@@ -251,7 +251,7 @@ function bs_pass_stock_game_pass_packages(mysqli $mysqli, int $gameId): array {
  *  - ['ok'=>false,'reason'=>...] si el validador falló (el frontend no bloquea nada).
  *  - ['ok'=>true,'applicable'=>true,'player_name','blocked'=>[],'available'=>[],'unmatched'=>[]]
  */
-function bs_pass_stock_check(mysqli $mysqli, int $gameId, string $playerId): array {
+function bs_pass_stock_check(mysqli $mysqli, int $gameId, string $playerId, bool $debug = false): array {
     $passPackages = bs_pass_stock_game_pass_packages($mysqli, $gameId);
     if ($passPackages === []) {
         return ['ok' => true, 'applicable' => false];
@@ -260,8 +260,9 @@ function bs_pass_stock_check(mysqli $mysqli, int $gameId, string $playerId): arr
     // Caché corto por jugador: el validador tarda 20-35s, evita repetirlo
     // si el cliente re-verifica el mismo ID enseguida. Se mantiene corto
     // (60s) para que una compra recién hecha se refleje pronto.
+    // En modo debug se ignora el caché para inspeccionar la respuesta fresca.
     $cacheKey = $gameId . '_' . $playerId;
-    if (isset($_SESSION) && is_array($_SESSION['bs_pass_stock_cache'][$cacheKey] ?? null)) {
+    if (!$debug && isset($_SESSION) && is_array($_SESSION['bs_pass_stock_cache'][$cacheKey] ?? null)) {
         $cached = $_SESSION['bs_pass_stock_cache'][$cacheKey];
         if ((time() - (int) ($cached['t'] ?? 0)) < 60 && is_array($cached['result'] ?? null)) {
             return $cached['result'];
@@ -377,6 +378,24 @@ function bs_pass_stock_check(mysqli $mysqli, int $gameId, string $playerId): arr
         'available' => $available,
         'unmatched' => $unmatched,
     ];
+
+    if ($debug) {
+        // Solo para diagnóstico (protegido por la API key en el endpoint):
+        // expone la respuesta cruda del validador y el detalle del mapeo.
+        $result['raw'] = $data;
+        $result['debug_packages'] = array_map(static function (array $pp) use ($providerIdMap, $inStockIds): array {
+            $mappedId = $providerIdMap[$pp['api_id']] ?? null;
+            return [
+                'local_id' => $pp['id'],
+                'nombre' => $pp['nombre'],
+                'giftven_id' => $pp['api_id'],
+                'giftven_name' => $pp['giftven_name'],
+                'validator_id' => $mappedId,
+                'in_response' => $mappedId !== null && isset($inStockIds[$mappedId]),
+            ];
+        }, $passPackages);
+        return $result;
+    }
 
     if (isset($_SESSION)) {
         if (!is_array($_SESSION['bs_pass_stock_cache'] ?? null)) {

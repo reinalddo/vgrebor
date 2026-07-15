@@ -33,6 +33,11 @@ if (!bs_pass_stock_is_configured()) {
 // El validador externo tarda 20-35s; ampliar el límite solo para esta petición.
 @set_time_limit(120);
 
-$result = bs_pass_stock_check($mysqli, $gameId, $playerId);
+// Modo diagnóstico: expone la respuesta cruda del validador y el detalle del
+// mapeo. Protegido: requiere presentar la misma API key configurada en admin.
+$debugKey = trim((string) ($_POST['debug_key'] ?? $_GET['debug_key'] ?? ''));
+$debug = $debugKey !== '' && hash_equals(bs_pass_stock_api_key(), $debugKey);
+
+$result = bs_pass_stock_check($mysqli, $gameId, $playerId, $debug);
 
 bs_pass_stock_json($result);
