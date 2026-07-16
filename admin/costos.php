@@ -213,6 +213,7 @@ $pkgRes = $mysqli->query(
      WHERE COALESCE(jp.activo, 1) = 1
      ORDER BY j.nombre ASC, jp.nombre ASC"
 );
+$automaticProviders = ['giftven'];
 if ($pkgRes instanceof mysqli_result) {
     while ($row = $pkgRes->fetch_assoc()) {
         $provider = costos_package_provider($row);
@@ -230,11 +231,20 @@ if ($pkgRes instanceof mysqli_result) {
             'juego_nombre' => (string) $row['juego_nombre'],
             'paquete_nombre' => (string) $row['paquete_nombre'],
             'provider' => $provider,
+            'is_auto' => in_array($provider, $automaticProviders, true),
             'costo_actual' => $currentCost,
             'historial' => $manualHistoryByPackage[$packageId] ?? [],
         ];
     }
 }
+
+$providerTabCounts = [
+    'all' => count($packages),
+    'giftven' => count(array_filter($packages, static fn (array $p): bool => $p['provider'] === 'giftven')),
+    'discord' => count(array_filter($packages, static fn (array $p): bool => $p['provider'] === 'discord')),
+    'auto' => count(array_filter($packages, static fn (array $p): bool => $p['is_auto'])),
+    'manual' => count(array_filter($packages, static fn (array $p): bool => !$p['is_auto'])),
+];
 
 $pendingGiftvenCount = 0;
 $pendingRes = $mysqli->query(
@@ -293,6 +303,13 @@ if ($pendingRes instanceof mysqli_result) {
       <h2 class="h5 text-info mb-0">Paquetes</h2>
       <input type="text" id="costos-search-input" class="form-control form-control-sm costos-search" placeholder="Buscar juego o paquete...">
     </div>
+    <div class="d-flex flex-wrap gap-2 mb-3">
+      <button type="button" class="btn btn-info fw-bold btn-sm costos-provider-tab-btn active" data-provider-tab="">Todos <span>(<?= $providerTabCounts['all'] ?>)</span></button>
+      <button type="button" class="btn btn-outline-info fw-bold btn-sm costos-provider-tab-btn" data-provider-tab="giftven">TiendaGiftVen <span>(<?= $providerTabCounts['giftven'] ?>)</span></button>
+      <button type="button" class="btn btn-outline-info fw-bold btn-sm costos-provider-tab-btn" data-provider-tab="discord">Discord <span>(<?= $providerTabCounts['discord'] ?>)</span></button>
+      <button type="button" class="btn btn-outline-info fw-bold btn-sm costos-provider-tab-btn" data-provider-tab="auto">Automáticos <span>(<?= $providerTabCounts['auto'] ?>)</span></button>
+      <button type="button" class="btn btn-outline-info fw-bold btn-sm costos-provider-tab-btn" data-provider-tab="manual">Manuales <span>(<?= $providerTabCounts['manual'] ?>)</span></button>
+    </div>
     <?php if ($packages === []): ?>
       <p class="text-secondary text-center">No hay paquetes activos registrados.</p>
     <?php else: ?>
@@ -309,7 +326,7 @@ if ($pendingRes instanceof mysqli_result) {
         </thead>
         <tbody>
           <?php foreach ($packages as $p): ?>
-          <tr class="costos-row" data-search="<?= htmlspecialchars(mb_strtolower($p['juego_nombre'] . ' ' . $p['paquete_nombre'], 'UTF-8'), ENT_QUOTES, 'UTF-8') ?>">
+          <tr class="costos-row" data-search="<?= htmlspecialchars(mb_strtolower($p['juego_nombre'] . ' ' . $p['paquete_nombre'], 'UTF-8'), ENT_QUOTES, 'UTF-8') ?>" data-provider="<?= htmlspecialchars($p['provider'], ENT_QUOTES, 'UTF-8') ?>" data-auto="<?= $p['is_auto'] ? '1' : '0' ?>">
             <td><?= htmlspecialchars($p['juego_nombre'], ENT_QUOTES, 'UTF-8') ?></td>
             <td><?= htmlspecialchars($p['paquete_nombre'], ENT_QUOTES, 'UTF-8') ?></td>
             <td>
@@ -366,19 +383,46 @@ if ($pendingRes instanceof mysqli_result) {
 <script>
 (function () {
   var searchInput = document.getElementById('costos-search-input');
-  if (searchInput) {
-    searchInput.addEventListener('input', function () {
-      var term = this.value.trim().toLowerCase();
-      document.querySelectorAll('.costos-row').forEach(function (row) {
-        var matches = row.dataset.search.indexOf(term) !== -1;
-        row.style.display = matches ? '' : 'none';
-        var historyRow = row.nextElementSibling;
-        if (historyRow && historyRow.classList.contains('costos-history-row')) {
-          if (!matches) historyRow.classList.remove('is-visible');
-          historyRow.style.display = matches && historyRow.classList.contains('is-visible') ? '' : 'none';
-        }
-      });
+  var providerTabButtons = Array.from(document.querySelectorAll('.costos-provider-tab-btn'));
+  var activeProviderTab = '';
+
+  function rowMatchesTab(row, tab) {
+    if (tab === '') return true;
+    if (tab === 'auto') return row.dataset.auto === '1';
+    if (tab === 'manual') return row.dataset.auto === '0';
+    return row.dataset.provider === tab;
+  }
+
+  function applyFilters() {
+    var term = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    document.querySelectorAll('.costos-row').forEach(function (row) {
+      var matchesSearch = row.dataset.search.indexOf(term) !== -1;
+      var matchesTab = rowMatchesTab(row, activeProviderTab);
+      var matches = matchesSearch && matchesTab;
+      row.style.display = matches ? '' : 'none';
+      var historyRow = row.nextElementSibling;
+      if (historyRow && historyRow.classList.contains('costos-history-row')) {
+        if (!matches) historyRow.classList.remove('is-visible');
+        historyRow.style.display = matches && historyRow.classList.contains('is-visible') ? '' : 'none';
+      }
     });
+  }
+
+  providerTabButtons.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      providerTabButtons.forEach(function (other) {
+        other.classList.remove('btn-info', 'active');
+        other.classList.add('btn-outline-info');
+      });
+      btn.classList.remove('btn-outline-info');
+      btn.classList.add('btn-info', 'active');
+      activeProviderTab = btn.dataset.providerTab || '';
+      applyFilters();
+    });
+  });
+
+  if (searchInput) {
+    searchInput.addEventListener('input', applyFilters);
   }
 
   document.querySelectorAll('[data-toggle-history]').forEach(function (btn) {
