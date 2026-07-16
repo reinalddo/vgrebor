@@ -1265,6 +1265,18 @@ $packageCategoriesById = [];
 foreach ($packageCategories as $pcatItem) {
     $packageCategoriesById[(int) $pcatItem['id']] = $pcatItem;
 }
+$packageCategoryTabCounts = ['otros' => 0];
+foreach ($packageCategories as $pcatItem) {
+    $packageCategoryTabCounts[(int) $pcatItem['id']] = 0;
+}
+foreach ($paquetes as $pkgRow) {
+    $pkgCatId = (int) ($pkgRow['categoria_paquete_id'] ?? 0);
+    if ($pkgCatId > 0 && isset($packageCategoryTabCounts[$pkgCatId])) {
+        $packageCategoryTabCounts[$pkgCatId]++;
+    } else {
+        $packageCategoryTabCounts['otros']++;
+    }
+}
 
 // Incluir header
 include '../includes/header.php';
@@ -1890,6 +1902,15 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
         <button type="submit" class="btn btn-outline-info btn-sm" onclick="return confirm('¿Aplicar este porcentaje al precio de todos los paquetes de este juego?')">Aplicar a todos</button>
         <div class="small" style="color:#8be9fd;">Modifica el precio de todos los paquetes del juego en el porcentaje indicado. Usa valores negativos para reducir.</div>
     </form>
+    <?php if ($packageCategories !== []): ?>
+    <div class="d-flex flex-wrap gap-2 mb-3">
+        <button type="button" class="btn btn-info fw-bold js-package-category-tab-btn active" data-package-category-tab="" onclick="window.filterAdminPackagesByCategory(''); return false;">Todos <span data-package-category-tab-count="">(<?= count($paquetes) ?>)</span></button>
+        <?php foreach ($packageCategories as $pcatTab): ?>
+        <button type="button" class="btn btn-outline-info fw-bold js-package-category-tab-btn" data-package-category-tab="<?= (int) $pcatTab['id'] ?>" onclick="window.filterAdminPackagesByCategory('<?= (int) $pcatTab['id'] ?>'); return false;"><?= $pcatTab['icono'] !== '' ? htmlspecialchars($pcatTab['icono'], ENT_QUOTES, 'UTF-8') . ' ' : '' ?><?= htmlspecialchars($pcatTab['nombre'], ENT_QUOTES, 'UTF-8') ?> <span data-package-category-tab-count="<?= (int) $pcatTab['id'] ?>">(<?= $packageCategoryTabCounts[(int) $pcatTab['id']] ?? 0 ?>)</span></button>
+        <?php endforeach; ?>
+        <button type="button" class="btn btn-outline-info fw-bold js-package-category-tab-btn" data-package-category-tab="otros" onclick="window.filterAdminPackagesByCategory('otros'); return false;">Otros <span data-package-category-tab-count="otros">(<?= $packageCategoryTabCounts['otros'] ?>)</span></button>
+    </div>
+    <?php endif; ?>
     <div class="d-flex flex-wrap gap-2 mb-3">
         <button type="button" class="btn <?= $currentPackageTab === 'active' ? 'btn-info' : 'btn-outline-info' ?> fw-bold js-package-tab-btn" data-package-tab="active" onclick="window.filterAdminPackagesByClass('activo'); return false;">Activos <span data-package-tab-count="active"><?= $activePackageCount ?></span></button>
         <button type="button" class="btn <?= $currentPackageTab === 'inactive' ? 'btn-info' : 'btn-outline-info' ?> fw-bold js-package-tab-btn" data-package-tab="inactive" onclick="window.filterAdminPackagesByClass('inactivo'); return false;">Inactivos <span data-package-tab-count="inactive"><?= $inactivePackageCount ?></span></button>
@@ -1926,7 +1947,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <?php $packageProvider = admin_package_resolve_provider($p, $juego, $discordApiEnabled); ?>
                 <?php $packageProviderReference = admin_package_provider_reference_text($packageProvider, $p, $apiProductsById); ?>
                 <?php $packageCat = $packageCategoriesById[(int) ($p['categoria_paquete_id'] ?? 0)] ?? null; ?>
-                <tr class="js-package-record js-package-filterable <?= $packageIsActive ? 'activo' : 'inactivo' ?>" data-package-context="desktop" data-package-id="<?= (int) ($p['id'] ?? 0) ?>" style="background:#181f2a; color:#fff;<?= (($currentPackageTab === 'active' && !$packageIsActive) || ($currentPackageTab === 'inactive' && $packageIsActive)) ? 'display:none;' : '' ?>">
+                <tr class="js-package-record js-package-filterable <?= $packageIsActive ? 'activo' : 'inactivo' ?>" data-package-context="desktop" data-package-id="<?= (int) ($p['id'] ?? 0) ?>" data-package-category="<?= $packageCat !== null ? (int) $packageCat['id'] : 'otros' ?>" style="background:#181f2a; color:#fff;<?= (($currentPackageTab === 'active' && !$packageIsActive) || ($currentPackageTab === 'inactive' && $packageIsActive)) ? 'display:none;' : '' ?>">
                     <td style="background:#181f2a;">
                         <?php if (!empty($p['imagen_icono'])): ?>
                             <img src="/<?= htmlspecialchars($p['imagen_icono']) ?>" alt="icono" class="rounded img-thumbnail" style="max-height:48px;max-width:48px;box-shadow:0 0 8px #22d3ee; border:2px solid #22d3ee; background:#222c3a;">
@@ -2040,7 +2061,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
             <?php $packageProvider = admin_package_resolve_provider($p, $juego, $discordApiEnabled); ?>
             <?php $packageProviderReference = admin_package_provider_reference_text($packageProvider, $p, $apiProductsById); ?>
             <?php $packageCat = $packageCategoriesById[(int) ($p['categoria_paquete_id'] ?? 0)] ?? null; ?>
-            <div class="col-12 js-package-record js-package-filterable <?= $packageIsActive ? 'activo' : 'inactivo' ?>" data-package-context="mobile" data-package-id="<?= (int) ($p['id'] ?? 0) ?>" style="<?= (($currentPackageTab === 'active' && !$packageIsActive) || ($currentPackageTab === 'inactive' && $packageIsActive)) ? 'display:none;' : '' ?>">
+            <div class="col-12 js-package-record js-package-filterable <?= $packageIsActive ? 'activo' : 'inactivo' ?>" data-package-context="mobile" data-package-id="<?= (int) ($p['id'] ?? 0) ?>" data-package-category="<?= $packageCat !== null ? (int) $packageCat['id'] : 'otros' ?>" style="<?= (($currentPackageTab === 'active' && !$packageIsActive) || ($currentPackageTab === 'inactive' && $packageIsActive)) ? 'display:none;' : '' ?>">
                 <div class="card neon-card p-3" style="background:#181f2a; border:2px solid #22d3ee; box-shadow:0 0 16px #22d3ee,0 0 4px #2dd4bf; color:#22d3ee;">
                     <div class="d-flex align-items-center mb-2">
                         <?php if (!empty($p['imagen_icono'])): ?>
@@ -2650,39 +2671,66 @@ async function submitAjaxAdminForm(form, requestData = null) {
 }
 
 window.adminPackageActiveTab = '<?= $currentPackageTab ?>';
+window.adminPackageCategoryTab = '';
 
 window.adminPackageRefreshTabCounts = function() {
     const counts = { active: 0, inactive: 0 };
+    const categoryCounts = {};
     document.querySelectorAll('.js-package-record[data-package-context="desktop"]').forEach((record) => {
         const status = record.classList.contains('inactivo') ? 'inactive' : 'active';
         counts[status] += 1;
+        const cat = record.getAttribute('data-package-category') || 'otros';
+        categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+        categoryCounts.__todos__ = (categoryCounts.__todos__ || 0) + 1;
     });
     document.querySelectorAll('[data-package-tab-count]').forEach((node) => {
         const status = node.getAttribute('data-package-tab-count') === 'inactive' ? 'inactive' : 'active';
         node.textContent = String(counts[status] || 0);
     });
+    document.querySelectorAll('[data-package-category-tab-count]').forEach((node) => {
+        const cat = node.getAttribute('data-package-category-tab-count') || '';
+        const key = cat === '' ? '__todos__' : cat;
+        node.textContent = '(' + String(categoryCounts[key] || 0) + ')';
+    });
 };
 
-window.filterAdminPackagesByClass = function(filterClass) {
-    const activeTab = filterClass === 'inactivo' ? 'inactive' : 'active';
-    window.adminPackageActiveTab = activeTab;
+window.adminPackageApplyFilters = function() {
+    const filterClass = window.adminPackageActiveTab === 'inactive' ? 'inactivo' : 'activo';
+    const categoryTab = window.adminPackageCategoryTab || '';
 
     document.querySelectorAll('.js-package-tab-btn').forEach((button) => {
-        const isCurrent = button.getAttribute('data-package-tab') === activeTab;
+        const isCurrent = button.getAttribute('data-package-tab') === window.adminPackageActiveTab;
         button.classList.toggle('btn-info', isCurrent);
         button.classList.toggle('btn-outline-info', !isCurrent);
     });
 
-    document.querySelectorAll('.js-package-filterable').forEach((record) => {
-        const matches = record.classList.contains(filterClass);
-        record.style.display = matches ? '' : 'none';
+    document.querySelectorAll('.js-package-category-tab-btn').forEach((button) => {
+        const isCurrent = (button.getAttribute('data-package-category-tab') || '') === categoryTab;
+        button.classList.toggle('btn-info', isCurrent);
+        button.classList.toggle('active', isCurrent);
+        button.classList.toggle('btn-outline-info', !isCurrent);
     });
 
+    document.querySelectorAll('.js-package-filterable').forEach((record) => {
+        const matchesActive = record.classList.contains(filterClass);
+        const matchesCategory = categoryTab === '' || (record.getAttribute('data-package-category') || 'otros') === categoryTab;
+        record.style.display = (matchesActive && matchesCategory) ? '' : 'none';
+    });
+};
+
+window.filterAdminPackagesByClass = function(filterClass) {
+    window.adminPackageActiveTab = filterClass === 'inactivo' ? 'inactive' : 'active';
+    window.adminPackageApplyFilters();
+};
+
+window.filterAdminPackagesByCategory = function(categoryTab) {
+    window.adminPackageCategoryTab = categoryTab || '';
+    window.adminPackageApplyFilters();
 };
 
 window.initAdminPackageTabs = function() {
     window.adminPackageRefreshTabCounts();
-    window.filterAdminPackagesByClass(window.adminPackageActiveTab === 'inactive' ? 'inactivo' : 'activo');
+    window.adminPackageApplyFilters();
 };
 
 if (document.readyState === 'loading') {
@@ -2806,38 +2854,66 @@ if (typeof window.submitAjaxAdminForm !== 'function') {
 
 if (typeof window.adminPackageRefreshTabCounts !== 'function') {
     window.adminPackageActiveTab = '<?= $currentPackageTab ?>';
+    window.adminPackageCategoryTab = '';
+
     window.adminPackageRefreshTabCounts = function() {
         const counts = { active: 0, inactive: 0 };
+        const categoryCounts = {};
         document.querySelectorAll('.js-package-record[data-package-context="desktop"]').forEach((record) => {
             const status = record.classList.contains('inactivo') ? 'inactive' : 'active';
             counts[status] += 1;
+            const cat = record.getAttribute('data-package-category') || 'otros';
+            categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+            categoryCounts.__todos__ = (categoryCounts.__todos__ || 0) + 1;
         });
         document.querySelectorAll('[data-package-tab-count]').forEach((node) => {
             const status = node.getAttribute('data-package-tab-count') === 'inactive' ? 'inactive' : 'active';
             node.textContent = String(counts[status] || 0);
         });
+        document.querySelectorAll('[data-package-category-tab-count]').forEach((node) => {
+            const cat = node.getAttribute('data-package-category-tab-count') || '';
+            const key = cat === '' ? '__todos__' : cat;
+            node.textContent = '(' + String(categoryCounts[key] || 0) + ')';
+        });
     };
 
-    window.filterAdminPackagesByClass = function(filterClass) {
-        const activeTab = filterClass === 'inactivo' ? 'inactive' : 'active';
-        window.adminPackageActiveTab = activeTab;
+    window.adminPackageApplyFilters = function() {
+        const filterClass = window.adminPackageActiveTab === 'inactive' ? 'inactivo' : 'activo';
+        const categoryTab = window.adminPackageCategoryTab || '';
 
         document.querySelectorAll('.js-package-tab-btn').forEach((button) => {
-            const isCurrent = button.getAttribute('data-package-tab') === activeTab;
+            const isCurrent = button.getAttribute('data-package-tab') === window.adminPackageActiveTab;
             button.classList.toggle('btn-info', isCurrent);
             button.classList.toggle('btn-outline-info', !isCurrent);
         });
 
-        document.querySelectorAll('.js-package-filterable').forEach((record) => {
-            const matches = record.classList.contains(filterClass);
-            record.style.display = matches ? '' : 'none';
+        document.querySelectorAll('.js-package-category-tab-btn').forEach((button) => {
+            const isCurrent = (button.getAttribute('data-package-category-tab') || '') === categoryTab;
+            button.classList.toggle('btn-info', isCurrent);
+            button.classList.toggle('active', isCurrent);
+            button.classList.toggle('btn-outline-info', !isCurrent);
         });
 
+        document.querySelectorAll('.js-package-filterable').forEach((record) => {
+            const matchesActive = record.classList.contains(filterClass);
+            const matchesCategory = categoryTab === '' || (record.getAttribute('data-package-category') || 'otros') === categoryTab;
+            record.style.display = (matchesActive && matchesCategory) ? '' : 'none';
+        });
+    };
+
+    window.filterAdminPackagesByClass = function(filterClass) {
+        window.adminPackageActiveTab = filterClass === 'inactivo' ? 'inactive' : 'active';
+        window.adminPackageApplyFilters();
+    };
+
+    window.filterAdminPackagesByCategory = function(categoryTab) {
+        window.adminPackageCategoryTab = categoryTab || '';
+        window.adminPackageApplyFilters();
     };
 
     window.initAdminPackageTabs = function() {
         window.adminPackageRefreshTabCounts();
-        window.filterAdminPackagesByClass(window.adminPackageActiveTab === 'inactive' ? 'inactivo' : 'activo');
+        window.adminPackageApplyFilters();
     };
 
     if (document.readyState === 'loading') {
@@ -3606,8 +3682,39 @@ window.adminPackageCategoryChange = async function(select) {
 
     try {
         const payload = await window.submitAjaxAdminForm(form, requestData);
-        select.dataset.lastValue = String(payload.categoria_paquete_id ?? newValue);
-        select.value = select.dataset.lastValue;
+        const savedCategoryId = String(payload.categoria_paquete_id ?? newValue);
+        select.dataset.lastValue = savedCategoryId;
+        select.value = savedCategoryId;
+
+        const packageIdInput = form.querySelector('input[name="paquete_id"]');
+        const packageId = packageIdInput ? String(packageIdInput.value || '') : '';
+        const categoryTab = savedCategoryId === '0' ? 'otros' : savedCategoryId;
+
+        document.querySelectorAll('.js-package-record').forEach((record) => {
+            if (String(record.getAttribute('data-package-id') || '') === packageId) {
+                record.setAttribute('data-package-category', categoryTab);
+            }
+        });
+
+        document.querySelectorAll('.js-ajax-category-select').forEach((otherSelect) => {
+            if (otherSelect === select) {
+                return;
+            }
+            const otherForm = otherSelect.form;
+            const otherPkgInput = otherForm ? otherForm.querySelector('input[name="paquete_id"]') : null;
+            const otherPkgId = otherPkgInput ? String(otherPkgInput.value || '') : '';
+            if (otherPkgId === packageId) {
+                otherSelect.dataset.lastValue = savedCategoryId;
+                otherSelect.value = savedCategoryId;
+            }
+        });
+
+        if (typeof window.filterAdminPackagesByCategory === 'function') {
+            window.filterAdminPackagesByCategory(categoryTab);
+        }
+        if (typeof window.adminPackageRefreshTabCounts === 'function') {
+            window.adminPackageRefreshTabCounts();
+        }
     } catch (error) {
         select.value = lastValue;
         window.alert(error.message);
