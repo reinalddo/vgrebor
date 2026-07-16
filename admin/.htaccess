@@ -12,6 +12,7 @@ RewriteRule ^movimientos-binance$ ../admin.php?seccion=movimientos-binance [L,QS
 RewriteRule ^monedas$ monedas.php [L,QSA]
 RewriteRule ^juegos$ juegos.php [L,QSA]
 RewriteRule ^juego-categorias$ juego_categorias.php [L,QSA]
+RewriteRule ^paquete-categorias$ paquete_categorias.php [L,QSA]
 RewriteRule ^paquetes/?([0-9]*)$ paquetes.php [L,QSA]
 RewriteRule ^pedidos$ pedidos.php [L,QSA]
 RewriteRule ^estadisticas$ estadisticas.php [L,QSA]

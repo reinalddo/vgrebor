@@ -10,6 +10,7 @@ require_once '../includes/package_features.php';
 require_once '../includes/package_account_sales.php';
 require_once '../includes/recharge_availability.php';
 require_once '../includes/win_points.php';
+require_once '../includes/package_categories.php';
 
 function admin_packages_is_ajax_request(): bool {
     if (isset($_REQUEST['ajax']) && (string) $_REQUEST['ajax'] === '1') {
@@ -642,6 +643,7 @@ ensure_juegos_api_discord_catalog_columns($mysqli);
 package_account_sales_ensure_schema($mysqli);
 package_features_ensure_schema($mysqli);
 win_points_ensure_schema();
+package_categories_ensure_schema($mysqli);
 
 $accountSaleFeatureEnabled = trim((string) store_config_get('vender_cuentas', '0')) === '1';
 
@@ -665,6 +667,9 @@ $res_juego->bind_param('i', $juego_id);
 $res_juego->execute();
 $juego = $res_juego->get_result()->fetch_assoc();
 $adminPackageMarkupPct = floatval($juego['precio_markup_pct'] ?? 0);
+$packageCategories = package_category_list($mysqli, $juego_id);
+$packageCategoryNotice = trim((string) ($_GET['package_category_notice'] ?? ''));
+$packageCategoryError = trim((string) ($_GET['package_category_error'] ?? ''));
 $freeFireApiOptions = free_fire_api_amount_options();
 $discordApiEnabled = trim((string) store_config_get('api_discord', '0')) === '1';
 $unionApisEnabled = $discordApiEnabled && trim((string) store_config_get('union_apis_discord_giftven', '0')) === '1';
@@ -968,6 +973,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_orden_paquete'
     exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_categoria_paquete'], $_POST['paquete_id'])) {
+    $packageId = intval($_POST['paquete_id']);
+    $categoryId = (int) ($_POST['categoria_paquete_id'] ?? 0);
+    if ($packageId > 0) {
+        $stmtOwner = $mysqli->prepare("SELECT id FROM juego_paquetes WHERE id = ? AND juego_id = ?");
+        $stmtOwner->bind_param('ii', $packageId, $juego_id);
+        $stmtOwner->execute();
+        $ownsPackage = $stmtOwner->get_result()->num_rows > 0;
+        $stmtOwner->close();
+        if ($ownsPackage && ($categoryId <= 0 || in_array($categoryId, array_map(static fn (array $c): int => (int) $c['id'], $packageCategories), true))) {
+            package_set_category($mysqli, $packageId, $categoryId);
+            if (admin_packages_is_ajax_request()) {
+                admin_packages_json_response(['ok' => true, 'id' => $packageId, 'categoria_paquete_id' => $categoryId]);
+            }
+        } elseif (admin_packages_is_ajax_request()) {
+            admin_packages_json_response(['ok' => false, 'message' => 'Categoría inválida para este juego.'], 422);
+        }
+    }
+    header('Location: ' . $adminPackageBaseUrl . '/' . $juego_id);
+    exit;
+}
+
 // Ajuste masivo de precios
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_price_adjust'])) {
     $rawPct = trim((string) ($_POST['bulk_price_adjust_pct'] ?? ''));
@@ -1053,6 +1080,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $edit_descuento_destacado = max(0, min(99, (int) ($_POST['edit_descuento_destacado'] ?? 0)));
     $edit_orden_gg = ($_POST['edit_orden_gg'] ?? '') !== '' ? max(0, (int) $_POST['edit_orden_gg']) : null;
     $edit_precio_manual_override = isset($_POST['edit_precio_manual_override']) ? 1 : 0;
+    $edit_categoria_paquete_id = (int) ($_POST['edit_categoria_paquete_id'] ?? 0);
     $edit_imagen_icono = admin_package_store_upload($_FILES['edit_imagen_icono'] ?? []);
     $editExistingGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['edit_existing_account_gallery_replace'] ?? []);
     $editNewGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['edit_new_account_gallery_image'] ?? []);
@@ -1081,6 +1109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     }
     $stmt->execute();
     $stmt->close();
+    package_set_category($mysqli, $edit_id, $edit_categoria_paquete_id);
     $editInfoHtml = package_info_sanitize_html((string) ($_POST['edit_info_paquete_html'] ?? ''));
     $stmtEditInfo = $mysqli->prepare("UPDATE juego_paquetes SET info_html = NULLIF(?, '') WHERE id = ?");
     if ($stmtEditInfo) {
@@ -1164,6 +1193,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $descuento_destacado = max(0, min(99, (int) ($_POST['descuento_destacado'] ?? 0)));
     $orden_gg = ($_POST['orden_gg'] ?? '') !== '' ? max(0, (int) $_POST['orden_gg']) : null;
     $precio_manual_override = isset($_POST['precio_manual_override']) ? 1 : 0;
+    $categoria_paquete_id = (int) ($_POST['categoria_paquete_id'] ?? 0);
     $orden = admin_package_next_order($mysqli, $juego_id);
     $imagen_icono = admin_package_store_upload($_FILES['imagen_icono'] ?? []);
     $newGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['new_account_gallery_image'] ?? []);
@@ -1181,6 +1211,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $stmt->execute();
     $newPackageId = (int) $mysqli->insert_id;
     $stmt->close();
+    package_set_category($mysqli, $newPackageId, $categoria_paquete_id);
     $infoHtml = package_info_sanitize_html((string) ($_POST['info_paquete_html'] ?? ''));
     $stmtInfo = $mysqli->prepare("UPDATE juego_paquetes SET info_html = NULLIF(?, '') WHERE id = ?");
     if ($stmtInfo) {
@@ -1230,12 +1261,162 @@ $packageFeatureIconOptionsHtml = admin_package_feature_icon_options_html($packag
 $activePackageCount = count(array_filter($paquetes, static fn (array $package): bool => !isset($package['activo']) || !empty($package['activo'])));
 $inactivePackageCount = count($paquetes) - $activePackageCount;
 $currentPackageTab = 'active';
+$packageCategoriesById = [];
+foreach ($packageCategories as $pcatItem) {
+    $packageCategoriesById[(int) $pcatItem['id']] = $pcatItem;
+}
 
 // Incluir header
 include '../includes/header.php';
 ?>
 <main class="container py-4">
     <h2 class="mb-4 text-neon">Paquetes de <?= htmlspecialchars($juego['nombre'] ?? 'Juego') ?></h2>
+    <?php if ($packageCategoryNotice !== ''): ?>
+        <div class="alert alert-info mb-4" style="background:#0f2a1a;color:#c8ffe0;border:1px solid #22d3ee;"><?= htmlspecialchars($packageCategoryNotice, ENT_QUOTES, 'UTF-8') ?></div>
+    <?php endif; ?>
+    <?php if ($packageCategoryError !== ''): ?>
+        <div class="alert alert-danger mb-4" style="background:#3a1520;color:#ffd6de;border:1px solid #ff5e8a;"><?= htmlspecialchars($packageCategoryError, ENT_QUOTES, 'UTF-8') ?></div>
+    <?php endif; ?>
+    <!-- ═══ GESTIÓN DE CATEGORÍAS DE PAQUETES ═══════════════════════════ -->
+    <section class="mb-5" id="pcatSection">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+            <h3 style="color:#22d3ee;margin:0;">Categorías de paquetes</h3>
+            <button type="button" id="pcatToggleCreate" class="btn btn-sm" style="background:transparent;border:1px solid #22d3ee;color:#22d3ee;padding:0.3rem 0.9rem;">+ Nueva categoría</button>
+        </div>
+        <div class="small mb-3" style="color:#8be9fd;">Si creas al menos una categoría, en la tienda los paquetes de este juego se mostrarán agrupados en pestañas (una por categoría, más "Otros" para los paquetes sin categoría). Si no creas ninguna, se muestra todo igual que ahora.</div>
+
+        <!-- Formulario crear categoría -->
+        <div id="pcatCreateForm" style="display:none;background:#182030;border:1px solid #22d3ee;border-radius:10px;padding:1rem;margin-bottom:1rem;">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4 col-sm-6">
+                    <label class="form-label" style="color:#22d3ee;font-size:0.85rem;margin-bottom:0.25rem;">Nombre *</label>
+                    <input type="text" id="pcatNombre" class="form-control form-control-sm" placeholder="ej. Diamantes" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <label class="form-label" style="color:#8be9fd;font-size:0.85rem;margin-bottom:0.25rem;">Slug <span style="opacity:.6">(auto)</span></label>
+                    <input type="text" id="pcatSlug" class="form-control form-control-sm" placeholder="diamantes" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;">
+                </div>
+                <div class="col-md-2 col-6">
+                    <label class="form-label" style="color:#22d3ee;font-size:0.85rem;margin-bottom:0.25rem;">Icono / Emoji</label>
+                    <input type="text" id="pcatIcono" class="form-control form-control-sm text-center" placeholder="💎" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;font-size:1.2rem;">
+                </div>
+                <div class="col-md-2 col-6">
+                    <label class="form-label" style="color:#22d3ee;font-size:0.85rem;margin-bottom:0.25rem;">Color</label>
+                    <input type="color" id="pcatColor" value="#22d3ee" class="form-control form-control-color form-control-sm" style="background:#222c3a;border:1px solid #22d3ee;width:100%;height:34px;">
+                </div>
+                <div class="col-md-1 col-6">
+                    <label class="form-label" style="color:#8be9fd;font-size:0.85rem;margin-bottom:0.25rem;">Orden</label>
+                    <input type="number" id="pcatOrden" value="0" min="0" class="form-control form-control-sm" style="background:#222c3a;color:#22d3ee;border:1px solid #1e3a5f;">
+                </div>
+                <div class="col-md-2 col-6">
+                    <label class="form-label" style="color:#8be9fd;font-size:0.85rem;margin-bottom:0.25rem;">Color de texto <span style="opacity:.6">(tab activo)</span></label>
+                    <input type="color" id="pcatColorTexto" value="#ffffff" class="form-control form-control-color form-control-sm" style="background:#222c3a;border:1px solid #1e3a5f;width:100%;height:34px;">
+                </div>
+            </div>
+            <div class="mt-2">
+                <label class="form-label" style="color:#22d3ee;font-size:0.82rem;margin-bottom:0.3rem;">Estilo del tab en el juego</label>
+                <div class="d-flex flex-wrap gap-3">
+                    <?php foreach (['icono' => 'Solo icono', 'texto' => 'Solo texto', 'icono_texto' => 'Icono + texto'] as $val => $lbl): ?>
+                    <label class="d-flex align-items-center gap-1" style="cursor:pointer;color:#8be9fd;font-size:0.82rem;">
+                        <input type="radio" name="pcatMostrarMenu" value="<?= $val ?>" <?= $val === 'icono_texto' ? 'checked' : '' ?> style="accent-color:#22d3ee;">
+                        <?= $lbl ?>
+                    </label>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <div class="mt-2 d-flex align-items-center gap-3 flex-wrap">
+                <div style="flex:1;min-width:200px;">
+                    <label class="form-label" style="color:#8be9fd;font-size:0.82rem;margin-bottom:0.2rem;">Imagen de categoría <span style="opacity:.6">(opcional)</span></label>
+                    <input type="file" id="pcatImagen" accept="image/*" class="form-control form-control-sm" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;">
+                </div>
+                <div id="pcatImagenPreview" style="display:none;">
+                    <img id="pcatImagenPreviewImg" style="max-height:54px;border-radius:6px;border:1px solid #1e3a5f;" alt="preview">
+                </div>
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-3 flex-wrap">
+                <button type="button" id="pcatCreateBtn" class="btn btn-sm" style="background:#22d3ee;color:#111;border:none;font-weight:600;">Crear categoría</button>
+                <button type="button" id="pcatCancelCreate" class="btn btn-sm" style="background:transparent;border:1px solid #555;color:#aaa;">Cancelar</button>
+                <span id="pcatCreateStatus" class="small" style="color:#ff5e8a;"></span>
+            </div>
+        </div>
+
+        <!-- Lista de categorías -->
+        <div id="pcatList">
+            <?php if ($packageCategories === []): ?>
+            <p class="small" style="color:#8be9fd;">Aún no hay categorías de paquetes para este juego. Crea la primera con el botón de arriba.</p>
+            <?php else: ?>
+            <?php foreach ($packageCategories as $pcat): ?>
+            <div class="pcatRow d-flex align-items-center gap-3 p-2 rounded-3 mb-2 flex-wrap" data-id="<?= (int) $pcat['id'] ?>" style="background:#182030;border:1px solid #1e3a5f;">
+                <?php if ($pcat['imagen'] !== ''): ?>
+                <img src="/<?= htmlspecialchars($pcat['imagen'], ENT_QUOTES, 'UTF-8') ?>" style="width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid #1e3a5f;flex-shrink:0;" alt="">
+                <?php endif; ?>
+                <span style="font-size:1.3em;min-width:1.5rem;text-align:center;"><?= $pcat['icono'] !== '' ? htmlspecialchars($pcat['icono'], ENT_QUOTES, 'UTF-8') : '📁' ?></span>
+                <span style="width:12px;height:12px;border-radius:50%;background:<?= htmlspecialchars($pcat['color'] ?: '#22d3ee', ENT_QUOTES, 'UTF-8') ?>;display:inline-block;flex-shrink:0;"></span>
+                <strong style="color:#22d3ee;flex:1;min-width:100px;"><?= htmlspecialchars($pcat['nombre'], ENT_QUOTES, 'UTF-8') ?></strong>
+                <code style="color:#8be9fd;font-size:0.8rem;opacity:.8;"><?= htmlspecialchars($pcat['slug'], ENT_QUOTES, 'UTF-8') ?></code>
+                <span class="small" style="color:#8be9fd;"><?= package_category_packages_count($mysqli, (int) $pcat['id']) ?> paquete(s)</span>
+                <div class="d-flex gap-2 ms-auto flex-shrink-0">
+                    <button type="button" class="btn btn-sm pcatEditBtn" data-id="<?= (int) $pcat['id'] ?>" style="border:1px solid #22d3ee;color:#22d3ee;background:transparent;padding:0.1rem 0.55rem;font-size:0.82rem;">Editar</button>
+                    <button type="button" class="btn btn-sm pcatDeleteBtn" data-id="<?= (int) $pcat['id'] ?>" data-nombre="<?= htmlspecialchars($pcat['nombre'], ENT_QUOTES, 'UTF-8') ?>" style="border:1px solid #ff5e8a;color:#ff5e8a;background:transparent;padding:0.1rem 0.55rem;font-size:0.82rem;">Eliminar</button>
+                </div>
+            </div>
+            <div class="pcatEditRow" id="pcatEdit_<?= (int) $pcat['id'] ?>" style="display:none;background:#182030;border:1px solid #22d3ee;border-radius:10px;padding:0.75rem;margin-bottom:0.5rem;">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-4 col-sm-6">
+                        <label class="form-label" style="color:#22d3ee;font-size:0.8rem;margin-bottom:0.2rem;">Nombre *</label>
+                        <input type="text" class="form-control form-control-sm pcatEditNombre" value="<?= htmlspecialchars($pcat['nombre'], ENT_QUOTES, 'UTF-8') ?>" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <label class="form-label" style="color:#8be9fd;font-size:0.8rem;margin-bottom:0.2rem;">Slug</label>
+                        <input type="text" class="form-control form-control-sm pcatEditSlug" value="<?= htmlspecialchars($pcat['slug'], ENT_QUOTES, 'UTF-8') ?>" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;">
+                    </div>
+                    <div class="col-md-2 col-6">
+                        <label class="form-label" style="color:#22d3ee;font-size:0.8rem;margin-bottom:0.2rem;">Icono</label>
+                        <input type="text" class="form-control form-control-sm pcatEditIcono text-center" value="<?= htmlspecialchars($pcat['icono'], ENT_QUOTES, 'UTF-8') ?>" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;font-size:1.1rem;">
+                    </div>
+                    <div class="col-md-2 col-6">
+                        <label class="form-label" style="color:#22d3ee;font-size:0.8rem;margin-bottom:0.2rem;">Color</label>
+                        <input type="color" class="form-control form-control-color form-control-sm pcatEditColor" value="<?= htmlspecialchars($pcat['color'] ?: '#22d3ee', ENT_QUOTES, 'UTF-8') ?>" style="background:#222c3a;border:1px solid #22d3ee;width:100%;height:32px;">
+                    </div>
+                    <div class="col-md-1 col-6">
+                        <label class="form-label" style="color:#8be9fd;font-size:0.8rem;margin-bottom:0.2rem;">Orden</label>
+                        <input type="number" class="form-control form-control-sm pcatEditOrden" value="<?= (int) $pcat['orden'] ?>" min="0" style="background:#222c3a;color:#22d3ee;border:1px solid #1e3a5f;">
+                    </div>
+                    <div class="col-md-2 col-6">
+                        <label class="form-label" style="color:#8be9fd;font-size:0.8rem;margin-bottom:0.2rem;">Color de texto <span style="opacity:.6">(tab activo)</span></label>
+                        <input type="color" class="form-control form-control-color form-control-sm pcatEditColorTexto" value="<?= htmlspecialchars($pcat['color_texto'] ?: '#ffffff', ENT_QUOTES, 'UTF-8') ?>" style="background:#222c3a;border:1px solid #1e3a5f;width:100%;height:32px;">
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <label class="form-label" style="color:#22d3ee;font-size:0.78rem;margin-bottom:0.25rem;">Estilo del tab en el juego</label>
+                    <div class="d-flex flex-wrap gap-3">
+                        <?php foreach (['icono' => 'Solo icono', 'texto' => 'Solo texto', 'icono_texto' => 'Icono + texto'] as $mval => $mlbl): ?>
+                        <label class="d-flex align-items-center gap-1" style="cursor:pointer;color:#8be9fd;font-size:0.78rem;">
+                            <input type="radio" class="pcatEditMostrarMenu" name="pcatEditMostrarMenu_<?= (int) $pcat['id'] ?>" value="<?= $mval ?>" <?= ($pcat['mostrar_menu'] ?? 'icono_texto') === $mval ? 'checked' : '' ?> style="accent-color:#22d3ee;">
+                            <?= $mlbl ?>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
+                    <?php if ($pcat['imagen'] !== ''): ?>
+                    <img src="/<?= htmlspecialchars($pcat['imagen'], ENT_QUOTES, 'UTF-8') ?>" class="pcatCurrentImgThumb" style="max-height:40px;border-radius:5px;border:1px solid #1e3a5f;" alt="">
+                    <button type="button" class="btn btn-sm pcatRemoveImgBtn" style="border:1px solid #ff5e8a;color:#ff5e8a;background:transparent;font-size:0.78rem;padding:0.1rem 0.5rem;">✕ Quitar imagen</button>
+                    <?php endif; ?>
+                    <input type="hidden" class="pcatEditRemoveImagen" value="0">
+                    <input type="file" class="pcatEditImagen form-control form-control-sm" accept="image/*" style="background:#222c3a;color:#8be9fd;border:1px solid #1e3a5f;max-width:260px;">
+                </div>
+                <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                    <button type="button" class="btn btn-sm pcatSaveEditBtn" data-id="<?= (int) $pcat['id'] ?>" style="background:#22d3ee;color:#111;border:none;font-weight:600;">Guardar</button>
+                    <button type="button" class="btn btn-sm pcatCancelEditBtn" data-id="<?= (int) $pcat['id'] ?>" style="border:1px solid #555;color:#aaa;background:transparent;">Cancelar</button>
+                    <span class="pcatEditStatus small" style="color:#ff5e8a;"></span>
+                </div>
+            </div>
+            <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </section>
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
     <?php if ($hasDiscordCatalog): ?>
         <div class="rounded-4 p-3 mb-4" style="background:#101826;border:1px solid rgba(34,211,238,0.18);">
             <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
@@ -1550,6 +1731,18 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
             </div>
         </div>
         <div class="col-12">
+            <label class="form-label text-neon">Categoría de paquete</label>
+            <select name="categoria_paquete_id" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                <option value="0">Sin categoría (irá en "Otros")</option>
+                <?php foreach ($packageCategories as $pcat): ?>
+                <option value="<?= (int) $pcat['id'] ?>"><?= htmlspecialchars(($pcat['icono'] !== '' ? $pcat['icono'] . ' ' : '') . $pcat['nombre'], ENT_QUOTES, 'UTF-8') ?></option>
+                <?php endforeach; ?>
+            </select>
+            <?php if ($packageCategories === []): ?>
+            <div class="form-text mt-2" style="color:#8be9fd;">Crea categorías en la sección «Categorías de paquetes» para poder asignarlas.</div>
+            <?php endif; ?>
+        </div>
+        <div class="col-12">
             <div class="form-check mt-2">
                 <input type="checkbox" name="activo" class="form-check-input" id="paqueteActivoCheck" checked>
                 <label class="form-check-label text-neon" for="paqueteActivoCheck">Paquete activo / publicado</label>
@@ -1732,6 +1925,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <?php $packageIsActive = !isset($p['activo']) || !empty($p['activo']); ?>
                 <?php $packageProvider = admin_package_resolve_provider($p, $juego, $discordApiEnabled); ?>
                 <?php $packageProviderReference = admin_package_provider_reference_text($packageProvider, $p, $apiProductsById); ?>
+                <?php $packageCat = $packageCategoriesById[(int) ($p['categoria_paquete_id'] ?? 0)] ?? null; ?>
                 <tr class="js-package-record js-package-filterable <?= $packageIsActive ? 'activo' : 'inactivo' ?>" data-package-context="desktop" data-package-id="<?= (int) ($p['id'] ?? 0) ?>" style="background:#181f2a; color:#fff;<?= (($currentPackageTab === 'active' && !$packageIsActive) || ($currentPackageTab === 'inactive' && $packageIsActive)) ? 'display:none;' : '' ?>">
                     <td style="background:#181f2a;">
                         <?php if (!empty($p['imagen_icono'])): ?>
@@ -1744,6 +1938,19 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                     </td>
                     <td class="fw-semibold text-neon" style="background:#181f2a; color:#22d3ee;">
                         <div><?= htmlspecialchars($p['nombre']) ?></div>
+                        <?php if ($packageCategories !== []): ?>
+                            <form method="post" action="<?= htmlspecialchars($adminPackageBaseUrl, ENT_QUOTES, 'UTF-8') ?>/<?= $juego_id ?>" class="mt-2 m-0 js-ajax-category-form">
+                                <input type="hidden" name="ajax" value="1">
+                                <input type="hidden" name="update_categoria_paquete" value="1">
+                                <input type="hidden" name="paquete_id" value="<?= (int) $p['id'] ?>">
+                                <select name="categoria_paquete_id" class="form-select form-select-sm js-ajax-category-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;font-size:0.8rem;max-width:200px;" data-last-value="<?= $packageCat !== null ? (int) $packageCat['id'] : 0 ?>" onchange="window.adminPackageCategoryChange(this)">
+                                    <option value="0"<?= $packageCat === null ? ' selected' : '' ?>>Sin categoría</option>
+                                    <?php foreach ($packageCategories as $pcatOpt): ?>
+                                    <option value="<?= (int) $pcatOpt['id'] ?>"<?= ($packageCat !== null && (int) $packageCat['id'] === (int) $pcatOpt['id']) ? ' selected' : '' ?>><?= htmlspecialchars(($pcatOpt['icono'] !== '' ? $pcatOpt['icono'] . ' ' : '') . $pcatOpt['nombre'], ENT_QUOTES, 'UTF-8') ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </form>
+                        <?php endif; ?>
                         <?php if ($packageSourceSelectionEnabled): ?>
                             <div class="small mt-2"><span style="display:inline-flex;align-items:center;gap:0.35rem;padding:0.2rem 0.55rem;border-radius:999px;border:1px solid rgba(34,211,238,0.35);background:rgba(15,23,42,0.92);color:#d8fbff;font-weight:700;letter-spacing:0.03em;"><?= htmlspecialchars(admin_package_provider_label($packageProvider), ENT_QUOTES, 'UTF-8') ?></span></div>
                         <?php endif; ?>
@@ -1832,6 +2039,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
             <?php $packageIsActive = !isset($p['activo']) || !empty($p['activo']); ?>
             <?php $packageProvider = admin_package_resolve_provider($p, $juego, $discordApiEnabled); ?>
             <?php $packageProviderReference = admin_package_provider_reference_text($packageProvider, $p, $apiProductsById); ?>
+            <?php $packageCat = $packageCategoriesById[(int) ($p['categoria_paquete_id'] ?? 0)] ?? null; ?>
             <div class="col-12 js-package-record js-package-filterable <?= $packageIsActive ? 'activo' : 'inactivo' ?>" data-package-context="mobile" data-package-id="<?= (int) ($p['id'] ?? 0) ?>" style="<?= (($currentPackageTab === 'active' && !$packageIsActive) || ($currentPackageTab === 'inactive' && $packageIsActive)) ? 'display:none;' : '' ?>">
                 <div class="card neon-card p-3" style="background:#181f2a; border:2px solid #22d3ee; box-shadow:0 0 16px #22d3ee,0 0 4px #2dd4bf; color:#22d3ee;">
                     <div class="d-flex align-items-center mb-2">
@@ -1844,6 +2052,19 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                         <?php endif; ?>
                         <div>
                             <div class="fw-bold text-neon" style="font-size:1.1rem; color:#22d3ee;"><?= htmlspecialchars($p['nombre']) ?></div>
+                            <?php if ($packageCategories !== []): ?>
+                                <form method="post" action="<?= htmlspecialchars($adminPackageBaseUrl, ENT_QUOTES, 'UTF-8') ?>/<?= $juego_id ?>" class="mt-2 m-0 js-ajax-category-form">
+                                    <input type="hidden" name="ajax" value="1">
+                                    <input type="hidden" name="update_categoria_paquete" value="1">
+                                    <input type="hidden" name="paquete_id" value="<?= (int) $p['id'] ?>">
+                                    <select name="categoria_paquete_id" class="form-select form-select-sm js-ajax-category-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;font-size:0.8rem;max-width:220px;" data-last-value="<?= $packageCat !== null ? (int) $packageCat['id'] : 0 ?>" onchange="window.adminPackageCategoryChange(this)">
+                                        <option value="0"<?= $packageCat === null ? ' selected' : '' ?>>Sin categoría</option>
+                                        <?php foreach ($packageCategories as $pcatOpt): ?>
+                                        <option value="<?= (int) $pcatOpt['id'] ?>"<?= ($packageCat !== null && (int) $packageCat['id'] === (int) $pcatOpt['id']) ? ' selected' : '' ?>><?= htmlspecialchars(($pcatOpt['icono'] !== '' ? $pcatOpt['icono'] . ' ' : '') . $pcatOpt['nombre'], ENT_QUOTES, 'UTF-8') ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </form>
+                            <?php endif; ?>
                             <?php if ($packageSourceSelectionEnabled): ?>
                                 <div class="small mt-1" style="color:#b2f6ff;">Origen: <?= htmlspecialchars(admin_package_provider_label($packageProvider), ENT_QUOTES, 'UTF-8') ?></div>
                             <?php endif; ?>
@@ -2151,6 +2372,18 @@ if (isset($_GET['editar'])) {
         <div class="mb-3">
             <label class="form-label text-neon"><?= htmlspecialchars($winPointsName, ENT_QUOTES, 'UTF-8') ?> a ganar</label>
             <input type="number" min="0" name="edit_win_points_reward" value="<?= (int) ($paq_edit['win_points_reward'] ?? 0) ?>" class="form-control" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+        </div>
+        <div class="mb-3">
+            <label class="form-label text-neon">Categoría de paquete</label>
+            <select name="edit_categoria_paquete_id" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                <option value="0">Sin categoría (irá en "Otros")</option>
+                <?php foreach ($packageCategories as $pcat): ?>
+                <option value="<?= (int) $pcat['id'] ?>" <?= (int) ($paq_edit['categoria_paquete_id'] ?? 0) === (int) $pcat['id'] ? 'selected' : '' ?>><?= htmlspecialchars(($pcat['icono'] !== '' ? $pcat['icono'] . ' ' : '') . $pcat['nombre'], ENT_QUOTES, 'UTF-8') ?></option>
+                <?php endforeach; ?>
+            </select>
+            <?php if ($packageCategories === []): ?>
+            <div class="form-text mt-2" style="color:#8be9fd;">Crea categorías en la sección «Categorías de paquetes» para poder asignarlas.</div>
+            <?php endif; ?>
         </div>
         <div class="form-check mb-2">
             <input type="checkbox" name="edit_activo" class="form-check-input" id="editPaqueteActivoCheck" <?= !isset($paq_edit['activo']) || !empty($paq_edit['activo']) ? 'checked' : '' ?>>
@@ -3356,6 +3589,33 @@ window.adminPackageOrderChange = async function(input) {
     }
 };
 
+window.adminPackageCategoryChange = async function(select) {
+    if (!select || !select.form) {
+        return;
+    }
+
+    const form = select.form;
+    const lastValue = String(select.dataset.lastValue || '0');
+    const newValue = String(select.value || '0');
+    if (newValue === lastValue) {
+        return;
+    }
+
+    const requestData = new FormData(form);
+    select.disabled = true;
+
+    try {
+        const payload = await window.submitAjaxAdminForm(form, requestData);
+        select.dataset.lastValue = String(payload.categoria_paquete_id ?? newValue);
+        select.value = select.dataset.lastValue;
+    } catch (error) {
+        select.value = lastValue;
+        window.alert(error.message);
+    } finally {
+        select.disabled = false;
+    }
+};
+
 /* ── Editor visual de "Información del paquete" (ícono i) ─────────────── */
 (function () {
     document.querySelectorAll('[data-pkg-info-editor]').forEach((editor) => {
@@ -3398,6 +3658,171 @@ window.adminPackageOrderChange = async function(input) {
         if (form) {
             form.addEventListener('submit', sync);
         }
+    });
+}());
+
+// ═══ CATEGORÍAS DE PAQUETES ══════════════════════════════════════════════
+(function () {
+    const PCATS_URL = '<?= htmlspecialchars(app_path('/admin/paquete-categorias'), ENT_QUOTES, 'UTF-8') ?>';
+    const CURRENT_JUEGO_ID = <?= (int) $juego_id ?>;
+
+    async function pcatsFetch(action, data) {
+        const fd = new FormData();
+        fd.append('action', action);
+        if (data) {
+            for (const [k, v] of Object.entries(data)) {
+                if (v == null) continue;
+                if (v instanceof File) {
+                    fd.append(k, v);
+                } else {
+                    fd.append(k, String(v));
+                }
+            }
+        }
+        const resp = await fetch(PCATS_URL, {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: fd
+        });
+        const json = await resp.json().catch(() => null);
+        if (!resp.ok || !json || !json.ok) {
+            throw new Error((json && json.message) ? json.message : 'Error de red');
+        }
+        return json;
+    }
+
+    document.getElementById('pcatToggleCreate')?.addEventListener('click', () => {
+        const f = document.getElementById('pcatCreateForm');
+        if (f) f.style.display = f.style.display === 'none' ? '' : 'none';
+    });
+    document.getElementById('pcatCancelCreate')?.addEventListener('click', () => {
+        const f = document.getElementById('pcatCreateForm');
+        if (f) f.style.display = 'none';
+    });
+    document.getElementById('pcatCreateBtn')?.addEventListener('click', async () => {
+        const status = document.getElementById('pcatCreateStatus');
+        const btn = document.getElementById('pcatCreateBtn');
+        if (status) status.textContent = '';
+        btn.disabled = true;
+        try {
+            await pcatsFetch('create', {
+                juego_id:     CURRENT_JUEGO_ID,
+                nombre:       document.getElementById('pcatNombre')?.value ?? '',
+                slug:         document.getElementById('pcatSlug')?.value ?? '',
+                icono:        document.getElementById('pcatIcono')?.value ?? '',
+                color:        document.getElementById('pcatColor')?.value ?? '#22d3ee',
+                color_texto:  document.getElementById('pcatColorTexto')?.value ?? '#ffffff',
+                orden:        document.getElementById('pcatOrden')?.value ?? '0',
+                activa:       '1',
+                imagen:       document.getElementById('pcatImagen')?.files?.[0] ?? null,
+                mostrar_menu: document.querySelector('input[name="pcatMostrarMenu"]:checked')?.value ?? 'icono_texto',
+            });
+            window.location.reload();
+        } catch (e) {
+            if (status) { status.textContent = e.message; }
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    document.querySelectorAll('.pcatEditBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            const row = btn.closest('.pcatRow');
+            const editRow = document.getElementById('pcatEdit_' + id);
+            if (row) row.style.display = 'none';
+            if (editRow) editRow.style.display = '';
+        });
+    });
+
+    document.querySelectorAll('.pcatCancelEditBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            const row = document.querySelector('.pcatRow[data-id="' + id + '"]');
+            const editRow = document.getElementById('pcatEdit_' + id);
+            if (editRow) editRow.style.display = 'none';
+            if (row) row.style.display = '';
+        });
+    });
+
+    document.querySelectorAll('.pcatSaveEditBtn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const id = btn.dataset.id;
+            const editRow = document.getElementById('pcatEdit_' + id);
+            const status = editRow?.querySelector('.pcatEditStatus');
+            if (status) status.textContent = '';
+            btn.disabled = true;
+            try {
+                await pcatsFetch('update', {
+                    id,
+                    nombre:        editRow?.querySelector('.pcatEditNombre')?.value ?? '',
+                    slug:          editRow?.querySelector('.pcatEditSlug')?.value ?? '',
+                    icono:         editRow?.querySelector('.pcatEditIcono')?.value ?? '',
+                    color:         editRow?.querySelector('.pcatEditColor')?.value ?? '#22d3ee',
+                    color_texto:   editRow?.querySelector('.pcatEditColorTexto')?.value ?? '#ffffff',
+                    orden:         editRow?.querySelector('.pcatEditOrden')?.value ?? '0',
+                    imagen:        editRow?.querySelector('.pcatEditImagen')?.files?.[0] ?? null,
+                    remove_imagen: editRow?.querySelector('.pcatEditRemoveImagen')?.value ?? '0',
+                    mostrar_menu:  editRow?.querySelector('.pcatEditMostrarMenu:checked')?.value ?? 'icono_texto',
+                });
+                window.location.reload();
+            } catch (e) {
+                if (status) status.textContent = e.message;
+                btn.disabled = false;
+            }
+        });
+    });
+
+    document.querySelectorAll('.pcatDeleteBtn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!window.confirm('¿Eliminar la categoría "' + (btn.dataset.nombre || '') + '"?')) return;
+            btn.disabled = true;
+            try {
+                await pcatsFetch('delete', { id: btn.dataset.id });
+                window.location.reload();
+            } catch (e) {
+                window.alert(e.message);
+                btn.disabled = false;
+            }
+        });
+    });
+
+    document.getElementById('pcatImagen')?.addEventListener('change', function () {
+        const preview    = document.getElementById('pcatImagenPreview');
+        const previewImg = document.getElementById('pcatImagenPreviewImg');
+        if (this.files?.[0] && preview && previewImg) {
+            previewImg.src = URL.createObjectURL(this.files[0]);
+            preview.style.display = '';
+        } else if (preview) {
+            preview.style.display = 'none';
+        }
+    });
+
+    document.querySelectorAll('.pcatEditImagen').forEach(input => {
+        input.addEventListener('change', function () {
+            if (!this.files?.[0]) return;
+            const editRow = this.closest('.pcatEditRow');
+            if (!editRow) return;
+            let thumb = editRow.querySelector('.pcatCurrentImgThumb');
+            if (!thumb) {
+                thumb = document.createElement('img');
+                thumb.className = 'pcatCurrentImgThumb';
+                thumb.style.cssText = 'max-height:40px;border-radius:5px;border:1px solid #1e3a5f;';
+                this.parentElement.insertBefore(thumb, this);
+            }
+            thumb.src = URL.createObjectURL(this.files[0]);
+        });
+    });
+
+    document.querySelectorAll('.pcatRemoveImgBtn').forEach(btn => {
+        btn.addEventListener('click', function () {
+            const editRow = this.closest('.pcatEditRow');
+            if (!editRow) return;
+            editRow.querySelector('.pcatEditRemoveImagen').value = '1';
+            const thumb = editRow.querySelector('.pcatCurrentImgThumb');
+            if (thumb) thumb.remove();
+            this.remove();
+        });
     });
 }());
 </script>

@@ -17,6 +17,7 @@ require_once __DIR__ . "/includes/binance_pay.php";
 require_once __DIR__ . "/includes/paypal_pay.php";
 require_once __DIR__ . "/includes/package_account_sales.php";
 require_once __DIR__ . "/includes/bs_pass_stock.php";
+require_once __DIR__ . "/includes/package_categories.php";
 currency_ensure_schema();
 if (trim((string) store_config_get('binance_pagonorte_activo', '0')) === '1') {
   currency_ensure_code('USDT', 'Tether USD', 1.0, true, true);
@@ -483,6 +484,50 @@ include __DIR__ . "/includes/header.php";
   <?php $gameMarkupPct = floatval($game['precio_markup_pct'] ?? 0); ?>
   <?php $priceSyncQueue = []; ?>
   <?php $bsPassStockPackageIds = []; ?>
+  <?php
+    // ── Categorías de paquetes: si el juego tiene alguna, los paquetes se
+    // agrupan en tabs (una por categoría + "Otros" para los que no tienen).
+    // Si no hay ninguna categoría creada, todo se comporta igual que antes.
+    $gamePackageCategories = package_categories_for_game($mysqli, (int) $game['id'], true);
+    $packageCategoriesActive = !empty($gamePackageCategories);
+    $validPackageCategoryIds = array_map(static fn (array $c): int => (int) $c['id'], $gamePackageCategories);
+    $hasUncategorizedPackages = false;
+    if ($packageCategoriesActive) {
+      foreach ($paquetes as $pack) {
+        $packCatIdCheck = (int) ($pack['categoria_paquete_id'] ?? 0);
+        if ($packCatIdCheck <= 0 || !in_array($packCatIdCheck, $validPackageCategoryIds, true)) {
+          $hasUncategorizedPackages = true;
+          break;
+        }
+      }
+    }
+  ?>
+  <?php if ($packageCategoriesActive): ?>
+  <div class="pack-category-tabs" id="pack-category-tabs" role="tablist">
+    <?php foreach ($gamePackageCategories as $pcatIdx => $pcat): ?>
+      <?php $pcatShowIcon = in_array($pcat['mostrar_menu'], ['icono', 'icono_texto'], true) && $pcat['icono'] !== ''; ?>
+      <?php $pcatShowText = in_array($pcat['mostrar_menu'], ['texto', 'icono_texto'], true) || !$pcatShowIcon; ?>
+      <?php
+        $pcatStyleVars = '';
+        if ($pcat['color'] !== '') {
+          $pcatStyleVars .= '--pack-cat-color:' . htmlspecialchars($pcat['color'], ENT_QUOTES, 'UTF-8') . ';';
+        }
+        if ($pcat['color_texto'] !== '') {
+          $pcatStyleVars .= '--pack-cat-text:' . htmlspecialchars($pcat['color_texto'], ENT_QUOTES, 'UTF-8') . ';';
+        }
+      ?>
+      <button type="button" class="pack-category-tab-btn<?= $pcatIdx === 0 ? ' active' : '' ?>" data-category-tab="<?= (int) $pcat['id'] ?>" role="tab" aria-selected="<?= $pcatIdx === 0 ? 'true' : 'false' ?>"<?= $pcatStyleVars !== '' ? ' style="' . $pcatStyleVars . '"' : '' ?>>
+        <?php if ($pcatShowIcon): ?><span class="pack-category-tab-icon"><?= htmlspecialchars($pcat['icono'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+        <?php if ($pcatShowText): ?><span class="pack-category-tab-label"><?= htmlspecialchars($pcat['nombre'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+      </button>
+    <?php endforeach; ?>
+    <?php if ($hasUncategorizedPackages): ?>
+      <button type="button" class="pack-category-tab-btn" data-category-tab="otros" role="tab" aria-selected="false">
+        <span class="pack-category-tab-label">Otros</span>
+      </button>
+    <?php endif; ?>
+  </div>
+  <?php endif; ?>
   <div class="row row-cols-2 row-cols-md-3 row-cols-lg-4 g-2 g-sm-3 mb-4" id="pack-grid">
     <?php foreach ($paquetes as $pack):
         $packApiId = (int) ($pack['paquete_api'] ?? 0);
@@ -553,8 +598,15 @@ include __DIR__ . "/includes/header.php";
         }
         $img_paquete = !empty($pack['imagen_icono']) ? $pack['imagen_icono'] : (!empty($game['imagen_paquete']) ? $game['imagen_paquete'] : null);
         $packImageUrl = package_feature_public_asset_url($img_paquete);
+        $packCategoryTabId = 'otros';
+        if ($packageCategoriesActive) {
+          $packCatIdForTab = (int) ($pack['categoria_paquete_id'] ?? 0);
+          if ($packCatIdForTab > 0 && in_array($packCatIdForTab, $validPackageCategoryIds, true)) {
+            $packCategoryTabId = (string) $packCatIdForTab;
+          }
+        }
     ?>
-      <div class="col">
+      <div class="col" data-package-category="<?= htmlspecialchars($packCategoryTabId, ENT_QUOTES, 'UTF-8') ?>">
         <article class="pack-card card border-info bg-dark text-start w-100 h-100 shadow-sm"
           data-package-id="<?= $packId ?>"
           data-package-provider="<?= htmlspecialchars($packApiProvider, ENT_QUOTES, 'UTF-8') ?>"
@@ -4725,6 +4777,47 @@ include __DIR__ . "/includes/header.php";
     max-width: 250px;
     padding: 0;
     margin-top: 0;
+  }
+  .pack-category-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 2.1rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.2rem;
+  }
+  .pack-category-tab-btn {
+    --pack-cat-color: rgb(var(--theme-button-primary-rgb));
+    --pack-cat-text: var(--theme-bg-main, #fff);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+    padding: 0.45rem 1.05rem;
+    border-radius: 999px;
+    border: 1px solid rgba(var(--theme-button-primary-rgb), 0.32);
+    background: rgba(var(--theme-button-surface-rgb), 0.6);
+    color: var(--theme-text-muted);
+    font-weight: 600;
+    font-size: 0.88rem;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: background 0.22s ease, color 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+  }
+  .pack-category-tab-btn:hover {
+    border-color: var(--pack-cat-color);
+    color: var(--theme-text);
+  }
+  .pack-category-tab-btn.active {
+    background: var(--pack-cat-color);
+    border-color: var(--pack-cat-color);
+    color: var(--pack-cat-text);
+    box-shadow: 0 0 16px var(--pack-cat-color);
+  }
+  .pack-category-tab-icon {
+    font-size: 1.05em;
+    line-height: 1;
   }
   #pack-grid .pack-card-media {
     height: 116px; /* 250px × 704/1511 */
@@ -9057,6 +9150,17 @@ include __DIR__ . "/includes/header.php";
     note.textContent = message;
   }
 
+  // Visibilidad combinada de cada columna del grid: puede estar oculta por el
+  // tab de categoría activo y/o por el bloqueo de stock BS Pass. Ambas señales
+  // se guardan por separado en dataset para que ninguna se pise a la otra al
+  // escribir la clase d-none.
+  function updateColumnVisibility(column) {
+    if (!column) return;
+    const tabHidden = column.dataset.tabHidden === '1';
+    const bsHidden = column.dataset.bsHidden === '1';
+    column.classList.toggle('d-none', tabHidden || bsHidden);
+  }
+
   // El validador indica compras previas del jugador: los pases que ya
   // adquirió en el ciclo/evento actual se OCULTAN por completo de la grilla
   // y reaparecen cuando el validador vuelva a listarlos como disponibles.
@@ -9067,7 +9171,8 @@ include __DIR__ . "/includes/header.php";
     card.classList.add('bs-pass-blocked');
     card.setAttribute('aria-disabled', 'true');
     const column = card.closest('.col') || card;
-    column.classList.add('d-none');
+    column.dataset.bsHidden = '1';
+    updateColumnVisibility(column);
   }
 
   function unblockPackCardForStock(card) {
@@ -9077,7 +9182,8 @@ include __DIR__ . "/includes/header.php";
     card.classList.remove('bs-pass-blocked');
     card.removeAttribute('aria-disabled');
     const column = card.closest('.col') || card;
-    column.classList.remove('d-none');
+    column.dataset.bsHidden = '0';
+    updateColumnVisibility(column);
   }
 
   function deselectBlockedActivePack() {
@@ -9207,6 +9313,57 @@ include __DIR__ . "/includes/header.php";
       if (abortTimer) {
         window.clearTimeout(abortTimer);
       }
+    }
+  }
+
+  // ── Tabs de categorías de paquetes ───────────────────────────────────────
+  // Si el juego tiene categorías de paquetes creadas, los paquetes se agrupan
+  // en tabs (una por categoría + "Otros" para los que no tienen). Solo puede
+  // haber paquetes seleccionados de UN tab a la vez: cambiar de tab reinicia
+  // por completo la selección/carrito actual.
+  function applyPackCategoryTab(tabId) {
+    packCards2.forEach((card) => {
+      const column = card.closest('.col') || card;
+      const cardTab = column.dataset.packageCategory || 'otros';
+      column.dataset.tabHidden = (cardTab === tabId) ? '0' : '1';
+      updateColumnVisibility(column);
+    });
+  }
+
+  function resetSelectionForPackCategoryTabSwitch() {
+    const multiCartCheckEl = document.getElementById('multi-cart-check');
+    if (multiCartCheckEl) {
+      // Reutiliza el reset completo del modo carrito (vacía cartItems, quita
+      // neon-selected, oculta resúmenes, etc.) sin duplicar esa lógica aquí.
+      multiCartCheckEl.dispatchEvent(new Event('change'));
+      return;
+    }
+    cartItems = [];
+    activePack = null;
+    packCards2.forEach((card) => card.classList.remove('neon-selected'));
+    updateButtonState();
+  }
+
+  const packCategoryTabsBar = document.getElementById('pack-category-tabs');
+  if (packCategoryTabsBar) {
+    const packCategoryTabButtons = Array.from(packCategoryTabsBar.querySelectorAll('.pack-category-tab-btn'));
+    packCategoryTabButtons.forEach((tabBtn) => {
+      tabBtn.addEventListener('click', () => {
+        if (tabBtn.classList.contains('active')) {
+          return;
+        }
+        packCategoryTabButtons.forEach((otherBtn) => {
+          otherBtn.classList.remove('active');
+          otherBtn.setAttribute('aria-selected', 'false');
+        });
+        tabBtn.classList.add('active');
+        tabBtn.setAttribute('aria-selected', 'true');
+        applyPackCategoryTab(tabBtn.dataset.categoryTab || 'otros');
+        resetSelectionForPackCategoryTabSwitch();
+      });
+    });
+    if (packCategoryTabButtons.length) {
+      applyPackCategoryTab(packCategoryTabButtons[0].dataset.categoryTab || 'otros');
     }
   }
 
