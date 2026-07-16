@@ -25,7 +25,7 @@ $baseUrl = app_path('/admin/estadisticas');
 
 // ── Pestaña activa ────────────────────────────────────────────────────────
 $activeTab = trim((string) ($_GET['tab'] ?? 'resumen'));
-$allowedTabs = ['resumen', 'productos', 'detalle'];
+$allowedTabs = ['resumen', 'productos', 'detalle', 'ganancia'];
 if (!in_array($activeTab, $allowedTabs, true)) {
     $activeTab = 'resumen';
 }
@@ -241,6 +241,61 @@ $topProductsJson = json_encode(array_map(static function (array $p) use ($select
     return ['label' => $label, 'unidades' => $p['unidades']];
 }, $topProducts), JSON_UNESCAPED_UNICODE);
 
+// ── Ganancia (venta - costo, siempre en USD/base) ────────────────────────
+// Solo cuenta pedidos con costo capturado; los que no tienen quedan fuera
+// y se informan como "sin costo registrado" para transparencia.
+$profitDailySeries = [];
+$profitTotal = 0.0;
+$ordersWithCost = 0;
+$ordersWithoutCost = 0;
+$stmtProfitTotals = $mysqli->prepare(
+    "SELECT COUNT(*) AS total,
+            SUM(CASE WHEN costo_unitario_base IS NOT NULL THEN 1 ELSE 0 END) AS con_costo,
+            SUM(CASE WHEN costo_unitario_base IS NOT NULL THEN (precio_venta_unitario_base - costo_unitario_base) * cantidad_compra ELSE 0 END) AS ganancia
+     FROM pedidos
+     WHERE estado IN ('enviado','pagado') AND creado_en BETWEEN ? AND ?"
+);
+if ($stmtProfitTotals) {
+    $stmtProfitTotals->bind_param('ss', $rangeStartSql, $rangeEndSql);
+    $stmtProfitTotals->execute();
+    $profitTotalsRow = $stmtProfitTotals->get_result()->fetch_assoc();
+    $stmtProfitTotals->close();
+    if ($profitTotalsRow) {
+        $totalOrdersForProfit = (int) ($profitTotalsRow['total'] ?? 0);
+        $ordersWithCost = (int) ($profitTotalsRow['con_costo'] ?? 0);
+        $ordersWithoutCost = max(0, $totalOrdersForProfit - $ordersWithCost);
+        $profitTotal = (float) ($profitTotalsRow['ganancia'] ?? 0);
+    }
+}
+
+$stmtProfitDaily = $mysqli->prepare(
+    "SELECT DATE(creado_en) AS dia, SUM((precio_venta_unitario_base - costo_unitario_base) * cantidad_compra) AS ganancia
+     FROM pedidos
+     WHERE estado IN ('enviado','pagado') AND costo_unitario_base IS NOT NULL AND creado_en BETWEEN ? AND ?
+     GROUP BY DATE(creado_en)
+     ORDER BY dia ASC"
+);
+if ($stmtProfitDaily) {
+    $stmtProfitDaily->bind_param('ss', $rangeStartSql, $rangeEndSql);
+    $stmtProfitDaily->execute();
+    $resProfitDaily = $stmtProfitDaily->get_result();
+    $profitByDate = [];
+    while ($row = $resProfitDaily->fetch_assoc()) {
+        $profitByDate[$row['dia']] = (float) $row['ganancia'];
+    }
+    $stmtProfitDaily->close();
+
+    $cursorProfit = $dateFrom;
+    $guardProfit = 0;
+    while ($cursorProfit <= $dateTo && $guardProfit < 400) {
+        $key = $cursorProfit->format('Y-m-d');
+        $profitDailySeries[] = ['fecha' => $key, 'ganancia' => $profitByDate[$key] ?? 0.0];
+        $cursorProfit = $cursorProfit->modify('+1 day');
+        $guardProfit++;
+    }
+}
+$profitDailySeriesJson = json_encode($profitDailySeries, JSON_UNESCAPED_UNICODE);
+
 $presetLabels = ['hoy' => 'Hoy', 'semana' => 'Últimos 7 días', 'mes' => 'Este mes', 'personalizado' => 'Personalizado'];
 
 $clearGameParams = $_GET;
@@ -315,6 +370,7 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
     <button type="button" class="stats-tab-btn <?= $activeTab === 'resumen' ? 'is-active' : '' ?>" data-tab="resumen">📊 Resumen</button>
     <button type="button" class="stats-tab-btn <?= $activeTab === 'productos' ? 'is-active' : '' ?>" data-tab="productos">🏆 Productos más vendidos</button>
     <button type="button" class="stats-tab-btn <?= $activeTab === 'detalle' ? 'is-active' : '' ?>" data-tab="detalle">📋 Detalle por producto</button>
+    <button type="button" class="stats-tab-btn <?= $activeTab === 'ganancia' ? 'is-active' : '' ?>" data-tab="ganancia">💰 Ganancia</button>
   </div>
 
   <!-- ── Resumen ─────────────────────────────────────────────────────── -->
@@ -447,6 +503,48 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
     </div>
     <?php endif; ?>
   </section>
+
+  <!-- ── Ganancia ─────────────────────────────────────────────────────── -->
+  <section class="stats-panel <?= $activeTab === 'ganancia' ? 'is-active' : '' ?>" data-panel="ganancia">
+    <h2 class="h5 text-info mb-3 text-center">Ganancia (USD) <small class="text-secondary"><?= htmlspecialchars($dateFromStr, ENT_QUOTES, 'UTF-8') ?> — <?= htmlspecialchars($dateToStr, ENT_QUOTES, 'UTF-8') ?></small></h2>
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-4">
+        <div class="stat-card text-center">
+          <div class="stat-value">$<?= stats_format_money($profitTotal) ?></div>
+          <div class="stat-label">Ganancia total</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4">
+        <div class="stat-card text-center">
+          <div class="stat-value"><?= $ordersWithCost ?></div>
+          <div class="stat-label">Pedidos con costo registrado</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4">
+        <div class="stat-card text-center">
+          <div class="stat-value" style="color:<?= $ordersWithoutCost > 0 ? '#facc15' : '#00ffb3' ?>;"><?= $ordersWithoutCost ?></div>
+          <div class="stat-label">Pedidos sin costo (no cuentan)</div>
+        </div>
+      </div>
+    </div>
+    <?php if ($ordersWithoutCost > 0): ?>
+      <p class="text-center small mb-4" style="color:#facc15;">Hay <?= $ordersWithoutCost ?> pedido(s) en este rango sin costo registrado — no se incluyen en la ganancia. Revisa <a href="<?= htmlspecialchars(app_path('/admin/costos'), ENT_QUOTES, 'UTF-8') ?>" style="color:#00fff7;">Registrar Costos</a> para completarlos.</p>
+    <?php endif; ?>
+
+    <?php if ($profitDailySeries !== []): ?>
+    <div class="chart-card">
+      <div class="chart-card-header">
+        <h3 class="chart-card-title">Ganancia por fecha</h3>
+        <div class="d-flex gap-1" data-chart-toggle="profit-by-date-chart">
+          <button type="button" class="chart-toggle-btn is-active" data-type="line">Línea</button>
+          <button type="button" class="chart-toggle-btn" data-type="bar">Barras</button>
+          <button type="button" class="chart-toggle-btn" data-type="pie">Torta</button>
+        </div>
+      </div>
+      <div class="chart-canvas-wrap"><canvas id="profit-by-date-chart"></canvas></div>
+    </div>
+    <?php endif; ?>
+  </section>
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -454,6 +552,7 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
 (function () {
   var dailySeries = <?= $dailySeriesJson ?: '[]' ?>;
   var topProducts = <?= $topProductsJson ?: '[]' ?>;
+  var profitDailySeries = <?= $profitDailySeriesJson ?: '[]' ?>;
 
   // ── Pestañas ──────────────────────────────────────────────────────────
   var tabButtons = Array.from(document.querySelectorAll('.stats-tab-btn'));
@@ -563,6 +662,25 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
     return { type: 'bar', data: { labels: labels, datasets: [{ label: 'Unidades', data: data, backgroundColor: '#00ffb3', hoverBackgroundColor: '#00fff7', borderRadius: 8, maxBarThickness: 46 }] } };
   }
 
+  function buildProfitDataset(type) {
+    var labels = profitDailySeries.map(function (d) { return d.fecha.slice(5); });
+    var data = profitDailySeries.map(function (d) { return d.ganancia; });
+    if (type === 'pie') {
+      return {
+        type: 'doughnut',
+        data: { labels: labels, datasets: [{ data: data, backgroundColor: labels.map(function (_, i) { return themeColor(i); }), borderColor: '#181f2a', borderWidth: 2 }] },
+        options: { cutout: '58%' }
+      };
+    }
+    if (type === 'bar') {
+      return { type: 'bar', data: { labels: labels, datasets: [{ label: 'Ganancia', data: data, backgroundColor: '#facc15', hoverBackgroundColor: '#00ffb3', borderRadius: 8, maxBarThickness: 46 }] } };
+    }
+    return {
+      type: 'line',
+      data: { labels: labels, datasets: [{ label: 'Ganancia', data: data, borderColor: '#facc15', backgroundColor: 'rgba(250,204,21,0.18)', borderWidth: 2.5, fill: true, tension: 0.35, pointRadius: 3, pointBackgroundColor: '#facc15', pointBorderColor: '#0f1a28', pointBorderWidth: 1.5, pointHoverRadius: 6 }] }
+    };
+  }
+
   function makeSwitchableChart(canvasId, builder, defaultType) {
     var canvas = document.getElementById(canvasId);
     if (!canvas) return;
@@ -597,6 +715,7 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
 
   makeSwitchableChart('sales-by-date-chart', buildDailyDataset, 'line');
   makeSwitchableChart('top-products-chart', buildProductsDataset, 'bar');
+  makeSwitchableChart('profit-by-date-chart', buildProfitDataset, 'line');
 })();
 </script>
 

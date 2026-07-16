@@ -319,6 +319,79 @@ function ensure_juego_paquetes_api_source_key_column(mysqli $mysqli): void {
     }
 }
 
+// Costo/ganancia: columnas snapshot por pedido, capturadas al momento de la compra.
+function ensure_pedidos_costo_columns(mysqli $mysqli): void {
+    $columns = [
+        'costo_unitario_base' => "ALTER TABLE pedidos ADD COLUMN costo_unitario_base DECIMAL(12,4) NULL AFTER precio_sin_drop",
+        'precio_venta_unitario_base' => "ALTER TABLE pedidos ADD COLUMN precio_venta_unitario_base DECIMAL(12,4) NULL AFTER costo_unitario_base",
+        'costo_fuente' => "ALTER TABLE pedidos ADD COLUMN costo_fuente VARCHAR(20) NULL AFTER precio_venta_unitario_base",
+    ];
+    foreach ($columns as $col => $sql) {
+        $result = $mysqli->query("SHOW COLUMNS FROM pedidos LIKE '$col'");
+        if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+            $mysqli->query($sql);
+        }
+    }
+}
+
+// Historial de costos manuales (Discord / precio manual / Free Fire legado): cada registro
+// nuevo es una fila nueva, nunca se sobreescribe, así queda memoria de cuándo cambió el costo.
+function ensure_costos_manuales_table(mysqli $mysqli): void {
+    $mysqli->query("CREATE TABLE IF NOT EXISTS costos_manuales (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        juego_id INT NOT NULL,
+        paquete_id INT NOT NULL,
+        costo_base DECIMAL(12,4) NOT NULL,
+        registrado_por INT NULL,
+        vigente_desde TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_paquete_vigencia (paquete_id, vigente_desde)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+function costos_manuales_get_current(mysqli $mysqli, int $packageId): ?float {
+    if ($packageId <= 0) {
+        return null;
+    }
+    $stmt = $mysqli->prepare('SELECT costo_base FROM costos_manuales WHERE paquete_id = ? ORDER BY vigente_desde DESC, id DESC LIMIT 1');
+    if (!$stmt) {
+        return null;
+    }
+    $stmt->bind_param('i', $packageId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $row ? (float) $row['costo_base'] : null;
+}
+
+/**
+ * Resuelve costo unitario (base/USD) y su fuente para una venta en curso.
+ * Giftven: costo real desde la API (fail-open: null si la API falla, nunca bloquea la compra).
+ * Discord/manual/free_fire: último costo registrado manualmente para ese paquete, si existe.
+ * Devuelve [costo_unitario_base|null, costo_fuente|null].
+ */
+function resolve_order_unit_cost_base(mysqli $mysqli, int $packageId, int $paqueteApiId, string $provider, ?array $catalogProduct = null): array {
+    if ($provider === 'giftven') {
+        if ($catalogProduct === null && $paqueteApiId > 0) {
+            try {
+                $catalogProduct = recargas_api_fetch_product_by_id($paqueteApiId);
+            } catch (Throwable $e) {
+                $catalogProduct = null;
+            }
+        }
+        if ($catalogProduct !== null && isset($catalogProduct['precio'])) {
+            return [(float) $catalogProduct['precio'], 'giftven_api'];
+        }
+        return [null, null];
+    }
+
+    $manualCost = costos_manuales_get_current($mysqli, $packageId);
+    if ($manualCost !== null) {
+        return [$manualCost, 'manual'];
+    }
+    return [null, null];
+}
+
 function ensure_movimientos_table(mysqli $mysqli): void {
     $create = "CREATE TABLE IF NOT EXISTS movimientos (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -7931,6 +8004,16 @@ try {
     error_log('TVG ensure_juego_paquetes_api_source_key_column skipped: ' . $e->getMessage());
 }
 try {
+    ensure_pedidos_costo_columns($mysqli);
+} catch (Throwable $e) {
+    error_log('TVG ensure_pedidos_costo_columns skipped: ' . $e->getMessage());
+}
+try {
+    ensure_costos_manuales_table($mysqli);
+} catch (Throwable $e) {
+    error_log('TVG ensure_costos_manuales_table skipped: ' . $e->getMessage());
+}
+try {
     influencer_coupon_ensure_sales_table_mysqli($mysqli);
 } catch (Throwable $e) {
     error_log('TVG influencer_coupon_ensure_sales_table_mysqli skipped: ' . $e->getMessage());
@@ -8122,6 +8205,12 @@ if ($action === 'create') {
         }
     }
 
+    // Costo/ganancia: snapshot del costo unitario (base/USD) vigente al momento de esta compra.
+    $precioVentaUnitarioBase = (float) ($selectedPackage['precio'] ?? 0);
+    [$costoUnitarioBase, $costoFuente] = $selectedPackageIsAccountSale
+        ? [null, null]
+        : resolve_order_unit_cost_base($mysqli, $package_id, (int) ($paquete_api ?? 0), $packageApiProvider, $catalogProduct);
+
     if (!$selectedPackageIsAccountSale && $usesDiscordApi && $discordCheckoutRequiredFields !== []) {
         $discordMissingFields = [];
         foreach ($discordCheckoutRequiredFields as $fieldConfig) {
@@ -8291,6 +8380,9 @@ if ($action === 'create') {
             'descuento_drop_monto' => round($dropSavings, 2),
             'diferencia_pago_credito_aplicado' => $paymentDifferenceCreditApplied,
             'diferencia_pago_credito_origen_pedido_id' => $paymentDifferenceCreditSourceOrderId > 0 ? $paymentDifferenceCreditSourceOrderId : null,
+            'costo_unitario_base' => $costoUnitarioBase,
+            'precio_venta_unitario_base' => $precioVentaUnitarioBase,
+            'costo_fuente' => $costoFuente,
             'user_identifier' => $user_identifier,
             'player_fields_json' => $player_fields_json,
             'email' => $email,
@@ -11369,6 +11461,12 @@ if ($action === 'batch_create_and_pay') {
             $qty = 1;
         }
 
+        // Costo/ganancia: snapshot del costo unitario (base/USD) vigente al momento de esta compra.
+        $itemPrecioVentaBase = (float) ($pkg['precio'] ?? 0);
+        [$itemCostoUnitarioBase, $itemCostoFuente] = $batchItemIsAccountSale
+            ? [null, null]
+            : resolve_order_unit_cost_base($mysqli, $pkgId, (int) ($paqueteApi ?? 0), $pkgProvider);
+
         $winPointsAward = 0;
         if ($payMode !== 'points' && win_points_enabled() && $clienteUsuarioId !== null && $clienteUsuarioId > 0) {
             $winPointsAward = win_points_package_reward($pkg) * $qty;
@@ -11398,6 +11496,9 @@ if ($action === 'batch_create_and_pay') {
                 'precio_sin_drop'                    => $itemPrice,
                 'descuento_drop_porcentaje'          => 0,
                 'descuento_drop_monto'               => 0,
+                'costo_unitario_base'                => $itemCostoUnitarioBase,
+                'precio_venta_unitario_base'          => $itemPrecioVentaBase,
+                'costo_fuente'                        => $itemCostoFuente,
                 'user_identifier'                    => $userIdRaw,
                 'player_fields_json'                 => $playerFieldsJson,
                 'email'                              => $email,

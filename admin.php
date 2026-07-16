@@ -3852,6 +3852,7 @@ require_once __DIR__ . '/includes/header.php';
                 <a href="/admin/juegos" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🎮</span>Juegos</a>
                 <a href="/admin/monedas" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>💵</span>Monedas</a>
                 <a href="/admin/estadisticas" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>📈</span>Estadísticas</a>
+                <a href="/admin/costos" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>💰</span>Registrar Costos</a>
                 <?php if (trim((string) store_config_get('win_points', '0')) === '1'): ?>
                 <a href="/admin/win-points" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🏆</span>Win Points</a>
                 <?php endif; ?>
