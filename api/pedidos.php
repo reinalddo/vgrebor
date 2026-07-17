@@ -5635,6 +5635,22 @@ function continue_provider_follow_up_in_background(mysqli $mysqli, int $orderId,
     }
 }
 
+/**
+ * Nombres de campo bajo los que TiendaGiftVen (u otros proveedores) puede esperar
+ * el identificador principal del jugador. El proveedor cambia esto sin previo aviso
+ * (ej. de "user_id" a "id_juego" al migrar de pines a recargas directas), así que en
+ * vez de adivinar cuál usa, se envía el mismo valor bajo todos: el proveedor lee el
+ * que necesite e ignora el resto.
+ */
+function catalog_purchase_player_id_aliases(): array {
+    return ['id_juego', 'player_id', 'playerid', 'user_id', 'userid', 'uid', 'id', 'usuario', 'id_jugador', 'id_usuario', 'game_id', 'input1'];
+}
+
+/** Igual que catalog_purchase_player_id_aliases() pero para el campo secundario (zona/servidor), cuando el paquete lo requiere. */
+function catalog_purchase_secondary_id_aliases(): array {
+    return ['zone_id', 'zoneid', 'zona', 'zone', 'server_id', 'serverid', 'input2'];
+}
+
 function execute_catalog_api_purchase_once(int $productId, ?string $userIdentifier, array $playerFields = []): array {
     if ($productId <= 0) {
         throw new RuntimeException('El paquete seleccionado no tiene un producto API configurado.');
@@ -5673,10 +5689,38 @@ function execute_catalog_api_purchase_once(int $productId, ?string $userIdentifi
         $payload[$fieldName] = $fieldValue;
     }
 
-    $playerIdPayloadKeys = ['id_juego', 'player_id', 'playerid', 'user_id', 'userid', 'uid', 'input1'];
-    $payloadHasPlayerId = !empty(array_intersect_key($payload, array_flip($playerIdPayloadKeys)));
-    if (!$payloadHasPlayerId && trim((string) $userIdentifier) !== '') {
-        $payload['id_juego'] = trim((string) $userIdentifier);
+    // El identificador del jugador se envía bajo TODOS los alias conocidos (no solo
+    // el nombre que declara hoy el catálogo remoto): así, si el proveedor cambia de
+    // sistema y renombra el campo (como ya ocurrió con Free Fire), la compra sigue
+    // funcionando sin depender de que actualicemos el mapeo cada vez.
+    $primaryPlayerId = trim((string) $userIdentifier);
+    if ($primaryPlayerId === '') {
+        foreach (catalog_purchase_player_id_aliases() as $aliasKey) {
+            $aliasValue = trim((string) ($normalizedFields[$aliasKey] ?? ''));
+            if ($aliasValue !== '') {
+                $primaryPlayerId = $aliasValue;
+                break;
+            }
+        }
+    }
+    if ($primaryPlayerId !== '') {
+        foreach (catalog_purchase_player_id_aliases() as $aliasKey) {
+            $payload[$aliasKey] = $primaryPlayerId;
+        }
+    }
+
+    $secondaryFieldValue = '';
+    foreach (catalog_purchase_secondary_id_aliases() as $aliasKey) {
+        $aliasValue = trim((string) ($normalizedFields[$aliasKey] ?? ''));
+        if ($aliasValue !== '') {
+            $secondaryFieldValue = $aliasValue;
+            break;
+        }
+    }
+    if ($secondaryFieldValue !== '') {
+        foreach (catalog_purchase_secondary_id_aliases() as $aliasKey) {
+            $payload[$aliasKey] = $secondaryFieldValue;
+        }
     }
 
     try {
@@ -10117,7 +10161,7 @@ if ($action === 'discord_catalog_listener') {
 
 if ($action === 'admin_update_discord_status') {
     $adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
-    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado'], true)) {
+    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado', 'root'], true)) {
         json_error('No autorizado', 403);
     }
 
@@ -10227,7 +10271,7 @@ if ($action === 'order_status') {
 
 if ($action === 'sync_provider_status') {
     $adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
-    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado'], true)) {
+    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado', 'root'], true)) {
         json_error('No autorizado', 403);
     }
 
@@ -10365,7 +10409,7 @@ if ($action === 'sync_provider_status') {
 
 if ($action === 'admin_retry_recharge') {
     $adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
-    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado'], true)) {
+    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado', 'root'], true)) {
         json_error('No autorizado', 403);
     }
 
@@ -10457,7 +10501,11 @@ if ($action === 'admin_retry_recharge') {
         // disparen dos despachos al proveedor en paralelo para el mismo pedido.
         // Cada desenlace de abajo (éxito, seguimiento, sin stock o error) libera
         // esta reserva sobrescribiendo recargas_api_estado con el resultado real.
-        $retryClaimStmt = $mysqli->prepare("UPDATE pedidos SET recargas_api_estado = 'admin_retry_in_progress' WHERE id = ? AND estado = 'pagado' AND (recargas_api_pedido_id IS NULL OR recargas_api_pedido_id = '') AND COALESCE(recargas_api_estado, '') <> 'admin_retry_in_progress'");
+        // Si un intento anterior murió a mitad de camino (timeout, error fatal) sin
+        // liberar la reserva, esta expira sola a los 150s (más que el timeout de
+        // compra + reintentos de seguimiento) para que un próximo clic no quede
+        // bloqueado para siempre.
+        $retryClaimStmt = $mysqli->prepare("UPDATE pedidos SET recargas_api_estado = 'admin_retry_in_progress', recargas_api_ultimo_check = NOW() WHERE id = ? AND estado = 'pagado' AND (recargas_api_pedido_id IS NULL OR recargas_api_pedido_id = '') AND (COALESCE(recargas_api_estado, '') <> 'admin_retry_in_progress' OR recargas_api_ultimo_check IS NULL OR recargas_api_ultimo_check < (NOW() - INTERVAL 150 SECOND))");
         if (!$retryClaimStmt) {
             json_error('No se pudo reservar el pedido para el reenvío.', 500);
         }
@@ -10735,7 +10783,7 @@ if ($action === 'admin_retry_recharge') {
 
 if ($action === 'provider_recent_orders') {
     $adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
-    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado'], true)) {
+    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado', 'root'], true)) {
         json_error('No autorizado', 403);
     }
 
@@ -10750,7 +10798,7 @@ if ($action === 'provider_recent_orders') {
 
 if ($action === 'provider_transactions') {
     $adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
-    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado'], true)) {
+    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado', 'root'], true)) {
         json_error('No autorizado', 403);
     }
 
@@ -10765,7 +10813,7 @@ if ($action === 'provider_transactions') {
 
 if ($action === 'provider_get_webhook') {
     $adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
-    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado'], true)) {
+    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado', 'root'], true)) {
         json_error('No autorizado', 403);
     }
 
@@ -10780,7 +10828,7 @@ if ($action === 'provider_get_webhook') {
 
 if ($action === 'provider_register_webhook') {
     $adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
-    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado'], true)) {
+    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado', 'root'], true)) {
         json_error('No autorizado', 403);
     }
 
@@ -11026,7 +11074,7 @@ if ($action === 'binance_notify') {
 
 if ($action === 'update_status') {
     $adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
-    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado'], true)) {
+    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado', 'root'], true)) {
         json_error('No autorizado', 403);
     }
     $order_id = intval($_POST['order_id'] ?? 0);
@@ -11249,12 +11297,11 @@ if ($action === 'batch_create_and_pay') {
                 json_error('Debes ingresar al menos ' . $batchRefDigits . ' dígitos en el número de referencia.');
             }
 
-            $batchRefConflict = find_reference_reuse_conflict($mysqli, $refNumber, $batchRefDigits, 0, $totalBlindado);
-            if ($batchRefConflict !== null) {
-                json_error(reference_reuse_conflict_message($batchRefConflict), 409);
-            }
-
-            // Idempotencia: si ya existe un batch pagado hoy con la misma referencia+monto, devolver sus IDs
+            // Idempotencia PRIMERO: si el cliente reintenta con la misma referencia+monto
+            // porque su conexión se cayó justo después de que el pago se verificó (la API
+            // bancaria puede tardar), esto debe devolver el pedido ya creado en vez de
+            // chocar contra el chequeo de "referencia ya usada" de más abajo (que de otro
+            // modo confundiría el propio pedido recién creado con un reuso ilegítimo).
             $iExistingBatchId = null;
             if ($batchRefDigits > 0) {
                 $iSuffix = substr($refNumber, -$batchRefDigits);
@@ -11313,6 +11360,11 @@ if ($action === 'batch_create_and_pay') {
                 if (!empty($iExistingOrderIds)) {
                     json_response(['ok' => true, 'message' => 'Pedidos del carrito creados.', 'batch_id' => $iExistingBatchId, 'order_ids' => $iExistingOrderIds, 'batch_size' => count($iExistingOrderIds), 'idempotent' => true]);
                 }
+            }
+
+            $batchRefConflict = find_reference_reuse_conflict($mysqli, $refNumber, $batchRefDigits, 0, $totalBlindado);
+            if ($batchRefConflict !== null) {
+                json_error(reference_reuse_conflict_message($batchRefConflict), 409);
             }
 
             $isAdminBatch = isset($_SESSION['auth_user']) && in_array(trim(strtolower((string) ($_SESSION['auth_user']['rol'] ?? ''))), ['admin', 'root'], true);
