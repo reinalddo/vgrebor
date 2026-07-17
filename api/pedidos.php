@@ -5036,10 +5036,30 @@ function provider_is_sequential_list(array $value): bool {
     return true;
 }
 
+/**
+ * Nombres de clave reconocidos para el código/PIN/serial entregado por el proveedor.
+ * Se amplía deliberadamente (no solo "pin"/"serial") porque el proveedor ya ha
+ * renombrado estos campos sin aviso al cambiar de sistema (ej. Roblox empezó a
+ * entregar también un "serial" junto al PIN, con nombres de clave variables).
+ */
+function provider_delivered_code_keys(): array {
+    return ['codigo', 'pin', 'codigo_pin', 'pin_code', 'serial', 'numero_serial', 'serial_number', 'sn', 'codigo_serial', 'voucher', 'code', 'clave'];
+}
+
+/** Rol conocido de una clave (para poder anteponer "PIN:"/"Serial:" cuando el proveedor entrega ambos). */
+function provider_delivered_code_role_for_key(string $key): string {
+    $normalized = strtolower(trim($key));
+    return match ($normalized) {
+        'pin', 'codigo_pin', 'pin_code' => 'PIN',
+        'serial', 'numero_serial', 'serial_number', 'sn', 'codigo_serial' => 'Serial',
+        default => '',
+    };
+}
+
 function provider_stringify_delivered_code_value($value): array {
     if (is_array($value)) {
         $codes = [];
-        foreach (['codigo', 'pin', 'serial', 'voucher', 'code', 'clave'] as $preferredKey) {
+        foreach (provider_delivered_code_keys() as $preferredKey) {
             if (!array_key_exists($preferredKey, $value)) {
                 continue;
             }
@@ -5090,7 +5110,7 @@ function provider_stringify_delivered_code_value($value): array {
 function provider_extract_delivered_codes(array $detail): array {
     $codes = [];
 
-    foreach (['codigos', 'codigos_entregados', 'codigo_entregado', 'codigo', 'pin', 'serial', 'voucher'] as $key) {
+    foreach (['codigos', 'codigos_entregados', 'codigo_entregado', ...provider_delivered_code_keys()] as $key) {
         if (!array_key_exists($key, $detail)) {
             continue;
         }
@@ -5103,8 +5123,107 @@ function provider_extract_delivered_codes(array $detail): array {
     return array_keys($codes);
 }
 
+/**
+ * Igual que provider_stringify_delivered_code_value(), pero conserva el rol
+ * (PIN/Serial/genérico) de cada valor encontrado, como pares [valor => rol].
+ */
+function provider_stringify_delivered_code_value_with_role($value, string $roleHint = ''): array {
+    if (is_array($value)) {
+        $codes = [];
+        foreach (provider_delivered_code_keys() as $preferredKey) {
+            if (!array_key_exists($preferredKey, $value)) {
+                continue;
+            }
+
+            foreach (provider_stringify_delivered_code_value_with_role($value[$preferredKey], provider_delivered_code_role_for_key($preferredKey)) as $candidateValue => $candidateRole) {
+                $codes[$candidateValue] = $candidateRole;
+            }
+        }
+
+        if (!empty($codes)) {
+            return $codes;
+        }
+
+        if (!provider_is_sequential_list($value)) {
+            $parts = [];
+            foreach ($value as $key => $item) {
+                if (is_array($item)) {
+                    continue;
+                }
+
+                $normalizedItem = trim((string) $item);
+                if ($normalizedItem === '') {
+                    continue;
+                }
+
+                $label = trim((string) $key);
+                $parts[] = $label !== '' ? $label . ': ' . $normalizedItem : $normalizedItem;
+            }
+
+            if (!empty($parts)) {
+                return [implode(' | ', $parts) => $roleHint];
+            }
+        }
+
+        foreach ($value as $item) {
+            foreach (provider_stringify_delivered_code_value_with_role($item, $roleHint) as $candidateValue => $candidateRole) {
+                $codes[$candidateValue] = $candidateRole;
+            }
+        }
+
+        return $codes;
+    }
+
+    $normalized = trim((string) $value);
+    return $normalized !== '' ? [$normalized => $roleHint] : [];
+}
+
+/** Como provider_extract_delivered_codes() pero devuelve pares [valor => rol ('PIN'|'Serial'|'')]. */
+function provider_extract_delivered_codes_with_roles(array $detail): array {
+    $codes = [];
+
+    foreach (['codigos', 'codigos_entregados', 'codigo_entregado', ...provider_delivered_code_keys()] as $key) {
+        if (!array_key_exists($key, $detail)) {
+            continue;
+        }
+
+        $roleHint = provider_delivered_code_role_for_key($key);
+        foreach (provider_stringify_delivered_code_value_with_role($detail[$key], $roleHint) as $candidateValue => $candidateRole) {
+            $codes[$candidateValue] = $candidateRole;
+        }
+    }
+
+    return $codes;
+}
+
 function provider_delivered_code_text(array $detail): string {
-    return implode("\n", provider_extract_delivered_codes($detail));
+    $codesWithRoles = provider_extract_delivered_codes_with_roles($detail);
+    if (empty($codesWithRoles)) {
+        return '';
+    }
+
+    // Solo se antepone "PIN:"/"Serial:" cuando hay más de un código Y al menos uno
+    // tiene un rol identificado (ej. Roblox entregando PIN + Serial a la vez). Los
+    // productos que siempre devolvieron un único código genérico (la gran mayoría)
+    // mantienen el mismo formato de salida que antes, sin ninguna etiqueta.
+    $hasKnownRole = false;
+    foreach ($codesWithRoles as $role) {
+        if ($role !== '') {
+            $hasKnownRole = true;
+            break;
+        }
+    }
+
+    if (count($codesWithRoles) <= 1 || !$hasKnownRole) {
+        return implode("\n", array_keys($codesWithRoles));
+    }
+
+    $lines = [];
+    foreach ($codesWithRoles as $value => $role) {
+        $lines[] = $role !== '' ? $role . ': ' . $value : $value;
+    }
+
+    return implode("\n", $lines);
 }
 
 function provider_status_to_local_status(string $providerStatus): ?string {

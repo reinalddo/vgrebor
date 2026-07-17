@@ -162,7 +162,13 @@ function order_provider_detail_lines(array $order): array {
 
   $providerCode = trim((string) ($order['recargas_api_codigo_entregado'] ?? ''));
   if ($providerCode !== '') {
-    $lines[] = 'Código entregado: ' . $providerCode;
+    // Cuando el proveedor entrega varios valores a la vez (ej. PIN + Serial de
+    // Roblox), cada uno queda en su propia línea del historial en vez de
+    // concatenarse en una sola.
+    $codeLines = array_filter(array_map('trim', explode("\n", $providerCode)));
+    foreach ($codeLines as $codeLine) {
+      $lines[] = 'Código entregado: ' . $codeLine;
+    }
   }
 
   $refundAmount = isset($order['recargas_api_reembolso']) ? (float) $order['recargas_api_reembolso'] : 0.0;
