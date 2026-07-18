@@ -9336,12 +9336,24 @@ include __DIR__ . "/includes/header.php";
       // Reutiliza el reset completo del modo carrito (vacía cartItems, quita
       // neon-selected, oculta resúmenes, etc.) sin duplicar esa lógica aquí.
       multiCartCheckEl.dispatchEvent(new Event('change'));
-      return;
+    } else {
+      cartItems = [];
+      activePack = null;
+      packCards2.forEach((card) => card.classList.remove('neon-selected'));
+      updateButtonState();
     }
-    cartItems = [];
-    activePack = null;
-    packCards2.forEach((card) => card.classList.remove('neon-selected'));
-    updateButtonState();
+
+    // El ID de jugador es específico del juego, no de la categoría: al cambiar
+    // de tab se borra para evitar comprar en la categoría nueva con un ID que
+    // el cliente escribió pensando en los paquetes de la categoría anterior.
+    // Se limpia DESPUÉS del dispatch de arriba porque ese 'change' dispara
+    // renderPlayerFields(null), que re-rellena el campo con el último ID
+    // recordado (defaultOrderUserIdentifier) si lo encuentra vacío.
+    const playerIdInputEl = document.getElementById('order-user-id');
+    if (playerIdInputEl) {
+      playerIdInputEl.value = '';
+    }
+    resetPlayerVerificationState();
   }
 
   const packCategoryTabsBar = document.getElementById('pack-category-tabs');
