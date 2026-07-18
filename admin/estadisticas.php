@@ -8,6 +8,7 @@ if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'root'], t
 }
 
 require_once __DIR__ . '/../includes/db_connect.php';
+require_once __DIR__ . '/../includes/currency.php';
 require_once __DIR__ . '/../includes/header.php';
 
 function stats_format_money($amount): string {
@@ -294,6 +295,17 @@ if ($stmtProfitDaily) {
         $guardProfit++;
     }
 }
+
+// Conversión a Bs para mostrar junto al monto en USD. La ganancia siempre se
+// calcula en USD/base (evita el problema de sumar monedas distintas); para Bs
+// se usa la tasa ACTUAL — no hay tasa histórica guardada por día, así que es
+// una aproximación (misma limitación ya aceptada para el backfill de costos).
+$bsCurrency = currency_find_by_code('BS');
+$profitTotalBs = $bsCurrency ? currency_convert_from_base($profitTotal, $bsCurrency) : null;
+foreach ($profitDailySeries as &$profitDayRow) {
+    $profitDayRow['ganancia_bs'] = $bsCurrency ? currency_convert_from_base((float) $profitDayRow['ganancia'], $bsCurrency) : 0.0;
+}
+unset($profitDayRow);
 $profitDailySeriesJson = json_encode($profitDailySeries, JSON_UNESCAPED_UNICODE);
 
 $presetLabels = ['hoy' => 'Hoy', 'semana' => 'Últimos 7 días', 'mes' => 'Este mes', 'personalizado' => 'Personalizado'];
@@ -511,6 +523,9 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
       <div class="col-6 col-md-4">
         <div class="stat-card text-center">
           <div class="stat-value">$<?= stats_format_money($profitTotal) ?></div>
+          <?php if ($bsCurrency): ?>
+            <div class="small text-secondary mt-1">≈ Bs <?= stats_format_money($profitTotalBs) ?> <span title="Convertido a la tasa actual, no a la tasa del día de cada venta.">(tasa actual)</span></div>
+          <?php endif; ?>
           <div class="stat-label">Ganancia total</div>
         </div>
       </div>
@@ -535,10 +550,18 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
     <div class="chart-card">
       <div class="chart-card-header">
         <h3 class="chart-card-title">Ganancia por fecha</h3>
-        <div class="d-flex gap-1" data-chart-toggle="profit-by-date-chart">
-          <button type="button" class="chart-toggle-btn is-active" data-type="line">Línea</button>
-          <button type="button" class="chart-toggle-btn" data-type="bar">Barras</button>
-          <button type="button" class="chart-toggle-btn" data-type="pie">Torta</button>
+        <div class="d-flex flex-wrap gap-2">
+          <?php if ($bsCurrency): ?>
+          <div class="d-flex gap-1" data-chart-currency-toggle="profit-by-date-chart">
+            <button type="button" class="chart-toggle-btn is-active" data-currency="usd">USD</button>
+            <button type="button" class="chart-toggle-btn" data-currency="bs">Bs</button>
+          </div>
+          <?php endif; ?>
+          <div class="d-flex gap-1" data-chart-toggle="profit-by-date-chart">
+            <button type="button" class="chart-toggle-btn is-active" data-type="line">Línea</button>
+            <button type="button" class="chart-toggle-btn" data-type="bar">Barras</button>
+            <button type="button" class="chart-toggle-btn" data-type="pie">Torta</button>
+          </div>
         </div>
       </div>
       <div class="chart-canvas-wrap"><canvas id="profit-by-date-chart"></canvas></div>
@@ -662,9 +685,11 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
     return { type: 'bar', data: { labels: labels, datasets: [{ label: 'Unidades', data: data, backgroundColor: '#00ffb3', hoverBackgroundColor: '#00fff7', borderRadius: 8, maxBarThickness: 46 }] } };
   }
 
-  function buildProfitDataset(type) {
+  function buildProfitDataset(type, currency) {
+    var isBs = currency === 'bs';
     var labels = profitDailySeries.map(function (d) { return d.fecha.slice(5); });
-    var data = profitDailySeries.map(function (d) { return d.ganancia; });
+    var data = profitDailySeries.map(function (d) { return isBs ? d.ganancia_bs : d.ganancia; });
+    var label = isBs ? 'Ganancia (Bs)' : 'Ganancia (USD)';
     if (type === 'pie') {
       return {
         type: 'doughnut',
@@ -673,11 +698,11 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
       };
     }
     if (type === 'bar') {
-      return { type: 'bar', data: { labels: labels, datasets: [{ label: 'Ganancia', data: data, backgroundColor: '#facc15', hoverBackgroundColor: '#00ffb3', borderRadius: 8, maxBarThickness: 46 }] } };
+      return { type: 'bar', data: { labels: labels, datasets: [{ label: label, data: data, backgroundColor: '#facc15', hoverBackgroundColor: '#00ffb3', borderRadius: 8, maxBarThickness: 46 }] } };
     }
     return {
       type: 'line',
-      data: { labels: labels, datasets: [{ label: 'Ganancia', data: data, borderColor: '#facc15', backgroundColor: 'rgba(250,204,21,0.18)', borderWidth: 2.5, fill: true, tension: 0.35, pointRadius: 3, pointBackgroundColor: '#facc15', pointBorderColor: '#0f1a28', pointBorderWidth: 1.5, pointHoverRadius: 6 }] }
+      data: { labels: labels, datasets: [{ label: label, data: data, borderColor: '#facc15', backgroundColor: 'rgba(250,204,21,0.18)', borderWidth: 2.5, fill: true, tension: 0.35, pointRadius: 3, pointBackgroundColor: '#facc15', pointBorderColor: '#0f1a28', pointBorderWidth: 1.5, pointHoverRadius: 6 }] }
     };
   }
 
@@ -686,8 +711,9 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
     if (!canvas) return;
     var wrap = canvas.closest('.chart-canvas-wrap');
     var chart = null;
+    var currentCurrency = 'usd';
     function render(type) {
-      var cfg = builder(type);
+      var cfg = builder(type, currentCurrency);
       var options = baseOptions(type, cfg.options);
       if (wrap) {
         if (type === 'horizontalBar') {
@@ -702,12 +728,25 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
     }
     render(defaultType);
     var toggle = document.querySelector('[data-chart-toggle="' + canvasId + '"]');
+    var currentType = defaultType;
     if (toggle) {
       toggle.querySelectorAll('.chart-toggle-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {
           toggle.querySelectorAll('.chart-toggle-btn').forEach(function (b) { b.classList.remove('is-active'); });
           btn.classList.add('is-active');
-          render(btn.dataset.type);
+          currentType = btn.dataset.type;
+          render(currentType);
+        });
+      });
+    }
+    var currencyToggle = document.querySelector('[data-chart-currency-toggle="' + canvasId + '"]');
+    if (currencyToggle) {
+      currencyToggle.querySelectorAll('.chart-toggle-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          currencyToggle.querySelectorAll('.chart-toggle-btn').forEach(function (b) { b.classList.remove('is-active'); });
+          btn.classList.add('is-active');
+          currentCurrency = btn.dataset.currency;
+          render(currentType);
         });
       });
     }
