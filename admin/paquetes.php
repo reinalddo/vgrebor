@@ -1358,16 +1358,20 @@ include '../includes/header.php';
             <p class="small" style="color:#8be9fd;">Aún no hay categorías de paquetes para este juego. Crea la primera con el botón de arriba.</p>
             <?php else: ?>
             <?php foreach ($packageCategories as $pcat): ?>
-            <div class="pcatRow d-flex align-items-center gap-3 p-2 rounded-3 mb-2 flex-wrap" data-id="<?= (int) $pcat['id'] ?>" style="background:#182030;border:1px solid #1e3a5f;">
+            <div class="pcatRow d-flex align-items-center gap-3 p-2 rounded-3 mb-2 flex-wrap" data-id="<?= (int) $pcat['id'] ?>" style="background:#182030;border:1px solid #1e3a5f;<?= $pcat['activa'] ? '' : 'opacity:.55;' ?>">
                 <?php if ($pcat['imagen'] !== ''): ?>
                 <img src="/<?= htmlspecialchars($pcat['imagen'], ENT_QUOTES, 'UTF-8') ?>" style="width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid #1e3a5f;flex-shrink:0;" alt="">
                 <?php endif; ?>
                 <span style="font-size:1.3em;min-width:1.5rem;text-align:center;"><?= $pcat['icono'] !== '' ? htmlspecialchars($pcat['icono'], ENT_QUOTES, 'UTF-8') : '📁' ?></span>
                 <span style="width:12px;height:12px;border-radius:50%;background:<?= htmlspecialchars($pcat['color'] ?: '#22d3ee', ENT_QUOTES, 'UTF-8') ?>;display:inline-block;flex-shrink:0;"></span>
                 <strong style="color:#22d3ee;flex:1;min-width:100px;"><?= htmlspecialchars($pcat['nombre'], ENT_QUOTES, 'UTF-8') ?></strong>
+                <?php if (!$pcat['activa']): ?>
+                <span class="small fw-bold" style="color:#ff5e8a;border:1px solid #ff5e8a;border-radius:4px;padding:0 0.4rem;">Inactiva</span>
+                <?php endif; ?>
                 <code style="color:#8be9fd;font-size:0.8rem;opacity:.8;"><?= htmlspecialchars($pcat['slug'], ENT_QUOTES, 'UTF-8') ?></code>
                 <span class="small" style="color:#8be9fd;"><?= package_category_packages_count($mysqli, (int) $pcat['id']) ?> paquete(s)</span>
                 <div class="d-flex gap-2 ms-auto flex-shrink-0">
+                    <button type="button" class="btn btn-sm pcatToggleActiveBtn" data-id="<?= (int) $pcat['id'] ?>" data-active="<?= $pcat['activa'] ? '1' : '0' ?>" style="border:1px solid <?= $pcat['activa'] ? '#8be9fd' : '#22c55e' ?>;color:<?= $pcat['activa'] ? '#8be9fd' : '#22c55e' ?>;background:transparent;padding:0.1rem 0.55rem;font-size:0.82rem;"><?= $pcat['activa'] ? 'Desactivar' : 'Activar' ?></button>
                     <button type="button" class="btn btn-sm pcatEditBtn" data-id="<?= (int) $pcat['id'] ?>" style="border:1px solid #22d3ee;color:#22d3ee;background:transparent;padding:0.1rem 0.55rem;font-size:0.82rem;">Editar</button>
                     <button type="button" class="btn btn-sm pcatDeleteBtn" data-id="<?= (int) $pcat['id'] ?>" data-nombre="<?= htmlspecialchars($pcat['nombre'], ENT_QUOTES, 'UTF-8') ?>" style="border:1px solid #ff5e8a;color:#ff5e8a;background:transparent;padding:0.1rem 0.55rem;font-size:0.82rem;">Eliminar</button>
                 </div>
@@ -3875,6 +3879,32 @@ window.adminPackageCategoryChange = async function(select) {
                 window.location.reload();
             } catch (e) {
                 if (status) status.textContent = e.message;
+                btn.disabled = false;
+            }
+        });
+    });
+
+    document.querySelectorAll('.pcatToggleActiveBtn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const id = btn.dataset.id;
+            const editRow = document.getElementById('pcatEdit_' + id);
+            const nextActive = btn.dataset.active === '1' ? '0' : '1';
+            btn.disabled = true;
+            try {
+                await pcatsFetch('update', {
+                    id,
+                    nombre:        editRow?.querySelector('.pcatEditNombre')?.value ?? '',
+                    slug:          editRow?.querySelector('.pcatEditSlug')?.value ?? '',
+                    icono:         editRow?.querySelector('.pcatEditIcono')?.value ?? '',
+                    color:         editRow?.querySelector('.pcatEditColor')?.value ?? '#22d3ee',
+                    color_texto:   editRow?.querySelector('.pcatEditColorTexto')?.value ?? '#ffffff',
+                    orden:         editRow?.querySelector('.pcatEditOrden')?.value ?? '0',
+                    mostrar_menu:  editRow?.querySelector('.pcatEditMostrarMenu:checked')?.value ?? 'icono_texto',
+                    activa:        nextActive,
+                });
+                window.location.reload();
+            } catch (e) {
+                window.alert(e.message);
                 btn.disabled = false;
             }
         });

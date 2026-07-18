@@ -476,6 +476,19 @@ include __DIR__ . "/includes/header.php";
     while ($pack = $resPaq->fetch_assoc()) {
       $paquetes[] = $pack;
     }
+    // Un paquete asignado a una categoría desactivada no debe aparecer en la
+    // tienda (ni en su tab ni en "Otros"), a diferencia de uno sin categoría.
+    $allPackageCategoriesByIdForGame = [];
+    foreach (package_category_list($mysqli, (int) $game['id']) as $pcatAllRow) {
+      $allPackageCategoriesByIdForGame[(int) $pcatAllRow['id']] = $pcatAllRow;
+    }
+    $paquetes = array_values(array_filter($paquetes, static function (array $pack) use ($allPackageCategoriesByIdForGame): bool {
+      $catId = (int) ($pack['categoria_paquete_id'] ?? 0);
+      if ($catId <= 0) {
+        return true;
+      }
+      return !isset($allPackageCategoriesByIdForGame[$catId]) || $allPackageCategoriesByIdForGame[$catId]['activa'];
+    }));
     $packageAccountSaleGalleryMap = $accountSaleFeatureEnabled
       ? package_account_sales_fetch_gallery_map($mysqli, array_map(static fn (array $package): int => (int) ($package['id'] ?? 0), $paquetes))
       : [];
