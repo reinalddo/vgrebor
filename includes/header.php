@@ -500,6 +500,27 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       border-color: rgba(var(--theme-topbar-text-rgb), 0.16) !important;
       color: var(--theme-topbar-login-text) !important;
     }
+    /* El botón de "Mi cuenta" siempre se ve como círculo de perfil (sin nombre
+       ni texto), en escritorio y en móvil, con o sin barra superior activada. */
+    body.site-user-authenticated #user-trigger {
+      min-width: 0 !important;
+      width: 44px;
+      height: 44px;
+      padding: 0.35rem !important;
+      gap: 0 !important;
+      border-radius: 50% !important;
+      justify-content: center;
+    }
+    body.site-user-authenticated #user-trigger-text {
+      display: none !important;
+    }
+    body.site-user-authenticated #user-trigger > svg {
+      display: none !important;
+    }
+    body.site-user-authenticated #user-trigger-initials {
+      width: 36px !important;
+      height: 36px !important;
+    }
     .site-topbar-enabled #auth-menu,
     .site-topbar-enabled #user-menu {
       border-color: rgba(var(--theme-topbar-search-border-rgb), 0.44) !important;
@@ -813,25 +834,6 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
         display: block;
         margin-left: 0;
         flex: 0 0 auto;
-      }
-      body.site-topbar-enabled.site-user-authenticated #user-trigger {
-        min-width: 0 !important;
-        width: 44px;
-        height: 44px;
-        padding: 0.35rem !important;
-        gap: 0 !important;
-        border-radius: 50% !important;
-        justify-content: center;
-      }
-      body.site-topbar-enabled.site-user-authenticated #user-trigger-text {
-        display: none !important;
-      }
-      body.site-topbar-enabled.site-user-authenticated #user-trigger > svg {
-        display: none !important;
-      }
-      body.site-topbar-enabled.site-user-authenticated #user-trigger-initials {
-        width: 36px !important;
-        height: 36px !important;
       }
       .site-topbar-enabled .site-auth-trigger {
         padding: 0.55rem 0.78rem !important;
