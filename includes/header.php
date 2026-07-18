@@ -1473,13 +1473,17 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
             // existen en la BD, se usa la consulta anterior como respaldo.
             try {
                 $cbGamesResult = $mysqli->query(
-                    "SELECT id, nombre, slug, imagen, imagen_catbar FROM juegos WHERE COALESCE(activo, 1) = 1
+                    "SELECT id, nombre, slug, imagen, imagen_catbar FROM juegos
+                     WHERE COALESCE(activo, 1) = 1
+                       AND EXISTS (SELECT 1 FROM juego_paquetes jp WHERE jp.juego_id = juegos.id AND COALESCE(jp.activo, 1) = 1)
                      ORDER BY CASE WHEN COALESCE(orden_catbar, 0) > 0 THEN 0 ELSE 1 END, orden_catbar ASC,
                               CASE WHEN orden IS NULL THEN 1 ELSE 0 END, orden ASC, id ASC"
                 );
             } catch (mysqli_sql_exception $cbEx) {
                 $cbGamesResult = $mysqli->query(
-                    "SELECT id, nombre, slug, imagen FROM juegos WHERE COALESCE(activo, 1) = 1
+                    "SELECT id, nombre, slug, imagen FROM juegos
+                     WHERE COALESCE(activo, 1) = 1
+                       AND EXISTS (SELECT 1 FROM juego_paquetes jp WHERE jp.juego_id = juegos.id AND COALESCE(jp.activo, 1) = 1)
                      ORDER BY CASE WHEN orden IS NULL THEN 1 ELSE 0 END, orden ASC, id ASC"
                 );
             }
