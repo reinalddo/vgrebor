@@ -10076,6 +10076,54 @@ if ($action === 'submit_payment') {
     });
 }
 
+if ($action === 'refresh_bank_movements') {
+    // Refresco liviano de la tabla `movimientos` mientras el cliente tiene abierto
+    // el modal de pago. NO verifica referencias ni crea/modifica pedidos: solo
+    // sincroniza los movimientos del banco a la BD local, para que cuando el
+    // cliente confirme el pago, el movimiento ya esté disponible localmente y la
+    // verificación (que queda intacta) lo encuentre a la primera.
+    $refreshMode = strtolower(trim((string) ($_POST['mode'] ?? $_GET['mode'] ?? 'bank')));
+    if (!in_array($refreshMode, ['bank', 'binance_pagonorte'], true)) {
+        $refreshMode = 'bank';
+    }
+
+    // Throttle global por modo: si otro cliente refrescó hace menos de 15s, no se
+    // vuelve a llamar a la API bancaria (varios modales abiertos comparten el
+    // mismo refresco). El timestamp se guarda ANTES del fetch para que dos
+    // requests simultáneos no disparen dos llamadas al banco.
+    $refreshThrottleKey = $refreshMode === 'binance_pagonorte'
+        ? 'binance_movimientos_ultimo_refresco'
+        : 'bank_movimientos_ultimo_refresco';
+    $lastRefreshAt = (int) store_config_get($refreshThrottleKey, '0');
+    if ($lastRefreshAt > 0 && (time() - $lastRefreshAt) < 15) {
+        json_response(['ok' => true, 'refreshed' => false, 'throttled' => true]);
+    }
+    store_config_upsert($refreshThrottleKey, (string) time());
+
+    try {
+        if ($refreshMode === 'binance_pagonorte') {
+            if (!binance_pagonorte_is_configured()) {
+                json_response(['ok' => true, 'refreshed' => false, 'message' => 'Binance no está configurado.']);
+            }
+            fetch_and_sync_binance_pagonorte_movements($mysqli, [
+                'binance_pagonorte_token' => store_config_get('binance_pagonorte_token', ''),
+            ]);
+        } else {
+            fetch_and_sync_bank_movements($mysqli, [
+                'ff_bank_api_base_url' => store_config_get('ff_bank_api_base_url', 'https://pagonorte.net'),
+                'ff_bank_posicion' => store_config_get('ff_bank_posicion', ''),
+                'ff_bank_token' => store_config_get('ff_bank_token', ''),
+                'ff_bank_clave' => store_config_get('ff_bank_clave', ''),
+            ]);
+        }
+        json_response(['ok' => true, 'refreshed' => true]);
+    } catch (Throwable $e) {
+        // Fallo silencioso: el refresco es oportunista; la verificación real al
+        // confirmar el pago tiene sus propios reintentos y mensajes.
+        json_response(['ok' => false, 'refreshed' => false]);
+    }
+}
+
 if ($action === 'expire_order') {
     $orderId = intval($_POST['order_id'] ?? 0);
     if ($orderId <= 0) {

@@ -11430,9 +11430,57 @@ include __DIR__ . "/includes/header.php";
     pendingWhatsappUrl = '';
   }
 
+  // ── Refresco de movimientos bancarios en segundo plano ────────────────────
+  // Mientras el cliente tiene abierto el modal de pago (haciendo su transferencia
+  // y copiando la referencia), se refresca la tabla de movimientos del servidor
+  // cada ~20s. Así, cuando confirme el pago, el movimiento normalmente ya estará
+  // sincronizado y la verificación (que no se toca) lo encontrará a la primera,
+  // sin depender de que la API bancaria responda a tiempo en ese momento exacto.
+  let bankMovementsRefreshTimer = null;
+
+  function bankMovementsRefreshMode() {
+    const mode = String((activePaymentOrder && activePaymentOrder.paymentMode) || '').trim();
+    if (mode === 'binance_pagonorte') {
+      return 'binance_pagonorte';
+    }
+    if (mode === '' || mode === 'money') {
+      return 'bank';
+    }
+    return ''; // points / Binance Pay / PayPal: no usan movimientos bancarios
+  }
+
+  function requestBankMovementsRefresh() {
+    const mode = bankMovementsRefreshMode();
+    if (!mode) {
+      return;
+    }
+    const body = new URLSearchParams();
+    body.set('action', 'refresh_bank_movements');
+    body.set('mode', mode);
+    fetch(buildAppUrl('/api/pedidos.php'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    }).catch(() => {});
+  }
+
+  function startBankMovementsAutoRefresh() {
+    stopBankMovementsAutoRefresh();
+    requestBankMovementsRefresh();
+    bankMovementsRefreshTimer = window.setInterval(requestBankMovementsRefresh, 20000);
+  }
+
+  function stopBankMovementsAutoRefresh() {
+    if (bankMovementsRefreshTimer) {
+      window.clearInterval(bankMovementsRefreshTimer);
+      bankMovementsRefreshTimer = null;
+    }
+  }
+
   function closePaymentModal(resetState) {
     paymentStatusShouldCloseAll = false;
     clearPaymentTimer();
+    stopBankMovementsAutoRefresh();
     setOverlayVisible(paymentModal, false);
     setPaymentAlert('', 'info');
     if (resetState) {
@@ -11559,6 +11607,7 @@ include __DIR__ . "/includes/header.php";
       clearPaymentTimer();
       updatePaymentTimer();
       paymentTimerInterval = setInterval(updatePaymentTimer, 1000);
+      startBankMovementsAutoRefresh();
     };
     if (preConfirmTosCheck) preConfirmTosCheck.checked = false;
     if (preConfirmProceedBtn) {
@@ -13623,6 +13672,7 @@ include __DIR__ . "/includes/header.php";
                   paymentTimerInterval = setInterval(updatePaymentTimer, 1000);
                   setOverlayVisible(paymentModal, true);
                   scrollPaymentModalToTop();
+                  startBankMovementsAutoRefresh();
                 };
                 if (preConfirmTosCheck) preConfirmTosCheck.checked = false;
                 if (preConfirmProceedBtn) {
@@ -13740,6 +13790,7 @@ include __DIR__ . "/includes/header.php";
                 // Close loading and payment modal, open progress modal
                 setOverlayVisible(loadingModal, false);
                 setOverlayVisible(paymentModal, false);
+                stopBankMovementsAutoRefresh();
                 // Restore payment modal to normal state
                 if (paymentCartSummary) paymentCartSummary.classList.remove('is-visible');
                 const singleSummaryCard = document.querySelector('.payment-summary-card');
