@@ -129,6 +129,7 @@ $registerEndpointUrl = app_path('/register_user.php');
 $loginUrl = app_path('/login.php');
 $resetUrl = app_path('/reset.php');
 $adminDashboardUrl = app_path('/admin/dashboard');
+$adminEstadisticasUrl = app_path('/admin/estadisticas');
 $adminGamesUrl = app_path('/admin/juegos');
 $adminCurrenciesUrl = app_path('/admin/monedas');
 $adminOrdersUrl = app_path('/admin/pedidos');
@@ -1439,6 +1440,9 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                 <a href="<?php echo htmlspecialchars($gamesUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info w-100 rounded-3 border mb-2 fw-semibold">Juegos</a>
                 <a href="<?php echo htmlspecialchars($influencerJoinUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-warning w-100 rounded-3 border mb-2 fw-semibold"><?php echo htmlspecialchars($influencerInstructionsMenuLabel !== '' ? $influencerInstructionsMenuLabel : 'Quiero Unirme', ENT_QUOTES, 'UTF-8'); ?></a>
                 <?php if ($authUserCanAccessAdmin): ?>
+                  <?php if (in_array($authUserRole, ['admin', 'root'], true)): ?>
+                    <a href="<?php echo htmlspecialchars($adminEstadisticasUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info w-100 rounded-3 border mb-2 fw-semibold">📈 Estadísticas</a>
+                  <?php endif; ?>
                   <a href="<?php echo htmlspecialchars($authUserAdminHome, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-light w-100 rounded-3 border mb-2 fw-semibold">Dashboard</a>
                 <?php endif; ?>
               <?php endif; ?>
