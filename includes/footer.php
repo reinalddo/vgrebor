@@ -2699,7 +2699,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       return el && !el.classList.contains('is-hidden') && el.getAttribute('aria-hidden') !== 'true';
     }
     function _anyModalOpen() {
-      return !!document.querySelector('.app-overlay-modal.is-visible, .modal.show');
+      return !!document.querySelector('.app-overlay-modal.is-visible, .modal.show, #user-menu:not(.d-none), #auth-menu:not(.d-none)');
     }
     function _blocked() {
       return _spVisible(_sp) || _anyModalOpen();

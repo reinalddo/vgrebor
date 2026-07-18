@@ -1392,7 +1392,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
               </svg>
               <span class="site-auth-label" style="text-shadow:0 0 4px rgba(var(--theme-primary-rgb),0.92), 0 0 1px rgba(var(--theme-secondary-rgb),0.92);">Iniciar Sesión / Registrarse</span>
             </button>
-            <div id="auth-menu" class="position-absolute end-0 mt-2 z-3 d-none" style="min-width:160px;max-width:220px;box-shadow:0 0 16px rgba(var(--theme-primary-rgb),0.72), 0 0 4px rgba(var(--theme-secondary-rgb),0.6);border-radius:0.75rem;border:1.5px solid var(--theme-primary);background:var(--theme-surface-alt);padding:0.75rem;">
+            <div id="auth-menu" class="position-absolute end-0 mt-2 d-none" style="min-width:160px;max-width:220px;z-index:1070;box-shadow:0 0 16px rgba(var(--theme-primary-rgb),0.72), 0 0 4px rgba(var(--theme-secondary-rgb),0.6);border-radius:0.75rem;border:1.5px solid var(--theme-primary);background:var(--theme-surface-alt);padding:0.75rem;">
               <button type="button" class="btn btn-info neon-btn-info w-100 rounded-3 border mb-2 fw-bold text-uppercase shadow-sm" style="font-size:12px;" data-auth-open="login">Iniciar sesión</button>
               <button type="button" class="btn btn-warning neon-btn w-100 rounded-3 border fw-bold text-uppercase shadow-sm" style="font-size:12px;" data-auth-open="register">Registrarse</button>
             </div>
@@ -1410,7 +1410,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
               </svg>
             </button>
-            <div id="user-menu" class="position-absolute end-0 mt-2 z-3 d-none" style="min-width:240px;max-width:280px;box-shadow:0 0 16px rgba(var(--theme-primary-rgb),0.72), 0 0 4px rgba(var(--theme-secondary-rgb),0.6);border-radius:1rem;border:1.5px solid var(--theme-primary);background:var(--theme-surface-alt);padding:0.85rem;">
+            <div id="user-menu" class="position-absolute end-0 mt-2 d-none" style="min-width:240px;max-width:280px;z-index:1070;box-shadow:0 0 16px rgba(var(--theme-primary-rgb),0.72), 0 0 4px rgba(var(--theme-secondary-rgb),0.6);border-radius:1rem;border:1.5px solid var(--theme-primary);background:var(--theme-surface-alt);padding:0.85rem;">
               <div class="px-2 pb-2 mb-2 border-bottom border-info-subtle">
                 <div id="user-menu-name" class="fw-bold text-light"><?php echo htmlspecialchars($authUserName, ENT_QUOTES, 'UTF-8'); ?></div>
                 <div id="user-menu-email" class="small text-info text-break"><?php echo htmlspecialchars($authUserEmail, ENT_QUOTES, 'UTF-8'); ?></div>
