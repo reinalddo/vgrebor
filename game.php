@@ -626,7 +626,7 @@ include __DIR__ . "/includes/header.php";
           }
         }
     ?>
-      <div class="col<?= $packLevelPassKey !== '' ? ' d-none' : '' ?>" data-package-category="<?= htmlspecialchars($packCategoryTabId, ENT_QUOTES, 'UTF-8') ?>"<?= $packLevelPassKey !== '' ? ' data-levelpass-key="' . htmlspecialchars($packLevelPassKey, ENT_QUOTES, 'UTF-8') . '" data-levelpass-hidden="1"' : '' ?>>
+      <div class="col" data-package-category="<?= htmlspecialchars($packCategoryTabId, ENT_QUOTES, 'UTF-8') ?>"<?= $packLevelPassKey !== '' ? ' data-levelpass-key="' . htmlspecialchars($packLevelPassKey, ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
         <article class="pack-card card border-info bg-dark text-start w-100 h-100 shadow-sm"
           data-package-id="<?= $packId ?>"
           data-package-provider="<?= htmlspecialchars($packApiProvider, ENT_QUOTES, 'UTF-8') ?>"
@@ -9349,13 +9349,14 @@ include __DIR__ . "/includes/header.php";
   }
 
   // ── Disponibilidad de Pase de Nivel ─────────────────────────────────────
-  // A diferencia de BS Pass Stock, aquí el estado por defecto es OCULTO
-  // (fail-closed): los paquetes con clave de nivel asignada nacen con
-  // d-none en el servidor y SOLO se revelan si el validador confirma
-  // "available" para ese nivel y ese jugador. La consulta se dispara desde
-  // dentro del bloque de éxito de verifyCurrentPlayer (nunca en paralelo,
-  // nunca con un nombre no verificado) para no saturar la IP del proveedor
-  // con IDs falsos/sin cuenta.
+  // Los 6 paquetes se muestran siempre por defecto (para que el cliente vea
+  // qué existe antes de escribir su ID). En cuanto el validador responde
+  // tras verificar el nombre, se OCULTAN los que no correspondan a ese
+  // jugador, dejando visibles solo los disponibles. Si el validador falla o
+  // no aplica, se deja todo visible (fail-open: no bloquea ventas por una
+  // caída del proveedor). La consulta se dispara desde dentro del bloque de
+  // éxito de verifyCurrentPlayer (nunca en paralelo, nunca con un nombre no
+  // verificado) para no saturar la IP del proveedor con IDs falsos/sin cuenta.
   let levelPassSeq = 0;
 
   function blockPackCardForLevelPass(card) {
@@ -9382,6 +9383,7 @@ include __DIR__ . "/includes/header.php";
 
   function applyLevelPassAvailability(availableIds) {
     const available = new Set((availableIds || []).map(String));
+    let deselected = false;
     levelPassConfig.packageIds.forEach((packageId) => {
       const card = findPackCardById(packageId);
       if (!card) {
@@ -9391,21 +9393,27 @@ include __DIR__ . "/includes/header.php";
         unblockPackCardForLevelPass(card);
       } else {
         blockPackCardForLevelPass(card);
+        if (activePack && String(activePack.id) === String(packageId)) {
+          deselected = true;
+        }
       }
     });
+    if (deselected) {
+      deselectBlockedActivePack();
+    }
+    return deselected;
   }
 
+  // Sin ID verificado no hay forma de saber cuáles corresponden: se muestran
+  // los 6 de nuevo (mismo estado que el render inicial).
   function clearLevelPassCheck() {
     levelPassSeq += 1;
     if (!levelPassConfig || !levelPassConfig.enabled) {
       return;
     }
     levelPassConfig.packageIds.forEach((packageId) => {
-      blockPackCardForLevelPass(findPackCardById(packageId));
+      unblockPackCardForLevelPass(findPackCardById(packageId));
     });
-    if (activePack && levelPassConfig.packageIds.includes(String(activePack.id))) {
-      deselectBlockedActivePack();
-    }
   }
 
   async function runLevelPassCheck(playerIdentifier) {
@@ -9446,10 +9454,17 @@ include __DIR__ . "/includes/header.php";
 
       if (data && data.ok && data.applicable) {
         applyLevelPassAvailability(Array.isArray(data.available) ? data.available : []);
+      } else {
+        // Fail-open: si el validador no aplica o la respuesta no fue válida,
+        // se dejan los 6 visibles en vez de bloquear la venta.
+        applyLevelPassAvailability(levelPassConfig.packageIds);
       }
-      // Si falla o no aplica: no se revela nada (los paquetes quedan ocultos).
     } catch (error) {
-      // Fail-closed: cualquier error deja los paquetes ocultos.
+      if (requestId !== levelPassSeq) {
+        return;
+      }
+      // Fail-open: cualquier error de red deja los paquetes visibles.
+      applyLevelPassAvailability(levelPassConfig.packageIds);
     } finally {
       if (abortTimer) {
         window.clearTimeout(abortTimer);
