@@ -9158,8 +9158,12 @@ include __DIR__ . "/includes/header.php";
         };
         // Pase de Nivel SOLO se consulta aquí, tras confirmar el nombre del
         // jugador (nunca en paralelo, nunca si el ID no arrojó nombre real),
-        // para no saturar la IP del validador con peticiones de IDs falsos.
-        runLevelPassCheck(payload.userIdentifier);
+        // y únicamente si el cliente está dentro de la pestaña de "Pases de
+        // nivel" — para no saturar la IP del validador con peticiones de
+        // IDs falsos ni con consultas de clientes comprando otra cosa.
+        if (activeTabHasLevelPassPackages()) {
+          runLevelPassCheck(payload.userIdentifier);
+        }
         setPlayerVerificationFeedback('success', String(data.message || 'Jugador encontrado.'));
         window.setTimeout(() => {
           const packSection = document.getElementById('game-packages-section');
@@ -9527,13 +9531,37 @@ include __DIR__ . "/includes/header.php";
   // en tabs (una por categoría + "Otros" para los que no tienen). Solo puede
   // haber paquetes seleccionados de UN tab a la vez: cambiar de tab reinicia
   // por completo la selección/carrito actual.
+  let currentActivePackCategoryTab = null;
+
   function applyPackCategoryTab(tabId) {
+    currentActivePackCategoryTab = tabId;
     packCards2.forEach((card) => {
       const column = card.closest('.col') || card;
       const cardTab = column.dataset.packageCategory || 'otros';
       column.dataset.tabHidden = (cardTab === tabId) ? '0' : '1';
       updateColumnVisibility(column);
     });
+  }
+
+  // El validador de Pase de Nivel solo debe consultarse cuando el cliente
+  // está viendo la pestaña de categoría de "Pases de nivel" — si compra
+  // recargas normales en otra pestaña del mismo juego, no debe dispararse.
+  function activeTabHasLevelPassPackages() {
+    if (!levelPassConfig || !levelPassConfig.enabled) {
+      return false;
+    }
+    if (!packCategoryTabsBar) {
+      // Este juego no usa pestañas de categoría: no hay forma de aislar por
+      // pestaña, así que se mantiene el comportamiento previo (todo el
+      // juego comparte un único formulario de verificación).
+      return true;
+    }
+    if (!currentActivePackCategoryTab) {
+      return false;
+    }
+    return Array.from(document.querySelectorAll('[data-package-category]')).some(
+      (col) => col.dataset.packageCategory === currentActivePackCategoryTab && col.hasAttribute('data-levelpass-key')
+    );
   }
 
   function resetSelectionForPackCategoryTabSwitch() {

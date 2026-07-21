@@ -309,7 +309,20 @@ function player_verification_verify(array $game, string $userIdentifier, array $
                 }
 
                 $nickname = trim((string) ($data['nickname'] ?? ''));
-                if ($nickname !== '') {
+                // El proveedor a veces devuelve un texto de error (p.ej.
+                // "jugador invalido") DENTRO del propio campo "nickname" en
+                // vez de dejarlo vacío o usar "mensaje" — si se toma ese
+                // texto como nombre válido, un ID inexistente queda marcado
+                // como "verificado" y dispara de forma indebida el validador
+                // de Pase de Nivel con IDs falsos.
+                $nicknameNormalized = player_verification_normalize_text($nickname);
+                $isErrorSentinel = $nickname !== '' && (
+                    strpos($nicknameNormalized, 'invalido') !== false
+                    || strpos($nicknameNormalized, 'no encontrado') !== false
+                    || strpos($nicknameNormalized, 'not found') !== false
+                    || strpos($nicknameNormalized, 'error') !== false
+                );
+                if ($nickname !== '' && !$isErrorSentinel) {
                     return player_verification_result(true, 'verified', 'Jugador encontrado: ' . $nickname, ['player_name' => $nickname]);
                 }
 
