@@ -9280,8 +9280,8 @@ include __DIR__ . "/includes/header.php";
 
   // El validador indica compras previas del jugador: los pases que ya
   // adquirió en el ciclo/evento actual se mantienen visibles pero
-  // oscurecidos/deshabilitados con una etiqueta ("No disponible"), y
-  // reaparecen normales cuando el validador vuelva a listarlos como
+  // oscurecidos/deshabilitados con una etiqueta ("Ya tienes este paquete"),
+  // y reaparecen normales cuando el validador vuelva a listarlos como
   // disponibles.
   function blockPackCardForStock(card, label) {
     if (!card) {
@@ -9289,7 +9289,7 @@ include __DIR__ . "/includes/header.php";
     }
     card.classList.add('bs-pass-blocked');
     card.setAttribute('aria-disabled', 'true');
-    card.setAttribute('data-lock-label', label || 'No disponible');
+    card.setAttribute('data-lock-label', label || 'Ya tienes este paquete');
   }
 
   function unblockPackCardForStock(card) {
