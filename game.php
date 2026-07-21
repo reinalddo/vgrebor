@@ -11982,6 +11982,14 @@ include __DIR__ . "/includes/header.php";
           } else {
             buyButton.textContent = `${_wp.name || 'RECoins'} insuficientes`;
           }
+        } else if (typeof syncCartBuyButton === 'function') {
+          // Sin bloqueo por verificación/puntos: restaurar la etiqueta normal
+          // (total/"Continuar con la compra"). Antes, al pasar de bloqueado a
+          // habilitado, el texto se quedaba pegado en "ID USUARIO INVÁLIDO"
+          // porque esta rama nunca lo restauraba — solo lo hacía otra función
+          // (syncCartBuyButton/el resumen del pedido) que no se re-ejecuta al
+          // verificar el jugador.
+          syncCartBuyButton();
         }
       }
       syncPlayerVerificationUi();
