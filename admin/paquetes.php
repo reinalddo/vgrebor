@@ -1152,7 +1152,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     package_set_category($mysqli, $edit_id, $edit_categoria_paquete_id);
     levelpass_set_key($mysqli, $edit_id, $edit_levelpass_key);
     $editFullimpulsoCustomComments = $edit_fullimpulso_service_id > 0
-        && fullimpulso_service_type_is_custom_comments(fullimpulso_service_type_for_id($fullimpulsoServices, $edit_fullimpulso_service_id));
+        && (
+            fullimpulso_service_type_is_custom_comments(fullimpulso_service_type_for_id($fullimpulsoServices, $edit_fullimpulso_service_id))
+            || isset($_POST['edit_fullimpulso_custom_comments_manual'])
+        );
     fullimpulso_set_package($mysqli, $edit_id, $edit_fullimpulso_service_id, $edit_fullimpulso_cantidad, $editFullimpulsoCustomComments);
     $editInfoHtml = package_info_sanitize_html((string) ($_POST['edit_info_paquete_html'] ?? ''));
     $stmtEditInfo = $mysqli->prepare("UPDATE juego_paquetes SET info_html = NULLIF(?, '') WHERE id = ?");
@@ -1271,7 +1274,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     package_set_category($mysqli, $newPackageId, $categoria_paquete_id);
     levelpass_set_key($mysqli, $newPackageId, $levelpass_key);
     $fullimpulsoCustomComments = $fullimpulso_service_id > 0
-        && fullimpulso_service_type_is_custom_comments(fullimpulso_service_type_for_id($fullimpulsoServices, $fullimpulso_service_id));
+        && (
+            fullimpulso_service_type_is_custom_comments(fullimpulso_service_type_for_id($fullimpulsoServices, $fullimpulso_service_id))
+            || isset($_POST['fullimpulso_custom_comments_manual'])
+        );
     fullimpulso_set_package($mysqli, $newPackageId, $fullimpulso_service_id, $fullimpulso_cantidad, $fullimpulsoCustomComments);
     $infoHtml = package_info_sanitize_html((string) ($_POST['info_paquete_html'] ?? ''));
     $stmtInfo = $mysqli->prepare("UPDATE juego_paquetes SET info_html = NULLIF(?, '') WHERE id = ?");
@@ -1858,7 +1864,10 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                         </div>
                     </div>
                     <div class="form-text mt-2 js-fi-cost-preview" style="color:#8be9fd;"></div>
-                    <div class="form-text mt-1 js-fi-comments-hint d-none" style="color:#facc15;">📝 Este servicio es de "Comentarios personalizados": en la tienda se le pedirá al cliente escribir cada comentario, no solo el enlace.</div>
+                    <div class="form-check mt-2">
+                        <input type="checkbox" name="fullimpulso_custom_comments_manual" class="form-check-input js-fi-comments-manual" id="fiCommentsManualCheck">
+                        <label class="form-check-label" style="color:#facc15;" for="fiCommentsManualCheck">📝 Requiere que el cliente escriba un comentario por línea (se marca solo si se detecta, pero puedes forzarlo aquí)</label>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2555,7 +2564,10 @@ if (isset($_GET['editar'])) {
                         </div>
                     </div>
                     <div class="form-text mt-2 js-fi-cost-preview" style="color:#8be9fd;"></div>
-                    <div class="form-text mt-1 js-fi-comments-hint d-none" style="color:#facc15;">📝 Este servicio es de "Comentarios personalizados": en la tienda se le pedirá al cliente escribir cada comentario, no solo el enlace.</div>
+                    <div class="form-check mt-2">
+                        <input type="checkbox" name="edit_fullimpulso_custom_comments_manual" class="form-check-input js-fi-comments-manual" id="editFiCommentsManualCheck" <?= !empty($paq_edit['fullimpulso_custom_comments']) ? 'checked' : '' ?>>
+                        <label class="form-check-label" style="color:#facc15;" for="editFiCommentsManualCheck">Requiere que el cliente escriba un comentario por linea (se marca solo si se detecta, pero puedes forzarlo aqui)</label>
+                    </div>
                 </div>
             </div>
         </div>
@@ -4136,11 +4148,15 @@ window.adminPackageCategoryChange = async function(select) {
     function updateFiCommentsHint(panel) {
         if (!panel) return;
         const select = panel.querySelector('.js-fi-service');
-        const hint = panel.querySelector('.js-fi-comments-hint');
-        if (!select || !hint) return;
+        const manualCheck = panel.querySelector('.js-fi-comments-manual');
+        if (!select || !manualCheck) return;
+        // Solo auto-marca cuando cambia el servicio seleccionado; si el admin
+        // ya la marco/desmarco a mano, no la pisamos en cada input/change.
+        if (select.dataset.lastAutoDetectedFor === select.value) return;
+        select.dataset.lastAutoDetectedFor = select.value;
         const option = select.selectedOptions && select.selectedOptions[0];
         const type = option ? String(option.dataset.type || '') : '';
-        hint.classList.toggle('d-none', !/custom comment/i.test(type));
+        manualCheck.checked = /custom comment/i.test(type);
     }
 
     document.querySelectorAll('.js-fi-toggle').forEach((checkbox) => {
@@ -4170,9 +4186,13 @@ window.adminPackageCategoryChange = async function(select) {
     });
 
     document.querySelectorAll('#fiPanel, #editFiPanel').forEach((panel) => {
+        // No se llama a updateFiCommentsHint aqui: el checkbox ya refleja el
+        // valor guardado en BD (o queda sin marcar en un paquete nuevo), y
+        // solo debe recalcularse cuando el admin cambia el servicio elegido.
+        const select = panel.querySelector('.js-fi-service');
+        if (select) select.dataset.lastAutoDetectedFor = select.value;
         if (panel.style.display !== 'none') {
             updateFiCostPreview(panel);
-            updateFiCommentsHint(panel);
         }
     });
 }());
