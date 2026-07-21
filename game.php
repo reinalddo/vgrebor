@@ -17,6 +17,7 @@ require_once __DIR__ . "/includes/binance_pay.php";
 require_once __DIR__ . "/includes/paypal_pay.php";
 require_once __DIR__ . "/includes/package_account_sales.php";
 require_once __DIR__ . "/includes/bs_pass_stock.php";
+require_once __DIR__ . "/includes/levelpass_api.php";
 require_once __DIR__ . "/includes/package_categories.php";
 currency_ensure_schema();
 if (trim((string) store_config_get('binance_pagonorte_activo', '0')) === '1') {
@@ -24,6 +25,7 @@ if (trim((string) store_config_get('binance_pagonorte_activo', '0')) === '1') {
 }
 package_features_ensure_schema($mysqli);
 package_account_sales_ensure_schema($mysqli);
+levelpass_ensure_schema($mysqli);
 $paymentSupportWhatsappBase = store_config_whatsapp_link(store_config_get('whatsapp', ''));
 $binancePayCheckoutEnabled = binance_pay_is_enabled() && binance_pay_is_configured();
 $paypalPayCheckoutEnabled = paypal_pay_checkout_is_enabled() && paypal_pay_is_configured();
@@ -497,6 +499,7 @@ include __DIR__ . "/includes/header.php";
   <?php $gameMarkupPct = floatval($game['precio_markup_pct'] ?? 0); ?>
   <?php $priceSyncQueue = []; ?>
   <?php $bsPassStockPackageIds = []; ?>
+  <?php $levelPassPackageIds = []; ?>
   <?php
     // ── Categorías de paquetes: si el juego tiene alguna, los paquetes se
     // agrupan en tabs (una por categoría + "Otros" para los que no tienen).
@@ -588,6 +591,10 @@ include __DIR__ . "/includes/header.php";
             $bsPassStockPackageIds[] = $packId;
           }
         }
+        $packLevelPassKey = levelpass_normalize_key($pack['levelpass_key'] ?? '');
+        if ($packLevelPassKey !== '') {
+          $levelPassPackageIds[$packId] = $packLevelPassKey;
+        }
         $packAccountGallery = $packIsAccountSale ? ($packageAccountSaleGalleryMap[$packId] ?? []) : [];
         $packAccountGalleryPayload = array_values(array_map(static function (array $item): array {
           $imageUrl = package_feature_public_asset_url((string) ($item['image_path'] ?? ''));
@@ -619,7 +626,7 @@ include __DIR__ . "/includes/header.php";
           }
         }
     ?>
-      <div class="col" data-package-category="<?= htmlspecialchars($packCategoryTabId, ENT_QUOTES, 'UTF-8') ?>">
+      <div class="col<?= $packLevelPassKey !== '' ? ' d-none' : '' ?>" data-package-category="<?= htmlspecialchars($packCategoryTabId, ENT_QUOTES, 'UTF-8') ?>"<?= $packLevelPassKey !== '' ? ' data-levelpass-key="' . htmlspecialchars($packLevelPassKey, ENT_QUOTES, 'UTF-8') . '" data-levelpass-hidden="1"' : '' ?>>
         <article class="pack-card card border-info bg-dark text-start w-100 h-100 shadow-sm"
           data-package-id="<?= $packId ?>"
           data-package-provider="<?= htmlspecialchars($packApiProvider, ENT_QUOTES, 'UTF-8') ?>"
@@ -5595,6 +5602,11 @@ include __DIR__ . "/includes/header.php";
     'packageIds' => array_map('strval', $bsPassStockPackageIds ?? []),
     'gameId' => (int) ($game['id'] ?? 0),
   ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+  const levelPassConfig = <?= json_encode([
+    'enabled' => levelpass_is_configured() && !empty($levelPassPackageIds) && $playerVerificationConfig !== null,
+    'packageIds' => array_map('strval', array_keys($levelPassPackageIds ?? [])),
+    'gameId' => (int) ($game['id'] ?? 0),
+  ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const couponInput = document.getElementById('coupon-input');
   const couponModal = document.getElementById('coupon-modal');
   const loadingModal = document.getElementById('loading-modal');
@@ -8890,6 +8902,7 @@ include __DIR__ . "/includes/header.php";
       clearPlayerVerificationFeedback();
     }
     clearBsPassStock();
+    clearLevelPassCheck();
   }
 
   function setPlayerVerificationUnavailableState(signature, message) {
@@ -8903,6 +8916,7 @@ include __DIR__ . "/includes/header.php";
       serverUnavailable: true,
     };
     clearBsPassStock();
+    clearLevelPassCheck();
 
     const baseMessage = String(message || 'No se pudo verificar el jugador en este momento.').trim();
     setPlayerVerificationFeedback('info', `${baseMessage} Puedes continuar con la recarga normal.`);
@@ -9092,6 +9106,10 @@ include __DIR__ . "/includes/header.php";
           pending: false,
           serverUnavailable: false,
         };
+        // Pase de Nivel SOLO se consulta aquí, tras confirmar el nombre del
+        // jugador (nunca en paralelo, nunca si el ID no arrojó nombre real),
+        // para no saturar la IP del validador con peticiones de IDs falsos.
+        runLevelPassCheck(payload.userIdentifier);
         setPlayerVerificationFeedback('success', String(data.message || 'Jugador encontrado.'));
         window.setTimeout(() => {
           const packSection = document.getElementById('game-packages-section');
@@ -9171,7 +9189,8 @@ include __DIR__ . "/includes/header.php";
     if (!column) return;
     const tabHidden = column.dataset.tabHidden === '1';
     const bsHidden = column.dataset.bsHidden === '1';
-    column.classList.toggle('d-none', tabHidden || bsHidden);
+    const levelpassHidden = column.dataset.levelpassHidden === '1';
+    column.classList.toggle('d-none', tabHidden || bsHidden || levelpassHidden);
   }
 
   // El validador indica compras previas del jugador: los pases que ya
@@ -9323,6 +9342,115 @@ include __DIR__ . "/includes/header.php";
       if (bsPassPendingPlayerId === playerId) {
         bsPassPendingPlayerId = '';
       }
+      if (abortTimer) {
+        window.clearTimeout(abortTimer);
+      }
+    }
+  }
+
+  // ── Disponibilidad de Pase de Nivel ─────────────────────────────────────
+  // A diferencia de BS Pass Stock, aquí el estado por defecto es OCULTO
+  // (fail-closed): los paquetes con clave de nivel asignada nacen con
+  // d-none en el servidor y SOLO se revelan si el validador confirma
+  // "available" para ese nivel y ese jugador. La consulta se dispara desde
+  // dentro del bloque de éxito de verifyCurrentPlayer (nunca en paralelo,
+  // nunca con un nombre no verificado) para no saturar la IP del proveedor
+  // con IDs falsos/sin cuenta.
+  let levelPassSeq = 0;
+
+  function blockPackCardForLevelPass(card) {
+    if (!card) {
+      return;
+    }
+    card.classList.add('levelpass-locked');
+    card.setAttribute('aria-disabled', 'true');
+    const column = card.closest('.col') || card;
+    column.dataset.levelpassHidden = '1';
+    updateColumnVisibility(column);
+  }
+
+  function unblockPackCardForLevelPass(card) {
+    if (!card) {
+      return;
+    }
+    card.classList.remove('levelpass-locked');
+    card.removeAttribute('aria-disabled');
+    const column = card.closest('.col') || card;
+    column.dataset.levelpassHidden = '0';
+    updateColumnVisibility(column);
+  }
+
+  function applyLevelPassAvailability(availableIds) {
+    const available = new Set((availableIds || []).map(String));
+    levelPassConfig.packageIds.forEach((packageId) => {
+      const card = findPackCardById(packageId);
+      if (!card) {
+        return;
+      }
+      if (available.has(String(packageId))) {
+        unblockPackCardForLevelPass(card);
+      } else {
+        blockPackCardForLevelPass(card);
+      }
+    });
+  }
+
+  function clearLevelPassCheck() {
+    levelPassSeq += 1;
+    if (!levelPassConfig || !levelPassConfig.enabled) {
+      return;
+    }
+    levelPassConfig.packageIds.forEach((packageId) => {
+      blockPackCardForLevelPass(findPackCardById(packageId));
+    });
+    if (activePack && levelPassConfig.packageIds.includes(String(activePack.id))) {
+      deselectBlockedActivePack();
+    }
+  }
+
+  async function runLevelPassCheck(playerIdentifier) {
+    if (!levelPassConfig || !levelPassConfig.enabled) {
+      return;
+    }
+    const playerId = String(playerIdentifier || '').trim();
+    if (!/^[0-9]{4,20}$/.test(playerId)) {
+      return;
+    }
+
+    const requestId = ++levelPassSeq;
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const abortTimer = controller ? window.setTimeout(() => controller.abort(), 45000) : null;
+
+    try {
+      const requestBody = new URLSearchParams();
+      requestBody.set('game_id', String(levelPassConfig.gameId));
+      requestBody.set('player_id', playerId);
+
+      const response = await fetch(buildAppUrl('/api/levelpass_check.php'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: requestBody.toString(),
+        signal: controller ? controller.signal : undefined,
+      });
+
+      let data = null;
+      try {
+        data = await response.json();
+      } catch (error) {
+        data = null;
+      }
+
+      if (requestId !== levelPassSeq) {
+        return;
+      }
+
+      if (data && data.ok && data.applicable) {
+        applyLevelPassAvailability(Array.isArray(data.available) ? data.available : []);
+      }
+      // Si falla o no aplica: no se revela nada (los paquetes quedan ocultos).
+    } catch (error) {
+      // Fail-closed: cualquier error deja los paquetes ocultos.
+    } finally {
       if (abortTimer) {
         window.clearTimeout(abortTimer);
       }
@@ -11793,7 +11921,7 @@ include __DIR__ . "/includes/header.php";
     if (!card) {
       return;
     }
-    if (card.classList.contains('bs-pass-blocked')) {
+    if (card.classList.contains('bs-pass-blocked') || card.classList.contains('levelpass-locked')) {
       return;
     }
 
@@ -13165,7 +13293,7 @@ include __DIR__ . "/includes/header.php";
                   if (!cartMode) return; // normal flow handles it
                   if (e.target.closest('[data-pack-preview-trigger]')) return; // let preview button open gallery modal
                   if (e.target.closest('.pack-info-btn')) return; // let the "i" button open its info modal
-                  if (card.classList.contains('bs-pass-blocked')) { e.stopImmediatePropagation(); return; } // pase sin stock
+                  if (card.classList.contains('bs-pass-blocked') || card.classList.contains('levelpass-locked')) { e.stopImmediatePropagation(); return; } // pase sin stock / nivel no disponible
 
                   e.stopImmediatePropagation(); // prevent original handler
 

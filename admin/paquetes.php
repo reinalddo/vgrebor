@@ -11,6 +11,7 @@ require_once '../includes/package_account_sales.php';
 require_once '../includes/recharge_availability.php';
 require_once '../includes/win_points.php';
 require_once '../includes/package_categories.php';
+require_once '../includes/levelpass_api.php';
 
 function admin_packages_is_ajax_request(): bool {
     if (isset($_REQUEST['ajax']) && (string) $_REQUEST['ajax'] === '1') {
@@ -644,6 +645,7 @@ package_account_sales_ensure_schema($mysqli);
 package_features_ensure_schema($mysqli);
 win_points_ensure_schema();
 package_categories_ensure_schema($mysqli);
+levelpass_ensure_schema($mysqli);
 
 $accountSaleFeatureEnabled = trim((string) store_config_get('vender_cuentas', '0')) === '1';
 
@@ -1081,6 +1083,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $edit_orden_gg = ($_POST['edit_orden_gg'] ?? '') !== '' ? max(0, (int) $_POST['edit_orden_gg']) : null;
     $edit_precio_manual_override = isset($_POST['edit_precio_manual_override']) ? 1 : 0;
     $edit_categoria_paquete_id = (int) ($_POST['edit_categoria_paquete_id'] ?? 0);
+    $edit_levelpass_key = levelpass_normalize_key($_POST['edit_levelpass_key'] ?? '');
     $edit_imagen_icono = admin_package_store_upload($_FILES['edit_imagen_icono'] ?? []);
     $editExistingGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['edit_existing_account_gallery_replace'] ?? []);
     $editNewGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['edit_new_account_gallery_image'] ?? []);
@@ -1110,6 +1113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $stmt->execute();
     $stmt->close();
     package_set_category($mysqli, $edit_id, $edit_categoria_paquete_id);
+    levelpass_set_key($mysqli, $edit_id, $edit_levelpass_key);
     $editInfoHtml = package_info_sanitize_html((string) ($_POST['edit_info_paquete_html'] ?? ''));
     $stmtEditInfo = $mysqli->prepare("UPDATE juego_paquetes SET info_html = NULLIF(?, '') WHERE id = ?");
     if ($stmtEditInfo) {
@@ -1194,6 +1198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $orden_gg = ($_POST['orden_gg'] ?? '') !== '' ? max(0, (int) $_POST['orden_gg']) : null;
     $precio_manual_override = isset($_POST['precio_manual_override']) ? 1 : 0;
     $categoria_paquete_id = (int) ($_POST['categoria_paquete_id'] ?? 0);
+    $levelpass_key = levelpass_normalize_key($_POST['levelpass_key'] ?? '');
     $orden = admin_package_next_order($mysqli, $juego_id);
     $imagen_icono = admin_package_store_upload($_FILES['imagen_icono'] ?? []);
     $newGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['new_account_gallery_image'] ?? []);
@@ -1212,6 +1217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $newPackageId = (int) $mysqli->insert_id;
     $stmt->close();
     package_set_category($mysqli, $newPackageId, $categoria_paquete_id);
+    levelpass_set_key($mysqli, $newPackageId, $levelpass_key);
     $infoHtml = package_info_sanitize_html((string) ($_POST['info_paquete_html'] ?? ''));
     $stmtInfo = $mysqli->prepare("UPDATE juego_paquetes SET info_html = NULLIF(?, '') WHERE id = ?");
     if ($stmtInfo) {
@@ -1757,6 +1763,16 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
             <?php if ($packageCategories === []): ?>
             <div class="form-text mt-2" style="color:#8be9fd;">Crea categorías en la sección «Categorías de paquetes» para poder asignarlas.</div>
             <?php endif; ?>
+        </div>
+        <div class="col-12">
+            <label class="form-label text-neon">Nivel de Pase (Pase de Nivel)</label>
+            <select name="levelpass_key" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                <option value="">No aplica</option>
+                <?php foreach (levelpass_key_options() as $lpKey => $lpLabel): ?>
+                <option value="<?= htmlspecialchars($lpKey, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($lpLabel, ENT_QUOTES, 'UTF-8') ?></option>
+                <?php endforeach; ?>
+            </select>
+            <div class="form-text mt-2" style="color:#8be9fd;">Solo para paquetes de "Pase de Nivel": define qué nivel representa este paquete para consultar disponibilidad por jugador.</div>
         </div>
         <div class="col-12">
             <div class="form-check mt-2">
@@ -2409,6 +2425,16 @@ if (isset($_GET['editar'])) {
             <?php if ($packageCategories === []): ?>
             <div class="form-text mt-2" style="color:#8be9fd;">Crea categorías en la sección «Categorías de paquetes» para poder asignarlas.</div>
             <?php endif; ?>
+        </div>
+        <div class="mb-3">
+            <label class="form-label text-neon">Nivel de Pase (Pase de Nivel)</label>
+            <select name="edit_levelpass_key" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                <option value="">No aplica</option>
+                <?php foreach (levelpass_key_options() as $lpKey => $lpLabel): ?>
+                <option value="<?= htmlspecialchars($lpKey, ENT_QUOTES, 'UTF-8') ?>" <?= (string) ($paq_edit['levelpass_key'] ?? '') === $lpKey ? 'selected' : '' ?>><?= htmlspecialchars($lpLabel, ENT_QUOTES, 'UTF-8') ?></option>
+                <?php endforeach; ?>
+            </select>
+            <div class="form-text mt-2" style="color:#8be9fd;">Solo para paquetes de "Pase de Nivel": define qué nivel representa este paquete para consultar disponibilidad por jugador.</div>
         </div>
         <div class="form-check mb-2">
             <input type="checkbox" name="edit_activo" class="form-check-input" id="editPaqueteActivoCheck" <?= !isset($paq_edit['activo']) || !empty($paq_edit['activo']) ? 'checked' : '' ?>>

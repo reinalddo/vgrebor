@@ -59,6 +59,31 @@ function player_verification_definition_for_game(array $game): ?array {
         ];
     }
 
+    // "Pase de Nivel" es un producto de Free Fire tratado como juego aparte
+    // (no anidado dentro de "Free Fire" en el catálogo): usa la misma
+    // verificación de nombre free_fire_latam sin depender de que el admin
+    // incluya "free fire" en el nombre del juego.
+    if (
+        strpos($haystack, 'pase de nivel') !== false
+        || strpos($haystackCompact, 'pasedenivel') !== false
+        || strpos($haystack, 'level pass') !== false
+        || strpos($haystackCompact, 'levelpass') !== false
+    ) {
+        return [
+            'key' => 'free_fire_latam',
+            'button_label' => 'Verificar nombre del jugador',
+            'default_fields' => [
+                [
+                    'name' => 'input1',
+                    'label' => 'ID del jugador',
+                    'placeholder' => 'Ingresa ID del Jugador',
+                    'inputMode' => 'numeric',
+                    'maxLength' => 32,
+                ],
+            ],
+        ];
+    }
+
     if (strpos($haystack, 'blood strike') !== false || strpos($haystackCompact, 'bloodstrike') !== false) {
         return [
             'key' => 'blood_strike',
