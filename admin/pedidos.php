@@ -437,6 +437,10 @@ function order_can_sync_gateway(array $order): bool {
     return true;
   }
 
+  if (trim((string) ($order['fullimpulso_order_id'] ?? '')) !== '') {
+    return true;
+  }
+
   return binance_pay_is_enabled() && order_has_binance_tracking($order);
 }
 
@@ -470,8 +474,36 @@ function order_can_retry_recharge(array $order): bool {
 
   $packageApiId = (int) ($order['paquete_api'] ?? 0);
   $legacyMonto = trim((string) ($order['monto_ff'] ?? ''));
+  $fullimpulsoServiceId = (int) ($order['fullimpulso_service_id'] ?? 0);
+  $fullimpulsoOrderId = trim((string) ($order['fullimpulso_order_id'] ?? ''));
+
+  if ($fullimpulsoServiceId > 0) {
+    return $fullimpulsoOrderId === '';
+  }
 
   return $packageApiId > 0 || $legacyMonto !== '';
+}
+
+function order_can_fullimpulso_refill(array $order): bool {
+  if (trim((string) ($order['estado'] ?? '')) !== 'enviado') {
+    return false;
+  }
+  if ((int) ($order['fullimpulso_service_id'] ?? 0) <= 0) {
+    return false;
+  }
+  return trim((string) ($order['fullimpulso_order_id'] ?? '')) !== '';
+}
+
+function order_can_fullimpulso_cancel(array $order): bool {
+  // Solo tiene sentido cancelar pedidos aun en curso; uno ya "enviado" se
+  // considera entregado y no debe revertirse retroactivamente.
+  if (trim((string) ($order['estado'] ?? '')) !== 'pagado') {
+    return false;
+  }
+  if ((int) ($order['fullimpulso_service_id'] ?? 0) <= 0) {
+    return false;
+  }
+  return trim((string) ($order['fullimpulso_order_id'] ?? '')) !== '';
 }
 
 function order_can_manage_discord_status(array $order): bool {
@@ -1157,6 +1189,12 @@ foreach ($statuses as $statusKey) {
                       <?php if (order_can_sync_gateway($order)): ?>
                         <button type="button" class="btn btn-outline-warning btn-sm mt-2 js-sync-provider" data-order-id="<?= (int) $order['id'] ?>" data-sync-label="<?= htmlspecialchars(order_sync_button_label($order)) ?>"><?= htmlspecialchars(order_sync_button_label($order)) ?></button>
                       <?php endif; ?>
+                      <?php if (order_can_fullimpulso_refill($order)): ?>
+                        <button type="button" class="btn btn-outline-success btn-sm mt-2 js-fullimpulso-refill" data-order-id="<?= (int) $order['id'] ?>">Solicitar reposición</button>
+                      <?php endif; ?>
+                      <?php if (order_can_fullimpulso_cancel($order)): ?>
+                        <button type="button" class="btn btn-outline-danger btn-sm mt-2 js-fullimpulso-cancel" data-order-id="<?= (int) $order['id'] ?>">Cancelar en FullImpulso</button>
+                      <?php endif; ?>
                       <?php if (order_can_manage_discord_status($order)): ?>
                         <select class="form-select form-select-sm mt-2 js-discord-status-select" data-order-id="<?= (int) $order['id'] ?>" style="border-radius:8px; border:1px solid #f9a8d4; background:#222c3a; color:#f9a8d4; font-weight:bold; padding:0.25em 0.5em;">
                           <option value="">Aplicar estado Discord...</option>
@@ -1257,6 +1295,12 @@ foreach ($statuses as $statusKey) {
                 <?php endif; ?>
                 <?php if (order_can_sync_gateway($order)): ?>
                   <button type="button" class="btn btn-outline-warning btn-sm mt-3 js-sync-provider" data-order-id="<?= (int) $order['id'] ?>" data-sync-label="<?= htmlspecialchars(order_sync_button_label($order)) ?>"><?= htmlspecialchars(order_sync_button_label($order)) ?></button>
+                <?php endif; ?>
+                <?php if (order_can_fullimpulso_refill($order)): ?>
+                  <button type="button" class="btn btn-outline-success btn-sm mt-3 js-fullimpulso-refill" data-order-id="<?= (int) $order['id'] ?>">Solicitar reposición</button>
+                <?php endif; ?>
+                <?php if (order_can_fullimpulso_cancel($order)): ?>
+                  <button type="button" class="btn btn-outline-danger btn-sm mt-3 js-fullimpulso-cancel" data-order-id="<?= (int) $order['id'] ?>">Cancelar en FullImpulso</button>
                 <?php endif; ?>
                 <?php if (order_can_manage_discord_status($order)): ?>
                   <select class="form-select form-select-sm mt-3 js-discord-status-select" data-order-id="<?= (int) $order['id'] ?>" style="border-radius:8px; border:1px solid #f9a8d4; background:#222c3a; color:#f9a8d4; font-weight:bold; padding:0.45em 0.6em;">
@@ -1698,6 +1742,73 @@ foreach ($statuses as $statusKey) {
           window.location.reload();
         } catch (err) {
           alert(err.message || 'No se pudo enviar nuevamente la recarga.');
+        } finally {
+          button.disabled = false;
+          setAdminLoadingVisible(false);
+        }
+      });
+    });
+
+    document.querySelectorAll('.js-fullimpulso-refill').forEach(button => {
+      button.addEventListener('click', async () => {
+        const orderId = button.dataset.orderId;
+        if (!orderId) {
+          return;
+        }
+
+        const confirmed = window.confirm('Se solicitará a FullImpulso la reposición de este pedido (seguidores/likes caídos). ¿Continuar?');
+        if (!confirmed) {
+          return;
+        }
+
+        button.disabled = true;
+        setAdminLoadingVisible(true);
+        try {
+          const fd = new FormData();
+          fd.append('action', 'fullimpulso_request_refill');
+          fd.append('order_id', orderId);
+          const res = await fetch(window.__TVG_API_PEDIDOS || <?php echo json_encode($ordersApiUrl, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>, { method: 'POST', body: fd });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            throw new Error((data && data.message) ? data.message : 'No se pudo solicitar la reposición.');
+          }
+          alert(data.message || 'Reposición solicitada correctamente.');
+        } catch (err) {
+          alert(err.message || 'No se pudo solicitar la reposición.');
+        } finally {
+          button.disabled = false;
+          setAdminLoadingVisible(false);
+        }
+      });
+    });
+
+    document.querySelectorAll('.js-fullimpulso-cancel').forEach(button => {
+      button.addEventListener('click', async () => {
+        const orderId = button.dataset.orderId;
+        if (!orderId) {
+          return;
+        }
+
+        const confirmed = window.confirm('Se cancelará este pedido en FullImpulso (si el proveedor lo permite). ¿Continuar?');
+        if (!confirmed) {
+          return;
+        }
+
+        button.disabled = true;
+        setAdminLoadingVisible(true);
+        try {
+          const fd = new FormData();
+          fd.append('action', 'fullimpulso_request_cancel');
+          fd.append('order_id', orderId);
+          const res = await fetch(window.__TVG_API_PEDIDOS || <?php echo json_encode($ordersApiUrl, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>, { method: 'POST', body: fd });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            throw new Error((data && data.message) ? data.message : 'No se pudo cancelar el pedido en FullImpulso.');
+          }
+          alert(data.message || 'Pedido cancelado correctamente.');
+          window.location.reload();
+        } catch (err) {
+          alert(err.message || 'No se pudo cancelar el pedido en FullImpulso.');
         } finally {
           button.disabled = false;
           setAdminLoadingVisible(false);

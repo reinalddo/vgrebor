@@ -18,6 +18,7 @@ require_once __DIR__ . "/includes/paypal_pay.php";
 require_once __DIR__ . "/includes/package_account_sales.php";
 require_once __DIR__ . "/includes/bs_pass_stock.php";
 require_once __DIR__ . "/includes/levelpass_api.php";
+require_once __DIR__ . "/includes/fullimpulso_api.php";
 require_once __DIR__ . "/includes/package_categories.php";
 currency_ensure_schema();
 if (trim((string) store_config_get('binance_pagonorte_activo', '0')) === '1') {
@@ -26,6 +27,7 @@ if (trim((string) store_config_get('binance_pagonorte_activo', '0')) === '1') {
 package_features_ensure_schema($mysqli);
 package_account_sales_ensure_schema($mysqli);
 levelpass_ensure_schema($mysqli);
+fullimpulso_ensure_schema($mysqli);
 $paymentSupportWhatsappBase = store_config_whatsapp_link(store_config_get('whatsapp', ''));
 $binancePayCheckoutEnabled = binance_pay_is_enabled() && binance_pay_is_configured();
 $paypalPayCheckoutEnabled = paypal_pay_checkout_is_enabled() && paypal_pay_is_configured();
@@ -578,6 +580,8 @@ include __DIR__ . "/includes/header.php";
             $packApiProvider = 'giftven';
           } elseif (!empty($pack['monto_ff'])) {
             $packApiProvider = 'free_fire';
+          } elseif ((int) ($pack['fullimpulso_service_id'] ?? 0) > 0) {
+            $packApiProvider = 'fullimpulso';
           } elseif (!empty($game['categoria_api_discord'])) {
             $packApiProvider = 'discord';
           }
@@ -615,6 +619,19 @@ include __DIR__ . "/includes/header.php";
           if (!empty($packDiscordFields)) {
             $apiRequiredFields = $packDiscordFields;
           }
+        } elseif ($packApiProvider === 'fullimpulso') {
+          // Único campo requerido: el enlace al perfil/publicación (en vez
+          // del ID de jugador numérico que usan los demás proveedores).
+          $apiRequiredFields = [[
+            'name' => 'link',
+            'label' => 'Enlace de tu perfil o publicación',
+            'placeholder' => 'https://instagram.com/tu_usuario',
+            'inputMode' => 'url',
+            'pattern' => 'https?://.+',
+            'title' => 'Ingresa un enlace válido (debe empezar con http:// o https://).',
+            'validationMessage' => 'Ingresa un enlace válido (debe empezar con http:// o https://).',
+            'maxLength' => 500,
+          ]];
         }
         $img_paquete = !empty($pack['imagen_icono']) ? $pack['imagen_icono'] : (!empty($game['imagen_paquete']) ? $game['imagen_paquete'] : null);
         $packImageUrl = package_feature_public_asset_url($img_paquete);

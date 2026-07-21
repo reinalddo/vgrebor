@@ -12,6 +12,7 @@ require_once '../includes/recharge_availability.php';
 require_once '../includes/win_points.php';
 require_once '../includes/package_categories.php';
 require_once '../includes/levelpass_api.php';
+require_once '../includes/fullimpulso_api.php';
 
 function admin_packages_is_ajax_request(): bool {
     if (isset($_REQUEST['ajax']) && (string) $_REQUEST['ajax'] === '1') {
@@ -305,7 +306,7 @@ function admin_package_save_discord_catalog(mysqli $mysqli, int $gameId, array $
 
 function admin_package_normalize_provider_value($value): string {
     $normalized = strtolower(trim((string) $value));
-    return in_array($normalized, ['giftven', 'discord', 'free_fire'], true) ? $normalized : '';
+    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso'], true) ? $normalized : '';
 }
 
 function admin_package_resolve_provider(array $package, array $game, bool $discordFeatureEnabled): string {
@@ -322,6 +323,10 @@ function admin_package_resolve_provider(array $package, array $game, bool $disco
         return 'free_fire';
     }
 
+    if ((int) ($package['fullimpulso_service_id'] ?? 0) > 0) {
+        return 'fullimpulso';
+    }
+
     if ($discordFeatureEnabled && trim((string) ($game['categoria_api_discord'] ?? '')) !== '') {
         return 'discord';
     }
@@ -334,6 +339,7 @@ function admin_package_provider_label(string $provider): string {
         'giftven' => 'TiendaGiftVen',
         'discord' => 'Discord',
         'free_fire' => 'Free Fire API',
+        'fullimpulso' => 'FullImpulso (Seguidores)',
         default => 'Manual',
     };
 }
@@ -356,6 +362,12 @@ function admin_package_provider_reference_text(string $provider, array $package,
     if ($provider === 'free_fire') {
         $amount = trim((string) ($package['monto_ff'] ?? ''));
         return $amount !== '' ? free_fire_api_amount_label($amount) : '—';
+    }
+
+    if ($provider === 'fullimpulso') {
+        $serviceId = (int) ($package['fullimpulso_service_id'] ?? 0);
+        $quantity = (int) ($package['fullimpulso_cantidad'] ?? 0);
+        return $serviceId > 0 ? 'Servicio ' . $serviceId . ' · ' . number_format($quantity) : '—';
     }
 
     return '—';
@@ -646,6 +658,7 @@ package_features_ensure_schema($mysqli);
 win_points_ensure_schema();
 package_categories_ensure_schema($mysqli);
 levelpass_ensure_schema($mysqli);
+fullimpulso_ensure_schema($mysqli);
 
 $accountSaleFeatureEnabled = trim((string) store_config_get('vender_cuentas', '0')) === '1';
 
@@ -673,6 +686,15 @@ $packageCategories = package_category_list($mysqli, $juego_id);
 $packageCategoryNotice = trim((string) ($_GET['package_category_notice'] ?? ''));
 $packageCategoryError = trim((string) ($_GET['package_category_error'] ?? ''));
 $freeFireApiOptions = free_fire_api_amount_options();
+$fullimpulsoServices = [];
+$fullimpulsoServicesError = '';
+if (fullimpulso_is_configured()) {
+    try {
+        $fullimpulsoServices = fullimpulso_api_fetch_services();
+    } catch (Throwable $e) {
+        $fullimpulsoServicesError = $e->getMessage();
+    }
+}
 $discordApiEnabled = trim((string) store_config_get('api_discord', '0')) === '1';
 $unionApisEnabled = $discordApiEnabled && trim((string) store_config_get('union_apis_discord_giftven', '0')) === '1';
 $juegoCategoriaApi        = trim((string) ($juego['categoria_api'] ?? ''));
@@ -1084,6 +1106,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $edit_precio_manual_override = isset($_POST['edit_precio_manual_override']) ? 1 : 0;
     $edit_categoria_paquete_id = (int) ($_POST['edit_categoria_paquete_id'] ?? 0);
     $edit_levelpass_key = levelpass_normalize_key($_POST['edit_levelpass_key'] ?? '');
+    $edit_fullimpulsoEnabled = isset($_POST['edit_fullimpulso_enabled']) && (string) $_POST['edit_fullimpulso_enabled'] === '1';
+    $edit_fullimpulso_service_id = $edit_fullimpulsoEnabled ? (int) ($_POST['edit_fullimpulso_service_id'] ?? 0) : 0;
+    $edit_fullimpulso_cantidad = $edit_fullimpulsoEnabled ? max(0, (int) ($_POST['edit_fullimpulso_cantidad'] ?? 0)) : 0;
+    if ($edit_fullimpulsoEnabled) {
+        $edit_provider = 'fullimpulso';
+        if ($edit_fullimpulso_service_id <= 0 || $edit_fullimpulso_cantidad <= 0) {
+            admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el servicio y la cantidad de FullImpulso para este paquete.']);
+        }
+    }
     $edit_imagen_icono = admin_package_store_upload($_FILES['edit_imagen_icono'] ?? []);
     $editExistingGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['edit_existing_account_gallery_replace'] ?? []);
     $editNewGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['edit_new_account_gallery_image'] ?? []);
@@ -1114,6 +1145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $stmt->close();
     package_set_category($mysqli, $edit_id, $edit_categoria_paquete_id);
     levelpass_set_key($mysqli, $edit_id, $edit_levelpass_key);
+    fullimpulso_set_package($mysqli, $edit_id, $edit_fullimpulso_service_id, $edit_fullimpulso_cantidad);
     $editInfoHtml = package_info_sanitize_html((string) ($_POST['edit_info_paquete_html'] ?? ''));
     $stmtEditInfo = $mysqli->prepare("UPDATE juego_paquetes SET info_html = NULLIF(?, '') WHERE id = ?");
     if ($stmtEditInfo) {
@@ -1199,6 +1231,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $precio_manual_override = isset($_POST['precio_manual_override']) ? 1 : 0;
     $categoria_paquete_id = (int) ($_POST['categoria_paquete_id'] ?? 0);
     $levelpass_key = levelpass_normalize_key($_POST['levelpass_key'] ?? '');
+    // FullImpulso es un toggle independiente del radio giftven/discord/free_fire
+    // (igual que "Nivel de Pase"): si se marca, sobreescribe el proveedor del
+    // paquete sin tocar la lógica existente del radio.
+    $fullimpulsoEnabled = isset($_POST['fullimpulso_enabled']) && (string) $_POST['fullimpulso_enabled'] === '1';
+    $fullimpulso_service_id = $fullimpulsoEnabled ? (int) ($_POST['fullimpulso_service_id'] ?? 0) : 0;
+    $fullimpulso_cantidad = $fullimpulsoEnabled ? max(0, (int) ($_POST['fullimpulso_cantidad'] ?? 0)) : 0;
+    if ($fullimpulsoEnabled) {
+        $provider = 'fullimpulso';
+        if ($fullimpulso_service_id <= 0 || $fullimpulso_cantidad <= 0) {
+            admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el servicio y la cantidad de FullImpulso para este paquete.']);
+        }
+    }
     $orden = admin_package_next_order($mysqli, $juego_id);
     $imagen_icono = admin_package_store_upload($_FILES['imagen_icono'] ?? []);
     $newGalleryFiles = admin_package_normalize_uploaded_file_list($_FILES['new_account_gallery_image'] ?? []);
@@ -1218,6 +1262,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $stmt->close();
     package_set_category($mysqli, $newPackageId, $categoria_paquete_id);
     levelpass_set_key($mysqli, $newPackageId, $levelpass_key);
+    fullimpulso_set_package($mysqli, $newPackageId, $fullimpulso_service_id, $fullimpulso_cantidad);
     $infoHtml = package_info_sanitize_html((string) ($_POST['info_paquete_html'] ?? ''));
     $stmtInfo = $mysqli->prepare("UPDATE juego_paquetes SET info_html = NULLIF(?, '') WHERE id = ?");
     if ($stmtInfo) {
@@ -1773,6 +1818,38 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <?php endforeach; ?>
             </select>
             <div class="form-text mt-2" style="color:#8be9fd;">Solo para paquetes de "Pase de Nivel": define qué nivel representa este paquete para consultar disponibilidad por jugador.</div>
+        </div>
+        <div class="col-12">
+            <div class="p-3 rounded-3" style="background:#182030;border:1px solid #1e3a5f;">
+                <div class="form-check mb-2">
+                    <input type="checkbox" class="form-check-input js-fi-toggle" id="fiEnabledCheck" data-panel="fiPanel" data-hidden-input="fiEnabledInput">
+                    <label class="form-check-label text-neon" for="fiEnabledCheck">Usar FullImpulso (Seguidores) para este paquete</label>
+                </div>
+                <input type="hidden" name="fullimpulso_enabled" id="fiEnabledInput" value="0">
+                <div id="fiPanel" style="display:none;">
+                    <div class="row g-2">
+                        <div class="col-md-7">
+                            <label class="form-label text-neon small mb-1">Servicio de FullImpulso</label>
+                            <select name="fullimpulso_service_id" class="form-select form-select-sm js-fi-service" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                                <option value="">Selecciona un servicio</option>
+                                <?php foreach ($fullimpulsoServices as $fiSvc): ?>
+                                <option value="<?= (int) ($fiSvc['service'] ?? 0) ?>" data-rate="<?= htmlspecialchars((string) ($fiSvc['rate'] ?? '0'), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars(trim((string) ($fiSvc['name'] ?? '')) . ' — $' . trim((string) ($fiSvc['rate'] ?? '0')) . '/1000', ENT_QUOTES, 'UTF-8') ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php if ($fullimpulsoServicesError !== ''): ?>
+                            <div class="form-text mt-1" style="color:#ff5e8a;">No se pudo cargar la lista de servicios: <?= htmlspecialchars($fullimpulsoServicesError, ENT_QUOTES, 'UTF-8') ?></div>
+                            <?php elseif (!fullimpulso_is_configured()): ?>
+                            <div class="form-text mt-1" style="color:#ff5e8a;">Configura la API key de FullImpulso primero.</div>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label text-neon small mb-1">Cantidad fija a enviar</label>
+                            <input type="number" min="1" name="fullimpulso_cantidad" class="form-control form-control-sm js-fi-quantity" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;" placeholder="Ej: 1000">
+                        </div>
+                    </div>
+                    <div class="form-text mt-2 js-fi-cost-preview" style="color:#8be9fd;"></div>
+                </div>
+            </div>
         </div>
         <div class="col-12">
             <div class="form-check mt-2">
@@ -2435,6 +2512,40 @@ if (isset($_GET['editar'])) {
                 <?php endforeach; ?>
             </select>
             <div class="form-text mt-2" style="color:#8be9fd;">Solo para paquetes de "Pase de Nivel": define qué nivel representa este paquete para consultar disponibilidad por jugador.</div>
+        </div>
+        <?php $editFiServiceId = (int) ($paq_edit['fullimpulso_service_id'] ?? 0); ?>
+        <?php $editFiCantidad = (int) ($paq_edit['fullimpulso_cantidad'] ?? 0); ?>
+        <div class="mb-3">
+            <div class="p-3 rounded-3" style="background:#182030;border:1px solid #1e3a5f;">
+                <div class="form-check mb-2">
+                    <input type="checkbox" class="form-check-input js-fi-toggle" id="editFiEnabledCheck" data-panel="editFiPanel" data-hidden-input="editFiEnabledInput" <?= $editFiServiceId > 0 ? 'checked' : '' ?>>
+                    <label class="form-check-label text-neon" for="editFiEnabledCheck">Usar FullImpulso (Seguidores) para este paquete</label>
+                </div>
+                <input type="hidden" name="edit_fullimpulso_enabled" id="editFiEnabledInput" value="<?= $editFiServiceId > 0 ? '1' : '0' ?>">
+                <div id="editFiPanel" style="<?= $editFiServiceId > 0 ? '' : 'display:none;' ?>">
+                    <div class="row g-2">
+                        <div class="col-md-7">
+                            <label class="form-label text-neon small mb-1">Servicio de FullImpulso</label>
+                            <select name="edit_fullimpulso_service_id" class="form-select form-select-sm js-fi-service" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                                <option value="">Selecciona un servicio</option>
+                                <?php foreach ($fullimpulsoServices as $fiSvc): ?>
+                                <option value="<?= (int) ($fiSvc['service'] ?? 0) ?>" data-rate="<?= htmlspecialchars((string) ($fiSvc['rate'] ?? '0'), ENT_QUOTES, 'UTF-8') ?>" <?= (int) ($fiSvc['service'] ?? 0) === $editFiServiceId ? 'selected' : '' ?>><?= htmlspecialchars(trim((string) ($fiSvc['name'] ?? '')) . ' — $' . trim((string) ($fiSvc['rate'] ?? '0')) . '/1000', ENT_QUOTES, 'UTF-8') ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php if ($fullimpulsoServicesError !== ''): ?>
+                            <div class="form-text mt-1" style="color:#ff5e8a;">No se pudo cargar la lista de servicios: <?= htmlspecialchars($fullimpulsoServicesError, ENT_QUOTES, 'UTF-8') ?></div>
+                            <?php elseif (!fullimpulso_is_configured()): ?>
+                            <div class="form-text mt-1" style="color:#ff5e8a;">Configura la API key de FullImpulso primero.</div>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label text-neon small mb-1">Cantidad fija a enviar</label>
+                            <input type="number" min="1" name="edit_fullimpulso_cantidad" value="<?= $editFiCantidad > 0 ? $editFiCantidad : '' ?>" class="form-control form-control-sm js-fi-quantity" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;" placeholder="Ej: 1000">
+                        </div>
+                    </div>
+                    <div class="form-text mt-2 js-fi-cost-preview" style="color:#8be9fd;"></div>
+                </div>
+            </div>
         </div>
         <div class="form-check mb-2">
             <input type="checkbox" name="edit_activo" class="form-check-input" id="editPaqueteActivoCheck" <?= !isset($paq_edit['activo']) || !empty($paq_edit['activo']) ? 'checked' : '' ?>>
@@ -3986,6 +4097,47 @@ window.adminPackageCategoryChange = async function(select) {
             if (thumb) thumb.remove();
             this.remove();
         });
+    });
+}());
+
+// ═══ FULLIMPULSO (SEGUIDORES) ════════════════════════════════════════════
+(function () {
+    function updateFiCostPreview(panel) {
+        if (!panel) return;
+        const select = panel.querySelector('.js-fi-service');
+        const quantityInput = panel.querySelector('.js-fi-quantity');
+        const preview = panel.querySelector('.js-fi-cost-preview');
+        if (!select || !quantityInput || !preview) return;
+
+        const option = select.selectedOptions && select.selectedOptions[0];
+        const rate = option ? parseFloat(option.dataset.rate || '0') : 0;
+        const quantity = parseInt(quantityInput.value || '0', 10);
+
+        if (!option || !option.value || !rate || !quantity || quantity <= 0) {
+            preview.textContent = '';
+            return;
+        }
+        const cost = (rate * quantity) / 1000;
+        preview.textContent = 'Costo estimado en FullImpulso: $' + cost.toFixed(4) + ' (referencia para fijar tu precio de venta).';
+    }
+
+    document.querySelectorAll('.js-fi-toggle').forEach((checkbox) => {
+        const panel = document.getElementById(checkbox.dataset.panel || '');
+        const hiddenInput = document.getElementById(checkbox.dataset.hiddenInput || '');
+        checkbox.addEventListener('change', () => {
+            if (panel) panel.style.display = checkbox.checked ? '' : 'none';
+            if (hiddenInput) hiddenInput.value = checkbox.checked ? '1' : '0';
+            if (checkbox.checked && panel) updateFiCostPreview(panel);
+        });
+    });
+
+    document.querySelectorAll('.js-fi-service, .js-fi-quantity').forEach((el) => {
+        el.addEventListener('input', () => updateFiCostPreview(el.closest('#fiPanel, #editFiPanel')));
+        el.addEventListener('change', () => updateFiCostPreview(el.closest('#fiPanel, #editFiPanel')));
+    });
+
+    document.querySelectorAll('#fiPanel, #editFiPanel').forEach((panel) => {
+        if (panel.style.display !== 'none') updateFiCostPreview(panel);
     });
 }());
 </script>

@@ -23,6 +23,7 @@ require_once __DIR__ . '/../includes/recharge_notifications.php';
 require_once __DIR__ . '/../includes/win_points.php';
 require_once __DIR__ . '/../includes/payment_difference.php';
 require_once __DIR__ . '/../includes/blocked_players.php';
+require_once __DIR__ . '/../includes/fullimpulso_api.php';
 
 if (!function_exists('create_app_mysqli_connection')) {
     function create_app_mysqli_connection(): mysqli {
@@ -127,6 +128,13 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         recargas_api_reembolso DECIMAL(12,2) DEFAULT NULL,
         recargas_api_ultimo_check DATETIME DEFAULT NULL,
         recargas_api_historial_json LONGTEXT DEFAULT NULL,
+        fullimpulso_service_id INT DEFAULT NULL,
+        fullimpulso_cantidad INT DEFAULT NULL,
+        fullimpulso_order_id VARCHAR(120) DEFAULT NULL,
+        fullimpulso_mensaje VARCHAR(255) DEFAULT NULL,
+        fullimpulso_payload LONGTEXT DEFAULT NULL,
+        fullimpulso_refill_id VARCHAR(120) DEFAULT NULL,
+        fullimpulso_refill_estado VARCHAR(40) DEFAULT NULL,
         binance_pay_request_id VARCHAR(120) DEFAULT NULL,
         binance_pay_order_no VARCHAR(120) DEFAULT NULL,
         binance_pay_reference VARCHAR(120) DEFAULT NULL,
@@ -222,7 +230,14 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         'recargas_api_reembolso' => "ALTER TABLE pedidos ADD COLUMN recargas_api_reembolso DECIMAL(12,2) NULL AFTER recargas_api_codigo_entregado",
         'recargas_api_ultimo_check' => "ALTER TABLE pedidos ADD COLUMN recargas_api_ultimo_check DATETIME NULL AFTER recargas_api_reembolso",
         'recargas_api_historial_json' => "ALTER TABLE pedidos ADD COLUMN recargas_api_historial_json LONGTEXT NULL AFTER recargas_api_ultimo_check",
-        'binance_pay_request_id' => "ALTER TABLE pedidos ADD COLUMN binance_pay_request_id VARCHAR(120) NULL AFTER recargas_api_historial_json",
+        'fullimpulso_service_id' => "ALTER TABLE pedidos ADD COLUMN fullimpulso_service_id INT NULL AFTER recargas_api_historial_json",
+        'fullimpulso_cantidad' => "ALTER TABLE pedidos ADD COLUMN fullimpulso_cantidad INT NULL AFTER fullimpulso_service_id",
+        'fullimpulso_order_id' => "ALTER TABLE pedidos ADD COLUMN fullimpulso_order_id VARCHAR(120) NULL AFTER fullimpulso_cantidad",
+        'fullimpulso_mensaje' => "ALTER TABLE pedidos ADD COLUMN fullimpulso_mensaje VARCHAR(255) NULL AFTER fullimpulso_order_id",
+        'fullimpulso_payload' => "ALTER TABLE pedidos ADD COLUMN fullimpulso_payload LONGTEXT NULL AFTER fullimpulso_mensaje",
+        'fullimpulso_refill_id' => "ALTER TABLE pedidos ADD COLUMN fullimpulso_refill_id VARCHAR(120) NULL AFTER fullimpulso_payload",
+        'fullimpulso_refill_estado' => "ALTER TABLE pedidos ADD COLUMN fullimpulso_refill_estado VARCHAR(40) NULL AFTER fullimpulso_refill_id",
+        'binance_pay_request_id' => "ALTER TABLE pedidos ADD COLUMN binance_pay_request_id VARCHAR(120) NULL AFTER fullimpulso_refill_estado",
         'binance_pay_order_no' => "ALTER TABLE pedidos ADD COLUMN binance_pay_order_no VARCHAR(120) NULL AFTER binance_pay_request_id",
         'binance_pay_reference' => "ALTER TABLE pedidos ADD COLUMN binance_pay_reference VARCHAR(120) NULL AFTER binance_pay_order_no",
         'binance_pay_status' => "ALTER TABLE pedidos ADD COLUMN binance_pay_status VARCHAR(40) NULL AFTER binance_pay_reference",
@@ -3916,6 +3931,34 @@ function sync_local_order_with_binance_payload(mysqli $mysqli, array $order, arr
         ];
     }
 
+    if (order_uses_fullimpulso_api_provider($updatedOrder)) {
+        $fiClaimStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, estado = 'pagado' WHERE id = ? AND estado = 'pendiente' LIMIT 1");
+        if ($fiClaimStmt) {
+            $fiClaimStmt->bind_param('si', $verifiedReference, $orderId);
+            $fiClaimStmt->execute();
+            $fiClaimStmt->close();
+        }
+        $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+
+        if (trim((string) ($updatedOrder['estado'] ?? '')) === 'pagado') {
+            $fiResult = fullimpulso_dispatch_and_persist($mysqli, $updatedOrder);
+            $paidOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+            recharge_notifications_emit_for_order($mysqli, $paidOrder);
+            register_influencer_coupon_sale($mysqli, $paidOrder);
+            if (!empty($fiResult['success'])) {
+                notify_free_fire_recharge_success($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, (string) ($fiResult['order_id'] ?? ''), (string) ($fiResult['message'] ?? ''));
+            } else {
+                notify_bank_payment_verified_paid($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone);
+            }
+
+            return [
+                'order' => $paidOrder,
+                'local_status' => trim((string) ($paidOrder['estado'] ?? 'pagado')),
+                'provider_flow' => order_provider_flow_from_row($paidOrder),
+            ];
+        }
+    }
+
     if (!$usesCatalogApi) {
         $paidStatus = 'pagado';
         $stmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, estado = ? WHERE id = ? AND estado = 'pendiente' LIMIT 1");
@@ -4322,6 +4365,34 @@ function sync_local_order_with_paypal_payload(mysqli $mysqli, array $order, arra
             'local_status' => trim((string) ($paidOrder['estado'] ?? $discordTargetState)),
             'provider_flow' => order_provider_flow_from_row($paidOrder),
         ];
+    }
+
+    if (order_uses_fullimpulso_api_provider($updatedOrder)) {
+        $fiClaimStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, estado = 'pagado' WHERE id = ? AND estado = 'pendiente' LIMIT 1");
+        if ($fiClaimStmt) {
+            $fiClaimStmt->bind_param('si', $verifiedReference, $orderId);
+            $fiClaimStmt->execute();
+            $fiClaimStmt->close();
+        }
+        $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+
+        if (trim((string) ($updatedOrder['estado'] ?? '')) === 'pagado') {
+            $fiResult = fullimpulso_dispatch_and_persist($mysqli, $updatedOrder);
+            $paidOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+            recharge_notifications_emit_for_order($mysqli, $paidOrder);
+            register_influencer_coupon_sale($mysqli, $paidOrder);
+            if (!empty($fiResult['success'])) {
+                notify_free_fire_recharge_success($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, (string) ($fiResult['order_id'] ?? ''), (string) ($fiResult['message'] ?? ''));
+            } else {
+                notify_bank_payment_verified_paid($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone);
+            }
+
+            return [
+                'order' => $paidOrder,
+                'local_status' => trim((string) ($paidOrder['estado'] ?? 'pagado')),
+                'provider_flow' => order_provider_flow_from_row($paidOrder),
+            ];
+        }
     }
 
     if (!$usesCatalogApi) {
@@ -4815,7 +4886,7 @@ function game_uses_discord_api(mysqli $mysqli, int $gameId): bool {
 
 function normalize_api_provider_value($value): string {
     $normalized = strtolower(trim((string) $value));
-    return in_array($normalized, ['giftven', 'discord', 'free_fire'], true) ? $normalized : '';
+    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso'], true) ? $normalized : '';
 }
 
 function package_api_provider_from_row(array $package, array $game = []): string {
@@ -4830,6 +4901,10 @@ function package_api_provider_from_row(array $package, array $game = []): string
 
     if (trim((string) ($package['monto_ff'] ?? '')) !== '') {
         return 'free_fire';
+    }
+
+    if ((int) ($package['fullimpulso_service_id'] ?? 0) > 0) {
+        return 'fullimpulso';
     }
 
     if (trim((string) ($game['categoria_api_discord'] ?? '')) !== '') {
@@ -4853,6 +4928,10 @@ function order_api_provider(array $order): string {
         return 'free_fire';
     }
 
+    if ((int) ($order['fullimpulso_service_id'] ?? 0) > 0) {
+        return 'fullimpulso';
+    }
+
     if (trim((string) ($order['api_discord_command_key'] ?? '')) !== '') {
         return 'discord';
     }
@@ -4866,6 +4945,10 @@ function order_uses_catalog_api_provider(array $order): bool {
 
 function order_uses_free_fire_api_provider(array $order): bool {
     return order_api_provider($order) === 'free_fire';
+}
+
+function order_uses_fullimpulso_api_provider(array $order): bool {
+    return order_api_provider($order) === 'fullimpulso';
 }
 
 function fetch_game_package(mysqli $mysqli, int $packageId, int $gameId): ?array {
@@ -5329,6 +5412,84 @@ function execute_free_fire_recharge(array $config, string $monto, string $numero
         'message' => $message !== '' ? $message : 'Respuesta recibida desde la API de Free Fire.',
         'reference' => sanitize_str((string) ($response['referencia'] ?? ''), 120),
         'payload' => $response,
+    ];
+}
+
+/**
+ * Ejecuta la compra en FullImpulso (API de seguidores/likes/comentarios):
+ * un service_id y una cantidad fijos por paquete + el enlace que pegó el
+ * cliente. Espeja execute_free_fire_recharge(): una sola llamada síncrona,
+ * sin catálogo remoto compartido.
+ */
+function execute_fullimpulso_purchase(int $serviceId, int $quantity, string $link): array {
+    try {
+        $result = fullimpulso_api_create_order($serviceId, $link, $quantity);
+    } catch (Throwable $e) {
+        return [
+            'success' => false,
+            'message' => $e->getMessage(),
+            'order_id' => '',
+            'payload' => ['exception' => $e->getMessage()],
+        ];
+    }
+
+    return [
+        'success' => !empty($result['success']),
+        'message' => (string) ($result['message'] ?? 'Respuesta recibida desde FullImpulso.'),
+        'order_id' => (string) ($result['order_id'] ?? ''),
+        'payload' => $result['payload'] ?? [],
+    ];
+}
+
+/**
+ * Despacha la compra en FullImpulso para un pedido ya marcado 'pagado' y
+ * persiste el resultado (order_id/mensaje/payload/historial). Usada por
+ * TODOS los puntos de despacho automático (transferencia/Pagonorte, sync de
+ * Binance/PayPal, RECoins, carrito) para no repetir la lógica de guardado en
+ * cada uno. Cada call site sigue construyendo su propia respuesta JSON y
+ * notificación, exactamente como ya hacen giftven/discord — esta función NO
+ * llama json_response ni envía notificaciones, solo ejecuta y guarda.
+ */
+function fullimpulso_dispatch_and_persist(mysqli $mysqli, array $order): array {
+    $orderId = (int) ($order['id'] ?? 0);
+    $fiServiceId = (int) ($order['fullimpulso_service_id'] ?? 0);
+    $fiCantidad = (int) ($order['fullimpulso_cantidad'] ?? 0);
+    $fiLink = (string) ($order['user_identifier'] ?? '');
+
+    $result = execute_fullimpulso_purchase($fiServiceId, $fiCantidad, $fiLink);
+
+    $fiOrderId = (string) ($result['order_id'] ?? '');
+    $fiMessage = (string) ($result['message'] ?? 'No se recibió mensaje de FullImpulso.');
+    $fiPayload = json_encode($result['payload'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($fiPayload)) {
+        $fiPayload = '{}';
+    }
+    $fiHistoryJson = append_provider_history(
+        $order['recargas_api_historial_json'] ?? null,
+        build_provider_history_entry('purchase', '', !empty($result['success']) ? 'enviado' : 'pagado', $fiMessage, $fiOrderId)
+    );
+
+    if (!empty($result['success'])) {
+        $sentStatus = 'enviado';
+        $stmt = $mysqli->prepare("UPDATE pedidos SET fullimpulso_order_id = ?, fullimpulso_mensaje = ?, fullimpulso_payload = ?, recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+        if ($stmt) {
+            $stmt->bind_param('sssssi', $fiOrderId, $fiMessage, $fiPayload, $fiHistoryJson, $sentStatus, $orderId);
+            $stmt->execute();
+            $stmt->close();
+        }
+    } else {
+        $stmt = $mysqli->prepare("UPDATE pedidos SET fullimpulso_order_id = ?, fullimpulso_mensaje = ?, fullimpulso_payload = ?, recargas_api_historial_json = ? WHERE id = ? AND estado = 'pagado'");
+        if ($stmt) {
+            $stmt->bind_param('ssssi', $fiOrderId, $fiMessage, $fiPayload, $fiHistoryJson, $orderId);
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
+    return [
+        'success' => !empty($result['success']),
+        'order_id' => $fiOrderId,
+        'message' => $fiMessage,
     ];
 }
 
@@ -8167,6 +8328,11 @@ try {
     error_log('TVG ensure_juego_paquetes_api_source_key_column skipped: ' . $e->getMessage());
 }
 try {
+    fullimpulso_ensure_schema($mysqli);
+} catch (Throwable $e) {
+    error_log('TVG fullimpulso_ensure_schema skipped: ' . $e->getMessage());
+}
+try {
     ensure_pedidos_costo_columns($mysqli);
 } catch (Throwable $e) {
     error_log('TVG ensure_pedidos_costo_columns skipped: ' . $e->getMessage());
@@ -8232,6 +8398,9 @@ if ($action === 'create') {
     $usesCatalogApi = false;
     $usesDiscordApi = false;
     $usesFreeFireApi = false;
+    $usesFullImpulsoApi = false;
+    $fullimpulso_service_id = null;
+    $fullimpulso_cantidad = null;
     $packageApiProvider = '';
     $discordCommandKey = '';
     $discordCheckoutRequiredFields = [];
@@ -8262,12 +8431,17 @@ if ($action === 'create') {
             $pack_amount_text = sanitize_str((string) ($selectedPackage['cantidad'] ?? $pack_amount_text), 80);
             $monto_ff = sanitize_str((string) ($selectedPackage['monto_ff'] ?? ''), 20);
             $paquete_api = isset($selectedPackage['paquete_api']) ? (int) $selectedPackage['paquete_api'] : null;
+            $fullimpulso_service_id = isset($selectedPackage['fullimpulso_service_id']) && (int) $selectedPackage['fullimpulso_service_id'] > 0
+                ? (int) $selectedPackage['fullimpulso_service_id'] : null;
+            $fullimpulso_cantidad = isset($selectedPackage['fullimpulso_cantidad']) && (int) $selectedPackage['fullimpulso_cantidad'] > 0
+                ? (int) $selectedPackage['fullimpulso_cantidad'] : null;
             $packageApiProvider = package_api_provider_from_row($selectedPackage, [
                 'categoria_api_discord' => game_discord_api_command($mysqli, (int) $game_id),
             ]);
             $usesCatalogApi = $packageApiProvider === 'giftven';
             $usesDiscordApi = $packageApiProvider === 'discord';
             $usesFreeFireApi = $packageApiProvider === 'free_fire';
+            $usesFullImpulsoApi = $packageApiProvider === 'fullimpulso';
             if ($usesDiscordApi) {
                 $packApiSourceKey = trim((string) ($selectedPackage['api_source_key'] ?? ''));
                 $discordCommandKey = $packApiSourceKey !== '' ? $packApiSourceKey : game_discord_api_command($mysqli, (int) $game_id);
@@ -8338,6 +8512,14 @@ if ($action === 'create') {
 
     if (!$selectedPackageIsAccountSale && $usesFreeFireApi && ($monto_ff === null || $monto_ff === '')) {
         json_error('Este paquete no tiene un monto API configurado para Free Fire.');
+    }
+
+    if (!$selectedPackageIsAccountSale && $usesFullImpulsoApi && ($fullimpulso_service_id === null || $fullimpulso_cantidad === null)) {
+        json_error('Este paquete no tiene un servicio de FullImpulso configurado.');
+    }
+
+    if (!$selectedPackageIsAccountSale && $usesFullImpulsoApi && trim((string) $user_identifier) === '') {
+        json_error('Debes indicar el enlace de tu perfil o publicación para procesar este pedido.');
     }
 
     if (!$selectedPackageIsAccountSale && $usesDiscordApi && $discordCommandKey === '') {
@@ -8531,6 +8713,8 @@ if ($action === 'create') {
             'paquete_cantidad' => $pack_amount_text,
             'monto_ff' => $monto_ff,
             'paquete_api' => $paquete_api,
+            'fullimpulso_service_id' => $fullimpulso_service_id,
+            'fullimpulso_cantidad' => $fullimpulso_cantidad,
             'api_provider' => $packageApiProvider !== '' ? $packageApiProvider : null,
             'moneda' => $currency,
             'precio' => $price,
@@ -8974,6 +9158,40 @@ if ($action === 'submit_payment') {
             ], $sentOrder), 200, static function () use ($mysqli, $sentOrder): void {
                 notify_account_sale_delivery($mysqli, $sentOrder, 'Canje por premios', '', '');
             });
+        }
+
+        if (order_uses_fullimpulso_api_provider($updatedOrder)) {
+            $fiClaimStmt = $mysqli->prepare("UPDATE pedidos SET estado = 'pagado' WHERE id = ? AND estado = 'pendiente'");
+            if ($fiClaimStmt) {
+                $fiClaimStmt->bind_param('i', $orderId);
+                $fiClaimStmt->execute();
+                $fiClaimStmt->close();
+            }
+            $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+
+            if (trim((string) ($updatedOrder['estado'] ?? '')) === 'pagado') {
+                $fiResult = fullimpulso_dispatch_and_persist($mysqli, $updatedOrder);
+                $paidOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+                recharge_notifications_emit_for_order($mysqli, $paidOrder);
+                json_response([
+                    'ok' => true,
+                    'message' => !empty($fiResult['success'])
+                        ? 'Canje realizado y pedido enviado correctamente a FullImpulso.'
+                        : 'Canje realizado. El pedido quedó registrado y será enviado a FullImpulso en breve.',
+                    'order_id' => $orderId,
+                    'estado' => trim((string) ($paidOrder['estado'] ?? 'pagado')),
+                    'verified' => true,
+                    'payment_mode' => 'points',
+                    'provider_flow' => !empty($fiResult['success']) ? 'completed' : 'pending_retry',
+                    'provider_reference' => (string) ($fiResult['order_id'] ?? ''),
+                    'provider_message' => (string) ($fiResult['message'] ?? ''),
+                    'win_points' => win_points_response_payload($mysqli, $sessionUserId, [
+                        'spent' => $requiredPoints,
+                    ]),
+                ], 200, !empty($fiResult['success']) ? static function () use ($mysqli, $paidOrder, $fiResult): void {
+                    notify_free_fire_recharge_success($mysqli, $paidOrder, 'Canje por premios', '', '', (string) ($fiResult['order_id'] ?? ''), (string) ($fiResult['message'] ?? ''));
+                } : null);
+            }
         }
 
         if (!$usesCatalogApi) {
@@ -9647,6 +9865,42 @@ if ($action === 'submit_payment') {
 
                     notify_bank_payment_verified_paid($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone);
                 });
+            }
+
+            if (order_uses_fullimpulso_api_provider($updatedOrder)) {
+                $fiClaimStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, estado = 'pagado' WHERE id = ? AND estado = 'pendiente'");
+                if (!$fiClaimStmt) {
+                    json_error('No se pudo iniciar el envío a FullImpulso.', 500);
+                }
+                $fiClaimStmt->bind_param('ssi', $verifiedReference, $phone, $orderId);
+                $fiClaimStmt->execute();
+                $fiClaimStmt->close();
+                $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+
+                if (($updatedOrder['estado'] ?? '') === 'pagado') {
+                    $fiResult = fullimpulso_dispatch_and_persist($mysqli, $updatedOrder);
+                    $paidOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+                    recharge_notifications_emit_for_order($mysqli, $paidOrder);
+                    json_response(append_payment_difference_response([
+                        'ok' => true,
+                        'message' => !empty($fiResult['success'])
+                            ? 'Pago verificado y pedido enviado correctamente a FullImpulso.'
+                            : 'Pago verificado. El pedido quedó registrado y será enviado a FullImpulso en breve.',
+                        'order_id' => $orderId,
+                        'estado' => trim((string) ($paidOrder['estado'] ?? 'pagado')),
+                        'verified' => true,
+                        'provider_flow' => !empty($fiResult['success']) ? 'completed' : 'pending_retry',
+                        'provider_reference' => (string) ($fiResult['order_id'] ?? ''),
+                        'provider_message' => (string) ($fiResult['message'] ?? ''),
+                    ], $paidOrder, $overpaymentAmount), 200, static function () use ($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, $fiResult): void {
+                        register_influencer_coupon_sale($mysqli, $paidOrder);
+                        if (!empty($fiResult['success'])) {
+                            notify_free_fire_recharge_success($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, (string) ($fiResult['order_id'] ?? ''), (string) ($fiResult['message'] ?? ''));
+                            return;
+                        }
+                        notify_bank_payment_verified_paid($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone);
+                    });
+                }
             }
 
             if (!$usesCatalogApi) {
@@ -10461,9 +10715,29 @@ if ($action === 'sync_provider_status') {
 
     try {
         $providerOrderId = trim((string) ($order['recargas_api_pedido_id'] ?? ''));
+        $fullimpulsoOrderId = trim((string) ($order['fullimpulso_order_id'] ?? ''));
         if ($providerOrderId !== '') {
             $providerDetail = recargas_api_fetch_order_detail($providerOrderId);
             $syncResult = sync_local_order_with_provider_detail($mysqli, $order, $providerDetail, true);
+        } elseif ($fullimpulsoOrderId !== '') {
+            $syncGateway = 'fullimpulso';
+            $fiStatus = fullimpulso_api_fetch_order_status($fullimpulsoOrderId);
+            $fiStatusText = trim((string) ($fiStatus['status'] ?? ''));
+            $fiPayload = json_encode($fiStatus['payload'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (!is_string($fiPayload)) {
+                $fiPayload = '{}';
+            }
+            $stmtFi = $mysqli->prepare("UPDATE pedidos SET recargas_api_estado = ?, fullimpulso_mensaje = ?, fullimpulso_payload = ?, recargas_api_ultimo_check = NOW() WHERE id = ?");
+            if ($stmtFi) {
+                $stmtFi->bind_param('sssi', $fiStatusText, $fiStatusText, $fiPayload, $orderId);
+                $stmtFi->execute();
+                $stmtFi->close();
+            }
+            $syncResult = [
+                'order' => fetch_order_by_id($mysqli, $orderId) ?: $order,
+                'provider_status' => $fiStatusText,
+                'provider_reference' => $fullimpulsoOrderId,
+            ];
         } elseif ($hasBinanceTracking) {
             if (!binance_pay_is_enabled()) {
                 json_error('Binance Pay no está activo en esta tienda.', 409);
@@ -10945,7 +11219,164 @@ if ($action === 'admin_retry_recharge') {
         json_error('La recarga de Free Fire no pudo completarse automaticamente: ' . $providerMessage, 409);
     }
 
+    if (order_uses_fullimpulso_api_provider($order)) {
+        $fiServiceId = (int) ($order['fullimpulso_service_id'] ?? 0);
+        $fiCantidad = (int) ($order['fullimpulso_cantidad'] ?? 0);
+        $fiLink = sanitize_str((string) ($order['user_identifier'] ?? ''), 500) ?? '';
+        if ($fiServiceId <= 0 || $fiCantidad <= 0) {
+            json_error('Este pedido no tiene un servicio de FullImpulso configurado.', 409);
+        }
+        if ($fiLink === '') {
+            json_error('Este pedido no tiene un enlace guardado para procesar en FullImpulso.', 409);
+        }
+
+        $providerResult = execute_fullimpulso_purchase($fiServiceId, $fiCantidad, $fiLink);
+
+        $mysqli = ensure_mysqli_connection($mysqli);
+        $fiOrderId = (string) ($providerResult['order_id'] ?? '');
+        $fiMessage = (string) ($providerResult['message'] ?? 'No se recibió mensaje de FullImpulso.');
+        $fiPayload = json_encode($providerResult['payload'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($fiPayload)) {
+            $fiPayload = '{}';
+        }
+        $fiHistoryJson = append_provider_history(
+            $order['recargas_api_historial_json'] ?? null,
+            build_provider_history_entry('admin_retry_fullimpulso', '', !empty($providerResult['success']) ? 'enviado' : 'pagado', $fiMessage, $fiOrderId)
+        );
+
+        if (!empty($providerResult['success'])) {
+            $sentStatus = 'enviado';
+            $stmt = $mysqli->prepare("UPDATE pedidos SET fullimpulso_order_id = ?, fullimpulso_mensaje = ?, fullimpulso_payload = ?, recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+            if (!$stmt) {
+                json_error('No se pudo actualizar el pedido tras enviarlo a FullImpulso.', 500);
+            }
+            $stmt->bind_param('sssssi', $fiOrderId, $fiMessage, $fiPayload, $fiHistoryJson, $sentStatus, $orderId);
+            if (!$stmt->execute()) {
+                $stmt->close();
+                json_error('No se pudo guardar el resultado de FullImpulso.', 500);
+            }
+            $stmt->close();
+
+            $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
+            recharge_notifications_emit_for_order($mysqli, $updatedOrder);
+            json_response([
+                'ok' => true,
+                'message' => 'El pedido fue enviado correctamente a FullImpulso.',
+                'order_id' => $orderId,
+                'estado' => 'enviado',
+                'provider_flow' => 'completed',
+                'provider_reference' => $fiOrderId,
+                'provider_message' => $fiMessage,
+            ]);
+        }
+
+        $stmt = $mysqli->prepare("UPDATE pedidos SET fullimpulso_order_id = ?, fullimpulso_mensaje = ?, fullimpulso_payload = ?, recargas_api_historial_json = ? WHERE id = ? AND estado = 'pagado'");
+        if (!$stmt) {
+            json_error('No se pudo registrar el intento de envío a FullImpulso.', 500);
+        }
+        $stmt->bind_param('ssssi', $fiOrderId, $fiMessage, $fiPayload, $fiHistoryJson, $orderId);
+        if (!$stmt->execute()) {
+            $stmt->close();
+            json_error('No se pudo guardar el error de FullImpulso.', 500);
+        }
+        $stmt->close();
+
+        json_error('El pedido no pudo enviarse a FullImpulso: ' . $fiMessage, 409);
+    }
+
     json_error('Este pedido no tiene una recarga automatica configurable para reintentar.', 409);
+}
+
+if ($action === 'fullimpulso_request_refill') {
+    $adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
+    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado', 'root'], true)) {
+        json_error('No autorizado', 403);
+    }
+
+    $orderId = intval($_POST['order_id'] ?? $_GET['order_id'] ?? 0);
+    if ($orderId <= 0) {
+        json_error('Pedido inválido.');
+    }
+
+    $order = fetch_order_by_id($mysqli, $orderId);
+    if (!$order) {
+        json_error('Pedido no encontrado.', 404);
+    }
+    if (!order_uses_fullimpulso_api_provider($order)) {
+        json_error('Este pedido no usa FullImpulso.', 409);
+    }
+    $fullimpulsoOrderId = trim((string) ($order['fullimpulso_order_id'] ?? ''));
+    if ($fullimpulsoOrderId === '') {
+        json_error('Este pedido aún no tiene una orden de FullImpulso registrada.', 409);
+    }
+
+    try {
+        $refillResult = fullimpulso_api_request_refill($fullimpulsoOrderId);
+    } catch (Throwable $e) {
+        json_error($e->getMessage(), 502);
+    }
+
+    $refillId = trim((string) ($refillResult['refill_id'] ?? ''));
+    if ($refillId === '') {
+        json_error('FullImpulso no devolvió un ID de reposición.', 502);
+    }
+
+    $stmt = $mysqli->prepare("UPDATE pedidos SET fullimpulso_refill_id = ?, fullimpulso_refill_estado = 'solicitado' WHERE id = ?");
+    if ($stmt) {
+        $stmt->bind_param('si', $refillId, $orderId);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    json_response(['ok' => true, 'message' => 'Reposición solicitada correctamente en FullImpulso.', 'refill_id' => $refillId]);
+}
+
+if ($action === 'fullimpulso_request_cancel') {
+    $adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
+    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'empleado', 'root'], true)) {
+        json_error('No autorizado', 403);
+    }
+
+    $orderId = intval($_POST['order_id'] ?? $_GET['order_id'] ?? 0);
+    if ($orderId <= 0) {
+        json_error('Pedido inválido.');
+    }
+
+    $order = fetch_order_by_id($mysqli, $orderId);
+    if (!$order) {
+        json_error('Pedido no encontrado.', 404);
+    }
+    if (!order_uses_fullimpulso_api_provider($order)) {
+        json_error('Este pedido no usa FullImpulso.', 409);
+    }
+    // Un pedido ya "enviado" se considera entregado: no se cancela retroactivamente.
+    if (trim((string) ($order['estado'] ?? '')) !== 'pagado') {
+        json_error('Solo se pueden cancelar pedidos aún en curso (estado pagado).', 409);
+    }
+    $fullimpulsoOrderId = trim((string) ($order['fullimpulso_order_id'] ?? ''));
+    if ($fullimpulsoOrderId === '') {
+        json_error('Este pedido aún no tiene una orden de FullImpulso registrada.', 409);
+    }
+
+    try {
+        $cancelResult = fullimpulso_api_request_cancel($fullimpulsoOrderId);
+    } catch (Throwable $e) {
+        json_error($e->getMessage(), 502);
+    }
+
+    if (empty($cancelResult['success'])) {
+        json_error('FullImpulso no pudo cancelar este pedido (puede que ya esté en progreso o completado).', 409);
+    }
+
+    $cancelStatus = 'cancelado';
+    $stmt = $mysqli->prepare("UPDATE pedidos SET estado = ? WHERE id = ? AND estado = 'pagado'");
+    if ($stmt) {
+        $stmt->bind_param('si', $cancelStatus, $orderId);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    json_response(['ok' => true, 'message' => 'Pedido cancelado correctamente en FullImpulso.']);
 }
 
 if ($action === 'provider_recent_orders') {
@@ -11665,6 +12096,8 @@ if ($action === 'batch_create_and_pay') {
         $packAmountText = (string) ($pkg['cantidad'] ?? '');
         $montoFF        = (string) ($pkg['monto_ff'] ?? '');
         $paqueteApi     = isset($pkg['paquete_api']) ? (int) $pkg['paquete_api'] : null;
+        $fiServiceId    = isset($pkg['fullimpulso_service_id']) && (int) $pkg['fullimpulso_service_id'] > 0 ? (int) $pkg['fullimpulso_service_id'] : null;
+        $fiCantidad     = isset($pkg['fullimpulso_cantidad']) && (int) $pkg['fullimpulso_cantidad'] > 0 ? (int) $pkg['fullimpulso_cantidad'] : null;
         $discordCmd     = game_discord_api_command($mysqli, $gameId);
         $pkgProvider    = package_api_provider_from_row($pkg, ['categoria_api_discord' => $discordCmd]);
         $apiDiscordData = build_api_discord_order_insert_data($mysqli, $gameId, $pkgProvider);
@@ -11705,6 +12138,8 @@ if ($action === 'batch_create_and_pay') {
                 'paquete_cantidad'                   => $packAmountText,
                 'monto_ff'                           => $montoFF !== '' ? $montoFF : null,
                 'paquete_api'                        => $paqueteApi,
+                'fullimpulso_service_id'             => $fiServiceId,
+                'fullimpulso_cantidad'               => $fiCantidad,
                 'api_provider'                       => $pkgProvider !== '' ? $pkgProvider : null,
                 'moneda'                             => $itemMoneda,
                 'precio'                             => $itemPrice,
@@ -11965,6 +12400,30 @@ if ($action === 'batch_fulfill_item') {
                 trim((string) ($dispatchResult['provider_message'] ?? '')) ?: 'Pedido enviado por Discord.'
             );
         });
+    }
+
+    // ── FullImpulso (seguidores/likes/comentarios) ───────────────────
+    if ($pkgProvider === 'fullimpulso') {
+        $fiResult = fullimpulso_dispatch_and_persist($mysqli, $order);
+        $updOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
+
+        if (!empty($fiResult['success'])) {
+            win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+            recharge_notifications_emit_for_order($mysqli, $updOrder);
+            json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Pedido enviado correctamente a FullImpulso.', 'provider_reference' => (string) ($fiResult['order_id'] ?? '')], 200, static function () use ($mysqli, $updOrder, $fiResult): void {
+                notify_free_fire_recharge_success(
+                    $mysqli,
+                    $updOrder,
+                    trim((string) ($updOrder['metodo_pago'] ?? 'Método de pago')),
+                    trim((string) ($updOrder['numero_referencia'] ?? '')),
+                    trim((string) ($updOrder['telefono_contacto'] ?? '')),
+                    (string) ($fiResult['order_id'] ?? ''),
+                    (string) ($fiResult['message'] ?? '')
+                );
+            });
+        }
+
+        json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => (string) ($fiResult['message'] ?? 'FullImpulso no pudo procesar el pedido.'), 'provider_message' => (string) ($fiResult['message'] ?? '')]);
     }
 
     // ── No auto-recharge (manual / free_fire legacy) ─────────────────
