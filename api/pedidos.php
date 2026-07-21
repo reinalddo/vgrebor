@@ -12543,7 +12543,16 @@ if ($action === 'batch_fulfill_item') {
 
         if (!empty($fiResult['success'])) {
             recharge_notifications_emit_for_order($mysqli, $updOrder);
-            json_response(['ok' => true, 'estado' => trim((string) ($updOrder['estado'] ?? 'pagado')), 'order_id' => $orderId, 'message' => 'Pedido recibido por FullImpulso y en curso.', 'provider_reference' => (string) ($fiResult['order_id'] ?? '')], 200, static function () use ($mysqli, $updOrder, $fiResult, $orderId): void {
+            // 'processing' => true es indispensable aquí: el frontend
+            // (batch-progress-modal en game.php) clasifica cada ítem como
+            // "En proceso" (icono azul) SOLO si estado='pagado' Y
+            // processing=true; sin este flag, un pedido aceptado
+            // correctamente por FullImpulso (estado se queda en 'pagado' a
+            // propósito hasta que el proveedor confirme "Completed", ver
+            // fullimpulso_dispatch_and_persist) caía por defecto en la rama
+            // de ERROR (❌ rojo + el mensaje de éxito mostrado como si fuera
+            // un fallo) — bug reportado por el cliente con captura.
+            json_response(['ok' => true, 'estado' => trim((string) ($updOrder['estado'] ?? 'pagado')), 'processing' => true, 'order_id' => $orderId, 'message' => 'Pedido recibido por FullImpulso y en curso.', 'provider_reference' => (string) ($fiResult['order_id'] ?? '')], 200, static function () use ($mysqli, $updOrder, $fiResult, $orderId): void {
                 notify_catalog_purchase_pending(
                     $mysqli,
                     $updOrder,
