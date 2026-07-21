@@ -4,6 +4,13 @@ require_once 'includes/auth.php';
 require_once 'includes/db_connect.php';
 require_once 'includes/slugify.php';
 
+$adminUser = auth_sync_session_user();
+$adminUserRole = trim((string) ($adminUser['rol'] ?? ''));
+if (!$adminUser || !in_array($adminUserRole, ['admin', 'root', 'influencer'], true)) {
+    header('Location: ' . app_path('/login.php'));
+    exit();
+}
+
 // Helper para URLs amigables
 define('ADMIN_CUPONES_BASE', '/admin/cupones');
 

@@ -2,6 +2,12 @@
 // admin/juegos.php - Gestión de juegos y características
 require_once '../includes/db_connect.php';
 require_once '../includes/tenant.php';
+tenant_start_session();
+$adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
+if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'root'], true)) {
+    header('Location: ' . app_path('/login.php'));
+    exit();
+}
 require_once '../includes/recargas_api.php';
 require_once '../includes/store_config.php';
 require_once '../includes/api_discord.php';

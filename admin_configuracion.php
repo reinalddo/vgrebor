@@ -4,6 +4,12 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
   tenant_start_session();
 }
 
+$adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
+if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'root'], true)) {
+    header('Location: ' . app_path('/login.php'));
+    exit();
+}
+
 require_once __DIR__ . '/includes/store_config.php';
 require_once __DIR__ . '/includes/home_gallery.php';
 require_once __DIR__ . '/includes/payment_methods.php';

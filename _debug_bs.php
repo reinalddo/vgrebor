@@ -1,7 +1,13 @@
 <?php
+require_once __DIR__ . '/includes/tenant.php';
+tenant_start_session();
+$adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
+if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'root'], true)) {
+    http_response_code(403);
+    die('Acceso denegado');
+}
 $_SERVER['HTTP_HOST'] = 'localhost';
 require_once __DIR__ . '/includes/db_connect.php';
-require_once __DIR__ . '/includes/tenant.php';
 require_once __DIR__ . '/includes/store_config.php';
 require_once __DIR__ . '/includes/recargas_api.php';
 
