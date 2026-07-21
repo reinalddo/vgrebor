@@ -4539,6 +4539,38 @@ include __DIR__ . "/includes/header.php";
     cursor: pointer;
   }
 
+  /* Paquete bloqueado (pase de nivel no disponible / stock BS Pass ya
+     usado / error del validador): se mantiene visible en la grilla, pero
+     oscurecido, deshabilitado y con una etiqueta encima explicando por qué. */
+  .pack-card.bs-pass-blocked,
+  .pack-card.levelpass-locked {
+    position: relative;
+    cursor: not-allowed;
+    pointer-events: none;
+    filter: grayscale(0.85);
+    opacity: 0.5;
+  }
+
+  .pack-card.bs-pass-blocked::after,
+  .pack-card.levelpass-locked::after {
+    content: attr(data-lock-label);
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #f8fafc;
+    background: rgba(8, 12, 20, 0.62);
+    border-radius: inherit;
+  }
+
   .pack-card-media {
     width: 100%;
     margin: 0;
@@ -9235,30 +9267,29 @@ include __DIR__ . "/includes/header.php";
     note.textContent = message;
   }
 
-  // Visibilidad combinada de cada columna del grid: puede estar oculta por el
-  // tab de categoría activo y/o por el bloqueo de stock BS Pass. Ambas señales
-  // se guardan por separado en dataset para que ninguna se pise a la otra al
-  // escribir la clase d-none.
+  // Visibilidad de cada columna del grid: solo depende del tab de categoría
+  // activo. El bloqueo de stock BS Pass / Pase de Nivel YA NO oculta la
+  // tarjeta — se mantiene visible pero oscurecida/deshabilitada (ver
+  // blockPackCardForStock / blockPackCardForLevelPass), a pedido del
+  // cliente: no quiere que las tarjetas desaparezcan de la grilla.
   function updateColumnVisibility(column) {
     if (!column) return;
     const tabHidden = column.dataset.tabHidden === '1';
-    const bsHidden = column.dataset.bsHidden === '1';
-    const levelpassHidden = column.dataset.levelpassHidden === '1';
-    column.classList.toggle('d-none', tabHidden || bsHidden || levelpassHidden);
+    column.classList.toggle('d-none', tabHidden);
   }
 
   // El validador indica compras previas del jugador: los pases que ya
-  // adquirió en el ciclo/evento actual se OCULTAN por completo de la grilla
-  // y reaparecen cuando el validador vuelva a listarlos como disponibles.
-  function blockPackCardForStock(card) {
-    if (!card || card.classList.contains('bs-pass-blocked')) {
+  // adquirió en el ciclo/evento actual se mantienen visibles pero
+  // oscurecidos/deshabilitados con una etiqueta ("No disponible"), y
+  // reaparecen normales cuando el validador vuelva a listarlos como
+  // disponibles.
+  function blockPackCardForStock(card, label) {
+    if (!card) {
       return;
     }
     card.classList.add('bs-pass-blocked');
     card.setAttribute('aria-disabled', 'true');
-    const column = card.closest('.col') || card;
-    column.dataset.bsHidden = '1';
-    updateColumnVisibility(column);
+    card.setAttribute('data-lock-label', label || 'No disponible');
   }
 
   function unblockPackCardForStock(card) {
@@ -9267,9 +9298,7 @@ include __DIR__ . "/includes/header.php";
     }
     card.classList.remove('bs-pass-blocked');
     card.removeAttribute('aria-disabled');
-    const column = card.closest('.col') || card;
-    column.dataset.bsHidden = '0';
-    updateColumnVisibility(column);
+    card.removeAttribute('data-lock-label');
   }
 
   function deselectBlockedActivePack() {
@@ -9405,23 +9434,24 @@ include __DIR__ . "/includes/header.php";
   // ── Disponibilidad de Pase de Nivel ─────────────────────────────────────
   // Los 6 paquetes se muestran siempre por defecto (para que el cliente vea
   // qué existe antes de escribir su ID). En cuanto el validador responde
-  // tras verificar el nombre, se OCULTAN los que no correspondan a ese
-  // jugador, dejando visibles solo los disponibles. Si el validador falla o
-  // no aplica, se deja todo visible (fail-open: no bloquea ventas por una
-  // caída del proveedor). La consulta se dispara desde dentro del bloque de
-  // éxito de verifyCurrentPlayer (nunca en paralelo, nunca con un nombre no
+  // tras verificar el nombre, los que no correspondan a ese jugador se dejan
+  // visibles pero oscurecidos/deshabilitados con la etiqueta "No disponible"
+  // (nunca se ocultan de la grilla). Si el validador responde con un error
+  // (IP bloqueada, servicio pausado, timeout, etc.) se bloquean TODOS con la
+  // etiqueta "Error al validar" — fail-CLOSED visual, nunca fail-open: un
+  // fallo del proveedor no debe habilitar la compra de paquetes no
+  // verificados. La consulta se dispara desde dentro del bloque de éxito de
+  // verifyCurrentPlayer (nunca en paralelo, nunca con un nombre no
   // verificado) para no saturar la IP del proveedor con IDs falsos/sin cuenta.
   let levelPassSeq = 0;
 
-  function blockPackCardForLevelPass(card) {
+  function blockPackCardForLevelPass(card, label) {
     if (!card) {
       return;
     }
     card.classList.add('levelpass-locked');
     card.setAttribute('aria-disabled', 'true');
-    const column = card.closest('.col') || card;
-    column.dataset.levelpassHidden = '1';
-    updateColumnVisibility(column);
+    card.setAttribute('data-lock-label', label || 'No disponible');
   }
 
   function unblockPackCardForLevelPass(card) {
@@ -9430,12 +9460,13 @@ include __DIR__ . "/includes/header.php";
     }
     card.classList.remove('levelpass-locked');
     card.removeAttribute('aria-disabled');
-    const column = card.closest('.col') || card;
-    column.dataset.levelpassHidden = '0';
-    updateColumnVisibility(column);
+    card.removeAttribute('data-lock-label');
   }
 
-  function applyLevelPassAvailability(availableIds) {
+  // lockLabel: si se pasa, TODOS los paquetes se bloquean con ese texto
+  // (usado para el estado de error del validador) en vez de compararlos
+  // contra availableIds.
+  function applyLevelPassAvailability(availableIds, lockLabel) {
     const available = new Set((availableIds || []).map(String));
     let deselected = false;
     levelPassConfig.packageIds.forEach((packageId) => {
@@ -9443,10 +9474,10 @@ include __DIR__ . "/includes/header.php";
       if (!card) {
         return;
       }
-      if (available.has(String(packageId))) {
+      if (!lockLabel && available.has(String(packageId))) {
         unblockPackCardForLevelPass(card);
       } else {
-        blockPackCardForLevelPass(card);
+        blockPackCardForLevelPass(card, lockLabel || 'No disponible');
         if (activePack && String(activePack.id) === String(packageId)) {
           deselected = true;
         }
@@ -9508,17 +9539,23 @@ include __DIR__ . "/includes/header.php";
 
       if (data && data.ok && data.applicable) {
         applyLevelPassAvailability(Array.isArray(data.available) ? data.available : []);
-      } else {
-        // Fail-open: si el validador no aplica o la respuesta no fue válida,
-        // se dejan los 6 visibles en vez de bloquear la venta.
+      } else if (data && data.ok && !data.applicable) {
+        // El juego no tiene paquetes de pase de nivel configurados (no
+        // debería pasar si levelPassConfig.enabled es true, pero no hay
+        // nada que bloquear en ese caso).
         applyLevelPassAvailability(levelPassConfig.packageIds);
+      } else {
+        // Fail-closed visual: el validador respondió con un error (o la
+        // respuesta no fue válida) — se bloquean todos con "Error al
+        // validar" en vez de habilitarlos para la compra.
+        applyLevelPassAvailability([], 'Error al validar');
       }
     } catch (error) {
       if (requestId !== levelPassSeq) {
         return;
       }
-      // Fail-open: cualquier error de red deja los paquetes visibles.
-      applyLevelPassAvailability(levelPassConfig.packageIds);
+      // Fail-closed visual: cualquier error de red también bloquea todos.
+      applyLevelPassAvailability([], 'Error al validar');
     } finally {
       if (abortTimer) {
         window.clearTimeout(abortTimer);
