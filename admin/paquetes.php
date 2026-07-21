@@ -701,6 +701,29 @@ if (fullimpulso_is_configured()) {
         $fullimpulsoServicesError = $e->getMessage();
     }
 }
+// Auto-corrige paquetes existentes cuyo flag "fullimpulso_custom_comments"
+// haya quedado desactualizado (p.ej. guardados antes de que existiera la
+// detección, o cuando el proveedor no reportó el "type" correctamente en su
+// momento). Solo corrige de 0 -> 1 (nunca apaga un override manual del
+// admin), y no cuesta una petición extra porque $fullimpulsoServices ya se
+// obtuvo arriba para poblar los selects de este formulario.
+if (!empty($fullimpulsoServices)) {
+    $fiReconcileResult = $mysqli->query(
+        'SELECT id, fullimpulso_service_id FROM juego_paquetes WHERE juego_id = ' . (int) $juego_id
+        . ' AND fullimpulso_service_id IS NOT NULL AND fullimpulso_service_id > 0 AND COALESCE(fullimpulso_custom_comments, 0) = 0'
+    );
+    if ($fiReconcileResult instanceof mysqli_result) {
+        while ($fiRow = $fiReconcileResult->fetch_assoc()) {
+            $fiDetected = fullimpulso_service_type_is_custom_comments(
+                fullimpulso_service_type_for_id($fullimpulsoServices, (int) $fiRow['fullimpulso_service_id'])
+            );
+            if ($fiDetected) {
+                $mysqli->query('UPDATE juego_paquetes SET fullimpulso_custom_comments = 1 WHERE id = ' . (int) $fiRow['id']);
+            }
+        }
+        $fiReconcileResult->free();
+    }
+}
 $discordApiEnabled = trim((string) store_config_get('api_discord', '0')) === '1';
 $unionApisEnabled = $discordApiEnabled && trim((string) store_config_get('union_apis_discord_giftven', '0')) === '1';
 $juegoCategoriaApi        = trim((string) ($juego['categoria_api'] ?? ''));
