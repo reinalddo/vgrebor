@@ -11971,7 +11971,7 @@ include __DIR__ . "/includes/header.php";
         const needsPlayerVerificationCart = requiresVerifiedPlayerForCheckout();
         buyButton.disabled = !hasItems || !requiredFilled || cartPointsBlocked || needsPlayerVerificationCart;
         if (needsPlayerVerificationCart) {
-          buyButton.textContent = verifyUserBuyButtonLabel;
+          buyButton.textContent = 'ID USUARIO INVÁLIDO';
         } else if (cartPointsBlocked) {
           const _wp = (typeof winPointsState !== 'undefined') ? winPointsState : {};
           if (!_wp.loggedIn) {
@@ -13680,8 +13680,13 @@ include __DIR__ . "/includes/header.php";
 
                 // Update buy button label
                 if (buyButton) {
-                  buyButton.textContent = `Continuar con la compra - ${totalTxt}`;
-                  buyButton.disabled = false;
+                  if (requiresVerifiedPlayerForCheckout()) {
+                    buyButton.textContent = 'ID USUARIO INVÁLIDO';
+                    buyButton.disabled = true;
+                  } else {
+                    buyButton.textContent = `Continuar con la compra - ${totalTxt}`;
+                    buyButton.disabled = false;
+                  }
                 }
                 syncFloatCartFab(); // refresca el total del FAB al cambiar método/cupón/moneda
               };
@@ -13708,8 +13713,11 @@ include __DIR__ . "/includes/header.php";
                   const fields = Array.from(orderForm.querySelectorAll('[required]'));
                   return fields.every(f => f.value.trim() !== '');
                 })();
-                buyButton.disabled = !hasItems || !requiredOk || pointsBlocked;
-                if (pointsBlocked && !wp.loggedIn) {
+                const needsPlayerVerificationCartSync = requiresVerifiedPlayerForCheckout();
+                buyButton.disabled = !hasItems || !requiredOk || pointsBlocked || needsPlayerVerificationCartSync;
+                if (needsPlayerVerificationCartSync) {
+                  buyButton.textContent = 'ID USUARIO INVÁLIDO';
+                } else if (pointsBlocked && !wp.loggedIn) {
                   buyButton.textContent = `Inicia sesión para usar ${wp.name || 'Puntos'}`;
                 } else if (pointsBlocked && wp.monthlyMinimumMet === false && !wp.isAdmin) {
                   const minAmt = wp.monthlyMinimumRequired > 0 ? ` $${Number(wp.monthlyMinimumRequired).toFixed(2)}` : '';
