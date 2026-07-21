@@ -4541,12 +4541,21 @@ include __DIR__ . "/includes/header.php";
 
   /* Paquete bloqueado (pase de nivel no disponible / stock BS Pass ya
      usado / error del validador): se mantiene visible en la grilla, pero
-     oscurecido, deshabilitado y con una etiqueta encima explicando por qué. */
+     oscurecido, deshabilitado y con una etiqueta encima explicando por qué.
+     El oscurecido (filter/opacity) se aplica SOLO al contenido interno
+     (.card-body), nunca a .pack-card en sí: el filter de un elemento
+     "arrastra" también a sus pseudo-elementos, así que si se aplicara sobre
+     la tarjeta completa, la etiqueta de texto (::after) quedaría opacada y
+     grisácea junto con la imagen, en vez de verse nítida por encima. */
   .pack-card.bs-pass-blocked,
   .pack-card.levelpass-locked {
     position: relative;
     cursor: not-allowed;
     pointer-events: none;
+  }
+
+  .pack-card.bs-pass-blocked > .card-body,
+  .pack-card.levelpass-locked > .card-body {
     filter: grayscale(0.85);
     opacity: 0.5;
   }
