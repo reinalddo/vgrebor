@@ -12130,6 +12130,21 @@ if ($action === 'batch_create_and_pay') {
         $paqueteApi     = isset($pkg['paquete_api']) ? (int) $pkg['paquete_api'] : null;
         $fiServiceId    = isset($pkg['fullimpulso_service_id']) && (int) $pkg['fullimpulso_service_id'] > 0 ? (int) $pkg['fullimpulso_service_id'] : null;
         $fiCantidad     = isset($pkg['fullimpulso_cantidad']) && (int) $pkg['fullimpulso_cantidad'] > 0 ? (int) $pkg['fullimpulso_cantidad'] : null;
+        // Servicios "Custom Comments" de FullImpulso comprados vía carrito
+        // múltiple: el front manda los comentarios de este paquete en
+        // cart_items_json (fullimpulso_comments), no en el POST plano (eso
+        // es solo para la compra individual). Misma validación de líneas
+        // exactas que en el flujo individual.
+        $fiComments = null;
+        if ($fiServiceId !== null && !empty($pkg['fullimpulso_custom_comments'])) {
+            $rawFiComments = str_replace("\r\n", "\n", (string) ($cartItem['fullimpulso_comments'] ?? ''));
+            $fiCommentLines = array_values(array_filter(array_map('trim', explode("\n", $rawFiComments)), static fn (string $line): bool => $line !== ''));
+            $fiRequiredLines = (int) ($fiCantidad ?? 0);
+            if (count($fiCommentLines) !== $fiRequiredLines) {
+                json_error('Debes escribir exactamente ' . $fiRequiredLines . ' comentario(s) para "' . $packName . '", uno por línea.');
+            }
+            $fiComments = implode("\n", $fiCommentLines);
+        }
         $discordCmd     = game_discord_api_command($mysqli, $gameId);
         $pkgProvider    = package_api_provider_from_row($pkg, ['categoria_api_discord' => $discordCmd]);
         $apiDiscordData = build_api_discord_order_insert_data($mysqli, $gameId, $pkgProvider);
@@ -12172,6 +12187,7 @@ if ($action === 'batch_create_and_pay') {
                 'paquete_api'                        => $paqueteApi,
                 'fullimpulso_service_id'             => $fiServiceId,
                 'fullimpulso_cantidad'               => $fiCantidad,
+                'fullimpulso_comments'               => $fiComments,
                 'api_provider'                       => $pkgProvider !== '' ? $pkgProvider : null,
                 'moneda'                             => $itemMoneda,
                 'precio'                             => $itemPrice,

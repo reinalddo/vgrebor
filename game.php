@@ -4566,7 +4566,8 @@ include __DIR__ . "/includes/header.php";
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: #f8fafc;
+    color: #22d3ee;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
     background: rgba(8, 12, 20, 0.62);
     border-radius: inherit;
   }
@@ -5810,6 +5811,7 @@ include __DIR__ . "/includes/header.php";
   const fullimpulsoCommentsContinueBtn = document.getElementById('fullimpulso-comments-continue-btn');
   const fullimpulsoCommentsCancelBtn = document.getElementById('fullimpulso-comments-cancel-btn');
   let fullimpulsoCommentsOnContinue = null;
+  let fullimpulsoCommentsOnCancel = null;
   let pendingWhatsappUrl = '';
   let pendingPaymentExecution = null;
   let pendingOpenModal = null;
@@ -12974,35 +12976,48 @@ include __DIR__ . "/includes/header.php";
                 return { valid, lines };
               }
 
-              function openFullimpulsoCommentsModal(pack, onContinue) {
+              // Paquete asociado a la ventana de comentarios actualmente abierta.
+              // NO se usa "activePack" aquí: en el flujo de carrito múltiple se
+              // pide un set de comentarios por cada paquete del carrito, uno a
+              // la vez, y activePack no corresponde necesariamente al paquete
+              // que se está pidiendo en ese momento.
+              let fullimpulsoCommentsActivePack = null;
+
+              function openFullimpulsoCommentsModal(pack, onContinue, onCancel) {
                 if (!fullimpulsoCommentsModal || !fullimpulsoCommentsTextarea) {
                   onContinue('');
                   return;
                 }
+                fullimpulsoCommentsActivePack = pack;
                 fullimpulsoCommentsTextarea.value = '';
                 fullimpulsoCommentsOnContinue = onContinue;
+                fullimpulsoCommentsOnCancel = onCancel || null;
                 updateFullimpulsoCommentsValidation(pack);
                 setOverlayVisible(fullimpulsoCommentsModal, true);
                 window.setTimeout(() => fullimpulsoCommentsTextarea.focus(), 50);
               }
 
               if (fullimpulsoCommentsTextarea) {
-                fullimpulsoCommentsTextarea.addEventListener('input', () => updateFullimpulsoCommentsValidation(activePack));
+                fullimpulsoCommentsTextarea.addEventListener('input', () => updateFullimpulsoCommentsValidation(fullimpulsoCommentsActivePack));
               }
               if (fullimpulsoCommentsContinueBtn) {
                 fullimpulsoCommentsContinueBtn.addEventListener('click', () => {
-                  const { valid, lines } = updateFullimpulsoCommentsValidation(activePack);
+                  const { valid, lines } = updateFullimpulsoCommentsValidation(fullimpulsoCommentsActivePack);
                   if (!valid) return;
                   setOverlayVisible(fullimpulsoCommentsModal, false);
                   const callback = fullimpulsoCommentsOnContinue;
                   fullimpulsoCommentsOnContinue = null;
+                  fullimpulsoCommentsOnCancel = null;
                   if (typeof callback === 'function') callback(lines.join('\n'));
                 });
               }
               if (fullimpulsoCommentsCancelBtn) {
                 fullimpulsoCommentsCancelBtn.addEventListener('click', () => {
                   setOverlayVisible(fullimpulsoCommentsModal, false);
+                  const cancelCallback = fullimpulsoCommentsOnCancel;
                   fullimpulsoCommentsOnContinue = null;
+                  fullimpulsoCommentsOnCancel = null;
+                  if (typeof cancelCallback === 'function') cancelCallback();
                 });
               }
 
@@ -13791,10 +13806,43 @@ include __DIR__ . "/includes/header.php";
                 if (publicOrderSummaryShell) publicOrderSummaryShell.classList.add('d-none');
               }
 
+              // Paquetes FullImpulso "Comentarios personalizados" dentro del
+              // carrito: se piden uno a la vez (misma ventana que la compra
+              // individual) ANTES de armar el payload del carrito. Si el
+              // cliente cancela cualquiera, se aborta todo el checkout.
+              function collectCartFullimpulsoComments() {
+                const pending = cartItems
+                  .map((ci, idx) => ({ ci, idx }))
+                  .filter(({ ci }) => ci.pack && ci.pack.fullimpulsoCustomComments && typeof ci.fullimpulsoComments !== 'string');
+                if (pending.length === 0) {
+                  return Promise.resolve(true);
+                }
+                return new Promise((resolve) => {
+                  let i = 0;
+                  function next() {
+                    if (i >= pending.length) {
+                      resolve(true);
+                      return;
+                    }
+                    const { ci, idx } = pending[i];
+                    openFullimpulsoCommentsModal(ci.pack, (commentsText) => {
+                      cartItems[idx].fullimpulsoComments = commentsText;
+                      i += 1;
+                      next();
+                    }, () => resolve(false));
+                  }
+                  next();
+                });
+              }
+
               // ── Submit cart checkout ─────────────────────────────────────
               async function submitCartCheckout() {
                 if (cartItems.length === 0) {
                   showToast('No hay paquetes en el carrito.', 'error');
+                  return;
+                }
+
+                if (!(await collectCartFullimpulsoComments())) {
                   return;
                 }
 
@@ -13853,6 +13901,7 @@ include __DIR__ . "/includes/header.php";
                     quantity: ci.quantity,
                     price: normalizeCurrencyAmount(cartItemSubtotal(ci), ci.pack.showDecimals),
                     moneda: ci.pack.moneda,
+                    fullimpulso_comments: typeof ci.fullimpulsoComments === 'string' ? ci.fullimpulsoComments : '',
                   }));
                   const cartPseudoOrderPts = {
                     orderId: '__cart__',
@@ -13880,6 +13929,7 @@ include __DIR__ . "/includes/header.php";
                   quantity: ci.quantity,
                   price: normalizeCurrencyAmount(cartItemSubtotal(ci), ci.pack.showDecimals),
                   moneda: ci.pack.moneda,
+                  fullimpulso_comments: typeof ci.fullimpulsoComments === 'string' ? ci.fullimpulsoComments : '',
                 }));
 
                 // Collect payment data from the payment form (same as normal flow)
