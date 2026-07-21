@@ -6,6 +6,121 @@
 // que Free Fire usa monto_ff. El cliente final solo pega su enlace.
 
 require_once __DIR__ . '/store_config.php';
+require_once __DIR__ . '/win_points.php';
+require_once __DIR__ . '/recharge_notifications.php';
+
+/** SELECT mínimo, para no depender de fetch_order_by_id() (definida en api/pedidos.php). */
+function fullimpulso_fetch_order_row(mysqli $mysqli, int $orderId): ?array {
+    $stmt = $mysqli->prepare('SELECT * FROM pedidos WHERE id = ? LIMIT 1');
+    if (!$stmt) {
+        return null;
+    }
+    $stmt->bind_param('i', $orderId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+    return $row ?: null;
+}
+
+/** true si el texto de estado de FullImpulso indica entrega completa (p.ej. "Completed"). */
+function fullimpulso_order_is_completed_status(string $status): bool {
+    return stripos($status, 'complet') !== false;
+}
+
+/**
+ * Consulta action=status para un pedido con order_id de FullImpulso ya
+ * registrado y persiste el resultado. Si el proveedor confirma "Completed",
+ * recién ahí el pedido pasa de 'pagado' a 'enviado' (nunca antes: el pedido
+ * queda en 'pagado' desde que FullImpulso solo ACEPTA la orden). Vive aquí
+ * (no en api/pedidos.php) para poder llamarse también desde admin/pedidos.php
+ * y api/account.php sin duplicar la lógica de consulta. El correo específico
+ * de "recarga completada" (notify_free_fire_recharge_success, definida en
+ * api/pedidos.php) lo dispara el llamador cuando detecta el cambio de estado.
+ */
+function fullimpulso_sync_order_status(mysqli $mysqli, array $order): array {
+    $orderId = (int) ($order['id'] ?? 0);
+    $fullimpulsoOrderId = trim((string) ($order['fullimpulso_order_id'] ?? ''));
+    if ($orderId <= 0 || $fullimpulsoOrderId === '') {
+        return $order;
+    }
+
+    try {
+        $statusResult = fullimpulso_api_fetch_order_status($fullimpulsoOrderId);
+    } catch (Throwable $e) {
+        return $order;
+    }
+
+    $statusText = trim((string) ($statusResult['status'] ?? ''));
+    $payload = json_encode($statusResult['payload'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($payload)) {
+        $payload = '{}';
+    }
+
+    if (fullimpulso_order_is_completed_status($statusText) && trim((string) ($order['estado'] ?? '')) === 'pagado') {
+        $sentStatus = 'enviado';
+        $stmt = $mysqli->prepare("UPDATE pedidos SET recargas_api_estado = ?, fullimpulso_payload = ?, recargas_api_ultimo_check = NOW(), estado = ? WHERE id = ? AND estado = 'pagado'");
+        if ($stmt) {
+            $stmt->bind_param('sssi', $statusText, $payload, $sentStatus, $orderId);
+            $stmt->execute();
+            $stmt->close();
+        }
+        $updatedOrder = fullimpulso_fetch_order_row($mysqli, $orderId) ?: $order;
+        win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+        recharge_notifications_emit_for_order($mysqli, $updatedOrder);
+        return $updatedOrder;
+    }
+
+    $stmt = $mysqli->prepare("UPDATE pedidos SET recargas_api_estado = ?, fullimpulso_payload = ?, recargas_api_ultimo_check = NOW() WHERE id = ?");
+    if ($stmt) {
+        $stmt->bind_param('ssi', $statusText, $payload, $orderId);
+        $stmt->execute();
+        $stmt->close();
+    }
+    return fullimpulso_fetch_order_row($mysqli, $orderId) ?: $order;
+}
+
+/**
+ * Chequeo oportunista: sincroniza hasta $limit pedidos de FullImpulso que
+ * sigan "en curso" (pagado, ya con order_id) cada vez que se llama, con
+ * throttle propio (no más de 1 vez por minuto) para no golpear la API en
+ * cada carga de página. Se llama desde admin/pedidos.php y api/account.php
+ * para que el estado avance solo con el tráfico normal del sitio, sin cron.
+ */
+function fullimpulso_sync_pending_orders(mysqli $mysqli, int $limit = 5): void {
+    $throttleKey = 'fullimpulso_pending_sync_ultimo';
+    $lastRun = (int) store_config_get($throttleKey, '0');
+    if ($lastRun > 0 && (time() - $lastRun) < 60) {
+        return;
+    }
+    store_config_upsert($throttleKey, (string) time());
+
+    try {
+        $stmt = $mysqli->prepare("SELECT id FROM pedidos WHERE estado = 'pagado' AND fullimpulso_order_id IS NOT NULL AND fullimpulso_order_id <> '' ORDER BY id ASC LIMIT ?");
+        if (!$stmt) {
+            return;
+        }
+        $stmt->bind_param('i', $limit);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $orderIds = [];
+        if ($result) {
+            while ($row = $result->fetch_assoc()) {
+                $orderIds[] = (int) $row['id'];
+            }
+        }
+        $stmt->close();
+
+        foreach ($orderIds as $pendingOrderId) {
+            $pendingOrder = fullimpulso_fetch_order_row($mysqli, $pendingOrderId);
+            if ($pendingOrder) {
+                fullimpulso_sync_order_status($mysqli, $pendingOrder);
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('TVG fullimpulso_sync_pending_orders error: ' . $e->getMessage());
+    }
+}
 
 function fullimpulso_ensure_schema(mysqli $mysqli): void {
     $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'fullimpulso_service_id'");

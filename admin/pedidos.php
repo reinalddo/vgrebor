@@ -11,7 +11,17 @@ require_once __DIR__ . '/../includes/db_connect.php';
 require_once __DIR__ . '/../includes/recargas_api.php';
 require_once __DIR__ . '/../includes/binance_pay.php';
 require_once __DIR__ . '/../includes/api_discord.php';
+require_once __DIR__ . '/../includes/fullimpulso_api.php';
 require_once __DIR__ . '/../includes/header.php';
+
+// Chequeo oportunista (throttled a 1/min dentro de la función): al abrir el
+// panel de pedidos, sincroniza pedidos de FullImpulso que sigan "en curso"
+// para que el estado avance sin depender de un cron.
+try {
+    fullimpulso_sync_pending_orders($mysqli);
+} catch (Throwable $e) {
+    error_log('TVG fullimpulso_sync_pending_orders (admin/pedidos.php) skipped: ' . $e->getMessage());
+}
 
 $ordersApiUrl = app_path('/api/pedidos.php');
 
@@ -143,6 +153,16 @@ function order_retry_confirm_message(array $order): string {
 }
 
 function order_provider_status_label(array $order): string {
+  $fullimpulsoOrderId = trim((string) ($order['fullimpulso_order_id'] ?? ''));
+  if ($fullimpulsoOrderId !== '') {
+    $fiStatus = trim((string) ($order['recargas_api_estado'] ?? ''));
+    // "pagado" con order_id de FullImpulso ya registrado = aceptado y en
+    // curso todavía (no confundir con "sin estado": ya se envió a la API,
+    // solo falta que el proveedor confirme la entrega completa).
+    $fiStatusLabel = $fiStatus !== '' ? $fiStatus : 'en curso';
+    return 'FullImpulso: ' . $fiStatusLabel . ' | ID externo: ' . $fullimpulsoOrderId;
+  }
+
   $providerOrderId = trim((string) ($order['recargas_api_pedido_id'] ?? ''));
   if ($providerOrderId === '') {
     return '';
@@ -154,6 +174,11 @@ function order_provider_status_label(array $order): string {
 
 function order_provider_detail_lines(array $order): array {
   $lines = [];
+
+  $fullimpulsoMessage = trim((string) ($order['fullimpulso_mensaje'] ?? ''));
+  if ($fullimpulsoMessage !== '') {
+    $lines[] = 'Respuesta FullImpulso: ' . $fullimpulsoMessage;
+  }
 
   $providerMessage = trim((string) ($order['ff_api_mensaje'] ?? ''));
   if ($providerMessage !== '') {

@@ -6,6 +6,7 @@ header('Content-Type: application/json');
 require_once __DIR__ . '/../includes/db_connect.php';
 require_once __DIR__ . '/../includes/currency.php';
 require_once __DIR__ . '/../includes/win_points.php';
+require_once __DIR__ . '/../includes/fullimpulso_api.php';
 
 currency_ensure_schema();
 
@@ -140,6 +141,15 @@ if ($action === 'orders') {
     $orders = [];
     if (!account_pedidos_table_exists($mysqli)) {
         account_json_ok(['orders' => []]);
+    }
+
+    // Chequeo oportunista (throttled a 1/min): al ver su historial, el
+    // cliente dispara de paso una sincronización de pedidos de FullImpulso
+    // que sigan "en curso", para que el estado avance sin depender de un cron.
+    try {
+        fullimpulso_sync_pending_orders($mysqli);
+    } catch (Throwable $e) {
+        error_log('TVG fullimpulso_sync_pending_orders (api/account.php) skipped: ' . $e->getMessage());
     }
     $hasOwnerColumn = account_pedidos_has_owner_column($mysqli);
     $purchaseQuantitySelect = account_pedidos_has_purchase_quantity_column($mysqli) ? 'cantidad_compra' : '1 AS cantidad_compra';
