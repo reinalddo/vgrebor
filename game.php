@@ -11963,8 +11963,16 @@ include __DIR__ . "/includes/header.php";
         const requiredFilled = window.__gameNoPlayerIdRequired || requiredFields.every(f => f.value.trim() !== '');
         const cartSel = hasItems ? resolvePreferredCheckoutSelection(cartItems[0].pack) : null;
         const cartPointsBlocked = Boolean(cartSel && cartSel.mode === 'points' && !cartSel.canUsePointsNow);
-        buyButton.disabled = !hasItems || !requiredFilled || cartPointsBlocked;
-        if (cartPointsBlocked) {
+        // El carrito comparte el mismo campo de ID de jugador que la compra
+        // individual: si ese ID no está verificado, el carrito debe
+        // bloquearse igual (antes esta rama de cartMode nunca llamaba a
+        // requiresVerifiedPlayerForCheckout(), así que un ID inválido no
+        // bloqueaba nada al comprar por carrito — bug crítico reportado).
+        const needsPlayerVerificationCart = requiresVerifiedPlayerForCheckout();
+        buyButton.disabled = !hasItems || !requiredFilled || cartPointsBlocked || needsPlayerVerificationCart;
+        if (needsPlayerVerificationCart) {
+          buyButton.textContent = verifyUserBuyButtonLabel;
+        } else if (cartPointsBlocked) {
           const _wp = (typeof winPointsState !== 'undefined') ? winPointsState : {};
           if (!_wp.loggedIn) {
             buyButton.textContent = `Inicia sesión para usar ${_wp.name || 'Puntos'}`;
@@ -13860,6 +13868,16 @@ include __DIR__ . "/includes/header.php";
               async function submitCartCheckout() {
                 if (cartItems.length === 0) {
                   showToast('No hay paquetes en el carrito.', 'error');
+                  return;
+                }
+
+                // Mismo chequeo que submitOrderCreationRequest(): si el ID de
+                // jugador no está verificado, no se procede — antes esta
+                // función no llamaba a requiresVerifiedPlayerForCheckout() en
+                // absoluto, así que comprar por carrito con un ID inválido no
+                // se bloqueaba (bug crítico reportado por el cliente).
+                if (requiresVerifiedPlayerForCheckout()) {
+                  setPlayerVerificationFeedback('danger', 'Debes verificar el nombre del jugador antes de comprar.');
                   return;
                 }
 

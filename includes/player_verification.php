@@ -315,18 +315,31 @@ function player_verification_verify(array $game, string $userIdentifier, array $
                 // texto como nombre válido, un ID inexistente queda marcado
                 // como "verificado" y dispara de forma indebida el validador
                 // de Pase de Nivel con IDs falsos.
+                // Otro caso real detectado: el proveedor devuelve "La Región
+                // no es LATAM" como "nickname" cuando el ID pertenece a otra
+                // región — también debe tratarse como jugador NO verificado
+                // (no es un nombre real), aunque el proveedor lo entregue
+                // junto con datos que parecen válidos.
                 $nicknameNormalized = player_verification_normalize_text($nickname);
                 $isErrorSentinel = $nickname !== '' && (
                     strpos($nicknameNormalized, 'invalido') !== false
                     || strpos($nicknameNormalized, 'no encontrado') !== false
                     || strpos($nicknameNormalized, 'not found') !== false
                     || strpos($nicknameNormalized, 'error') !== false
+                    || strpos($nicknameNormalized, 'region') !== false
+                    || strpos($nicknameNormalized, 'no es latam') !== false
                 );
                 if ($nickname !== '' && !$isErrorSentinel) {
                     return player_verification_result(true, 'verified', 'Jugador encontrado: ' . $nickname, ['player_name' => $nickname]);
                 }
 
                 $message = trim((string) ($data['mensaje'] ?? ''));
+                if ($message === '' && $isErrorSentinel) {
+                    // El texto de error venía en "nickname" (no en "mensaje")
+                    // — mostrarlo tal cual es más útil que el genérico "no
+                    // encontrado" (p.ej. "La Región no es LATAM").
+                    $message = $nickname;
+                }
                 return player_verification_result(false, 'not_found', $message !== '' ? $message : 'ID del jugador no encontrado.');
 
             case 'free_fire_indonesia':
