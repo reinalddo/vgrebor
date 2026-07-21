@@ -9008,15 +9008,27 @@ include __DIR__ . "/includes/header.php";
 
   function shouldAllowCheckoutOnVerificationFailure(status, message, httpStatus) {
     const normalizedStatus = String(status || '').trim().toLowerCase();
-    const normalizedMessage = String(message || '').trim().toLowerCase();
     const numericHttpStatus = Number(httpStatus || 0);
 
-    if (normalizedStatus === 'unavailable' || numericHttpStatus >= 500) {
+    // El backend YA clasifica explícitamente cuando el proveedor respondió
+    // con claridad que el ID no existe/es inválido ('not_found'/'invalid').
+    // Eso NUNCA debe tratarse como caída temporal del servicio, sin importar
+    // el texto del mensaje: algunos proveedores redactan su propio mensaje
+    // de "no encontrado" con palabras como "no player data found for uid",
+    // que antes coincidían por accidente con la lista de abajo y dejaban
+    // pasar la compra con un ID inválido/inexistente EN CUALQUIER JUEGO —
+    // bug crítico reportado por el cliente. El corte explícito aquí evita
+    // que un mensaje de "no encontrado" se confunda con una caída real.
+    if (normalizedStatus === 'not_found' || normalizedStatus === 'invalid') {
+      return false;
+    }
+
+    if (normalizedStatus === 'unavailable' || normalizedStatus === 'unsupported' || numericHttpStatus >= 500) {
       return true;
     }
 
+    const normalizedMessage = String(message || '').trim().toLowerCase();
     const temporaryFailureSnippets = [
-      'no player data found for uid',
       'service unavailable',
       'temporarily unavailable',
       'internal server error',
