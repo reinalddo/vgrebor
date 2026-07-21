@@ -131,25 +131,47 @@ function fullimpulso_ensure_schema(mysqli $mysqli): void {
     if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
         $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN fullimpulso_cantidad INT NULL AFTER fullimpulso_service_id");
     }
+    $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'fullimpulso_custom_comments'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN fullimpulso_custom_comments TINYINT(1) NOT NULL DEFAULT 0 AFTER fullimpulso_cantidad");
+    }
+}
+
+/** true si el "type" de un servicio de FullImpulso corresponde a comentarios personalizados. */
+function fullimpulso_service_type_is_custom_comments(string $serviceType): bool {
+    return stripos($serviceType, 'custom comment') !== false;
+}
+
+/** Busca el campo "type" de un servicio dentro de la lista devuelta por fullimpulso_api_fetch_services(). */
+function fullimpulso_service_type_for_id(array $services, int $serviceId): string {
+    foreach ($services as $service) {
+        if ((int) ($service['service'] ?? 0) === $serviceId) {
+            return trim((string) ($service['type'] ?? ''));
+        }
+    }
+    return '';
 }
 
 /**
  * Asigna (o quita, con serviceId/cantidad <= 0) el servicio y la cantidad
- * fija de FullImpulso de un paquete. Se guarda con una UPDATE aparte (igual
- * que package_set_category()/levelpass_set_key()) para no tocar el INSERT
- * principal de admin/paquetes.php.
+ * fija de FullImpulso de un paquete, junto con si requiere comentarios
+ * personalizados (detectado automáticamente del campo "type" del servicio
+ * elegido — nunca lo marca el admin a mano). Se guarda con una UPDATE aparte
+ * (igual que package_set_category()/levelpass_set_key()) para no tocar el
+ * INSERT principal de admin/paquetes.php.
  */
-function fullimpulso_set_package(mysqli $mysqli, int $packageId, int $serviceId, int $cantidad): bool {
+function fullimpulso_set_package(mysqli $mysqli, int $packageId, int $serviceId, int $cantidad, bool $customComments = false): bool {
     if ($packageId <= 0) {
         return false;
     }
     $serviceValue = $serviceId > 0 ? $serviceId : null;
     $cantidadValue = $cantidad > 0 ? $cantidad : null;
-    $stmt = $mysqli->prepare('UPDATE juego_paquetes SET fullimpulso_service_id = ?, fullimpulso_cantidad = ? WHERE id = ?');
+    $customCommentsValue = ($serviceId > 0 && $customComments) ? 1 : 0;
+    $stmt = $mysqli->prepare('UPDATE juego_paquetes SET fullimpulso_service_id = ?, fullimpulso_cantidad = ?, fullimpulso_custom_comments = ? WHERE id = ?');
     if (!$stmt) {
         return false;
     }
-    $stmt->bind_param('iii', $serviceValue, $cantidadValue, $packageId);
+    $stmt->bind_param('iiii', $serviceValue, $cantidadValue, $customCommentsValue, $packageId);
     $ok = $stmt->execute();
     $stmt->close();
     return $ok;
@@ -241,7 +263,7 @@ function fullimpulso_api_fetch_services(): array {
 }
 
 /** Crea la orden en FullImpulso: servicio + enlace + cantidad fija del paquete. */
-function fullimpulso_api_create_order(int $serviceId, string $link, int $quantity): array {
+function fullimpulso_api_create_order(int $serviceId, string $link, int $quantity, string $comments = ''): array {
     if (!fullimpulso_is_configured()) {
         throw new RuntimeException('Falta configurar la API key de FullImpulso.');
     }
@@ -256,13 +278,21 @@ function fullimpulso_api_create_order(int $serviceId, string $link, int $quantit
         throw new RuntimeException('El paquete seleccionado no tiene una cantidad configurada.');
     }
 
-    $result = fullimpulso_api_http_post([
+    $payload = [
         'key' => fullimpulso_api_key(),
         'action' => 'add',
         'service' => $serviceId,
         'link' => $link,
         'quantity' => $quantity,
-    ]);
+    ];
+    $comments = trim($comments);
+    if ($comments !== '') {
+        // Servicios "Custom Comments": el texto de cada comentario, uno por
+        // línea, tal como lo escribe el cliente en la ventana dedicada.
+        $payload['comments'] = $comments;
+    }
+
+    $result = fullimpulso_api_http_post($payload);
     $data = $result['data'];
 
     $orderId = trim((string) ($data['order'] ?? ''));

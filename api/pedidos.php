@@ -135,6 +135,7 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         fullimpulso_payload LONGTEXT DEFAULT NULL,
         fullimpulso_refill_id VARCHAR(120) DEFAULT NULL,
         fullimpulso_refill_estado VARCHAR(40) DEFAULT NULL,
+        fullimpulso_comments LONGTEXT DEFAULT NULL,
         binance_pay_request_id VARCHAR(120) DEFAULT NULL,
         binance_pay_order_no VARCHAR(120) DEFAULT NULL,
         binance_pay_reference VARCHAR(120) DEFAULT NULL,
@@ -237,7 +238,8 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         'fullimpulso_payload' => "ALTER TABLE pedidos ADD COLUMN fullimpulso_payload LONGTEXT NULL AFTER fullimpulso_mensaje",
         'fullimpulso_refill_id' => "ALTER TABLE pedidos ADD COLUMN fullimpulso_refill_id VARCHAR(120) NULL AFTER fullimpulso_payload",
         'fullimpulso_refill_estado' => "ALTER TABLE pedidos ADD COLUMN fullimpulso_refill_estado VARCHAR(40) NULL AFTER fullimpulso_refill_id",
-        'binance_pay_request_id' => "ALTER TABLE pedidos ADD COLUMN binance_pay_request_id VARCHAR(120) NULL AFTER fullimpulso_refill_estado",
+        'fullimpulso_comments' => "ALTER TABLE pedidos ADD COLUMN fullimpulso_comments LONGTEXT NULL AFTER fullimpulso_refill_estado",
+        'binance_pay_request_id' => "ALTER TABLE pedidos ADD COLUMN binance_pay_request_id VARCHAR(120) NULL AFTER fullimpulso_comments",
         'binance_pay_order_no' => "ALTER TABLE pedidos ADD COLUMN binance_pay_order_no VARCHAR(120) NULL AFTER binance_pay_request_id",
         'binance_pay_reference' => "ALTER TABLE pedidos ADD COLUMN binance_pay_reference VARCHAR(120) NULL AFTER binance_pay_order_no",
         'binance_pay_status' => "ALTER TABLE pedidos ADD COLUMN binance_pay_status VARCHAR(40) NULL AFTER binance_pay_reference",
@@ -5421,9 +5423,9 @@ function execute_free_fire_recharge(array $config, string $monto, string $numero
  * cliente. Espeja execute_free_fire_recharge(): una sola llamada síncrona,
  * sin catálogo remoto compartido.
  */
-function execute_fullimpulso_purchase(int $serviceId, int $quantity, string $link): array {
+function execute_fullimpulso_purchase(int $serviceId, int $quantity, string $link, string $comments = ''): array {
     try {
-        $result = fullimpulso_api_create_order($serviceId, $link, $quantity);
+        $result = fullimpulso_api_create_order($serviceId, $link, $quantity, $comments);
     } catch (Throwable $e) {
         return [
             'success' => false,
@@ -5455,8 +5457,9 @@ function fullimpulso_dispatch_and_persist(mysqli $mysqli, array $order): array {
     $fiServiceId = (int) ($order['fullimpulso_service_id'] ?? 0);
     $fiCantidad = (int) ($order['fullimpulso_cantidad'] ?? 0);
     $fiLink = (string) ($order['user_identifier'] ?? '');
+    $fiComments = (string) ($order['fullimpulso_comments'] ?? '');
 
-    $result = execute_fullimpulso_purchase($fiServiceId, $fiCantidad, $fiLink);
+    $result = execute_fullimpulso_purchase($fiServiceId, $fiCantidad, $fiLink, $fiComments);
 
     $fiOrderId = (string) ($result['order_id'] ?? '');
     $fiMessage = (string) ($result['message'] ?? 'No se recibió mensaje de FullImpulso.');
@@ -8442,6 +8445,7 @@ if ($action === 'create') {
     $usesFullImpulsoApi = false;
     $fullimpulso_service_id = null;
     $fullimpulso_cantidad = null;
+    $fullimpulso_custom_comments = false;
     $packageApiProvider = '';
     $discordCommandKey = '';
     $discordCheckoutRequiredFields = [];
@@ -8476,6 +8480,7 @@ if ($action === 'create') {
                 ? (int) $selectedPackage['fullimpulso_service_id'] : null;
             $fullimpulso_cantidad = isset($selectedPackage['fullimpulso_cantidad']) && (int) $selectedPackage['fullimpulso_cantidad'] > 0
                 ? (int) $selectedPackage['fullimpulso_cantidad'] : null;
+            $fullimpulso_custom_comments = !empty($selectedPackage['fullimpulso_custom_comments']);
             $packageApiProvider = package_api_provider_from_row($selectedPackage, [
                 'categoria_api_discord' => game_discord_api_command($mysqli, (int) $game_id),
             ]);
@@ -8561,6 +8566,20 @@ if ($action === 'create') {
 
     if (!$selectedPackageIsAccountSale && $usesFullImpulsoApi && trim((string) $user_identifier) === '') {
         json_error('Debes indicar el enlace de tu perfil o publicación para procesar este pedido.');
+    }
+
+    // Servicios "Custom Comments" de FullImpulso: el cliente debe escribir
+    // exactamente tantas líneas de comentario como la cantidad fija del
+    // paquete (validado también en el front, esto es la verificación real).
+    $fullimpulso_comments = null;
+    if (!$selectedPackageIsAccountSale && $usesFullImpulsoApi && $fullimpulso_custom_comments) {
+        $rawComments = str_replace("\r\n", "\n", (string) ($_POST['fullimpulso_comments'] ?? ''));
+        $commentLines = array_values(array_filter(array_map('trim', explode("\n", $rawComments)), static fn (string $line): bool => $line !== ''));
+        $requiredLines = (int) ($fullimpulso_cantidad ?? 0);
+        if (count($commentLines) !== $requiredLines) {
+            json_error('Debes escribir exactamente ' . $requiredLines . ' comentario(s), uno por línea.');
+        }
+        $fullimpulso_comments = implode("\n", $commentLines);
     }
 
     if (!$selectedPackageIsAccountSale && $usesDiscordApi && $discordCommandKey === '') {
@@ -8756,6 +8775,7 @@ if ($action === 'create') {
             'paquete_api' => $paquete_api,
             'fullimpulso_service_id' => $fullimpulso_service_id,
             'fullimpulso_cantidad' => $fullimpulso_cantidad,
+            'fullimpulso_comments' => $fullimpulso_comments,
             'api_provider' => $packageApiProvider !== '' ? $packageApiProvider : null,
             'moneda' => $currency,
             'precio' => $price,

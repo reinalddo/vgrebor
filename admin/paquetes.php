@@ -1145,7 +1145,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $stmt->close();
     package_set_category($mysqli, $edit_id, $edit_categoria_paquete_id);
     levelpass_set_key($mysqli, $edit_id, $edit_levelpass_key);
-    fullimpulso_set_package($mysqli, $edit_id, $edit_fullimpulso_service_id, $edit_fullimpulso_cantidad);
+    $editFullimpulsoCustomComments = $edit_fullimpulso_service_id > 0
+        && fullimpulso_service_type_is_custom_comments(fullimpulso_service_type_for_id($fullimpulsoServices, $edit_fullimpulso_service_id));
+    fullimpulso_set_package($mysqli, $edit_id, $edit_fullimpulso_service_id, $edit_fullimpulso_cantidad, $editFullimpulsoCustomComments);
     $editInfoHtml = package_info_sanitize_html((string) ($_POST['edit_info_paquete_html'] ?? ''));
     $stmtEditInfo = $mysqli->prepare("UPDATE juego_paquetes SET info_html = NULLIF(?, '') WHERE id = ?");
     if ($stmtEditInfo) {
@@ -1262,7 +1264,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $stmt->close();
     package_set_category($mysqli, $newPackageId, $categoria_paquete_id);
     levelpass_set_key($mysqli, $newPackageId, $levelpass_key);
-    fullimpulso_set_package($mysqli, $newPackageId, $fullimpulso_service_id, $fullimpulso_cantidad);
+    $fullimpulsoCustomComments = $fullimpulso_service_id > 0
+        && fullimpulso_service_type_is_custom_comments(fullimpulso_service_type_for_id($fullimpulsoServices, $fullimpulso_service_id));
+    fullimpulso_set_package($mysqli, $newPackageId, $fullimpulso_service_id, $fullimpulso_cantidad, $fullimpulsoCustomComments);
     $infoHtml = package_info_sanitize_html((string) ($_POST['info_paquete_html'] ?? ''));
     $stmtInfo = $mysqli->prepare("UPDATE juego_paquetes SET info_html = NULLIF(?, '') WHERE id = ?");
     if ($stmtInfo) {
@@ -1833,7 +1837,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                             <select name="fullimpulso_service_id" class="form-select form-select-sm js-fi-service" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
                                 <option value="">Selecciona un servicio</option>
                                 <?php foreach ($fullimpulsoServices as $fiSvc): ?>
-                                <option value="<?= (int) ($fiSvc['service'] ?? 0) ?>" data-rate="<?= htmlspecialchars((string) ($fiSvc['rate'] ?? '0'), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars(trim((string) ($fiSvc['name'] ?? '')) . ' — $' . trim((string) ($fiSvc['rate'] ?? '0')) . '/1000', ENT_QUOTES, 'UTF-8') ?></option>
+                                <option value="<?= (int) ($fiSvc['service'] ?? 0) ?>" data-rate="<?= htmlspecialchars((string) ($fiSvc['rate'] ?? '0'), ENT_QUOTES, 'UTF-8') ?>" data-type="<?= htmlspecialchars((string) ($fiSvc['type'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars(trim((string) ($fiSvc['name'] ?? '')) . ' — $' . trim((string) ($fiSvc['rate'] ?? '0')) . '/1000', ENT_QUOTES, 'UTF-8') ?></option>
                                 <?php endforeach; ?>
                             </select>
                             <?php if ($fullimpulsoServicesError !== ''): ?>
@@ -1848,6 +1852,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                         </div>
                     </div>
                     <div class="form-text mt-2 js-fi-cost-preview" style="color:#8be9fd;"></div>
+                    <div class="form-text mt-1 js-fi-comments-hint d-none" style="color:#facc15;">📝 Este servicio es de "Comentarios personalizados": en la tienda se le pedirá al cliente escribir cada comentario, no solo el enlace.</div>
                 </div>
             </div>
         </div>
@@ -2529,7 +2534,7 @@ if (isset($_GET['editar'])) {
                             <select name="edit_fullimpulso_service_id" class="form-select form-select-sm js-fi-service" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
                                 <option value="">Selecciona un servicio</option>
                                 <?php foreach ($fullimpulsoServices as $fiSvc): ?>
-                                <option value="<?= (int) ($fiSvc['service'] ?? 0) ?>" data-rate="<?= htmlspecialchars((string) ($fiSvc['rate'] ?? '0'), ENT_QUOTES, 'UTF-8') ?>" <?= (int) ($fiSvc['service'] ?? 0) === $editFiServiceId ? 'selected' : '' ?>><?= htmlspecialchars(trim((string) ($fiSvc['name'] ?? '')) . ' — $' . trim((string) ($fiSvc['rate'] ?? '0')) . '/1000', ENT_QUOTES, 'UTF-8') ?></option>
+                                <option value="<?= (int) ($fiSvc['service'] ?? 0) ?>" data-rate="<?= htmlspecialchars((string) ($fiSvc['rate'] ?? '0'), ENT_QUOTES, 'UTF-8') ?>" data-type="<?= htmlspecialchars((string) ($fiSvc['type'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" <?= (int) ($fiSvc['service'] ?? 0) === $editFiServiceId ? 'selected' : '' ?>><?= htmlspecialchars(trim((string) ($fiSvc['name'] ?? '')) . ' — $' . trim((string) ($fiSvc['rate'] ?? '0')) . '/1000', ENT_QUOTES, 'UTF-8') ?></option>
                                 <?php endforeach; ?>
                             </select>
                             <?php if ($fullimpulsoServicesError !== ''): ?>
@@ -2544,6 +2549,7 @@ if (isset($_GET['editar'])) {
                         </div>
                     </div>
                     <div class="form-text mt-2 js-fi-cost-preview" style="color:#8be9fd;"></div>
+                    <div class="form-text mt-1 js-fi-comments-hint d-none" style="color:#facc15;">📝 Este servicio es de "Comentarios personalizados": en la tienda se le pedirá al cliente escribir cada comentario, no solo el enlace.</div>
                 </div>
             </div>
         </div>
@@ -4121,23 +4127,47 @@ window.adminPackageCategoryChange = async function(select) {
         preview.textContent = 'Costo estimado en FullImpulso: $' + cost.toFixed(4) + ' (referencia para fijar tu precio de venta).';
     }
 
+    function updateFiCommentsHint(panel) {
+        if (!panel) return;
+        const select = panel.querySelector('.js-fi-service');
+        const hint = panel.querySelector('.js-fi-comments-hint');
+        if (!select || !hint) return;
+        const option = select.selectedOptions && select.selectedOptions[0];
+        const type = option ? String(option.dataset.type || '') : '';
+        hint.classList.toggle('d-none', !/custom comment/i.test(type));
+    }
+
     document.querySelectorAll('.js-fi-toggle').forEach((checkbox) => {
         const panel = document.getElementById(checkbox.dataset.panel || '');
         const hiddenInput = document.getElementById(checkbox.dataset.hiddenInput || '');
         checkbox.addEventListener('change', () => {
             if (panel) panel.style.display = checkbox.checked ? '' : 'none';
             if (hiddenInput) hiddenInput.value = checkbox.checked ? '1' : '0';
-            if (checkbox.checked && panel) updateFiCostPreview(panel);
+            if (checkbox.checked && panel) {
+                updateFiCostPreview(panel);
+                updateFiCommentsHint(panel);
+            }
         });
     });
 
     document.querySelectorAll('.js-fi-service, .js-fi-quantity').forEach((el) => {
-        el.addEventListener('input', () => updateFiCostPreview(el.closest('#fiPanel, #editFiPanel')));
-        el.addEventListener('change', () => updateFiCostPreview(el.closest('#fiPanel, #editFiPanel')));
+        el.addEventListener('input', () => {
+            const panel = el.closest('#fiPanel, #editFiPanel');
+            updateFiCostPreview(panel);
+            updateFiCommentsHint(panel);
+        });
+        el.addEventListener('change', () => {
+            const panel = el.closest('#fiPanel, #editFiPanel');
+            updateFiCostPreview(panel);
+            updateFiCommentsHint(panel);
+        });
     });
 
     document.querySelectorAll('#fiPanel, #editFiPanel').forEach((panel) => {
-        if (panel.style.display !== 'none') updateFiCostPreview(panel);
+        if (panel.style.display !== 'none') {
+            updateFiCostPreview(panel);
+            updateFiCommentsHint(panel);
+        }
     });
 }());
 </script>

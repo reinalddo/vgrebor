@@ -633,6 +633,8 @@ include __DIR__ . "/includes/header.php";
             'maxLength' => 500,
           ]];
         }
+        $packFullimpulsoCustomComments = $packApiProvider === 'fullimpulso' && !empty($pack['fullimpulso_custom_comments']);
+        $packFullimpulsoCantidad = (int) ($pack['fullimpulso_cantidad'] ?? 0);
         $img_paquete = !empty($pack['imagen_icono']) ? $pack['imagen_icono'] : (!empty($game['imagen_paquete']) ? $game['imagen_paquete'] : null);
         $packImageUrl = package_feature_public_asset_url($img_paquete);
         $packCategoryTabId = 'otros';
@@ -663,6 +665,8 @@ include __DIR__ . "/includes/header.php";
           data-account-sale="<?= $packIsAccountSale ? '1' : '0' ?>"
           data-account-gallery="<?= htmlspecialchars(json_encode($packAccountGalleryPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8') ?>"
           data-moneda="<?= htmlspecialchars($clave_moneda) ?>"
+          data-fullimpulso-custom-comments="<?= $packFullimpulsoCustomComments ? '1' : '0' ?>"
+          data-fullimpulso-cantidad="<?= $packFullimpulsoCantidad ?>"
           tabindex="0"
           role="button"
           aria-pressed="false"
@@ -1295,6 +1299,26 @@ include __DIR__ . "/includes/header.php";
           <button type="button" id="payment-whatsapp-modal-confirm-btn" class="btn fw-bold" style="background:#25d366;color:#000;">
             <i class="fa-brands fa-whatsapp me-2" aria-hidden="true"></i>Ir a WhatsApp
           </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="fullimpulso-comments-modal" class="modal fade app-overlay-modal payment-confirm-overlay" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" style="max-width:560px;">
+      <div class="modal-content bg-dark text-light rounded-4 p-0" style="border:1px solid #22d3ee;">
+        <div class="p-4 pb-3">
+          <div class="fw-bold mb-2" style="color:#22d3ee;font-size:1.05rem;">📝 Escribe tus comentarios</div>
+          <div class="small mb-3" style="color:#8be9fd;">Este paquete requiere que escribas cada comentario que quieres publicar, uno por línea.</div>
+          <textarea id="fullimpulso-comments-textarea" class="form-control bg-black text-light" rows="10" style="border:1px solid #22d3ee;resize:vertical;font-size:0.95rem;" placeholder="Escribe un comentario por línea..."></textarea>
+          <div class="small mt-2 d-flex justify-content-between" style="color:#8be9fd;">
+            <span id="fullimpulso-comments-count">0 de 0 líneas</span>
+            <span id="fullimpulso-comments-error" style="color:#f87171;"></span>
+          </div>
+          <div class="d-flex gap-2 flex-column mt-3">
+            <button type="button" id="fullimpulso-comments-continue-btn" class="btn btn-info w-100 fw-bold text-uppercase py-2" disabled>Continuar</button>
+            <button type="button" id="fullimpulso-comments-cancel-btn" class="btn btn-outline-secondary w-100 py-2">Volver</button>
+          </div>
         </div>
       </div>
     </div>
@@ -5747,6 +5771,13 @@ include __DIR__ . "/includes/header.php";
   const preConfirmTosCheck = document.getElementById('pre-confirm-tos-check');
   const preConfirmProceedBtn = document.getElementById('pre-confirm-proceed-btn');
   const preConfirmCancelBtn = document.getElementById('pre-confirm-cancel-btn');
+  const fullimpulsoCommentsModal = document.getElementById('fullimpulso-comments-modal');
+  const fullimpulsoCommentsTextarea = document.getElementById('fullimpulso-comments-textarea');
+  const fullimpulsoCommentsCount = document.getElementById('fullimpulso-comments-count');
+  const fullimpulsoCommentsError = document.getElementById('fullimpulso-comments-error');
+  const fullimpulsoCommentsContinueBtn = document.getElementById('fullimpulso-comments-continue-btn');
+  const fullimpulsoCommentsCancelBtn = document.getElementById('fullimpulso-comments-cancel-btn');
+  let fullimpulsoCommentsOnContinue = null;
   let pendingWhatsappUrl = '';
   let pendingPaymentExecution = null;
   let pendingOpenModal = null;
@@ -6847,6 +6878,8 @@ include __DIR__ . "/includes/header.php";
       accountSale: card.dataset.accountSale === '1',
       accountGallery: parseAccountSaleGallery(card.dataset.accountGallery),
       dropPercent: Math.max(0, Math.min(99, Number(card.dataset.dropPercent || 0))),
+      fullimpulsoCustomComments: card.dataset.fullimpulsoCustomComments === '1',
+      fullimpulsoCantidad: Number(card.dataset.fullimpulsoCantidad || 0),
     };
   }
 
@@ -12846,6 +12879,68 @@ include __DIR__ . "/includes/header.php";
               });
               setPaymentDifferenceCreditState(paymentDifferenceCreditState);
               openGameEntryWindowIfNeeded();
+
+              // ── Ventana de comentarios personalizados (FullImpulso) ──────
+              // Solo para paquetes cuyo servicio de FullImpulso es "Custom
+              // Comments": antes de pasar a la ventana de términos, se le pide
+              // al cliente escribir cada comentario en su propia línea — la
+              // cantidad de líneas debe coincidir exactamente con la cantidad
+              // fija del paquete.
+              function fullimpulsoCommentsRequiredLines(pack) {
+                return Math.max(0, Number((pack && pack.fullimpulsoCantidad) || 0));
+              }
+
+              function updateFullimpulsoCommentsValidation(pack) {
+                const requiredLines = fullimpulsoCommentsRequiredLines(pack);
+                const lines = (fullimpulsoCommentsTextarea ? fullimpulsoCommentsTextarea.value : '')
+                  .split('\n').map(line => line.trim()).filter(line => line !== '');
+                if (fullimpulsoCommentsCount) {
+                  fullimpulsoCommentsCount.textContent = `${lines.length} de ${requiredLines} líneas`;
+                }
+                const valid = requiredLines > 0 && lines.length === requiredLines;
+                if (fullimpulsoCommentsError) {
+                  fullimpulsoCommentsError.textContent = (!valid && lines.length > 0)
+                    ? `Debes escribir exactamente ${requiredLines} línea(s).`
+                    : '';
+                }
+                if (fullimpulsoCommentsContinueBtn) {
+                  fullimpulsoCommentsContinueBtn.disabled = !valid;
+                }
+                return { valid, lines };
+              }
+
+              function openFullimpulsoCommentsModal(pack, onContinue) {
+                if (!fullimpulsoCommentsModal || !fullimpulsoCommentsTextarea) {
+                  onContinue('');
+                  return;
+                }
+                fullimpulsoCommentsTextarea.value = '';
+                fullimpulsoCommentsOnContinue = onContinue;
+                updateFullimpulsoCommentsValidation(pack);
+                setOverlayVisible(fullimpulsoCommentsModal, true);
+                window.setTimeout(() => fullimpulsoCommentsTextarea.focus(), 50);
+              }
+
+              if (fullimpulsoCommentsTextarea) {
+                fullimpulsoCommentsTextarea.addEventListener('input', () => updateFullimpulsoCommentsValidation(activePack));
+              }
+              if (fullimpulsoCommentsContinueBtn) {
+                fullimpulsoCommentsContinueBtn.addEventListener('click', () => {
+                  const { valid, lines } = updateFullimpulsoCommentsValidation(activePack);
+                  if (!valid) return;
+                  setOverlayVisible(fullimpulsoCommentsModal, false);
+                  const callback = fullimpulsoCommentsOnContinue;
+                  fullimpulsoCommentsOnContinue = null;
+                  if (typeof callback === 'function') callback(lines.join('\n'));
+                });
+              }
+              if (fullimpulsoCommentsCancelBtn) {
+                fullimpulsoCommentsCancelBtn.addEventListener('click', () => {
+                  setOverlayVisible(fullimpulsoCommentsModal, false);
+                  fullimpulsoCommentsOnContinue = null;
+                });
+              }
+
               function submitOrderCreationRequest(options = {}) {
                 const btn = options.triggerButton instanceof HTMLElement ? options.triggerButton : buyButton;
                 const couponVal = normalizeCouponCode(couponInput.value);
@@ -12932,6 +13027,13 @@ include __DIR__ . "/includes/header.php";
                   return;
                 }
 
+                if (pack.fullimpulsoCustomComments && typeof options.forceComments !== 'string') {
+                  openFullimpulsoCommentsModal(pack, function(commentsText) {
+                    submitOrderCreationRequest(Object.assign({}, options, { forceComments: commentsText }));
+                  });
+                  return;
+                }
+
                 if (couponVal && !couponApplied) {
                   if (modalCouponName) {
                     modalCouponName.textContent = couponVal;
@@ -12981,6 +13083,7 @@ include __DIR__ . "/includes/header.php";
                   player_fields_json: JSON.stringify(playerFields),
                   email: email,
                   coupon: couponApplied ? couponVal : '',
+                  fullimpulso_comments: typeof options.forceComments === 'string' ? options.forceComments : '',
                 };
 
                 console.log('Datos enviados a pedidos.php:', pedidoData);
