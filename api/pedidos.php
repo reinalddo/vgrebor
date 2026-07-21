@@ -24,6 +24,7 @@ require_once __DIR__ . '/../includes/win_points.php';
 require_once __DIR__ . '/../includes/payment_difference.php';
 require_once __DIR__ . '/../includes/blocked_players.php';
 require_once __DIR__ . '/../includes/fullimpulso_api.php';
+require_once __DIR__ . '/../includes/player_verification.php';
 
 if (!function_exists('create_app_mysqli_connection')) {
     function create_app_mysqli_connection(): mysqli {
@@ -4972,6 +4973,65 @@ function fetch_game_package(mysqli $mysqli, int $packageId, int $gameId): ?array
     return $package ?: null;
 }
 
+/**
+ * Re-verifica el ID de jugador en el SERVIDOR antes de crear una orden —
+ * nunca confiar solo en la verificación hecha por el frontend (game.php),
+ * que puede fallar por un bug de estado en el JS o directamente saltarse
+ * llamando a este endpoint sin pasar por la UI. Si el juego tiene un
+ * proveedor de verificación configurado (Free Fire, Blood Strike, Honor of
+ * Kings, Mobile Legends, Pase de Nivel), el ID DEBE existir según ese
+ * proveedor; si no hay proveedor configurado para el juego, no hay forma de
+ * verificar externamente y se deja pasar (mismo alcance ya confirmado con
+ * el cliente para el chequeo del frontend).
+ */
+function enforce_player_verification_for_order(mysqli $mysqli, int $gameId, array $package, string $userIdentifier, array $playerFields): void {
+    if ($gameId <= 0) {
+        return;
+    }
+    if (package_account_sales_is_enabled_for_package($package, account_sale_feature_enabled())) {
+        return;
+    }
+    $provider = strtolower(trim((string) ($package['api_provider'] ?? '')));
+    if ($provider === 'discord') {
+        return;
+    }
+
+    $stmt = $mysqli->prepare('SELECT * FROM juegos WHERE id = ? LIMIT 1');
+    if (!$stmt) {
+        return;
+    }
+    $stmt->bind_param('i', $gameId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $game = $res ? $res->fetch_assoc() : null;
+    $stmt->close();
+    if (!$game) {
+        return;
+    }
+
+    if (player_verification_definition_for_game($game) === null) {
+        return;
+    }
+
+    $verification = player_verification_verify($game, $userIdentifier, $playerFields);
+    if (!empty($verification['ok'])) {
+        return;
+    }
+    // 'unavailable': el proveedor externo está caído/no respondió — mismo
+    // criterio de fail-open que ya usa game.php (shouldAllowCheckoutOnVerificationFailure)
+    // para no bloquear ventas reales por una caída temporal del proveedor.
+    // 'not_found'/'invalid' (el proveedor SÍ respondió que el ID no existe)
+    // es lo único que bloquea la compra aquí.
+    $status = strtolower(trim((string) ($verification['status'] ?? '')));
+    if ($status === 'unavailable') {
+        return;
+    }
+    json_error(
+        (string) ($verification['message'] ?? 'Debes verificar el ID del jugador antes de comprar.'),
+        (int) ($verification['http_status'] ?? 422)
+    );
+}
+
 function normalize_player_field_key(string $key): string {
     $normalized = strtolower(trim($key));
     return preg_replace('/[^a-z0-9_]+/u', '', $normalized) ?? '';
@@ -8518,6 +8578,7 @@ if ($action === 'create') {
     if (!recharge_availability_is_package_active($mysqli, $package_id, (int) $game_id)) {
         json_error('Este paquete no está disponible en este momento.');
     }
+    enforce_player_verification_for_order($mysqli, (int) $game_id, $selectedPackage, (string) $user_identifier, $player_fields);
 
     $winPointsAward = 0;
     $winPointsEligible = win_points_enabled() && $cliente_usuario_id !== null && $cliente_usuario_id > 0;
@@ -11854,6 +11915,31 @@ if ($action === 'batch_create_and_pay') {
     }
     if ($batchPlayerIdToCheck !== '' && in_array($batchPlayerIdToCheck, $batchBlockedPlayerIds, true)) {
         json_error('Este ID de jugador ha sido suspendido por actividades ilícitas. Comunícate con el administrador si crees que es un error.', 403);
+    }
+
+    // Re-verificación server-side (ver enforce_player_verification_for_order):
+    // si CUALQUIER paquete del carrito requiere verificación (no es venta de
+    // cuenta ni Discord), el ID debe estar verificado para ese juego antes
+    // de crear las órdenes. Se llama una sola vez (mismo juego/ID para todo
+    // el carrito) apenas se encuentra el primer paquete que la requiera, en
+    // vez de repetir la consulta externa por cada ítem.
+    foreach ($cartItems as $batchVerifyItem) {
+        $batchVerifyPkgId = intval($batchVerifyItem['package_id'] ?? 0);
+        if ($batchVerifyPkgId <= 0) {
+            continue;
+        }
+        $batchVerifyPkg = fetch_game_package($mysqli, $batchVerifyPkgId, $gameId);
+        if (!$batchVerifyPkg) {
+            continue;
+        }
+        if (
+            package_account_sales_is_enabled_for_package($batchVerifyPkg, account_sale_feature_enabled())
+            || strtolower(trim((string) ($batchVerifyPkg['api_provider'] ?? ''))) === 'discord'
+        ) {
+            continue;
+        }
+        enforce_player_verification_for_order($mysqli, $gameId, $batchVerifyPkg, $batchPlayerIdToCheck, $playerFields);
+        break;
     }
 
     $batchId         = bin2hex(random_bytes(16));
