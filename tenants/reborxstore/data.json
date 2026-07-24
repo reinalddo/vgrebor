@@ -1,7 +1,7 @@
 {
   "tenant": {
     "slug": "reborxstore",
-    "domains": ["reborxstore.com", "www.reborxstore.com"]
+    "domains": ["reborxstore.com", "www.reborxstore.com", "demo.reborxstore.com"]
   },
   "brand": {
     "name": "Reborxstore"
