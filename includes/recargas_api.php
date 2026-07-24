@@ -105,7 +105,14 @@ function recargas_api_products_timeout_seconds(): int {
 }
 
 function recargas_api_purchase_timeout_seconds(): int {
-    return 60;
+    // Antes era 60s: en producción (hosting compartido) el proxy/servidor
+    // delante de PHP corta la conexión antes de eso y devuelve un 504 con
+    // una página HTML de error — el navegador nunca ve la respuesta JSON de
+    // PHP (aunque PHP siga corriendo y termine la compra igual del lado del
+    // proveedor). Bajarlo asegura que nuestro propio código responda con un
+    // JSON limpio (que el candado de reintento SÍ sabe manejar) antes de que
+    // el proxy se harte y devuelva su propia página de error sin sentido.
+    return 20;
 }
 
 function recargas_api_lookup_timeout_seconds(): int {

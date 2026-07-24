@@ -9180,6 +9180,10 @@ if ($action === 'create') {
 }
 
 if ($action === 'submit_payment') {
+    // Igual que en batch_fulfill_item: da margen de sobra para que PHP
+    // termine y devuelva JSON válido en vez de que el proxy/servidor corte
+    // primero con un 504 en HTML (ver recargas_api_purchase_timeout_seconds).
+    @set_time_limit(45);
     $mysqli = ensure_mysqli_connection($mysqli);
     blocked_user_guard($mysqli);
 
@@ -12694,6 +12698,12 @@ if ($action === 'batch_create_and_pay') {
 // Called sequentially by the frontend progress modal.
 // ──────────────────────────────────────────────────────────────────────
 if ($action === 'batch_fulfill_item') {
+    // Asegura que PHP tenga tiempo de sobra para terminar y devolver JSON
+    // válido incluso si la llamada al proveedor se acerca a su propio
+    // timeout (ver recargas_api_purchase_timeout_seconds) — sin esto, en
+    // hosting compartido el límite de ejecución por defecto de PHP podría
+    // cortar el script a mitad de camino, igual de mal que un 504 del proxy.
+    @set_time_limit(45);
     $mysqli = ensure_mysqli_connection($mysqli);
     blocked_user_guard($mysqli);
 
