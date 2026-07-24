@@ -12651,6 +12651,23 @@ if ($action === 'batch_fulfill_item') {
             });
         }
 
+        // Se marca ANTES de llamar al proveedor, no solo después: si el
+        // proceso muere a mitad de esta llamada (el servidor/proxy corta la
+        // conexión por tardanza y responde 504 al cliente antes de que PHP
+        // termine — no es el cliente desconectándose, eso ya lo cubre
+        // ignore_user_abort), el código de más abajo que guarda el rastro
+        // del intento nunca se ejecuta. Sin este marcador previo, el
+        // siguiente reintento no ve nada guardado, cree que es la primera
+        // vez, y compra de nuevo en el proveedor aunque el intento anterior
+        // sí se haya entregado (bug reportado: "da error" pero "la recarga
+        // sí se hace", varias veces, con un solo pago real).
+        $preMark = $mysqli->prepare("UPDATE pedidos SET recargas_api_ultimo_check=NOW() WHERE id=? AND estado='pagado'");
+        if ($preMark) {
+            $preMark->bind_param('i', $orderId);
+            $preMark->execute();
+            $preMark->close();
+        }
+
         try {
             $res = execute_catalog_api_purchase($pkgApiId, (string) ($order['user_identifier'] ?? ''), $orderFields, $qty);
         } catch (Throwable $e) {
