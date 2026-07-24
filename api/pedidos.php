@@ -7,6 +7,15 @@ if (ob_get_level() === 0) {
 header('Content-Type: application/json');
 @ini_set('display_errors', '0');
 error_reporting(E_ALL);
+// Si el cliente pierde la conexión justo durante el despacho a un
+// proveedor (TiendaGiftVen/FullImpulso/etc.), PHP por defecto aborta el
+// script a mitad de camino — la compra ya se hizo en el proveedor, pero
+// nunca se llega a guardar localmente que se completó. En el siguiente
+// intento el pedido sigue viéndose "sin despachar" y se vuelve a comprar,
+// duplicando la entrega real sin que el cliente haya pagado de nuevo. Con
+// esto, el script sigue corriendo hasta terminar de persistir el resultado
+// sin importar si el navegador del cliente sigue conectado o no.
+ignore_user_abort(true);
 
 require_once __DIR__ . '/../includes/db_connect.php';
 require_once __DIR__ . '/../includes/currency.php';
@@ -12448,6 +12457,30 @@ if ($action === 'batch_fulfill_item') {
 
     // ── GiftVen catalog API ──────────────────────────────────────────
     if ($pkgProvider === 'giftven' && $pkgApiId > 0) {
+        // Si ya hubo un intento de despacho previo para este pedido (queda
+        // registrado en recargas_api_ultimo_check/recargas_api_pedido_id en
+        // cuanto se llama a execute_catalog_api_purchase, sin importar si el
+        // navegador del cliente llegó a recibir la respuesta), esto es un
+        // REINTENTO — no un primer intento. En vez de volver a comprar a
+        // ciegas (lo que duplicaba la entrega cuando el primer intento sí
+        // se completó en el proveedor pero el cliente vio "Error de red"),
+        // primero se pregunta si el proveedor ya tiene una compra reciente
+        // que coincide, reutilizando la misma función que ya usa la
+        // recuperación automática de pedidos inciertos.
+        $isRetryDispatchAttempt = trim((string) ($order['recargas_api_ultimo_check'] ?? '')) !== ''
+            || trim((string) ($order['recargas_api_pedido_id'] ?? '')) !== '';
+        if ($isRetryDispatchAttempt) {
+            $recoverResult = try_recover_uncertain_provider_purchase($mysqli, $order, 1, 0);
+            $recoverStatus = is_array($recoverResult) ? (string) ($recoverResult['local_status'] ?? '') : '';
+            if (in_array($recoverStatus, ['enviado', 'cancelado'], true)) {
+                $updOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
+                json_response(['ok' => true, 'estado' => $recoverStatus, 'order_id' => $orderId, 'message' => 'Recarga ya procesada anteriormente por el proveedor.', 'already_done' => true]);
+            }
+            // Si no se encontró una compra previa confirmada, seguimos con
+            // el flujo normal de abajo (puede ser un reintento legítimo
+            // porque el primer intento sí falló de verdad en el proveedor).
+        }
+
         try {
             $res = execute_catalog_api_purchase($pkgApiId, (string) ($order['user_identifier'] ?? ''), $orderFields, $qty);
         } catch (Throwable $e) {
