@@ -10693,6 +10693,56 @@ if ($action === 'refresh_bank_movements') {
     }
 }
 
+if ($action === 'check_reference_used') {
+    // Chequeo en vivo mientras el cliente escribe/pega la referencia en el
+    // modal de pago (antes de crear ningún pedido). Instrucción explícita
+    // del cliente: consultar SOLO la tabla movimientos — si el campo
+    // referencia contiene los últimos N dígitos escritos, NO se debe dejar
+    // comprar, sin importar 'checked' ni si tiene pedido_id vinculado (esos
+    // campos los pone la propia aplicación y ya han fallado antes en esta
+    // sesión; la existencia del movimiento del banco es la única señal en
+    // la que se puede confiar al 100%).
+    $mysqli = ensure_mysqli_connection($mysqli);
+    $checkReference = trim((string) ($_POST['reference'] ?? ''));
+    $checkRequiredDigits = max(0, intval($_POST['required_digits'] ?? 0));
+
+    if ($checkReference === '') {
+        json_response(['ok' => true, 'used' => false]);
+    }
+
+    $used = false;
+    try {
+        if ($checkRequiredDigits > 0) {
+            $refSuffix = strlen($checkReference) > $checkRequiredDigits
+                ? substr($checkReference, -$checkRequiredDigits)
+                : $checkReference;
+            $stmt = $mysqli->prepare(
+                "SELECT id FROM movimientos
+                 WHERE CAST(RIGHT(TRIM(referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
+                 LIMIT 1"
+            );
+            if ($stmt) {
+                $stmt->bind_param('is', $checkRequiredDigits, $refSuffix);
+            }
+        } else {
+            $stmt = $mysqli->prepare("SELECT id FROM movimientos WHERE referencia = ? LIMIT 1");
+            if ($stmt) {
+                $stmt->bind_param('s', $checkReference);
+            }
+        }
+        if ($stmt) {
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $used = $result && $result->fetch_assoc() !== null;
+            $stmt->close();
+        }
+    } catch (Throwable $e) {
+        json_response(['ok' => true, 'used' => false]);
+    }
+
+    json_response(['ok' => true, 'used' => $used]);
+}
+
 if ($action === 'expire_order') {
     $orderId = intval($_POST['order_id'] ?? 0);
     if ($orderId <= 0) {

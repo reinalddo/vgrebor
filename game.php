@@ -6654,6 +6654,7 @@ include __DIR__ . "/includes/header.php";
       paymentReferenceInput.value = '';
       paymentReferenceInput.focus();
     }
+    setReferenceUsedState(false);
     setPaymentAlert(message || 'Realiza el pago restante y luego registra la nueva referencia para completar esta recarga.', 'warning');
     scrollPaymentSubmitIntoView();
   }
@@ -10467,6 +10468,72 @@ include __DIR__ . "/includes/header.php";
     return methods;
   }
 
+  // Chequeo en vivo de "referencia ya usada" mientras el cliente escribe/pega
+  // la referencia en el modal de pago — antes de darle clic a "Realizar
+  // Compra". Reutiliza la MISMA regla del backend (find_reference_reuse_conflict,
+  // sin importar el estado del pedido previo), así el cliente se entera de
+  // inmediato en vez de recibir el error genérico recién al confirmar.
+  let referenceAlreadyUsed = false;
+  let referenceUsedCheckSeq = 0;
+  let referenceUsedCheckTimer = null;
+  let paymentSubmitButtonLabelBeforeUsedCheck = null;
+
+  function setReferenceUsedState(isUsed) {
+    referenceAlreadyUsed = isUsed;
+    if (paymentSubmitButton) {
+      paymentSubmitButton.disabled = isUsed;
+      if (isUsed) {
+        if (paymentSubmitButtonLabelBeforeUsedCheck === null) {
+          paymentSubmitButtonLabelBeforeUsedCheck = paymentSubmitButton.textContent;
+        }
+        paymentSubmitButton.textContent = 'Referencia ya Usada';
+      } else if (paymentSubmitButtonLabelBeforeUsedCheck !== null) {
+        paymentSubmitButton.textContent = paymentSubmitButtonLabelBeforeUsedCheck;
+        paymentSubmitButtonLabelBeforeUsedCheck = null;
+      }
+    }
+    if (paymentReferenceHelp) {
+      if (isUsed) {
+        paymentReferenceHelp.textContent = 'Referencia ya usada';
+        paymentReferenceHelp.style.color = '#f87171';
+      } else {
+        paymentReferenceHelp.style.color = '';
+      }
+    }
+  }
+
+  function checkReferenceUsedLive() {
+    if (!paymentReferenceInput) return;
+    const requiredDigits = Number(paymentReferenceInput.dataset.requiredDigits || '0');
+    const reference = paymentReferenceInput.value.trim();
+    const minLen = requiredDigits > 0 ? requiredDigits : 4;
+    if (reference.length < minLen) {
+      if (referenceAlreadyUsed) setReferenceUsedState(false);
+      return;
+    }
+    const seq = ++referenceUsedCheckSeq;
+    const amount = Number(activePaymentOrder ? activePaymentOrder.baseAmount : 0) || 0;
+    fetch(buildAppUrl('/api/pedidos.php'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `action=check_reference_used&reference=${encodeURIComponent(reference)}&required_digits=${encodeURIComponent(requiredDigits)}&amount=${encodeURIComponent(amount)}`
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (seq !== referenceUsedCheckSeq) return; // el cliente siguió escribiendo, respuesta obsoleta
+        setReferenceUsedState(!!(data && data.used));
+      })
+      .catch(() => {
+        // Silencioso: si falla el chequeo en vivo no se bloquea nada — la
+        // verificación real al confirmar el pago sigue intacta.
+      });
+  }
+
+  function scheduleReferenceUsedCheck() {
+    clearTimeout(referenceUsedCheckTimer);
+    referenceUsedCheckTimer = setTimeout(checkReferenceUsedLive, 350);
+  }
+
   function setPaymentAlert(message, type, options = {}) {
     if (!paymentModalAlert) {
       return;
@@ -11506,7 +11573,9 @@ include __DIR__ . "/includes/header.php";
       _advRefPrevLen = paymentAdvReferenceInput.value.length;
       if (paymentReferenceInput) {
         paymentReferenceInput.value = paymentAdvReferenceInput.value;
+        paymentReferenceInput.dataset.requiredDigits = paymentAdvReferenceInput.dataset.requiredDigits || '0';
       }
+      scheduleReferenceUsedCheck();
     });
     paymentAdvReferenceInput.addEventListener('input', () => {
       const requiredDigits = Number(paymentAdvReferenceInput.dataset.requiredDigits || '0');
@@ -11520,7 +11589,9 @@ include __DIR__ . "/includes/header.php";
       _advRefPrevLen = digitsOnly.length;
       if (paymentReferenceInput) {
         paymentReferenceInput.value = paymentAdvReferenceInput.value;
+        paymentReferenceInput.dataset.requiredDigits = paymentAdvReferenceInput.dataset.requiredDigits || '0';
       }
+      scheduleReferenceUsedCheck();
     });
   }
 
@@ -11797,6 +11868,7 @@ include __DIR__ . "/includes/header.php";
     if (resetState) {
       activePaymentOrder = null;
       paymentReferenceInput.value = '';
+      setReferenceUsedState(false);
       paymentPhoneInput.value = defaultPaymentPhone || '';
       setPaymentMethodQrState('', 'QR del método de pago');
       clearPaymentSupportUi();
@@ -11899,6 +11971,7 @@ include __DIR__ . "/includes/header.php";
 
     renderPaymentSummary(pack, userId, totalText);
     paymentReferenceInput.value = '';
+    setReferenceUsedState(false);
     paymentPhoneInput.value = defaultPaymentPhone || '';
     if (paymentNombreInput && paymentNombreInput.value.trim() === '') paymentNombreInput.value = defaultPaymentNombre || '';
     if (paymentCedulaInput && paymentCedulaInput.value.trim() === '') paymentCedulaInput.value = defaultPaymentCedula || '';
@@ -12430,6 +12503,7 @@ include __DIR__ . "/includes/header.php";
                   const digitsOnly = pasted.replace(/\D+/g, '');
                   paymentReferenceInput.value = digitsOnly.slice(-requiredDigits);
                   _refPrevLen = paymentReferenceInput.value.length;
+                  scheduleReferenceUsedCheck();
                 });
                 paymentReferenceInput.addEventListener('input', function() {
                   const requiredDigits = Number(paymentReferenceInput.dataset.requiredDigits || '0');
@@ -12443,6 +12517,7 @@ include __DIR__ . "/includes/header.php";
                   }
                   paymentReferenceInput.value = digitsOnly;
                   _refPrevLen = digitsOnly.length;
+                  scheduleReferenceUsedCheck();
                 });
               }
 
@@ -12497,6 +12572,11 @@ include __DIR__ . "/includes/header.php";
                   }
                   // Cart mode: handled by executeCartPurchase via onclick property
                   if (activePaymentOrder && activePaymentOrder.isCart) return;
+
+                  if (referenceAlreadyUsed) {
+                    setPaymentAlert('Esta referencia ya fue usada en otra recarga. Ingresa la referencia correcta de tu pago.', 'danger');
+                    return;
+                  }
 
                   const paymentMode = normalizeCheckoutPaymentMode(activePaymentOrder.paymentMode);
                   const methods = getPaymentMethodsForCurrency(activePaymentOrder.currency);
@@ -14371,6 +14451,7 @@ include __DIR__ . "/includes/header.php";
                   }
 
                   let result = null;
+                  let batchFulfillHttpStatus = null;
                   try {
                     const body = new URLSearchParams();
                     body.set('action', 'batch_fulfill_item');
@@ -14381,9 +14462,10 @@ include __DIR__ . "/includes/header.php";
                       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                       body: body.toString(),
                     });
+                    batchFulfillHttpStatus = resp.status;
                     result = await resp.json();
                   } catch (err) {
-                    result = { ok: false, message: 'Error de red.', estado: 'pagado' };
+                    result = { ok: false, message: 'Error de red.', estado: 'pagado', client_error: String((err && err.message) || err) };
                   }
 
                   doneCount++;
@@ -14415,6 +14497,38 @@ include __DIR__ . "/includes/header.php";
                     row.querySelector('.batch-progress-item-icon').className = `batch-progress-item-icon ${statusClass}`;
                     row.querySelector('.batch-progress-item-status').textContent = statusText;
                     row.querySelector('.batch-progress-item-status').className = `batch-progress-item-status ${statusClass}`;
+
+                    // Botón para copiar el detalle exacto del error (para
+                    // enviárselo al administrador) — la recarga puede haberse
+                    // hecho igual del lado del proveedor aunque esto muestre
+                    // error; este JSON es lo que permite diagnosticarlo sin
+                    // adivinar a partir de un mensaje genérico.
+                    if (isError) {
+                      const errorDetailPayload = {
+                        order_id: orderId,
+                        batch_id: batchId,
+                        package: ci ? ci.pack.name : '',
+                        http_status: batchFulfillHttpStatus,
+                        response: result,
+                        timestamp: new Date().toISOString(),
+                      };
+                      const errInfoIcon = document.createElement('span');
+                      errInfoIcon.textContent = 'ⓘ';
+                      errInfoIcon.className = 'batch-error-info-icon';
+                      errInfoIcon.title = 'Enviar detalles del error al administrador';
+                      errInfoIcon.style.cursor = 'pointer';
+                      errInfoIcon.style.marginLeft = '6px';
+                      errInfoIcon.addEventListener('click', async () => {
+                        const json = JSON.stringify(errorDetailPayload, null, 2);
+                        try {
+                          const copied = await copyTextToClipboard(json);
+                          showToast(copied ? 'Detalles del error copiados. Envíalos al administrador.' : 'No se pudo copiar los detalles.', copied ? 'success' : 'error');
+                        } catch (_) {
+                          showToast('No se pudo copiar los detalles.', 'error');
+                        }
+                      });
+                      row.appendChild(errInfoIcon);
+                    }
 
                     // If account sale, show credentials inline below the progress row
                     if (isDone && result && result.account_sale && result.account_sale.enabled) {
