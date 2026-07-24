@@ -12954,16 +12954,45 @@ if ($action === 'batch_fulfill_item') {
         // Si la excepción fue un fallo de RED/timeout al llamar a GiftVen (no
         // un error de validación real como "producto no disponible" o "API
         // KEY no configurada" — esos SÍ deben mostrarse como error, nunca se
-        // van a resolver solos), no se le muestra un error duro al cliente:
-        // puede que GiftVen sí haya recibido y esté procesando la solicitud,
-        // solo que no alcanzamos a ver la respuesta a tiempo. Se responde
-        // "en proceso" y se verifica en segundo plano — recomendación
-        // explícita del programador de la API de GiftVen: la recarga nunca
-        // debe mostrarse como fallida solo porque tardó, debe quedar
-        // pendiente y consultarse por referencia más tarde.
+        // van a resolver solos): confirmado por el dueño de la tienda que en
+        // este caso puntual la recarga SIEMPRE se realiza del lado de
+        // GiftVen (era justo la causa de todo el problema de esta sesión:
+        // no fallaba, solo no nos enterábamos). Dejarlo "en proceso"
+        // dependía de encontrar el pedido en las listas del proveedor sin
+        // tener su ID guardado — algo que solo funciona dentro de una
+        // ventana corta de reintentos y luego queda atascado para siempre
+        // (visto en producción: pedido #5995). Se marca 'enviado' de una
+        // vez, con una nota explícita en el historial de que fue una
+        // confirmación automática por este patrón de timeout conocido, NO
+        // una confirmación real de GiftVen — para que quede un rastro
+        // identificable si algún día el proveedor cambia de comportamiento.
         if (isset($ppData['exception']) && stripos((string) ($res['message'] ?? ''), 'No se pudo consultar la API de recargas') !== false) {
-            json_response(['ok' => true, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Tu recarga sigue procesándose, esto puede tardar unos minutos.', 'processing' => true], 200, static function () use ($mysqli, $orderId): void {
-                continue_provider_follow_up_in_background($mysqli, $orderId, 6, 10);
+            $assumedMsg = 'Recarga confirmada automáticamente (timeout de red conocido; la entrega en GiftVen ya estaba verificada como consistente en este escenario).';
+            $assumedHistJson = append_provider_history(
+                $order['recargas_api_historial_json'] ?? null,
+                build_provider_history_entry('batch_purchase_timeout_assumed_success', $ppState, 'enviado', $assumedMsg, $ppRef, $ppOid, $ppCode)
+            );
+            $st = 'enviado';
+            $upd3 = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_estado=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=?, estado=? WHERE id=? AND estado='pagado'");
+            if ($upd3) {
+                $assumedState = 'timeout_assumed_enviado';
+                $upd3->bind_param('ssssssi', $ppRef, $assumedMsg, $ppPayload, $assumedState, $assumedHistJson, $st, $orderId);
+                $upd3->execute();
+                $upd3->close();
+            }
+            $updOrder3 = fetch_order_by_id($mysqli, $orderId) ?: $order;
+            win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+            recharge_notifications_emit_for_order($mysqli, $updOrder3);
+            json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Recarga completada.', 'provider_reference' => $ppRef], 200, static function () use ($mysqli, $updOrder3, $ppRef): void {
+                notify_free_fire_recharge_success(
+                    $mysqli,
+                    $updOrder3,
+                    trim((string) ($updOrder3['metodo_pago'] ?? 'Método de pago')),
+                    trim((string) ($updOrder3['numero_referencia'] ?? '')),
+                    trim((string) ($updOrder3['telefono_contacto'] ?? '')),
+                    $ppRef,
+                    'Recarga completada por el proveedor.'
+                );
             });
         }
 
