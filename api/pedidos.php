@@ -7306,6 +7306,46 @@ function explain_bank_movement_mismatch(array $movements, string $reportedRefere
     ];
 }
 
+function claim_movement_checked_by_reference(mysqli $mysqli, string $reference, int $requiredDigits): void {
+    // Reclama (checked=1) el/los movimiento(s) que coincidan con la
+    // referencia escrita EN CUANTO se recibe el intento de compra — antes de
+    // verificar si es válida o de crear/confirmar el pedido. Es intencional
+    // que se ejecute en CADA intento (incluso uno legítimo que va a terminar
+    // bien): así, el chequeo en vivo del frontend (check_reference_used) y
+    // cualquier reintento posterior con la MISMA referencia encuentran
+    // checked=1 y bloquean, sin depender de que el primer pedido termine de
+    // procesarse para que la referencia quede marcada como usada.
+    $mysqli = ensure_mysqli_connection($mysqli);
+    $reference = trim($reference);
+    if ($reference === '') {
+        return;
+    }
+
+    try {
+        if ($requiredDigits > 0) {
+            $refSuffix = strlen($reference) > $requiredDigits ? substr($reference, -$requiredDigits) : $reference;
+            $stmt = $mysqli->prepare(
+                "UPDATE movimientos SET checked = 1
+                 WHERE CAST(RIGHT(TRIM(referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)"
+            );
+            if ($stmt) {
+                $stmt->bind_param('is', $requiredDigits, $refSuffix);
+                $stmt->execute();
+                $stmt->close();
+            }
+        } else {
+            $stmt = $mysqli->prepare('UPDATE movimientos SET checked = 1 WHERE referencia = ?');
+            if ($stmt) {
+                $stmt->bind_param('s', $reference);
+                $stmt->execute();
+                $stmt->close();
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('TVG no se pudo marcar checked=1 en movimientos para referencia "' . $reference . '": ' . $e->getMessage());
+    }
+}
+
 function link_movement_to_order(mysqli $mysqli, string $reference, int $orderId): void {
     $mysqli = ensure_mysqli_connection($mysqli);
 
@@ -9899,6 +9939,15 @@ if ($action === 'submit_payment') {
     $referenceMatchDigits = $binancePagonorteMode
         ? ($referenceDigitsLimit > 0 ? $referenceDigitsLimit : strlen($referenceNumber))
         : $referenceDigitsLimit;
+
+    // Se marca checked=1 en movimientos EN CUANTO se recibe el clic en
+    // "Realizar Compra" — antes de verificar nada más. Instrucción explícita
+    // del cliente: esto es lo que después permite que un segundo intento con
+    // la MISMA referencia (aunque sea otro pedido distinto) se detecte y se
+    // bloquee de inmediato, en vez de depender de que el pedido termine de
+    // procesarse primero.
+    claim_movement_checked_by_reference($mysqli, $referenceNumber, $referenceMatchDigits);
+
     $bankFlowRequested = $orderSupportsBankApi || $methodSupportsBankApi;
     $usesBankValidation = $orderSupportsBankApi && $methodSupportsBankApi && $currencyMatchesOrder;
     $usesBinancePagonorteValidation = $binancePagonorteMode && $currencyMatchesOrder && $methodCurrencyCode === 'USDT';
@@ -10695,13 +10744,14 @@ if ($action === 'refresh_bank_movements') {
 
 if ($action === 'check_reference_used') {
     // Chequeo en vivo mientras el cliente escribe/pega la referencia en el
-    // modal de pago (antes de crear ningún pedido). Instrucción explícita
-    // del cliente: consultar SOLO la tabla movimientos — si el campo
-    // referencia contiene los últimos N dígitos escritos, NO se debe dejar
-    // comprar, sin importar 'checked' ni si tiene pedido_id vinculado (esos
-    // campos los pone la propia aplicación y ya han fallado antes en esta
-    // sesión; la existencia del movimiento del banco es la única señal en
-    // la que se puede confiar al 100%).
+    // modal de pago (antes de crear ningún pedido). Consulta SOLO la tabla
+    // movimientos. Se bloquea si CUALQUIERA de estas tres señales aplica:
+    //  1. Ya tiene un pedido_id vinculado (se usó para completar un pedido).
+    //  2. checked = 1 (alguien ya le dio clic a "Realizar Compra" con esta
+    //     referencia — ver claim_movement_checked_by_reference).
+    //  3. monto < 0 (es un movimiento de SALIDA/débito, nunca un pago
+    //     entrante real — no debe poder usarse como comprobante aunque
+    //     nadie lo haya "reclamado" todavía).
     $mysqli = ensure_mysqli_connection($mysqli);
     $checkReference = trim((string) ($_POST['reference'] ?? ''));
     $checkRequiredDigits = max(0, intval($_POST['required_digits'] ?? 0));
@@ -10709,6 +10759,8 @@ if ($action === 'check_reference_used') {
     if ($checkReference === '') {
         json_response(['ok' => true, 'used' => false]);
     }
+
+    $usedConditionSql = '(COALESCE(checked, 0) = 1 OR COALESCE(pedido_id, 0) > 0 OR monto < 0)';
 
     $used = false;
     try {
@@ -10719,13 +10771,14 @@ if ($action === 'check_reference_used') {
             $stmt = $mysqli->prepare(
                 "SELECT id FROM movimientos
                  WHERE CAST(RIGHT(TRIM(referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
+                   AND {$usedConditionSql}
                  LIMIT 1"
             );
             if ($stmt) {
                 $stmt->bind_param('is', $checkRequiredDigits, $refSuffix);
             }
         } else {
-            $stmt = $mysqli->prepare("SELECT id FROM movimientos WHERE referencia = ? LIMIT 1");
+            $stmt = $mysqli->prepare("SELECT id FROM movimientos WHERE referencia = ? AND {$usedConditionSql} LIMIT 1");
             if ($stmt) {
                 $stmt->bind_param('s', $checkReference);
             }
@@ -12253,6 +12306,10 @@ if ($action === 'batch_create_and_pay') {
             if ($batchRefDigits > 0 && strlen($refNumber) < $batchRefDigits) {
                 json_error('Debes ingresar al menos ' . $batchRefDigits . ' dígitos en el número de referencia.');
             }
+
+            // Se marca checked=1 en movimientos EN CUANTO se recibe el clic
+            // en "Realizar Compra" del carrito — ver claim_movement_checked_by_reference().
+            claim_movement_checked_by_reference($mysqli, $refNumber, $batchRefDigits);
 
             // Candado real contra creación duplicada de pedidos con la misma
             // referencia: sin esto, dos solicitudes casi simultáneas (doble
