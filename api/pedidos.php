@@ -6581,6 +6581,40 @@ function movement_reference_matches(string $fullReference, string $reportedRefer
         || normalize_reference_digits($fullReference) === normalize_reference_digits($reportedReference);
 }
 
+/**
+ * Candado real (a nivel de MySQL, con GET_LOCK) contra el uso duplicado de
+ * una misma referencia de pago. find_reference_reuse_conflict() de abajo es
+ * solo una consulta "¿ya existe un pedido pagado con esta referencia?" —
+ * sin un candado, dos solicitudes casi simultáneas para la MISMA referencia
+ * (doble clic, reintento tras "Error de red") pueden pasar esa consulta
+ * ambas antes de que cualquiera alcance a guardar nada, terminando en dos
+ * pedidos pagados/entregados con una sola transferencia real. GET_LOCK()
+ * serializa esto: solo una solicitud a la vez puede estar procesando una
+ * referencia específica. No se libera explícitamente — el lock es propio de
+ * la sesión de MySQL y se libera solo al cerrarse la conexión (fin del
+ * script), lo cual es exactamente cuánto tiempo necesita protegerse: desde
+ * que se conoce la referencia hasta que el pedido queda confirmado.
+ */
+function acquire_reference_processing_lock(mysqli $mysqli, string $referenceValue, int $timeoutSeconds = 12): bool {
+    $referenceValue = trim($referenceValue);
+    if ($referenceValue === '') {
+        return true;
+    }
+
+    $lockName = 'vg_pedido_ref_' . md5($referenceValue);
+    $stmt = $mysqli->prepare('SELECT GET_LOCK(?, ?) AS locked');
+    if (!$stmt) {
+        return true;
+    }
+    $stmt->bind_param('si', $lockName, $timeoutSeconds);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+
+    return $row !== null && (int) ($row['locked'] ?? 0) === 1;
+}
+
 function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference, int $requiredDigits, int $orderId, float $orderAmount = 0.0): ?array {
     $mysqli = ensure_mysqli_connection($mysqli);
 
@@ -9818,6 +9852,27 @@ if ($action === 'submit_payment') {
         );
     }
 
+    // Candado real contra el uso duplicado de una misma referencia: la
+    // verificación de abajo (find_reference_reuse_conflict) es una simple
+    // consulta que revisa si YA existe un pedido pagado/enviado/cancelado
+    // con esta referencia — si dos solicitudes casi simultáneas (doble clic,
+    // reintento tras "Error de red", etc.) llegan aquí al mismo tiempo,
+    // ambas pueden pasar la verificación antes de que la otra alcance a
+    // guardar nada, y las dos terminan confirmándose con la misma
+    // referencia (esto es justo lo que reportó el cliente: dos pedidos
+    // pagados con una sola transferencia real). GET_LOCK() serializa esto a
+    // nivel de MySQL: solo una solicitud a la vez puede estar procesando
+    // una referencia específica; la segunda espera o, si se agota el
+    // tiempo, se rechaza en vez de arriesgarse a duplicar.
+    $lockReferenceValue = trim((string) (
+        ($usesBankValidation || $usesBinancePagonorteValidation)
+            ? ($preselectedMatchingMovement['referencia'] ?? $referenceNumber)
+            : $referenceNumber
+    ));
+    if (!acquire_reference_processing_lock($mysqli, $lockReferenceValue)) {
+        json_error('Ya hay otra solicitud procesando esta misma referencia de pago. Espera unos segundos y vuelve a intentar.', 409);
+    }
+
     $referenceConflict = null;
     if ($usesBankValidation || $usesBinancePagonorteValidation) {
         if ($preselectedMatchingMovement !== null) {
@@ -12052,6 +12107,20 @@ if ($action === 'batch_create_and_pay') {
                 json_error('Debes ingresar al menos ' . $batchRefDigits . ' dígitos en el número de referencia.');
             }
 
+            // Candado real contra creación duplicada de pedidos con la misma
+            // referencia: sin esto, dos solicitudes casi simultáneas (doble
+            // clic en "Confirmar compra", reintento tras "Error de red")
+            // pueden pasar tanto la verificación de idempotencia como la de
+            // "referencia ya usada" de abajo al mismo tiempo — ninguna ve
+            // todavía el pedido de la otra — y ambas terminan creando un
+            // pedido de carrito pagado con la misma referencia (bug
+            // reportado por el cliente: dos entregas reales por un solo
+            // pago). GET_LOCK() serializa esto a nivel de MySQL por
+            // referencia específica.
+            if (!acquire_reference_processing_lock($mysqli, $refNumber)) {
+                json_error('Ya hay otra solicitud procesando esta misma referencia de pago. Espera unos segundos y vuelve a intentar.', 409);
+            }
+
             // Idempotencia PRIMERO: si el cliente reintenta con la misma referencia+monto
             // porque su conexión se cayó justo después de que el pago se verificó (la API
             // bancaria puede tardar), esto debe devolver el pedido ya creado en vez de
@@ -12500,15 +12569,18 @@ if ($action === 'batch_fulfill_item') {
         $isRetryDispatchAttempt = trim((string) ($order['recargas_api_ultimo_check'] ?? '')) !== ''
             || trim((string) ($order['recargas_api_pedido_id'] ?? '')) !== '';
         if ($isRetryDispatchAttempt) {
-            $recoverResult = try_recover_uncertain_provider_purchase($mysqli, $order, 1, 0);
-            $recoverStatus = is_array($recoverResult) ? (string) ($recoverResult['local_status'] ?? '') : '';
-            if (in_array($recoverStatus, ['enviado', 'cancelado'], true)) {
-                $updOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
-                json_response(['ok' => true, 'estado' => $recoverStatus, 'order_id' => $orderId, 'message' => 'Recarga ya procesada anteriormente por el proveedor.', 'already_done' => true]);
-            }
-            // Si no se encontró una compra previa confirmada, seguimos con
-            // el flujo normal de abajo (puede ser un reintento legítimo
-            // porque el primer intento sí falló de verdad en el proveedor).
+            // OJO: la verificación (find_provider_candidate_for_local_order)
+            // hace hasta 2 llamadas en vivo al proveedor, cada una con su
+            // propio timeout — hacerla en línea aquí podía dejar al cliente
+            // esperando más de un minuto sin ningún avance visible (bug
+            // reportado: "no avanza, ya va más de 1 min"). Se responde de
+            // inmediato que sigue en proceso, y la comprobación/recuperación
+            // real se hace en segundo plano (mismo patrón que ya se usa para
+            // pedidos recién aceptados por el proveedor), sin bloquear al
+            // cliente ni arriesgar una compra duplicada.
+            json_response(['ok' => true, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Verificando si tu recarga ya fue procesada...', 'processing' => true], 200, static function () use ($mysqli, $order): void {
+                try_recover_uncertain_provider_purchase($mysqli, $order, 3, 5);
+            });
         }
 
         try {
