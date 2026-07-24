@@ -12951,6 +12951,22 @@ if ($action === 'batch_fulfill_item') {
             });
         }
 
+        // Si la excepción fue un fallo de RED/timeout al llamar a GiftVen (no
+        // un error de validación real como "producto no disponible" o "API
+        // KEY no configurada" — esos SÍ deben mostrarse como error, nunca se
+        // van a resolver solos), no se le muestra un error duro al cliente:
+        // puede que GiftVen sí haya recibido y esté procesando la solicitud,
+        // solo que no alcanzamos a ver la respuesta a tiempo. Se responde
+        // "en proceso" y se verifica en segundo plano — recomendación
+        // explícita del programador de la API de GiftVen: la recarga nunca
+        // debe mostrarse como fallida solo porque tardó, debe quedar
+        // pendiente y consultarse por referencia más tarde.
+        if (isset($ppData['exception']) && stripos((string) ($res['message'] ?? ''), 'No se pudo consultar la API de recargas') !== false) {
+            json_response(['ok' => true, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Tu recarga sigue procesándose, esto puede tardar unos minutos.', 'processing' => true], 200, static function () use ($mysqli, $orderId): void {
+                continue_provider_follow_up_in_background($mysqli, $orderId, 6, 10);
+            });
+        }
+
         json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $ppMsg ?: 'La recarga no fue procesada por el proveedor.', 'provider_message' => $ppMsg]);
     }
 
