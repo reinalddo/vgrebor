@@ -8078,6 +8078,36 @@ function sync_local_order_with_provider_detail(mysqli $mysqli, array $order, arr
     }
 
     $providerStatus = strtolower(trim((string) ($providerDetail['estado'] ?? '')));
+
+    // El endpoint de estado del proveedor (visto sobre todo en BloodStrike)
+    // a veces reporta "cancelado/rechazada" para un pedido que en realidad
+    // SÍ fue entregado en su panel — marcarlo cancelado de inmediato bloquea
+    // la referencia de pago para siempre, lo saca de las estadísticas de
+    // ventas y le envía al cliente un correo de "compra cancelada" que no
+    // corresponde. Antes de confiar en un "cancelado", se hace un último
+    // cruce contra la lista de órdenes/transacciones recientes del
+    // proveedor (misma función que ya usa la recuperación de pedidos
+    // inciertos): si aparece un registro que coincide y NO está cancelado,
+    // se usa ESE como la verdad en vez del "cancelado" original. Si la
+    // doble verificación falla o no encuentra nada, se mantiene el
+    // resultado original sin cambios (no bloquea el flujo).
+    if (provider_status_to_local_status($providerStatus) === 'cancelado') {
+        try {
+            $cancelDoubleCheck = find_provider_candidate_for_local_order($order);
+            if (is_array($cancelDoubleCheck)) {
+                $doubleCheckStatus = strtolower(trim((string) ($cancelDoubleCheck['estado'] ?? '')));
+                $doubleCheckLocalStatus = provider_status_to_local_status($doubleCheckStatus);
+                if ($doubleCheckLocalStatus !== null && $doubleCheckLocalStatus !== 'cancelado') {
+                    $providerDetail = $cancelDoubleCheck;
+                    $providerStatus = $doubleCheckStatus;
+                }
+            }
+        } catch (Throwable $cancelDoubleCheckError) {
+            // Se ignora: si la doble verificación falla, se mantiene el
+            // "cancelado" original tal como llegó.
+        }
+    }
+
     $providerOrderId = sanitize_str((string) ($providerDetail['id'] ?? $order['recargas_api_pedido_id'] ?? ''), 120) ?? '';
     $providerReference = provider_order_display_reference($providerDetail, (string) ($order['ff_api_referencia'] ?? ''));
     $providerMessage = provider_order_status_message($providerDetail, (string) ($order['ff_api_mensaje'] ?? ''));

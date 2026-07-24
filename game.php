@@ -11382,10 +11382,15 @@ include __DIR__ . "/includes/header.php";
   }
 
   function renderPaymentServerFailure(errorMessage, reference, totalText) {
-    renderPaymentFailureDetails({
-      failure_type: 'server_or_data_mismatch',
-      reasons: [errorMessage || 'No se recibió una respuesta válida del servidor bancario.']
-    }, reference, totalText);
+    // No se usa renderPaymentFailureDetails() aquí: para el tipo
+    // 'server_or_data_mismatch' esa función descarta "reasons" y siempre
+    // muestra el título fijo "Su Pago está en proceso, Espere 1 min..." sin
+    // contenido — un mensaje genérico y a veces contradictorio (ej. cuando
+    // errorMessage ya es un motivo específico y distinto, como "la
+    // referencia ya está asociada a un pedido cancelado"). El mensaje real
+    // ya se muestra en el modal principal (setPaymentAlert/showPaymentStatusModal);
+    // aquí solo se limpia cualquier tarjeta de soporte previa.
+    clearPaymentSupportUi();
     scrollPaymentModalToTop();
   }
 
@@ -12681,7 +12686,15 @@ include __DIR__ . "/includes/header.php";
                       if (String((data && data.provider_flow) || '').trim() !== '') {
                         renderProviderPaymentDetails(data, reference, getConfirmedPaymentTotalText());
                       } else {
-                        renderPaymentFailureDetails(data, reference, getConfirmedPaymentTotalText());
+                        // No se llama a renderPaymentFailureDetails() aquí:
+                        // esa función solo agrega una tarjeta genérica que,
+                        // al no reconocer un failure_type específico para un
+                        // pedido ya cancelado, cae en el texto por defecto
+                        // "Su Pago está en proceso, Espere 1 min..." — un
+                        // mensaje contradictorio junto al de cancelMessage
+                        // (que ya es el motivo real y específico). Solo se
+                        // limpia cualquier tarjeta de soporte previa.
+                        clearPaymentSupportUi();
                       }
                       setPaymentFormDisabled(true);
                       clearPaymentTimer();
