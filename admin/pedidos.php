@@ -23,6 +23,13 @@ try {
     error_log('TVG fullimpulso_sync_pending_orders (admin/pedidos.php) skipped: ' . $e->getMessage());
 }
 
+// Mismo patrón, para pedidos de TiendaGiftVen que sigan "en curso".
+try {
+    recargas_api_sync_pending_orders($mysqli);
+} catch (Throwable $e) {
+    error_log('TVG recargas_api_sync_pending_orders (admin/pedidos.php) skipped: ' . $e->getMessage());
+}
+
 $ordersApiUrl = app_path('/api/pedidos.php');
 
 $statuses = ['pendiente','pagado','enviado','cancelado'];

@@ -10477,16 +10477,20 @@ include __DIR__ . "/includes/header.php";
   let referenceUsedCheckSeq = 0;
   let referenceUsedCheckTimer = null;
   let paymentSubmitButtonLabelBeforeUsedCheck = null;
+  let referenceUsedMessage = 'Referencia ya Usada';
 
-  function setReferenceUsedState(isUsed) {
+  function setReferenceUsedState(isUsed, message) {
     referenceAlreadyUsed = isUsed;
+    if (isUsed) {
+      referenceUsedMessage = String(message || 'Referencia ya usada').trim() || 'Referencia ya usada';
+    }
     if (paymentSubmitButton) {
       paymentSubmitButton.disabled = isUsed;
       if (isUsed) {
         if (paymentSubmitButtonLabelBeforeUsedCheck === null) {
           paymentSubmitButtonLabelBeforeUsedCheck = paymentSubmitButton.textContent;
         }
-        paymentSubmitButton.textContent = 'Referencia ya Usada';
+        paymentSubmitButton.textContent = referenceUsedMessage;
       } else if (paymentSubmitButtonLabelBeforeUsedCheck !== null) {
         paymentSubmitButton.textContent = paymentSubmitButtonLabelBeforeUsedCheck;
         paymentSubmitButtonLabelBeforeUsedCheck = null;
@@ -10494,7 +10498,7 @@ include __DIR__ . "/includes/header.php";
     }
     if (paymentReferenceHelp) {
       if (isUsed) {
-        paymentReferenceHelp.textContent = 'Referencia ya usada';
+        paymentReferenceHelp.textContent = referenceUsedMessage;
         paymentReferenceHelp.style.color = '#f87171';
       } else {
         paymentReferenceHelp.style.color = '';
@@ -10521,7 +10525,7 @@ include __DIR__ . "/includes/header.php";
       .then((response) => response.json())
       .then((data) => {
         if (seq !== referenceUsedCheckSeq) return; // el cliente siguió escribiendo, respuesta obsoleta
-        setReferenceUsedState(!!(data && data.used));
+        setReferenceUsedState(!!(data && data.used), data && data.message);
       })
       .catch(() => {
         // Silencioso: si falla el chequeo en vivo no se bloquea nada — la
@@ -12574,7 +12578,7 @@ include __DIR__ . "/includes/header.php";
                   if (activePaymentOrder && activePaymentOrder.isCart) return;
 
                   if (referenceAlreadyUsed) {
-                    setPaymentAlert('Esta referencia ya fue usada en otra recarga. Ingresa la referencia correcta de tu pago.', 'danger');
+                    setPaymentAlert(referenceUsedMessage + '. Ingresa la referencia correcta de tu pago.', 'danger');
                     return;
                   }
 

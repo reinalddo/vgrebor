@@ -4275,7 +4275,7 @@ function sync_local_order_with_binance_payload(mysqli $mysqli, array $order, arr
             notify_catalog_purchase_pending($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, $providerReference, $providerMessage);
 
             if ($trackingFollowUp) {
-                continue_provider_follow_up_in_background($mysqli, (int) ($paidOrder['id'] ?? $orderId), 8, 8);
+                continue_provider_follow_up_in_background($mysqli, (int) ($paidOrder['id'] ?? $orderId), 4, 5);
             } elseif ($acceptedLike) {
                 $autoSyncAttempts = $manualProcessing ? 10 : 8;
                 $autoSyncDelaySeconds = $manualProcessing ? 3 : 3;
@@ -4711,7 +4711,7 @@ function sync_local_order_with_paypal_payload(mysqli $mysqli, array $order, arra
             notify_catalog_purchase_pending($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, $providerReference, $providerMessage);
 
             if ($trackingFollowUp) {
-                continue_provider_follow_up_in_background($mysqli, (int) ($paidOrder['id'] ?? $orderId), 8, 8);
+                continue_provider_follow_up_in_background($mysqli, (int) ($paidOrder['id'] ?? $orderId), 4, 5);
             } elseif ($acceptedLike) {
                 $autoSyncAttempts = $manualProcessing ? 10 : 8;
                 $autoSyncDelaySeconds = $manualProcessing ? 3 : 3;
@@ -6099,7 +6099,17 @@ function try_recover_uncertain_provider_purchase(mysqli $mysqli, array $order, i
     return $latestResult;
 }
 
-function continue_provider_follow_up_in_background(mysqli $mysqli, int $orderId, int $attempts = 8, int $delaySeconds = 8): void {
+// $attempts/$delaySeconds bajados de 8x8s (~64s+ de sleep(), sin contar las
+// llamadas en vivo al proveedor dentro de cada intento) a 4x5s: cada pedido
+// "en proceso" mantiene un worker de PHP-FPM real durmiendo todo ese tiempo
+// — con varias compras simultáneas eso agota el pool de workers del hosting
+// compartido más rápido de lo que parece (posible causa de los mismos 504
+// que se vienen corrigiendo). Ya no es la única red de seguridad: si esta
+// ventana corta no alcanza a resolver el pedido, recargas_api_sync_pending_orders()
+// (includes/recargas_api.php) lo vuelve a revisar de forma oportunista cada
+// vez que el admin o el cliente abren su lista de pedidos, sin mantener
+// ninguna conexión abierta esperando.
+function continue_provider_follow_up_in_background(mysqli $mysqli, int $orderId, int $attempts = 4, int $delaySeconds = 5): void {
     if ($orderId <= 0) {
         return;
     }
@@ -10467,7 +10477,7 @@ if ($action === 'submit_payment') {
                     ensure_provider_webhook_registration();
                     register_influencer_coupon_sale($mysqli, $paidOrder);
                     notify_catalog_purchase_pending($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, $providerReference, $providerMessage);
-                    continue_provider_follow_up_in_background($mysqli, (int) ($paidOrder['id'] ?? $orderId), 8, 8);
+                    continue_provider_follow_up_in_background($mysqli, (int) ($paidOrder['id'] ?? $orderId), 4, 5);
                 });
             }
 
@@ -10553,7 +10563,7 @@ if ($action === 'submit_payment') {
                     ensure_provider_webhook_registration();
                     register_influencer_coupon_sale($mysqli, $paidOrder);
                     notify_catalog_purchase_pending($mysqli, $paidOrder, $paymentMethodName, $verifiedReference, $phone, $providerReference, $providerMessage);
-                    continue_provider_follow_up_in_background($mysqli, (int) ($paidOrder['id'] ?? 0), 8, 8);
+                    continue_provider_follow_up_in_background($mysqli, (int) ($paidOrder['id'] ?? 0), 4, 5);
                 });
             }
 
@@ -10767,13 +10777,15 @@ if ($action === 'check_reference_used') {
     $usedConditionSql = '(COALESCE(checked, 0) = 1 OR COALESCE(pedido_id, 0) > 0 OR monto < 0)';
 
     $used = false;
+    $usedMovement = null;
     try {
         if ($checkRequiredDigits > 0) {
             $refSuffix = strlen($checkReference) > $checkRequiredDigits
                 ? substr($checkReference, -$checkRequiredDigits)
                 : $checkReference;
             $stmt = $mysqli->prepare(
-                "SELECT id FROM movimientos
+                "SELECT id, COALESCE(checked, 0) AS checked, COALESCE(pedido_id, 0) AS pedido_id, monto
+                 FROM movimientos
                  WHERE CAST(RIGHT(TRIM(referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
                    AND {$usedConditionSql}
                  LIMIT 1"
@@ -10782,7 +10794,10 @@ if ($action === 'check_reference_used') {
                 $stmt->bind_param('is', $checkRequiredDigits, $refSuffix);
             }
         } else {
-            $stmt = $mysqli->prepare("SELECT id FROM movimientos WHERE referencia = ? AND {$usedConditionSql} LIMIT 1");
+            $stmt = $mysqli->prepare(
+                "SELECT id, COALESCE(checked, 0) AS checked, COALESCE(pedido_id, 0) AS pedido_id, monto
+                 FROM movimientos WHERE referencia = ? AND {$usedConditionSql} LIMIT 1"
+            );
             if ($stmt) {
                 $stmt->bind_param('s', $checkReference);
             }
@@ -10790,14 +10805,42 @@ if ($action === 'check_reference_used') {
         if ($stmt) {
             $stmt->execute();
             $result = $stmt->get_result();
-            $used = $result && $result->fetch_assoc() !== null;
+            $usedMovement = $result ? $result->fetch_assoc() : null;
+            $used = $usedMovement !== null;
             $stmt->close();
         }
     } catch (Throwable $e) {
         json_response(['ok' => true, 'used' => false]);
     }
 
-    json_response(['ok' => true, 'used' => $used]);
+    if (!$used) {
+        json_response(['ok' => true, 'used' => false]);
+    }
+
+    // Mensaje específico según la razón real del bloqueo, para no confundir
+    // al cliente con un genérico "ya usada" cuando en realidad su propia
+    // recarga sigue procesándose (pedido pedido explícito del cliente).
+    $usedMessage = 'Referencia ya usada';
+    $linkedOrderId = (int) ($usedMovement['pedido_id'] ?? 0);
+    if ((float) ($usedMovement['monto'] ?? 0) < 0) {
+        $usedMessage = 'Este movimiento no es un pago válido';
+    } elseif ($linkedOrderId > 0) {
+        $linkedOrder = fetch_order_by_id($mysqli, $linkedOrderId);
+        $linkedStatus = trim((string) ($linkedOrder['estado'] ?? ''));
+        if ($linkedStatus === 'pagado') {
+            $usedMessage = 'Ya tienes una recarga en proceso con esta referencia';
+        } elseif ($linkedStatus === 'enviado') {
+            $usedMessage = 'Referencia ya usada en una recarga completada';
+        } elseif ($linkedStatus === 'cancelado') {
+            $usedMessage = 'Referencia ya usada en un pedido cancelado';
+        }
+    } elseif ((int) ($usedMovement['checked'] ?? 0) === 1) {
+        // Reclamada al hacer clic en "Realizar Compra" pero el pedido aún no
+        // terminó de crearse/despacharse (ver claim_movement_checked_by_reference).
+        $usedMessage = 'Ya tienes una recarga en proceso con esta referencia';
+    }
+
+    json_response(['ok' => true, 'used' => true, 'message' => $usedMessage]);
 }
 
 if ($action === 'expire_order') {
@@ -11517,7 +11560,7 @@ if ($action === 'admin_retry_recharge') {
             ], 200, static function () use ($mysqli, $updatedOrder, $paymentMethodName, $verifiedReference, $phone, $providerReference, $providerMessage): void {
                 ensure_provider_webhook_registration();
                 notify_catalog_purchase_pending($mysqli, $updatedOrder, $paymentMethodName, $verifiedReference, $phone, $providerReference, $providerMessage);
-                continue_provider_follow_up_in_background($mysqli, (int) ($updatedOrder['id'] ?? 0), 8, 8);
+                continue_provider_follow_up_in_background($mysqli, (int) ($updatedOrder['id'] ?? 0), 4, 5);
             });
         }
 
@@ -12904,7 +12947,7 @@ if ($action === 'batch_fulfill_item') {
                 $upd2->close();
             }
             json_response(['ok' => true, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Pedido recibido y procesándose.', 'provider_reference' => $ppRef, 'processing' => true], 200, static function () use ($mysqli, $orderId): void {
-                continue_provider_follow_up_in_background($mysqli, $orderId, 8, 8);
+                continue_provider_follow_up_in_background($mysqli, $orderId, 4, 5);
             });
         }
 

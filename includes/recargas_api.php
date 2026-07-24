@@ -1,6 +1,8 @@
 <?php
 
 require_once __DIR__ . '/store_config.php';
+require_once __DIR__ . '/win_points.php';
+require_once __DIR__ . '/recharge_notifications.php';
 
 function recargas_api_decode_response_body(?string $body): ?array {
     $body = trim((string) $body);
@@ -693,6 +695,146 @@ function recargas_api_purchase_is_accepted(array $response): bool {
         || str_contains($message, 'en proceso')
         || str_contains($message, 'se confirmara automaticamente')
         || str_contains($message, 'se confirmará automáticamente');
+}
+
+/**
+ * Chequeo oportunista para pedidos de TiendaGiftVen que sigan "en curso"
+ * (pagado, ya con recargas_api_pedido_id conocido) — mismo patrón que
+ * fullimpulso_sync_pending_orders() (includes/fullimpulso_api.php): se
+ * llama al cargar el panel de pedidos del admin y "Mis pedidos" del
+ * cliente, con throttle propio de 1 vez por minuto, para que el estado
+ * avance con el tráfico normal del sitio en vez de depender de que el
+ * cliente deje el navegador abierto esperando o de que un admin haga algo
+ * manual. Recomendación explícita del programador de la API de GiftVen:
+ * consultar el estado por referencia cada cierto tiempo, sin mantener
+ * conexiones/hilos abiertos en espera.
+ *
+ * A propósito solo transiciona automáticamente a 'enviado' cuando el
+ * proveedor confirma entrega completa (recargas_api_purchase_is_completed,
+ * el mismo criterio que usa el resto del sistema). NO transiciona a
+ * 'cancelado' aquí: esa decisión sigue pasando solo por el sync manual del
+ * admin, el reintento en segundo plano o el webhook (api/pedidos.php),
+ * los únicos caminos que ya hacen la doble verificación necesaria —
+ * GiftVen ha reportado "cancelado"/"rechazada" antes para pedidos de
+ * BloodStrike que en realidad SÍ se habían entregado.
+ */
+function recargas_api_sync_pending_orders(mysqli $mysqli, int $limit = 5): void {
+    $throttleKey = 'recargas_api_pending_sync_ultimo';
+    $lastRun = (int) store_config_get($throttleKey, '0');
+    if ($lastRun > 0 && (time() - $lastRun) < 60) {
+        return;
+    }
+    store_config_upsert($throttleKey, (string) time());
+
+    try {
+        $stmt = $mysqli->prepare(
+            "SELECT id FROM pedidos
+             WHERE estado = 'pagado'
+               AND recargas_api_pedido_id IS NOT NULL AND recargas_api_pedido_id <> ''
+             ORDER BY id ASC LIMIT ?"
+        );
+        if (!$stmt) {
+            return;
+        }
+        $stmt->bind_param('i', $limit);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $orderIds = [];
+        if ($result) {
+            while ($row = $result->fetch_assoc()) {
+                $orderIds[] = (int) $row['id'];
+            }
+        }
+        $stmt->close();
+
+        foreach ($orderIds as $pendingOrderId) {
+            recargas_api_sync_single_pending_order($mysqli, $pendingOrderId);
+        }
+    } catch (Throwable $e) {
+        error_log('TVG recargas_api_sync_pending_orders error: ' . $e->getMessage());
+    }
+}
+
+function recargas_api_sync_single_pending_order(mysqli $mysqli, int $orderId): void {
+    $stmt = $mysqli->prepare("SELECT * FROM pedidos WHERE id = ? AND estado = 'pagado' LIMIT 1");
+    if (!$stmt) {
+        return;
+    }
+    $stmt->bind_param('i', $orderId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $order = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+    if (!$order) {
+        return;
+    }
+
+    $providerOrderId = trim((string) ($order['recargas_api_pedido_id'] ?? ''));
+    if ($providerOrderId === '') {
+        return;
+    }
+
+    try {
+        $response = recargas_api_fetch_order_detail($providerOrderId);
+    } catch (Throwable $e) {
+        // Fallo silencioso: es un chequeo oportunista, no debe romper la
+        // carga de la página que lo disparó. El próximo tráfico normal
+        // (throttle de 1/min) lo vuelve a intentar.
+        return;
+    }
+
+    $detail = is_array($response['pedido'] ?? null) ? $response['pedido'] : $response;
+    $statusText = strtolower(trim((string) ($detail['estado'] ?? '')));
+    $payloadJson = json_encode($detail, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($payloadJson)) {
+        $payloadJson = '{}';
+    }
+
+    if (!recargas_api_purchase_is_completed($detail)) {
+        // Todavía no está completo: se actualiza solo el rastro de
+        // seguimiento (para saber cuándo se revisó por última vez), sin
+        // tocar 'estado'.
+        $stmt2 = $mysqli->prepare("UPDATE pedidos SET recargas_api_estado = ?, ff_api_payload = ?, recargas_api_ultimo_check = NOW() WHERE id = ? AND estado = 'pagado'");
+        if ($stmt2) {
+            $stmt2->bind_param('ssi', $statusText, $payloadJson, $orderId);
+            $stmt2->execute();
+            $stmt2->close();
+        }
+        return;
+    }
+
+    $deliveredCode = '';
+    foreach (['codigo_entregado', 'codigo', 'pin', 'serial', 'voucher'] as $key) {
+        $value = trim((string) ($detail[$key] ?? ''));
+        if ($value !== '') {
+            $deliveredCode = $value;
+            break;
+        }
+    }
+
+    $sentStatus = 'enviado';
+    $stmt2 = $mysqli->prepare("UPDATE pedidos SET recargas_api_estado = ?, recargas_api_codigo_entregado = ?, ff_api_payload = ?, recargas_api_ultimo_check = NOW(), estado = ? WHERE id = ? AND estado = 'pagado'");
+    if ($stmt2) {
+        $stmt2->bind_param('ssssi', $statusText, $deliveredCode, $payloadJson, $sentStatus, $orderId);
+        $stmt2->execute();
+        $stmt2->close();
+    }
+
+    $updatedOrder = $order;
+    $stmt3 = $mysqli->prepare("SELECT * FROM pedidos WHERE id = ? LIMIT 1");
+    if ($stmt3) {
+        $stmt3->bind_param('i', $orderId);
+        $stmt3->execute();
+        $res3 = $stmt3->get_result();
+        $fetchedOrder = $res3 ? $res3->fetch_assoc() : null;
+        $stmt3->close();
+        if ($fetchedOrder) {
+            $updatedOrder = $fetchedOrder;
+        }
+    }
+
+    win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+    recharge_notifications_emit_for_order($mysqli, $updatedOrder);
 }
 
 function recargas_api_product_label(array $product): string {
