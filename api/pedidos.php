@@ -12879,6 +12879,17 @@ if ($action === 'batch_fulfill_item') {
             $res = ['success' => false, 'accepted' => false, 'message' => $e->getMessage(), 'reference' => '', 'payload' => ['exception' => $e->getMessage()]];
         }
 
+        // La llamada anterior puede haber bloqueado hasta ~35s esperando al
+        // proveedor (ver recargas_api_purchase_timeout_seconds). Si ese
+        // tiempo se acerca o supera el wait_timeout de MySQL en el hosting,
+        // la conexión queda cerrada del lado del servidor de base de datos
+        // ("MySQL server has gone away") y CUALQUIER consulta de aquí en
+        // adelante lanza una excepción no capturada (500 genérico) — esto
+        // nunca se notaba antes porque el caso de excepción pura no hacía
+        // ninguna consulta después (ver Bug 6 más abajo); ahora que sí se
+        // actualiza el pedido en ese caso, hace falta reconectar primero.
+        $mysqli = ensure_mysqli_connection($mysqli);
+
         $ppData    = (array) ($res['payload'] ?? []);
         $ppRef     = (string) ($res['reference'] ?? '');
         $ppMsg     = provider_order_status_message($ppData, (string) ($res['message'] ?? ''));
