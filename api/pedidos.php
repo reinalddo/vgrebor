@@ -12669,6 +12669,30 @@ if ($action === 'batch_fulfill_item') {
             build_provider_history_entry('batch_purchase', $ppState, !empty($res['success']) ? 'enviado' : 'pagado', $ppMsg, $ppRef, $ppOid, $ppCode)
         );
 
+        // CRÍTICO: si el proveedor SÍ respondió algo (aunque no se haya
+        // podido clasificar como "success" ni "accepted" — una forma de
+        // respuesta inesperada, no necesariamente un fallo real), se deja
+        // rastro del intento. Antes, en ese caso ambiguo el pedido quedaba
+        // SIN NINGÚN rastro (recargas_api_ultimo_check/recargas_api_pedido_id
+        // vacíos) — el candado de reintento de más arriba
+        // ($isRetryDispatchAttempt) nunca detectaba que ya se había
+        // intentado, así que CADA reintento del cliente volvía a ejecutar
+        // una compra real en el proveedor, aunque la anterior sí se hubiera
+        // entregado (bug reportado: "el cliente recargó 8000 de oro pagando
+        // solo 2000"). Se excluye a propósito el caso de excepción pura
+        // (isset($ppData['exception']): la solicitud nunca llegó a obtener
+        // respuesta del proveedor, así que no hay nada que verificar —
+        // dejarlo "limpio" permite un reintento normal sin demora.
+        if (!isset($ppData['exception'])) {
+            $updAlways = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_estado=?, recargas_api_codigo_entregado=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=? WHERE id=? AND estado='pagado'");
+            if ($updAlways) {
+                $updAlways->bind_param('sssssssi', $ppRef, $ppMsg, $ppPayload, $ppOid, $ppState, $ppCode, $histJson, $orderId);
+                $updAlways->execute();
+                $updAlways->close();
+                $order = fetch_order_by_id($mysqli, $orderId) ?: $order;
+            }
+        }
+
         if (!empty($res['success'])) {
             $st = 'enviado';
             $upd = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_estado=?, recargas_api_codigo_entregado=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=?, estado=? WHERE id=? AND estado='pagado'");
