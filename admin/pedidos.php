@@ -30,6 +30,15 @@ try {
     error_log('TVG recargas_api_sync_pending_orders (admin/pedidos.php) skipped: ' . $e->getMessage());
 }
 
+// Re-verificación de pedidos "confirmados por timeout" (ver
+// includes/recargas_api.php) — el contador en configuracion_general hace
+// que esto no cueste nada cuando no hay nada pendiente.
+try {
+    recargas_api_reverify_timeout_assumed_orders($mysqli);
+} catch (Throwable $e) {
+    error_log('TVG recargas_api_reverify_timeout_assumed_orders (admin/pedidos.php) skipped: ' . $e->getMessage());
+}
+
 $ordersApiUrl = app_path('/api/pedidos.php');
 
 $statuses = ['pendiente','pagado','enviado','cancelado'];
@@ -160,6 +169,17 @@ function order_retry_confirm_message(array $order): string {
 }
 
 function order_provider_status_label(array $order): string {
+  // Pedidos confirmados por el timeout de red conocido (ver
+  // includes/recargas_api.php, recargas_api_reverify_timeout_assumed_orders):
+  // no tienen recargas_api_pedido_id todavía (por eso el chequeo de abajo
+  // los omitía por completo), así que se revisa primero este caso para que
+  // el admin pueda distinguirlos de una confirmación real de GiftVen. La
+  // marca desaparece sola en cuanto la re-verificación automática confirma
+  // el pedido de verdad (pasa a 'confirmado_real') o lo corrige a cancelado.
+  if (trim((string) ($order['recargas_api_estado'] ?? '')) === 'timeout_assumed_enviado') {
+    return '⚠️ Confirmado automático (timeout de red) — pendiente de verificación con GiftVen';
+  }
+
   $fullimpulsoOrderId = trim((string) ($order['fullimpulso_order_id'] ?? ''));
   if ($fullimpulsoOrderId !== '') {
     $fiStatus = trim((string) ($order['recargas_api_estado'] ?? ''));

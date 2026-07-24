@@ -3,6 +3,7 @@
 require_once __DIR__ . '/store_config.php';
 require_once __DIR__ . '/win_points.php';
 require_once __DIR__ . '/recharge_notifications.php';
+require_once __DIR__ . '/recargas_provider_matching.php';
 
 function recargas_api_decode_response_body(?string $body): ?array {
     $body = trim((string) $body);
@@ -835,6 +836,178 @@ function recargas_api_sync_single_pending_order(mysqli $mysqli, int $orderId): v
 
     win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
     recharge_notifications_emit_for_order($mysqli, $updatedOrder);
+}
+
+// ── Re-verificación automática de pedidos "confirmados por timeout" ──────
+//
+// Cuando la compra a GiftVen truena por timeout de red, el pedido se marca
+// 'enviado' de inmediato (ver api/pedidos.php, rama batch_fulfill_item) sin
+// esperar confirmación real, porque está probado que casi siempre se
+// entrega igual. Pero eso deja sin red de seguridad al caso raro en que sí
+// falle: el pedido queda 'enviado' para siempre, sin ninguna revisión
+// posterior. Este bloque cierra ese hueco, revisando estos pedidos
+// puntuales con el mismo tráfico normal del sitio (sin cron), pero con un
+// candado extra pedido explícitamente por el dueño de la tienda: en vez de
+// consultar la tabla `pedidos` en cada carga de página "por si acaso", se
+// usa un contador en `configuracion_general` (tabla que YA se carga
+// completa en una sola consulta cacheada por request en cualquier página,
+// ver store_config_all()) — si el contador es 0, no se toca ni la tabla
+// pedidos ni la API de GiftVen, sin importar cuánto tráfico tenga el sitio.
+
+function recargas_api_timeout_assumed_pending_counter_key(): string {
+    return 'giftven_pendientes_verificar';
+}
+
+/** Se llama en cuanto un pedido se marca 'enviado' por timeout asumido. */
+function recargas_api_increment_timeout_assumed_pending(): void {
+    $key = recargas_api_timeout_assumed_pending_counter_key();
+    $current = max(0, (int) store_config_get($key, '0'));
+    store_config_upsert($key, (string) ($current + 1));
+}
+
+function recargas_api_reverify_timeout_assumed_orders(mysqli $mysqli, int $limit = 5): void {
+    $counterKey = recargas_api_timeout_assumed_pending_counter_key();
+    $pendingCount = (int) store_config_get($counterKey, '0');
+    if ($pendingCount <= 0) {
+        // Contador en 0: no se hace NINGUNA consulta más, ni a la tabla
+        // pedidos ni a GiftVen. Este es el camino que se ejecuta en la
+        // inmensa mayoría de las cargas de página.
+        return;
+    }
+
+    $throttleKey = 'recargas_api_timeout_assumed_sync_ultimo';
+    $lastRun = (int) store_config_get($throttleKey, '0');
+    if ($lastRun > 0 && (time() - $lastRun) < 60) {
+        return;
+    }
+    store_config_upsert($throttleKey, (string) time());
+
+    try {
+        $stmt = $mysqli->prepare(
+            "SELECT * FROM pedidos
+             WHERE estado = 'enviado'
+               AND recargas_api_estado = 'timeout_assumed_enviado'
+               AND creado_en > (NOW() - INTERVAL 72 HOUR)
+             ORDER BY id ASC LIMIT ?"
+        );
+        if ($stmt) {
+            $stmt->bind_param('i', $limit);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $orders = [];
+            if ($result) {
+                while ($row = $result->fetch_assoc()) {
+                    $orders[] = $row;
+                }
+            }
+            $stmt->close();
+
+            foreach ($orders as $pendingOrder) {
+                recargas_api_reverify_single_timeout_assumed_order($mysqli, $pendingOrder);
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('TVG recargas_api_reverify_timeout_assumed_orders error: ' . $e->getMessage());
+    }
+
+    // Instrucción explícita del cliente: sin importar qué haya pasado
+    // arriba, se recalcula el contador REAL contra la tabla pedidos — si
+    // configuracion_general decía, por ejemplo, 2 pendientes pero ya no
+    // queda ninguno (desincronización, ej. por un fallo a mitad de una
+    // actualización anterior), se corrige aquí mismo a 0 (o al valor real),
+    // para que el tráfico siguiente no siga intentando revisar algo que ya
+    // no existe.
+    recargas_api_reconcile_timeout_assumed_pending_counter($mysqli);
+}
+
+function recargas_api_reconcile_timeout_assumed_pending_counter(mysqli $mysqli): void {
+    try {
+        $result = $mysqli->query(
+            "SELECT COUNT(*) AS total FROM pedidos
+             WHERE estado = 'enviado'
+               AND recargas_api_estado = 'timeout_assumed_enviado'
+               AND creado_en > (NOW() - INTERVAL 72 HOUR)"
+        );
+        $row = $result instanceof mysqli_result ? $result->fetch_assoc() : null;
+        $realCount = max(0, (int) ($row['total'] ?? 0));
+        store_config_upsert(recargas_api_timeout_assumed_pending_counter_key(), (string) $realCount);
+    } catch (Throwable $e) {
+        error_log('TVG recargas_api_reconcile_timeout_assumed_pending_counter error: ' . $e->getMessage());
+    }
+}
+
+function recargas_api_reverify_single_timeout_assumed_order(mysqli $mysqli, array $order): void {
+    $orderId = (int) ($order['id'] ?? 0);
+    if ($orderId <= 0) {
+        return;
+    }
+
+    try {
+        $candidate = find_provider_candidate_for_local_order($order);
+    } catch (Throwable $e) {
+        // Silencioso: se reintenta en el próximo tráfico (throttle 1/min),
+        // dentro de la ventana de 72h.
+        return;
+    }
+
+    if (!is_array($candidate)) {
+        return; // Sin coincidencia todavía — se sigue intentando.
+    }
+
+    $candidateStatus = strtolower(trim((string) ($candidate['estado'] ?? '')));
+    $localStatus = provider_status_to_local_status($candidateStatus);
+    $providerOrderId = recargas_api_extract_provider_order_id($candidate);
+    $payloadJson = json_encode($candidate, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($payloadJson)) {
+        $payloadJson = '{}';
+    }
+
+    if ($localStatus === 'cancelado') {
+        // GiftVen confirma que en realidad NO se entregó: se corrige el
+        // pedido a cancelado, se reversan los puntos otorgados si aplica,
+        // y queda el detalle real guardado para que el admin lo revise.
+        $stmt = $mysqli->prepare("UPDATE pedidos SET estado='cancelado', recargas_api_estado=?, recargas_api_pedido_id=?, ff_api_payload=?, recargas_api_ultimo_check=NOW() WHERE id=? AND estado='enviado'");
+        if ($stmt) {
+            $stmt->bind_param('sssi', $candidateStatus, $providerOrderId, $payloadJson, $orderId);
+            $stmt->execute();
+            $stmt->close();
+        }
+
+        $updatedOrder = $order;
+        $stmt2 = $mysqli->prepare('SELECT * FROM pedidos WHERE id = ? LIMIT 1');
+        if ($stmt2) {
+            $stmt2->bind_param('i', $orderId);
+            $stmt2->execute();
+            $res2 = $stmt2->get_result();
+            $fetchedOrder = $res2 ? $res2->fetch_assoc() : null;
+            $stmt2->close();
+            if ($fetchedOrder) {
+                $updatedOrder = $fetchedOrder;
+            }
+        }
+
+        win_points_handle_order_status_change($mysqli, $orderId, 'cancelado');
+        recharge_notifications_emit_for_order($mysqli, $updatedOrder);
+        return;
+    }
+
+    if ($localStatus === 'enviado') {
+        // Confirmado de verdad por GiftVen: se quita la marca de "asumido
+        // por timeout" (deja de aparecer en esta revisión) y se guarda el
+        // ID real del proveedor para referencia futura.
+        $confirmedStatus = 'confirmado_real';
+        $stmt = $mysqli->prepare("UPDATE pedidos SET recargas_api_estado=?, recargas_api_pedido_id=?, ff_api_payload=?, recargas_api_ultimo_check=NOW() WHERE id=? AND estado='enviado'");
+        if ($stmt) {
+            $stmt->bind_param('sssi', $confirmedStatus, $providerOrderId, $payloadJson, $orderId);
+            $stmt->execute();
+            $stmt->close();
+        }
+        return;
+    }
+
+    // Estado no concluyente (sigue "procesando" o no se reconoce): no se
+    // toca nada más, se sigue intentando en el próximo tráfico dentro de
+    // la ventana de 72h.
 }
 
 function recargas_api_product_label(array $product): string {

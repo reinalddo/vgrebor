@@ -159,6 +159,14 @@ if ($action === 'orders') {
     } catch (Throwable $e) {
         error_log('TVG recargas_api_sync_pending_orders (api/account.php) skipped: ' . $e->getMessage());
     }
+
+    // Re-verificación de pedidos "confirmados por timeout" (ver
+    // includes/recargas_api.php) — gratis cuando no hay nada pendiente.
+    try {
+        recargas_api_reverify_timeout_assumed_orders($mysqli);
+    } catch (Throwable $e) {
+        error_log('TVG recargas_api_reverify_timeout_assumed_orders (api/account.php) skipped: ' . $e->getMessage());
+    }
     $hasOwnerColumn = account_pedidos_has_owner_column($mysqli);
     $purchaseQuantitySelect = account_pedidos_has_purchase_quantity_column($mysqli) ? 'cantidad_compra' : '1 AS cantidad_compra';
 
