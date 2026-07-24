@@ -316,6 +316,45 @@ function ensure_pedidos_table(mysqli $mysqli): void {
             $mysqli->query($sql);
         }
     }
+
+    // Candado real A NIVEL DE BASE DE DATOS contra pedidos duplicados con la
+    // misma referencia de pago: los candados a nivel de aplicación
+    // (GET_LOCK, verificación de idempotencia) tienen huecos reales — por
+    // ejemplo, un primer intento que no encuentra el movimiento bancario
+    // termina la solicitud (y libera el candado) SIN crear nada; un
+    // segundo intento más tarde SÍ encuentra el movimiento y crea el
+    // pedido; pero nada impide que ESE mismo segundo intento se repita
+    // más veces si el cliente sigue reintentando después de que ya
+    // funcionó (el candado ya se liberó, cada intento es una solicitud
+    // nueva e independiente). Esta columna generada + índice ÚNICO hace
+    // imposible, a nivel de MySQL, que exista más de un pedido
+    // pagado/enviado/cancelado con la misma referencia — sin importar
+    // cuántas veces se reintente ni por qué camino del código se llegue.
+    // Solo el primer ítem de cada carrito (cart_batch_index = 1) participa
+    // del candado — los demás ítems del MISMO carrito comparten a
+    // propósito la misma referencia y no deben chocar entre sí.
+    $hasReferenceLockColumn = $mysqli->query("SHOW COLUMNS FROM pedidos LIKE 'referencia_activa_lock'");
+    if (!($hasReferenceLockColumn instanceof mysqli_result) || $hasReferenceLockColumn->num_rows === 0) {
+        try {
+            $mysqli->query(
+                "ALTER TABLE pedidos ADD COLUMN referencia_activa_lock VARCHAR(120) " .
+                "GENERATED ALWAYS AS (CASE WHEN estado IN ('pagado','enviado','cancelado') " .
+                "AND TRIM(COALESCE(numero_referencia,'')) <> '' " .
+                "AND (cart_batch_id IS NULL OR cart_batch_index = 1) " .
+                "THEN TRIM(numero_referencia) ELSE NULL END) STORED"
+            );
+        } catch (Throwable $e) {
+            error_log('TVG no se pudo crear la columna referencia_activa_lock: ' . $e->getMessage());
+        }
+    }
+    $hasReferenceLockIndex = $mysqli->query("SHOW INDEX FROM pedidos WHERE Key_name = 'uniq_pedidos_referencia_activa'");
+    if (!($hasReferenceLockIndex instanceof mysqli_result) || $hasReferenceLockIndex->num_rows === 0) {
+        try {
+            $mysqli->query("ALTER TABLE pedidos ADD UNIQUE KEY uniq_pedidos_referencia_activa (referencia_activa_lock)");
+        } catch (Throwable $e) {
+            error_log('TVG no se pudo crear el índice único uniq_pedidos_referencia_activa (posibles referencias duplicadas ya existentes en la tabla): ' . $e->getMessage());
+        }
+    }
 }
 
 function ensure_juego_paquetes_monto_ff_column(mysqli $mysqli): void {
@@ -701,7 +740,20 @@ function pedidos_insert_order(mysqli $mysqli, array $data): int {
     }
 
     $sql = 'INSERT INTO pedidos (' . implode(', ', $columns) . ') VALUES (' . implode(', ', $values) . ')';
-    $mysqli->query($sql);
+    try {
+        $mysqli->query($sql);
+    } catch (mysqli_sql_exception $e) {
+        // Código 1062 = entrada duplicada. Si es específicamente por el
+        // índice único de referencia_activa_lock (ver ensure_pedidos_table),
+        // esto significa que YA existe un pedido pagado/enviado/cancelado
+        // con esta misma referencia — es el candado de base de datos
+        // funcionando, no un error inesperado. Se relanza con un mensaje
+        // claro para el cliente en vez del texto crudo de MySQL.
+        if ((int) $e->getCode() === 1062 && stripos($e->getMessage(), 'referencia_activa_lock') !== false) {
+            throw new RuntimeException('Esta referencia de pago ya fue utilizada en otro pedido.');
+        }
+        throw $e;
+    }
 
     return (int) $mysqli->insert_id;
 }
@@ -12431,6 +12483,22 @@ if ($action === 'batch_create_and_pay') {
             $orderIds[] = $oid;
         } catch (Throwable $e) {
             error_log('TVG batch_create_and_pay item #' . ($itemIdx + 1) . ' failed: ' . $e->getMessage());
+            // Candado de base de datos activado (ver pedidos_insert_order):
+            // ya existe un carrito pagado con esta misma referencia — se
+            // aborta TODO el carrito de inmediato en vez de seguir con el
+            // resto de los ítems (que de otro modo insertarían igual,
+            // dejando un carrito duplicado a medias).
+            if (stripos($e->getMessage(), 'referencia de pago ya fue utilizada') !== false) {
+                foreach ($orderIds as $priorOid) {
+                    $cancelPriorStmt = $mysqli->prepare("UPDATE pedidos SET estado = 'cancelado' WHERE id = ? AND estado = 'pagado' LIMIT 1");
+                    if ($cancelPriorStmt) {
+                        $cancelPriorStmt->bind_param('i', $priorOid);
+                        $cancelPriorStmt->execute();
+                        $cancelPriorStmt->close();
+                    }
+                }
+                json_error('Esta referencia de pago ya fue utilizada en otro pedido.', 409);
+            }
             $itemErrors[] = $e->getMessage();
             if ($oid > 0) {
                 $cancelStmt = $mysqli->prepare("UPDATE pedidos SET estado = 'cancelado' WHERE id = ? AND estado = 'pendiente' LIMIT 1");
