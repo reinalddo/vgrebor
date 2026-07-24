@@ -327,24 +327,65 @@ function ensure_pedidos_table(mysqli $mysqli): void {
     // más veces si el cliente sigue reintentando después de que ya
     // funcionó (el candado ya se liberó, cada intento es una solicitud
     // nueva e independiente). Esta columna generada + índice ÚNICO hace
-    // imposible, a nivel de MySQL, que exista más de un pedido
-    // pagado/enviado/cancelado con la misma referencia — sin importar
-    // cuántas veces se reintente ni por qué camino del código se llegue.
-    // Solo el primer ítem de cada carrito (cart_batch_index = 1) participa
-    // del candado — los demás ítems del MISMO carrito comparten a
-    // propósito la misma referencia y no deben chocar entre sí.
+    // imposible, a nivel de MySQL, que exista más de un pedido con la
+    // misma referencia — SIN IMPORTAR EL ESTADO (instrucción explícita del
+    // cliente: si una referencia ya existe en pedidos, no se debe permitir
+    // otra recarga con ella bajo ninguna circunstancia; si un pedido previo
+    // realmente no se completó, se reenvía manualmente desde el admin en
+    // vez de arriesgar una recarga real duplicada). Solo el primer ítem de
+    // cada carrito (cart_batch_index = 1) participa del candado — los demás
+    // ítems del MISMO carrito comparten a propósito la misma referencia y
+    // no deben chocar entre sí.
+    $referenceLockExpr =
+        "CASE WHEN TRIM(COALESCE(numero_referencia,'')) <> '' " .
+        "AND (cart_batch_id IS NULL OR cart_batch_index = 1) " .
+        "THEN TRIM(numero_referencia) ELSE NULL END";
     $hasReferenceLockColumn = $mysqli->query("SHOW COLUMNS FROM pedidos LIKE 'referencia_activa_lock'");
     if (!($hasReferenceLockColumn instanceof mysqli_result) || $hasReferenceLockColumn->num_rows === 0) {
         try {
             $mysqli->query(
                 "ALTER TABLE pedidos ADD COLUMN referencia_activa_lock VARCHAR(120) " .
-                "GENERATED ALWAYS AS (CASE WHEN estado IN ('pagado','enviado','cancelado') " .
-                "AND TRIM(COALESCE(numero_referencia,'')) <> '' " .
-                "AND (cart_batch_id IS NULL OR cart_batch_index = 1) " .
-                "THEN TRIM(numero_referencia) ELSE NULL END) STORED"
+                "GENERATED ALWAYS AS ({$referenceLockExpr}) STORED"
             );
         } catch (Throwable $e) {
             error_log('TVG no se pudo crear la columna referencia_activa_lock: ' . $e->getMessage());
+        }
+    } else {
+        // Instalaciones que ya tenían esta columna con la fórmula ANTERIOR
+        // (limitada a estado IN ('pagado','enviado','cancelado')) se
+        // actualizan para que el candado aplique sin importar el estado.
+        $genExprResult = $mysqli->query(
+            "SELECT GENERATION_EXPRESSION FROM information_schema.COLUMNS " .
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pedidos' " .
+            "AND COLUMN_NAME = 'referencia_activa_lock'"
+        );
+        $genExprRow = $genExprResult instanceof mysqli_result ? $genExprResult->fetch_assoc() : null;
+        $currentExpr = $genExprRow ? (string) ($genExprRow['GENERATION_EXPRESSION'] ?? '') : '';
+        if ($currentExpr !== '' && stripos($currentExpr, 'estado') !== false) {
+            // Se quita el índice único ANTES de cambiar la fórmula: al
+            // ampliar el candado a "sin importar el estado" es normal que
+            // aparezcan pedidos viejos (ej. varios 'pendiente' abandonados
+            // con la misma referencia) que ya violan la nueva regla — si el
+            // índice sigue presente, el MODIFY falla y la fórmula se queda
+            // en la versión vieja para siempre. Se reintenta crear el
+            // índice único más abajo; si de verdad hay datos duplicados
+            // legados, se registra en el log para limpieza manual, pero la
+            // fórmula ampliada queda aplicada de todas formas — y el
+            // chequeo a nivel de aplicación (find_reference_reuse_conflict)
+            // ya cubre todos los estados independientemente del índice.
+            try {
+                $mysqli->query("ALTER TABLE pedidos DROP INDEX uniq_pedidos_referencia_activa");
+            } catch (Throwable $e) {
+                // El índice puede no existir todavía en algunas instalaciones; se ignora.
+            }
+            try {
+                $mysqli->query(
+                    "ALTER TABLE pedidos MODIFY COLUMN referencia_activa_lock VARCHAR(120) " .
+                    "GENERATED ALWAYS AS ({$referenceLockExpr}) STORED"
+                );
+            } catch (Throwable $e) {
+                error_log('TVG no se pudo actualizar la fórmula de referencia_activa_lock: ' . $e->getMessage());
+            }
         }
     }
     $hasReferenceLockIndex = $mysqli->query("SHOW INDEX FROM pedidos WHERE Key_name = 'uniq_pedidos_referencia_activa'");
@@ -352,7 +393,7 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         try {
             $mysqli->query("ALTER TABLE pedidos ADD UNIQUE KEY uniq_pedidos_referencia_activa (referencia_activa_lock)");
         } catch (Throwable $e) {
-            error_log('TVG no se pudo crear el índice único uniq_pedidos_referencia_activa (posibles referencias duplicadas ya existentes en la tabla): ' . $e->getMessage());
+            error_log('TVG no se pudo crear el índice único uniq_pedidos_referencia_activa (hay referencias repetidas en pedidos que ya violan la nueva regla "sin importar el estado" — revisar y limpiar manualmente; mientras tanto, el chequeo de aplicación find_reference_reuse_conflict sigue protegiendo igual): ' . $e->getMessage());
         }
     }
 }
@@ -6678,6 +6719,12 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
         ? substr($reportedReference, -$requiredDigits)
         : $reportedReference;
 
+    // Instrucción explícita del cliente: si la referencia ya existe en
+    // pedidos, no importa el estado (ni siquiera 'pendiente' o
+    // 'rechazado') — no se debe permitir otra recarga con ella. Si un
+    // pedido previo realmente no llegó a completarse, se reenvía
+    // manualmente desde el admin en vez de arriesgar una recarga real
+    // duplicada.
     if ($requiredDigits > 0) {
         $stmt = $mysqli->prepare(
             "SELECT id, numero_referencia, estado
@@ -6685,7 +6732,6 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
              WHERE id <> ?
                AND numero_referencia IS NOT NULL
                AND TRIM(numero_referencia) <> ''
-               AND estado IN ('pagado', 'enviado', 'cancelado')
                AND CAST(RIGHT(TRIM(numero_referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
                AND (? = 0 OR ABS(precio - ?) < 0.01)
              ORDER BY id DESC
@@ -6700,7 +6746,6 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
              FROM pedidos
              WHERE id <> ?
                AND numero_referencia = ?
-               AND estado IN ('pagado', 'enviado', 'cancelado')
              ORDER BY id DESC
              LIMIT 1"
         );
