@@ -422,8 +422,22 @@ $menuScript = <<<'SCRIPT'
     }
   };
 
+  // "timeout_assumed" (ver api/account.php, action=orders): igual que en el
+  // panel de admin, el pedido se marcó 'enviado' por el patrón de timeout
+  // conocido con GiftVen, no por una confirmación real todavía — se avisa
+  // al cliente con el mismo criterio, sin tocar el estado real del pedido.
+  const timeoutAssumedNote = "Confirmado automático (timeout de red) — pendiente de verificación con GiftVen";
+  const orderStatusBadgeHtml = (order) => {
+    const label = escapeHtml(statusLabel(order.estado)) + (order.timeout_assumed ? " ⚠️" : "");
+    const title = order.timeout_assumed ? ` title="${escapeHtml(timeoutAssumedNote)}"` : "";
+    return `<span class="badge rounded-pill text-bg-dark border border-info-subtle text-info"${title}>${label}</span>`;
+  };
+
   const renderOrderCard = (order) => {
     const amount = order.paquete_cantidad ? ` <span class="text-secondary">(${escapeHtml(order.paquete_cantidad)})</span>` : "";
+    const timeoutNoteHtml = order.timeout_assumed
+      ? `<div class="small mt-2" style="color:#fbbf24;">⚠️ ${escapeHtml(timeoutAssumedNote)}</div>`
+      : "";
     return `
       <article class="rounded-4 border border-info p-3" style="background:rgba(8,15,24,0.78);box-shadow:0 0 16px rgba(34,211,238,0.08);">
         <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
@@ -431,24 +445,30 @@ $menuScript = <<<'SCRIPT'
             <div class="small text-uppercase text-info" style="letter-spacing:0.14em;">Pedido #${escapeHtml(order.id)}</div>
             <h4 class="h6 mb-0 text-white">${escapeHtml(order.juego_nombre)}</h4>
           </div>
-          <span class="badge rounded-pill text-bg-dark border border-info-subtle text-info">${escapeHtml(statusLabel(order.estado))}</span>
+          ${orderStatusBadgeHtml(order)}
         </div>
         <div class="small text-secondary mb-2">${escapeHtml(order.creado_en)}</div>
         <div class="mb-2 text-light"><strong>Paquete:</strong> ${escapeHtml(order.paquete_nombre)}${amount}</div>
+        <div class="mb-2 text-light"><strong>ID Usuario:</strong> ${escapeHtml(order.user_identifier || "—")}</div>
         <div class="mb-2 text-light"><strong>Correo:</strong> ${escapeHtml(order.email)}</div>
         <div class="fw-bold text-info fs-5">${escapeHtml(order.moneda)} ${escapeHtml(order.precio)}</div>
+        ${timeoutNoteHtml}
       </article>`;
   };
 
   const renderOrderRow = (order) => {
     const amount = order.paquete_cantidad ? ` (${escapeHtml(order.paquete_cantidad)})` : "";
+    const timeoutNoteHtml = order.timeout_assumed
+      ? `<div class="small mt-1" style="color:#fbbf24;">⚠️ ${escapeHtml(timeoutAssumedNote)}</div>`
+      : "";
     return `
       <tr>
         <td class="bg-transparent border-bottom border-info-subtle text-info fw-semibold">#${escapeHtml(order.id)}<div class="small text-secondary fw-normal">${escapeHtml(order.creado_en)}</div></td>
         <td class="bg-transparent border-bottom border-info-subtle text-light fw-semibold">${escapeHtml(order.juego_nombre)}</td>
         <td class="bg-transparent border-bottom border-info-subtle text-light">${escapeHtml(order.paquete_nombre)}<span class="text-secondary">${amount}</span></td>
+        <td class="bg-transparent border-bottom border-info-subtle text-light">${escapeHtml(order.user_identifier || "—")}</td>
         <td class="bg-transparent border-bottom border-info-subtle text-light">${escapeHtml(order.email)}</td>
-        <td class="bg-transparent border-bottom border-info-subtle"><span class="badge rounded-pill text-bg-dark border border-info-subtle text-info">${escapeHtml(statusLabel(order.estado))}</span></td>
+        <td class="bg-transparent border-bottom border-info-subtle">${orderStatusBadgeHtml(order)}${timeoutNoteHtml}</td>
         <td class="bg-transparent border-bottom border-info-subtle text-info fw-bold text-end">${escapeHtml(order.moneda)} ${escapeHtml(order.precio)}</td>
       </tr>`;
   };
@@ -548,13 +568,14 @@ $menuScript = <<<'SCRIPT'
     hideFeedback(userOrdersFeedback);
     userOrdersList.innerHTML = "";
     userOrdersList.innerHTML = `
-                <div class="table-responsive d-none d-md-block rounded-4 border border-info-subtle overflow-hidden" style="background:rgba(8,15,24,0.82);">
+                <div class="table-responsive d-none d-md-block rounded-4 border border-info-subtle" style="background:rgba(8,15,24,0.82);overflow-x:auto;">
                   <table class="table align-middle mb-0" style="--bs-table-bg:transparent;--bs-table-color:#e5f6ff;">
                     <thead>
                       <tr>
                         <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Pedido</th>
                         <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Juego</th>
                         <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Paquete</th>
+                        <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">ID Usuario</th>
                         <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Correo</th>
                         <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Estado</th>
                         <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent text-end">Total</th>

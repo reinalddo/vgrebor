@@ -1993,7 +1993,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       <?php if ($authUser): ?>
       <div id="user-orders-modal" class="position-fixed top-0 start-0 w-100 h-100 d-none d-flex align-items-start align-items-md-center justify-content-center px-3 py-3 overflow-auto" style="z-index:13100;">
         <div class="position-absolute top-0 start-0 w-100 h-100" style="background:var(--theme-overlay-soft);backdrop-filter:blur(6px);" data-user-close></div>
-        <div class="position-relative w-100" style="max-width:820px;z-index:1;">
+        <div class="position-relative w-100" style="max-width:1200px;z-index:1;">
           <div class="rounded-4 border border-info overflow-hidden" style="background:var(--theme-panel-gradient);box-shadow:0 0 32px var(--theme-primary-glow);">
             <div class="d-flex align-items-center justify-content-between gap-3 px-4 py-3 border-bottom border-info-subtle">
               <div>
@@ -2009,13 +2009,14 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
               <div id="user-orders-loading" class="text-center py-5 text-info">Cargando pedidos...</div>
               <div id="user-orders-empty" class="d-none text-center py-5 text-secondary">Todavía no has realizado pedidos con esta cuenta.</div>
               <div id="user-orders-list" class="d-none">
-                <div class="table-responsive d-none d-md-block rounded-4 border border-info-subtle overflow-hidden" style="background:var(--theme-bg-elevated);">
+                <div class="table-responsive d-none d-md-block rounded-4 border border-info-subtle" style="background:var(--theme-bg-elevated);overflow-x:auto;">
                   <table class="table align-middle mb-0" style="--bs-table-bg:transparent;--bs-table-color:var(--theme-text);">
                     <thead>
                       <tr>
                         <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Pedido</th>
                         <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Juego</th>
                         <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Paquete</th>
+                        <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">ID Usuario</th>
                         <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Correo</th>
                         <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Estado</th>
                         <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent text-end">Total</th>

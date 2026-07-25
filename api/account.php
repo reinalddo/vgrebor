@@ -172,7 +172,7 @@ if ($action === 'orders') {
 
     if ($hasOwnerColumn) {
         $stmt = $mysqli->prepare(
-            "SELECT id, juego_nombre, paquete_nombre, paquete_cantidad, {$purchaseQuantitySelect}, moneda, precio, email, estado, creado_en
+            "SELECT id, juego_nombre, paquete_nombre, paquete_cantidad, {$purchaseQuantitySelect}, moneda, precio, email, estado, creado_en, user_identifier, recargas_api_estado
              FROM pedidos
              WHERE cliente_usuario_id = ?
                 OR (cliente_usuario_id IS NULL AND email = ?)
@@ -184,7 +184,7 @@ if ($action === 'orders') {
         $stmt->bind_param('is', $authUserId, $authUserEmail);
     } else {
         $stmt = $mysqli->prepare(
-            "SELECT id, juego_nombre, paquete_nombre, paquete_cantidad, {$purchaseQuantitySelect}, moneda, precio, email, estado, creado_en
+            "SELECT id, juego_nombre, paquete_nombre, paquete_cantidad, {$purchaseQuantitySelect}, moneda, precio, email, estado, creado_en, user_identifier, recargas_api_estado
              FROM pedidos
              WHERE email = ?
              ORDER BY creado_en DESC, id DESC"
@@ -199,6 +199,11 @@ if ($action === 'orders') {
     $result = $stmt->get_result();
     if ($result) {
         while ($row = $result->fetch_assoc()) {
+            // "timeout_assumed_enviado" (ver includes/recargas_api.php): el
+            // pedido se marcó 'enviado' por el patrón de timeout conocido,
+            // no por una confirmación real todavía recibida de GiftVen — se
+            // le informa al cliente igual que ya se le muestra al admin.
+            $isTimeoutAssumed = trim((string) ($row['recargas_api_estado'] ?? '')) === 'timeout_assumed_enviado';
             $orders[] = [
                 'id' => (int) ($row['id'] ?? 0),
                 'juego_nombre' => (string) ($row['juego_nombre'] ?? ''),
@@ -210,6 +215,8 @@ if ($action === 'orders') {
                 'email' => (string) ($row['email'] ?? ''),
                 'estado' => (string) ($row['estado'] ?? 'pendiente'),
                 'creado_en' => (string) ($row['creado_en'] ?? ''),
+                'user_identifier' => (string) ($row['user_identifier'] ?? ''),
+                'timeout_assumed' => $isTimeoutAssumed,
             ];
         }
     }
