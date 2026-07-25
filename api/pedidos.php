@@ -10549,13 +10549,16 @@ if ($action === 'refresh_bank_movements') {
 if ($action === 'check_reference_used') {
     // Chequeo en vivo mientras el cliente escribe/pega la referencia en el
     // modal de pago (antes de crear ningún pedido). Consulta SOLO la tabla
-    // movimientos. Se bloquea si CUALQUIERA de estas tres señales aplica:
-    //  1. Ya tiene un pedido_id vinculado (se usó para completar un pedido).
+    // movimientos. Instrucción explícita del cliente: una referencia SOLO
+    // se puede usar una vez, sin importar el estado del pedido — únicamente
+    // se permite usarla si monto > 0 Y checked = 0 Y pedido_id IS NULL. Se
+    // bloquea si CUALQUIERA de estas señales aplica:
+    //  1. pedido_id IS NOT NULL (ya se usó para completar un pedido).
     //  2. checked = 1 (alguien ya le dio clic a "Realizar Compra" con esta
     //     referencia — ver claim_movement_checked_by_reference).
-    //  3. monto < 0 (es un movimiento de SALIDA/débito, nunca un pago
-    //     entrante real — no debe poder usarse como comprobante aunque
-    //     nadie lo haya "reclamado" todavía).
+    //  3. monto <= 0 (cero o negativo — nunca un pago entrante real, no
+    //     debe poder usarse como comprobante aunque nadie lo haya
+    //     "reclamado" todavía).
     $mysqli = ensure_mysqli_connection($mysqli);
     $checkReference = trim((string) ($_POST['reference'] ?? ''));
     $checkRequiredDigits = max(0, intval($_POST['required_digits'] ?? 0));
@@ -10564,7 +10567,7 @@ if ($action === 'check_reference_used') {
         json_response(['ok' => true, 'used' => false]);
     }
 
-    $usedConditionSql = '(COALESCE(checked, 0) = 1 OR COALESCE(pedido_id, 0) > 0 OR monto < 0)';
+    $usedConditionSql = '(COALESCE(checked, 0) = 1 OR pedido_id IS NOT NULL OR monto <= 0)';
 
     $used = false;
     $usedMovement = null;
@@ -10617,7 +10620,13 @@ if ($action === 'check_reference_used') {
     } elseif ($linkedOrderId > 0) {
         $linkedOrder = fetch_order_by_id($mysqli, $linkedOrderId);
         $linkedStatus = trim((string) ($linkedOrder['estado'] ?? ''));
-        if ($linkedStatus === 'pagado') {
+        $linkedRecargasEstado = trim((string) ($linkedOrder['recargas_api_estado'] ?? ''));
+        if ($linkedStatus === 'pagado' || $linkedRecargasEstado === 'timeout_assumed_enviado') {
+            // El "confirmado automático" por timeout (ver
+            // recargas_api_reverify_timeout_assumed_orders) todavía no está
+            // verificado de verdad con GiftVen — aunque el pedido ya
+            // muestre 'enviado', para el cliente debe seguir viéndose como
+            // "en proceso", no como una recarga ya completada.
             $usedMessage = 'Ya tienes una recarga en proceso con esta referencia';
         } elseif ($linkedStatus === 'enviado') {
             $usedMessage = 'Referencia ya usada en una recarga completada';
