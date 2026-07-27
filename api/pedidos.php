@@ -12535,6 +12535,72 @@ if ($action === 'batch_create_and_pay') {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+/**
+ * Despacha un pedido de STREAMING: toma un perfil LIBRE del stock de la tienda (owner 0) para la
+ * plataforma vinculada al paquete, lo marca vendido, crea la venta de streaming y devuelve las
+ * credenciales para entregarlas al cliente. Atómico (FOR UPDATE). No toca a los demás proveedores.
+ */
+function execute_streaming_order_dispatch(mysqli $mysqli, array $order): array {
+    $pkgId = (int) ($order['paquete_id'] ?? 0);
+    if ($pkgId <= 0) { return ['ok' => false, 'message' => 'Pedido sin paquete.']; }
+    $platId = 0;
+    if ($res = $mysqli->query("SELECT streaming_plataforma_id FROM juego_paquetes WHERE id = " . $pkgId . " LIMIT 1")) {
+        $row = $res->fetch_assoc();
+        $platId = (int) ($row['streaming_plataforma_id'] ?? 0);
+    }
+    if ($platId <= 0) { return ['ok' => false, 'message' => 'El producto no está vinculado a una plataforma de streaming.']; }
+
+    $mysqli->begin_transaction();
+    try {
+        $sel = $mysqli->prepare("SELECT p.id AS pid, p.etiqueta, p.pin AS ppin, c.id AS cuenta_id, c.correo, c.clave,
+                                        COALESCE(pl.nombre, c.plataforma) AS plat_nombre, COALESCE(pl.dias_default, 30) AS dias
+                                 FROM streaming_perfiles p
+                                 JOIN streaming_cuentas c ON c.id = p.cuenta_id
+                                 JOIN streaming_plataformas pl ON pl.id = c.plataforma_id
+                                 WHERE c.owner_id = 0 AND c.plataforma_id = ? AND p.estado = 'libre' AND c.estado = 'activa'
+                                 ORDER BY (c.vencimiento IS NULL), c.vencimiento ASC
+                                 LIMIT 1 FOR UPDATE");
+        if (!$sel) { throw new RuntimeException('db'); }
+        $sel->bind_param('i', $platId);
+        $sel->execute();
+        $rr = $sel->get_result();
+        $p = $rr ? $rr->fetch_assoc() : null;
+        $sel->close();
+        if (!$p) { $mysqli->rollback(); return ['ok' => false, 'message' => 'Sin stock disponible de esa plataforma.']; }
+
+        $dias = (int) ($p['dias'] ?: 30);
+        $venc = date('Y-m-d', strtotime("+$dias days"));
+        $cliNombre = trim((string) ($order['user_identifier'] ?? '')) ?: trim((string) ($order['email'] ?? ''));
+        $precio = (float) ($order['precio'] ?? 0);
+        $cuentaId = (int) $p['cuenta_id'];
+        $platNombre = (string) $p['plat_nombre'];
+        $etq = (string) ($p['etiqueta'] ?? '');
+        $ppin = (string) ($p['ppin'] ?? '');
+
+        $ins = $mysqli->prepare("INSERT INTO streaming_ventas (owner_id, plataforma, tipo, cuenta_id, cliente_nombre, correo, clave, perfil, pin, precio, fecha_inicio, fecha_vencimiento, estado, entregada)
+                                 VALUES (0, ?, 'perfil', ?, ?, ?, ?, ?, ?, ?, CURDATE(), ?, 'activa', 1)");
+        $ins->bind_param('sisssssds', $platNombre, $cuentaId, $cliNombre, $p['correo'], $p['clave'], $etq, $ppin, $precio, $venc);
+        $ins->execute();
+        $vid = (int) $mysqli->insert_id;
+        $ins->close();
+
+        $up = $mysqli->prepare("UPDATE streaming_perfiles SET estado='vendido', venta_id=? WHERE id=? AND estado='libre'");
+        $up->bind_param('ii', $vid, $p['pid']);
+        $up->execute();
+        $changed = $up->affected_rows;
+        $up->close();
+        if ($changed < 1) { $mysqli->rollback(); return ['ok' => false, 'message' => 'Sin stock disponible.']; }
+
+        $mysqli->commit();
+        return ['ok' => true, 'plataforma' => $platNombre, 'correo' => (string) $p['correo'], 'clave' => (string) $p['clave'],
+                'perfil' => $etq, 'pin' => $ppin, 'vencimiento' => $venc, 'venta_id' => $vid];
+    } catch (Throwable $e) {
+        @$mysqli->rollback();
+        return ['ok' => false, 'message' => 'Error al asignar el streaming.'];
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // BATCH CART: batch_fulfill_item
 // Processes one cart item: submits to provider API, updates estado.
 // Called sequentially by the frontend progress modal.
@@ -12624,6 +12690,27 @@ if ($action === 'batch_fulfill_item') {
                 trim((string) ($asSentOrder['telefono_contacto'] ?? ''))
             );
         });
+    }
+
+    // ── Streaming: asigna un perfil del stock de la tienda y entrega credenciales ──
+    if ($pkgProvider === 'streaming') {
+        $sres = execute_streaming_order_dispatch($mysqli, $order);
+        if (!empty($sres['ok'])) {
+            $codigo = 'Plataforma: ' . $sres['plataforma'] . "\n"
+                    . 'Correo: ' . $sres['correo'] . "\n"
+                    . 'Clave: ' . $sres['clave']
+                    . ($sres['perfil'] !== '' ? "\nPerfil: " . $sres['perfil'] : '')
+                    . ($sres['pin'] !== '' ? "\nPIN: " . $sres['pin'] : '')
+                    . "\nVence: " . $sres['vencimiento'];
+            $st = 'enviado';
+            $upd = $mysqli->prepare("UPDATE pedidos SET recargas_api_codigo_entregado=?, recargas_api_estado='entregado', recargas_api_ultimo_check=NOW(), estado=? WHERE id=? AND estado='pagado'");
+            if ($upd) { $upd->bind_param('ssi', $codigo, $st, $orderId); $upd->execute(); $upd->close(); }
+            $updOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
+            win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+            recharge_notifications_emit_for_order($mysqli, $updOrder);
+            json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Streaming entregado.', 'provider_code' => $codigo]);
+        }
+        json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $sres['message'] ?? 'No se pudo entregar el streaming (sin stock).']);
     }
 
     // ── GiftVen catalog API ──────────────────────────────────────────

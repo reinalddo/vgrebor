@@ -1,0 +1,2 @@
+# Los esquemas/seeds .sql no deben ser descargables por web.
+Require all denied

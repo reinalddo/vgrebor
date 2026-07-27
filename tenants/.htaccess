@@ -1,0 +1,9 @@
+# Bloquea todo acceso web a la configuración de tenants (data.json con credenciales de BD).
+# PHP lee estos archivos desde el sistema de archivos, no por HTTP, así que esto NO afecta al sitio.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

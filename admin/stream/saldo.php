@@ -1,0 +1,206 @@
+<?php
+/**
+ * admin/stream/saldo.php — Billetera del REVENDEDOR: saldo actual, movimientos y solicitud de
+ * recarga de saldo. La recarga queda 'pendiente'; el admin la aprueba (o la aprueba la pasarela
+ * de pago automáticamente cuando esté conectada). Solo tiene sentido en contexto revendedor.
+ */
+define('CONEC_ADMIN', true);
+require __DIR__ . '/../_auth.php';
+require __DIR__ . '/_layout.php';
+require __DIR__ . '/../../api/wallet/_helpers.php';
+admin_require_login();
+
+if (stream_ctx() !== 'revendedor') {
+    header('Location: dashboard.php');
+    exit;
+}
+$pdo = db();
+$uid = (int) current_user_id();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
+    $msg = '';
+    if (($_POST['accion'] ?? '') === 'solicitar_recarga') {
+        $monto = round(abs((float) ($_POST['monto'] ?? 0)), 2);
+        $metodo = trim((string) ($_POST['metodo'] ?? '')) ?: null;
+        $ref = trim((string) ($_POST['referencia'] ?? '')) ?: null;
+        if ($monto <= 0) {
+            $msg = '⚠ Indica un monto válido.';
+        } else {
+            $pdo->prepare("INSERT INTO wallet_recargas (usuario_id, monto, metodo, referencia, estado) VALUES (?,?,?,?, 'pendiente')")
+                ->execute([$uid, $monto, $metodo, $ref]);
+            $msg = '✓ Solicitud de recarga por $' . number_format($monto, 2) . ' registrada. Se acreditará al confirmarse el pago.';
+        }
+        header('Location: saldo.php?msg=' . urlencode($msg));
+        exit;
+    }
+}
+
+$flash = (string) ($_GET['msg'] ?? '');
+$saldo = wallet_saldo($pdo, $uid);
+
+// Tasa Bs de la tienda (moneda con clave 'BS'): para mostrar el monto a pagar en bolívares.
+$bsRate = 0.0; $bsDec = 2;
+try {
+    $m = $pdo->query("SELECT tasa, mostrar_decimales FROM monedas WHERE UPPER(clave)='BS' AND activo=1 LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    if ($m) { $bsRate = (float) $m['tasa']; $bsDec = (int) $m['mostrar_decimales']; }
+} catch (Throwable $e) {}
+
+// ¿Pasarelas automáticas habilitadas? (al pagar se acredita el saldo solo). Config de la tienda.
+$paypalOn = false; $binanceOn = false;
+try {
+    $cfg = $pdo->query("SELECT clave, valor FROM configuracion_general WHERE clave IN
+        ('pago_paypal','paypal_activo','paypal_client_id','paypal_client_secret',
+         'api_binance','api_binance_usuario','binance_pay_merchant_no','binance_pay_secret_key')")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $paypalOn = (($cfg['pago_paypal'] ?? '0') === '1')
+        && (($cfg['paypal_activo'] ?? '1') === '1')
+        && trim((string) ($cfg['paypal_client_id'] ?? '')) !== ''
+        && trim((string) ($cfg['paypal_client_secret'] ?? '')) !== '';
+    $binanceOn = (($cfg['api_binance'] ?? '0') === '1')
+        && (($cfg['api_binance_usuario'] ?? '1') === '1')
+        && trim((string) ($cfg['binance_pay_merchant_no'] ?? '')) !== ''
+        && trim((string) ($cfg['binance_pay_secret_key'] ?? '')) !== '';
+} catch (Throwable $e) {}
+$autoOn = $paypalOn || $binanceOn;
+$recargarUrl = function_exists('app_path') ? app_path('/api/revendedor/recargar-saldo.php') : '/api/revendedor/recargar-saldo.php';
+
+// Métodos de pago ACTIVOS de la tienda (los mismos del checkout): el revendedor paga con cualquiera.
+$metodosPago = [];
+try {
+    $metodosPago = $pdo->query("SELECT pm.id, pm.nombre, pm.datos, pm.qr_image_path, pm.referencia_digitos,
+            mo.clave AS moneda, mo.tasa AS moneda_tasa
+        FROM payment_methods pm LEFT JOIN monedas mo ON mo.id = pm.moneda_id
+        WHERE pm.activo = 1 ORDER BY pm.nombre")->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) { $metodosPago = []; }
+
+$movs = $pdo->prepare("SELECT tipo, monto, descripcion, referencia, creado_en FROM wallet_movimientos WHERE usuario_id=? ORDER BY id DESC LIMIT 200");
+$movs->execute([$uid]);
+$movimientos = $movs->fetchAll(PDO::FETCH_ASSOC);
+
+$recs = $pdo->prepare("SELECT monto, metodo, estado, creado_en FROM wallet_recargas WHERE usuario_id=? ORDER BY id DESC LIMIT 20");
+$recs->execute([$uid]);
+$recargas = $recs->fetchAll(PDO::FETCH_ASSOC);
+
+stream_head('Mi saldo', 'saldo');
+?>
+<?php if ($flash): ?><div class="banner" style="margin-bottom:16px;white-space:normal"><i data-lucide="info"></i><?= h($flash) ?></div><?php endif; ?>
+
+<div class="pagehd">
+  <div><h1>Mi <span class="nm">saldo</span></h1><p>Recarga tu saldo para comprar del stock de la tienda.</p></div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px" class="saldo-grid">
+  <div class="card" style="padding:20px;display:flex;flex-direction:column;justify-content:center">
+    <div style="font-size:12px;color:var(--faint);font-weight:700;text-transform:uppercase;letter-spacing:.05em">Saldo disponible</div>
+    <div class="tnum" style="font-size:38px;font-weight:800;color:var(--accent);line-height:1.1">$<?= number_format($saldo, 2) ?></div>
+  </div>
+  <div class="card" style="padding:18px">
+    <h2 style="margin:0 0 12px;font-size:15px"><i data-lucide="plus-circle" style="width:16px;height:16px;vertical-align:-2px"></i> Recargar saldo</h2>
+    <form method="post">
+      <input type="hidden" name="_csrf" value="<?= h(csrf_token()) ?>">
+      <input type="hidden" name="accion" value="solicitar_recarga">
+      <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px">Monto ($)</label>
+          <input type="number" step="0.01" min="1" name="monto" id="rcMonto" required oninput="rcCalcBs()" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)"></div>
+        <div><label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px">Método de pago</label>
+          <?php if ($metodosPago): ?>
+          <select name="metodo" id="rcMetodo" onchange="rcMetodoInfo()" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
+            <?php foreach ($metodosPago as $mp): ?><option value="<?= h($mp['nombre']) ?>"><?= h($mp['nombre']) ?></option><?php endforeach; ?>
+          </select>
+          <?php else: ?>
+          <select name="metodo" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
+            <option value="Binance">Binance</option><option value="PayPal">PayPal</option>
+            <option value="Pago Móvil">Pago Móvil</option><option value="Transferencia">Transferencia</option>
+          </select>
+          <?php endif; ?>
+        </div>
+      </div>
+      <?php if ($metodosPago): ?>
+      <div id="rcMetodoBox" style="margin-top:10px;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);font-size:13px;display:none">
+        <div id="rcMetodoDatos" style="white-space:pre-line;color:var(--text)"></div>
+        <img id="rcMetodoQr" src="" alt="QR" style="display:none;max-width:150px;margin-top:8px;border-radius:8px">
+      </div>
+      <?php endif; ?>
+      <?php if ($bsRate > 0): ?>
+      <div id="rcBsBox" style="margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:13.5px;display:none">
+        A pagar: <span id="rcBs">0,00</span> Bs
+        <span style="font-weight:500;color:var(--muted);font-size:12px">· tasa <?= number_format($bsRate, 2, ',', '.') ?> Bs/$</span>
+      </div>
+      <?php endif; ?>
+      <div style="margin-top:10px"><label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px">Referencia del pago (opcional)</label>
+        <input name="referencia" placeholder="Nº de referencia / ID de transacción" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)"></div>
+      <?php if ($paypalOn): ?>
+        <button class="btn primary" type="submit" name="pasarela" value="paypal" formaction="<?= h($recargarUrl) ?>" formmethod="post" style="width:100%;margin-top:14px;background:#0070ba"><i data-lucide="zap"></i> Pagar con PayPal (automático)</button>
+      <?php endif; ?>
+      <?php if ($binanceOn): ?>
+        <button class="btn primary" type="submit" name="pasarela" value="binance" formaction="<?= h($recargarUrl) ?>" formmethod="post" style="width:100%;margin-top:<?= $paypalOn ? '8' : '14' ?>px;background:#f0b90b;color:#111"><i data-lucide="zap"></i> Pagar con Binance (automático)</button>
+      <?php endif; ?>
+      <?php if ($autoOn): ?>
+        <button class="btn ghost" type="submit" style="width:100%;margin-top:8px"><i data-lucide="clock"></i> Otro método (lo aprueba el admin)</button>
+      <?php else: ?>
+        <button class="btn primary" type="submit" style="width:100%;margin-top:14px"><i data-lucide="wallet"></i> Solicitar recarga</button>
+      <?php endif; ?>
+    </form>
+    <p class="muted" style="font-size:11.5px;margin:10px 0 0"><?= $autoOn ? 'Con PayPal/Binance el saldo se acredita al instante. Con otro método, el admin confirma tu pago.' : 'Al confirmarse el pago se acredita tu saldo.' ?></p>
+  </div>
+</div>
+
+<?php if ($recargas): ?>
+<div class="card" style="margin-bottom:16px;padding:16px">
+  <h2 style="margin:0 0 10px;font-size:14px">Recargas recientes</h2>
+  <div class="overflow-x-auto thin"><table class="dtable">
+    <thead><tr><th>Monto</th><th>Método</th><th>Estado</th><th>Fecha</th></tr></thead>
+    <tbody>
+    <?php foreach ($recargas as $r): $col = $r['estado']==='aprobada'?'var(--good)':($r['estado']==='rechazada'?'var(--bad)':'var(--warn)'); ?>
+      <tr><td class="tnum">$<?= number_format((float) $r['monto'], 2) ?></td><td><?= h($r['metodo'] ?: '—') ?></td>
+      <td><span style="color:<?= $col ?>;font-weight:700"><?= h($r['estado']) ?></span></td>
+      <td class="muted" style="font-size:12px"><?= h($r['creado_en']) ?></td></tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table></div>
+</div>
+<?php endif; ?>
+
+<div class="card">
+  <div class="card-hd"><i data-lucide="receipt"></i><h2>Movimientos</h2></div>
+  <div class="overflow-x-auto thin"><table class="dtable">
+    <thead><tr><th>Fecha</th><th>Concepto</th><th style="text-align:right">Monto</th></tr></thead>
+    <tbody>
+    <?php if (!$movimientos): ?>
+      <tr><td colspan="3" class="muted" style="text-align:center;padding:24px">Aún no hay movimientos.</td></tr>
+    <?php else: foreach ($movimientos as $m): $neg = (float) $m['monto'] < 0; ?>
+      <tr>
+        <td class="muted" style="font-size:12px"><?= h($m['creado_en']) ?></td>
+        <td><?= h($m['descripcion'] ?: $m['tipo']) ?></td>
+        <td class="tnum" style="text-align:right;font-weight:700;color:<?= $neg ? 'var(--bad)' : 'var(--good)' ?>"><?= $neg ? '-' : '+' ?>$<?= number_format(abs((float) $m['monto']), 2) ?></td>
+      </tr>
+    <?php endforeach; endif; ?>
+    </tbody>
+  </table></div>
+</div>
+<style>@media(max-width:640px){.saldo-grid{grid-template-columns:1fr!important}}</style>
+<script>
+const RC_RATE = <?= json_encode($bsRate) ?>;
+const RC_DEC = <?= json_encode($bsDec) ?>;
+const RC_METODOS = <?= json_encode(array_map(fn($m) => ['nombre'=>$m['nombre'],'datos'=>$m['datos'],'qr'=>$m['qr_image_path']], $metodosPago), JSON_UNESCAPED_UNICODE) ?>;
+function rcCalcBs(){
+  const box = document.getElementById('rcBsBox'); if (!box) return;
+  const inp = document.getElementById('rcMonto');
+  const u = parseFloat((inp && inp.value) || '0');
+  if (!u || u <= 0 || RC_RATE <= 0) { box.style.display = 'none'; return; }
+  document.getElementById('rcBs').textContent = (u * RC_RATE).toLocaleString('es-VE', { minimumFractionDigits: RC_DEC, maximumFractionDigits: RC_DEC });
+  box.style.display = 'block';
+}
+function rcMetodoInfo(){
+  const box = document.getElementById('rcMetodoBox'); if (!box) return;
+  const sel = document.getElementById('rcMetodo'); if (!sel) return;
+  const m = RC_METODOS.find(x => x.nombre === sel.value);
+  if (!m) { box.style.display = 'none'; return; }
+  document.getElementById('rcMetodoDatos').textContent = m.datos || '';
+  const qr = document.getElementById('rcMetodoQr');
+  if (m.qr) { qr.src = m.qr; qr.style.display = 'block'; } else { qr.style.display = 'none'; }
+  box.style.display = 'block';
+}
+document.addEventListener('DOMContentLoaded', rcMetodoInfo);
+</script>
+<?php stream_foot();

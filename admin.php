@@ -23,6 +23,7 @@ function admin_manageable_user_roles(): array {
         'usuario' => 'Usuario',
         'empleado' => 'Empleado',
         'influencer' => 'Influencer',
+        'revendedor' => 'Revendedor',
         'admin' => 'Admin',
     ];
 }
@@ -3859,6 +3860,7 @@ require_once __DIR__ . '/includes/header.php';
                 <?php endif; ?>
                 <a href="/admin/misiones-premios" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🎯</span>Misiones y Premios</a>
                 <a href="/admin/streaming-tickets" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>📺</span>Tickets Streaming</a>
+                <a href="/admin/stream/" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🎬</span>Gestión de Streaming</a>
                 <a href="/admin/cupones" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>✏️</span>Cupones</a>
                 <?php if (admin_is_root_role($adminUserRole)): ?>
                 <a href="<?= htmlspecialchars($adminExtraFeaturesPath, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🧩</span>Comprar Funciones Extra</a>
