@@ -3169,7 +3169,7 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
         <style>
           .gg-drops-track {
             display: flex;
-            gap: 0.6rem;
+            gap: 0.85rem;
             overflow-x: auto;
             scroll-behavior: auto;
             scrollbar-width: none;
@@ -3179,10 +3179,10 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           .gg-drops-track::-webkit-scrollbar { display: none; }
           .gg-drops-card {
             flex: 0 0 auto;
-            width: 220px;
+            width: 320px;
             background: #0b1420;
             border: 1px solid rgba(34,211,238,0.18);
-            border-radius: 10px;
+            border-radius: 12px;
             overflow: hidden;
             text-decoration: none;
             color: inherit;
@@ -3191,63 +3191,76 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           }
           .gg-drops-card:hover {
             border-color: rgba(34,211,238,0.65);
-            box-shadow: 0 0 16px rgba(34,211,238,0.18);
+            box-shadow: 0 0 18px rgba(34,211,238,0.2);
             transform: translateY(-2px);
           }
-          .gg-drops-card-top {
+          .gg-drops-top {
             display: flex;
-            align-items: center;
-            gap: 0.55rem;
-            padding: 0.55rem 0.6rem 0.45rem;
+            align-items: stretch;
+            width: 100%;
           }
-          .gg-drops-thumb {
-            width: 68px;
-            height: 68px;
-            flex-shrink: 0;
-            border-radius: 8px;
-            overflow: hidden;
+          .gg-drops-image-wrap {
+            width: 80%;
+            aspect-ratio: 4 / 3;
             background: #111927;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            overflow: hidden;
           }
-          .gg-drops-thumb img {
+          .gg-drops-image-wrap img {
             width: 100%;
             height: 100%;
             object-fit: cover;
             display: block;
           }
-          .gg-drops-info {
-            flex: 1;
-            min-width: 0;
-          }
-          .gg-drops-game-label {
-            font-size: 0.58rem;
-            font-weight: 800;
-            letter-spacing: 0.1em;
-            text-transform: uppercase;
-            color: #22d3ee;
-            margin-bottom: 0.18rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }
-          .gg-drops-pkg-name {
-            font-size: 0.85rem;
-            font-weight: 700;
-            color: #f1f5f9;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            line-height: 1.2;
-          }
-          .gg-drops-price-row {
+          .gg-drops-image-fallback {
+            width: 100%;
+            height: 100%;
             display: flex;
             align-items: center;
-            gap: 0.35rem;
-            padding: 0.35rem 0.6rem 0.55rem;
-            border-top: 1px solid rgba(34,211,238,0.1);
-            flex-wrap: wrap;
+            justify-content: center;
+            font-size: 2.4rem;
+          }
+          .gg-drops-badge-area {
+            width: 20%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+          .gg-drops-badge {
+            font-size: 0.72rem;
+            font-weight: 800;
+            background: #dc2626;
+            color: #fff;
+            border-radius: 8px;
+            padding: 0.32rem 0.55rem;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+          }
+          .gg-drops-info-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            padding: 0.6rem 0.7rem;
+            border-top: 1px solid rgba(34,211,238,0.12);
+          }
+          .gg-drops-game-label {
+            font-family: 'Oxanium', sans-serif;
+            font-size: 0.82rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #22d3ee;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-width: 0;
+          }
+          .gg-drops-price-stack {
+            display: flex;
+            flex-direction: row;
+            align-items: baseline;
+            gap: 0.4rem;
+            flex-shrink: 0;
           }
           .gg-drops-price-original {
             font-size: 0.72rem;
@@ -3256,19 +3269,9 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             white-space: nowrap;
           }
           .gg-drops-price-actual {
-            font-size: 0.9rem;
-            font-weight: 700;
-            color: #22d3ee;
-            white-space: nowrap;
-          }
-          .gg-drops-badge {
-            font-size: 0.62rem;
+            font-size: 1rem;
             font-weight: 800;
-            background: #dc2626;
-            color: #fff;
-            border-radius: 4px;
-            padding: 0.1rem 0.3rem;
-            margin-left: auto;
+            color: #22d3ee;
             white-space: nowrap;
           }
         </style>
@@ -3314,29 +3317,30 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             }
           ?>
             <a href="<?= htmlspecialchars($dpkgUrl, ENT_QUOTES, 'UTF-8') ?>" class="gg-drops-card">
-              <div class="gg-drops-card-top">
-                <div class="gg-drops-thumb">
+              <div class="gg-drops-top">
+                <div class="gg-drops-image-wrap">
                   <?php if ($dpkgImgSrc !== ''): ?>
                     <img src="<?= htmlspecialchars($dpkgImgSrc, ENT_QUOTES, 'UTF-8') ?>"
                          alt="<?= htmlspecialchars((string) ($dpkg['nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
                          loading="lazy">
                   <?php else: ?>
-                    <span style="font-size:1.8rem;">&#127918;</span>
+                    <span class="gg-drops-image-fallback">&#127918;</span>
                   <?php endif; ?>
                 </div>
-                <div class="gg-drops-info">
-                  <div class="gg-drops-game-label"><?= htmlspecialchars((string) ($dpkg['juego_nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?></div>
-                  <div class="gg-drops-pkg-name"><?= htmlspecialchars((string) ($dpkg['nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?></div>
+                <div class="gg-drops-badge-area">
+                  <?php if ($dpkgDescuento > 0): ?>
+                    <span class="gg-drops-badge">-<?= $dpkgDescuento ?>%</span>
+                  <?php endif; ?>
                 </div>
               </div>
-              <div class="gg-drops-price-row">
-                <?php if ($dpkgOriginalLabel !== ''): ?>
-                  <span class="gg-drops-price-original"><?= htmlspecialchars($dpkgOriginalLabel, ENT_QUOTES, 'UTF-8') ?></span>
-                <?php endif; ?>
-                <span class="gg-drops-price-actual"><?= htmlspecialchars($dpkgPriceLabel, ENT_QUOTES, 'UTF-8') ?></span>
-                <?php if ($dpkgDescuento > 0): ?>
-                  <span class="gg-drops-badge">-<?= $dpkgDescuento ?>%</span>
-                <?php endif; ?>
+              <div class="gg-drops-info-row">
+                <div class="gg-drops-game-label"><?= htmlspecialchars((string) ($dpkg['juego_nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?></div>
+                <div class="gg-drops-price-stack">
+                  <?php if ($dpkgOriginalLabel !== ''): ?>
+                    <span class="gg-drops-price-original"><?= htmlspecialchars($dpkgOriginalLabel, ENT_QUOTES, 'UTF-8') ?></span>
+                  <?php endif; ?>
+                  <span class="gg-drops-price-actual"><?= htmlspecialchars($dpkgPriceLabel, ENT_QUOTES, 'UTF-8') ?></span>
+                </div>
               </div>
             </a>
           <?php endforeach; ?>
