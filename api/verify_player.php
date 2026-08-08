@@ -12,27 +12,6 @@ function verify_player_json(array $payload, int $status = 200): void {
     exit;
 }
 
-function verify_player_normalize_package_provider(array $game, array $package): string {
-    $provider = strtolower(trim((string) ($package['api_provider'] ?? '')));
-    if ($provider !== '') {
-        return $provider;
-    }
-
-    if ((int) ($package['paquete_api'] ?? 0) > 0) {
-        return 'giftven';
-    }
-
-    if (trim((string) ($package['monto_ff'] ?? '')) !== '') {
-        return 'free_fire';
-    }
-
-    if (trim((string) ($game['categoria_api_discord'] ?? '')) !== '') {
-        return 'discord';
-    }
-
-    return '';
-}
-
 $gameId = (int) ($_POST['game_id'] ?? $_GET['game_id'] ?? 0);
 if ($gameId <= 0) {
     verify_player_json(['ok' => false, 'message' => 'Juego inválido.'], 422);
@@ -54,8 +33,9 @@ if (!$game) {
 }
 
 $packageId = (int) ($_POST['package_id'] ?? $_GET['package_id'] ?? 0);
+$package = null;
 if ($packageId > 0) {
-    $packageStmt = $mysqli->prepare('SELECT id, paquete_api, monto_ff, api_provider FROM juego_paquetes WHERE id = ? AND juego_id = ? LIMIT 1');
+    $packageStmt = $mysqli->prepare('SELECT id, paquete_api, monto_ff, api_provider, recargasamerica_tipo FROM juego_paquetes WHERE id = ? AND juego_id = ? LIMIT 1');
     if (!$packageStmt) {
         verify_player_json(['ok' => false, 'message' => 'No se pudo preparar la verificación del paquete.'], 500);
     }
@@ -65,10 +45,6 @@ if ($packageId > 0) {
     $packageResult = $packageStmt->get_result();
     $package = $packageResult ? $packageResult->fetch_assoc() : null;
     $packageStmt->close();
-
-    if ($package) {
-        verify_player_normalize_package_provider($game, $package);
-    }
 }
 
 $userIdentifier = trim((string) ($_POST['user_identifier'] ?? $_GET['user_identifier'] ?? ''));
@@ -81,7 +57,7 @@ if ($playerFieldsRaw !== '') {
     }
 }
 
-$verification = player_verification_verify($game, $userIdentifier, $playerFields);
+$verification = player_verification_verify($game, $userIdentifier, $playerFields, $package);
 $httpStatus = (int) ($verification['http_status'] ?? 200);
 unset($verification['http_status']);
 

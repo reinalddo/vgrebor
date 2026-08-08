@@ -19,6 +19,7 @@ require_once '../includes/win_points.php';
 require_once '../includes/package_categories.php';
 require_once '../includes/levelpass_api.php';
 require_once '../includes/fullimpulso_api.php';
+require_once '../includes/recargasamerica_api.php';
 
 function admin_packages_is_ajax_request(): bool {
     if (isset($_REQUEST['ajax']) && (string) $_REQUEST['ajax'] === '1') {
@@ -213,6 +214,17 @@ function ensure_juego_paquetes_api_source_key_column(mysqli $mysqli): void {
     }
 }
 
+// Distingue si un paquete de RecargasAmérica es type=pin (entrega códigos)
+// o type=recharge (recarga directa a un ID de cuenta) — reutiliza
+// paquete_api como ID externo (ya no es ambiguo con GiftVen porque
+// api_provider siempre se guarda explícito para paquetes nuevos).
+function ensure_juego_paquetes_recargasamerica_tipo_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'recargasamerica_tipo'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN recargasamerica_tipo VARCHAR(20) NULL AFTER api_source_key");
+    }
+}
+
 function ensure_juego_paquetes_info_html_column(mysqli $mysqli): void {
     $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'info_html'");
     if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
@@ -312,7 +324,7 @@ function admin_package_save_discord_catalog(mysqli $mysqli, int $gameId, array $
 
 function admin_package_normalize_provider_value($value): string {
     $normalized = strtolower(trim((string) $value));
-    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso'], true) ? $normalized : '';
+    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica'], true) ? $normalized : '';
 }
 
 function admin_package_resolve_provider(array $package, array $game, bool $discordFeatureEnabled): string {
@@ -346,6 +358,7 @@ function admin_package_provider_label(string $provider): string {
         'discord' => 'Discord',
         'free_fire' => 'Free Fire API',
         'fullimpulso' => 'FullImpulso (Seguidores)',
+        'recargasamerica' => 'RecargasAmérica',
         default => 'Manual',
     };
 }
@@ -374,6 +387,15 @@ function admin_package_provider_reference_text(string $provider, array $package,
         $serviceId = (int) ($package['fullimpulso_service_id'] ?? 0);
         $quantity = (int) ($package['fullimpulso_cantidad'] ?? 0);
         return $serviceId > 0 ? 'Servicio ' . $serviceId . ' · ' . number_format($quantity) : '—';
+    }
+
+    if ($provider === 'recargasamerica') {
+        $apiProductId = (int) ($package['paquete_api'] ?? 0);
+        if ($apiProductId <= 0) {
+            return '—';
+        }
+        $tipo = trim((string) ($package['recargasamerica_tipo'] ?? '')) === 'pin' ? 'PIN' : 'Recarga';
+        return 'ID ' . $apiProductId . ' · ' . $tipo;
     }
 
     return '—';
@@ -651,6 +673,7 @@ ensure_juego_paquetes_activo_column($mysqli);
 ensure_juego_paquetes_paquete_api_column($mysqli);
 ensure_juego_paquetes_api_provider_column($mysqli);
 ensure_juego_paquetes_api_source_key_column($mysqli);
+ensure_juego_paquetes_recargasamerica_tipo_column($mysqli);
 ensure_juego_paquetes_info_html_column($mysqli);
 ensure_juego_paquetes_cantidad_text_column($mysqli);
 ensure_juego_paquetes_orden_column($mysqli);
@@ -774,6 +797,14 @@ if ($discordActiveSlots > 1) {
 if ($usesLegacyFreeFire) {
     $packageSourceItems[] = ['value' => 'free_fire', 'provider' => 'free_fire', 'source_key' => '', 'label' => admin_package_provider_label('free_fire')];
 }
+// RecargasAmérica no tiene "categoría" a nivel de juego (su catálogo de
+// /products/pins no se filtra por juego en la API) — a diferencia de
+// GiftVen/Discord, aparece como opción disponible en CUALQUIER juego en
+// cuanto la API KEY está configurada, y el admin busca el producto correcto
+// dentro del catálogo completo.
+if (function_exists('recargasamerica_api_is_configured') && recargasamerica_api_is_configured()) {
+    $packageSourceItems[] = ['value' => 'recargasamerica', 'provider' => 'recargasamerica', 'source_key' => '', 'label' => admin_package_provider_label('recargasamerica')];
+}
 foreach ($packageSourceItems as $item) {
     $packageSourceValueMap[$item['value']] = ['provider' => $item['provider'], 'source_key' => $item['source_key']];
 }
@@ -845,6 +876,21 @@ if ($hasGiftVenCatalog3) {
         if ($apiProductsError === null) {
             $apiProductsError = $e->getMessage();
         }
+    }
+}
+
+$recargasAmericaAvailable = function_exists('recargasamerica_api_is_configured') && recargasamerica_api_is_configured();
+$recargasAmericaProducts = [];
+$recargasAmericaProductsById = [];
+$recargasAmericaProductsError = null;
+if ($recargasAmericaAvailable) {
+    try {
+        $recargasAmericaProducts = recargasamerica_api_fetch_products_pins();
+        foreach ($recargasAmericaProducts as $raProduct) {
+            $recargasAmericaProductsById[(int) ($raProduct['id'] ?? 0)] = $raProduct;
+        }
+    } catch (Throwable $e) {
+        $recargasAmericaProductsError = $e->getMessage();
     }
 }
 
@@ -1115,7 +1161,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $edit_provider      = $packageSourceValueMap[$rawEditSourceValue]['provider'] ?? admin_package_normalize_provider_value($rawEditSourceValue);
     $edit_api_source_key = $packageSourceValueMap[$rawEditSourceValue]['source_key'] ?? '';
     $edit_monto_ff = $edit_provider === 'free_fire' ? trim((string) ($_POST['edit_monto_ff'] ?? '')) : '';
-    $edit_paquete_api = $edit_provider === 'giftven' ? trim((string) ($_POST['edit_paquete_api'] ?? '')) : '';
+    $edit_paquete_api = in_array($edit_provider, ['giftven', 'recargasamerica'], true) ? trim((string) ($_POST['edit_paquete_api'] ?? '')) : '';
+    $edit_recargasamerica_tipo = '';
+    if ($edit_provider === 'recargasamerica' && $edit_paquete_api !== '') {
+        $raEditSelectedProduct = $recargasAmericaProductsById[(int) $edit_paquete_api] ?? null;
+        $edit_recargasamerica_tipo = $raEditSelectedProduct ? recargasamerica_api_product_type($raEditSelectedProduct) : '';
+    }
     $edit_vender_cuenta = $accountSaleFeatureEnabled && isset($_POST['edit_vender_cuenta']) ? 1 : 0;
     $edit_cuenta_texto = $accountSaleFeatureEnabled
         ? package_account_sales_normalize_text((string) ($_POST['edit_cuenta_texto'] ?? ''))
@@ -1160,15 +1211,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     if ($edit_provider === 'giftven' && $edit_paquete_api === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el producto de TiendaGiftVen para este paquete.']);
     }
+    if ($edit_provider === 'recargasamerica' && ($edit_paquete_api === '' || $edit_recargasamerica_tipo === '')) {
+        admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el producto de RecargasAmérica para este paquete.']);
+    }
     if ($edit_provider === 'free_fire' && $edit_monto_ff === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el monto de Free Fire para este paquete.']);
     }
     if ($edit_imagen_icono) {
-        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, imagen_icono=?, activo=?, destacado=?, descuento_destacado=?, orden_gg=?, precio_manual_override=? WHERE id=?");
-        $stmt->bind_param('ssssssissdisiiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_imagen_icono, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_orden_gg, $edit_precio_manual_override, $edit_id);
+        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), recargasamerica_tipo=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, imagen_icono=?, activo=?, destacado=?, descuento_destacado=?, orden_gg=?, precio_manual_override=? WHERE id=?");
+        $stmt->bind_param('sssssssissdisiiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_recargasamerica_tipo, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_imagen_icono, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_orden_gg, $edit_precio_manual_override, $edit_id);
     } else {
-        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, activo=?, destacado=?, descuento_destacado=?, orden_gg=?, precio_manual_override=? WHERE id=?");
-        $stmt->bind_param('ssssssissdiiiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_orden_gg, $edit_precio_manual_override, $edit_id);
+        $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), recargasamerica_tipo=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, activo=?, destacado=?, descuento_destacado=?, orden_gg=?, precio_manual_override=? WHERE id=?");
+        $stmt->bind_param('sssssssissdiiiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_recargasamerica_tipo, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_orden_gg, $edit_precio_manual_override, $edit_id);
     }
     $stmt->execute();
     $stmt->close();
@@ -1245,7 +1299,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $provider      = $packageSourceValueMap[$rawSourceValue]['provider'] ?? admin_package_normalize_provider_value($rawSourceValue);
     $api_source_key = $packageSourceValueMap[$rawSourceValue]['source_key'] ?? '';
     $monto_ff = $provider === 'free_fire' ? trim((string) ($_POST['monto_ff'] ?? '')) : '';
-    $paquete_api = $provider === 'giftven' ? trim((string) ($_POST['paquete_api'] ?? '')) : '';
+    $paquete_api = in_array($provider, ['giftven', 'recargasamerica'], true) ? trim((string) ($_POST['paquete_api'] ?? '')) : '';
+    // El "tipo" (pin/recharge) NUNCA se confía del formulario — se resuelve
+    // en vivo contra el catálogo de RecargasAmérica por el ID elegido, para
+    // que no se pueda desincronizar con lo que la API realmente tiene.
+    $recargasamerica_tipo = '';
+    if ($provider === 'recargasamerica' && $paquete_api !== '') {
+        $raSelectedProduct = $recargasAmericaProductsById[(int) $paquete_api] ?? null;
+        $recargasamerica_tipo = $raSelectedProduct ? recargasamerica_api_product_type($raSelectedProduct) : '';
+    }
     $vender_cuenta = $accountSaleFeatureEnabled && isset($_POST['vender_cuenta']) ? 1 : 0;
     $cuenta_texto = $accountSaleFeatureEnabled
         ? package_account_sales_normalize_text((string) ($_POST['cuenta_texto'] ?? ''))
@@ -1286,11 +1348,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     if ($provider === 'giftven' && $paquete_api === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el producto de TiendaGiftVen para este paquete.']);
     }
+    if ($provider === 'recargasamerica' && ($paquete_api === '' || $recargasamerica_tipo === '')) {
+        admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el producto de RecargasAmérica para este paquete.']);
+    }
     if ($provider === 'free_fire' && $monto_ff === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el monto de Free Fire para este paquete.']);
     }
-    $stmt = $mysqli->prepare("INSERT INTO juego_paquetes (juego_id, nombre, clave, monto_ff, paquete_api, api_provider, api_source_key, vender_cuenta, cuenta_texto, cantidad, precio, win_points_reward, imagen_icono, activo, orden, destacado, descuento_destacado, orden_gg, precio_manual_override) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('issssssissdisiiiiii', $juego_id, $nombre, $clave, $monto_ff, $paquete_api, $provider, $api_source_key, $vender_cuenta, $cuenta_texto, $cantidad, $precio, $win_points_reward, $imagen_icono, $activo, $orden, $destacado, $descuento_destacado, $orden_gg, $precio_manual_override);
+    $stmt = $mysqli->prepare("INSERT INTO juego_paquetes (juego_id, nombre, clave, monto_ff, paquete_api, api_provider, api_source_key, recargasamerica_tipo, vender_cuenta, cuenta_texto, cantidad, precio, win_points_reward, imagen_icono, activo, orden, destacado, descuento_destacado, orden_gg, precio_manual_override) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('isssssssissdisiiiiii', $juego_id, $nombre, $clave, $monto_ff, $paquete_api, $provider, $api_source_key, $recargasamerica_tipo, $vender_cuenta, $cuenta_texto, $cantidad, $precio, $win_points_reward, $imagen_icono, $activo, $orden, $destacado, $descuento_destacado, $orden_gg, $precio_manual_override);
     $stmt->execute();
     $newPackageId = (int) $mysqli->insert_id;
     $stmt->close();
@@ -1674,6 +1739,22 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                     <?php endforeach; ?>
                 </select>
                 <div class="form-text mt-2" style="color:#8be9fd;">Categoría API vinculada: <?= htmlspecialchars($juegoCategoriaApi, ENT_QUOTES, 'UTF-8') ?></div>
+            </div>
+        <?php endif; ?>
+        <?php if ($recargasAmericaAvailable): ?>
+            <div class="col-md-6" data-package-source-panel="recargasamerica">
+                <label class="form-label text-neon">Producto RecargasAmérica</label>
+                <select name="paquete_api" <?= $packageSourceSelectionEnabled ? 'data-package-source-required="1"' : 'required' ?> class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($recargasAmericaProducts as $raProduct): ?>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <?php if ($recargasAmericaProductsError !== null): ?>
+                    <div class="form-text mt-2 text-danger">No se pudo cargar el catálogo de RecargasAmérica: <?= htmlspecialchars($recargasAmericaProductsError, ENT_QUOTES, 'UTF-8') ?></div>
+                <?php else: ?>
+                    <div class="form-text mt-2" style="color:#8be9fd;">Catálogo completo (PINs y recargas de todos los juegos) — busca por nombre.</div>
+                <?php endif; ?>
             </div>
         <?php endif; ?>
         <?php if ($discordActiveSlots > 1): ?>
@@ -2430,6 +2511,20 @@ if (isset($_GET['editar'])) {
                         <option value="<?= (int) ($apiProduct['id'] ?? 0) ?>" <?= (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($apiProduct['id'] ?? 0) ? 'selected' : '' ?>><?= htmlspecialchars(recargas_api_product_label($apiProduct), ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
+            </div>
+        <?php endif; ?>
+        <?php if ($recargasAmericaAvailable): ?>
+            <div class="mb-3" data-package-source-panel="recargasamerica">
+                <label class="form-label text-neon">Producto RecargasAmérica</label>
+                <select name="edit_paquete_api" <?= $packageSourceSelectionEnabled ? 'data-package-source-required="1"' : 'required' ?> class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($recargasAmericaProducts as $raProduct): ?>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <?php if ($recargasAmericaProductsError !== null): ?>
+                    <div class="form-text mt-2 text-danger">No se pudo cargar el catálogo de RecargasAmérica: <?= htmlspecialchars($recargasAmericaProductsError, ENT_QUOTES, 'UTF-8') ?></div>
+                <?php endif; ?>
             </div>
         <?php endif; ?>
         <?php if ($discordActiveSlots > 1): ?>

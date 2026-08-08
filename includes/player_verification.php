@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/store_config.php';
+require_once __DIR__ . '/recargasamerica_api.php';
 
 function player_verification_normalize_text(string $value): string {
     $value = trim($value);
@@ -285,13 +286,46 @@ function player_verification_extract_zone_value(array $playerFields): string {
     return $fallbackValues[0] ?? '';
 }
 
-function player_verification_verify(array $game, string $userIdentifier, array $playerFields = []): array {
+function player_verification_verify(array $game, string $userIdentifier, array $playerFields = [], ?array $package = null): array {
+    $userIdentifier = trim($userIdentifier);
+
+    // RecargasAmérica se verifica por PAQUETE (necesita un product_id
+    // concreto para /pins/validate), no por nombre de juego como el resto
+    // — se resuelve ANTES del switch de abajo, independiente de si el
+    // juego coincide con algún patrón conocido. Solo aplica a paquetes
+    // type=recharge (los PIN no recargan una cuenta, no hay nada que
+    // validar).
+    $packageProvider = strtolower(trim((string) ($package['api_provider'] ?? '')));
+    $packageTipo = strtolower(trim((string) ($package['recargasamerica_tipo'] ?? '')));
+    if ($packageProvider === 'recargasamerica' && $packageTipo === 'recharge') {
+        if ($userIdentifier === '') {
+            return player_verification_result(false, 'invalid', 'Debes ingresar el ID del jugador.', ['http_status' => 422]);
+        }
+
+        $raProductId = (int) ($package['paquete_api'] ?? 0);
+        if ($raProductId <= 0 || !recargasamerica_api_is_configured()) {
+            return player_verification_result(false, 'unavailable', 'La verificación de RecargasAmérica no está disponible.', ['http_status' => 502]);
+        }
+
+        try {
+            $raValidation = recargasamerica_api_validate_recharge_account($raProductId, $userIdentifier);
+        } catch (Throwable $e) {
+            return player_verification_result(false, 'unavailable', 'No se pudo verificar el jugador: ' . $e->getMessage(), ['http_status' => 502]);
+        }
+
+        if (empty($raValidation['found'])) {
+            return player_verification_result(false, 'not_found', 'ID ' . $userIdentifier . ' no encontrado.');
+        }
+
+        $raAccountName = trim((string) ($raValidation['account_name'] ?? ''));
+        return player_verification_result(true, 'verified', $raAccountName !== '' ? ('Jugador encontrado: ' . $raAccountName) : 'Jugador verificado.', ['player_name' => $raAccountName]);
+    }
+
     $definition = player_verification_definition_for_game($game);
     if (!$definition) {
         return player_verification_result(false, 'unsupported', 'Este juego no tiene verificación automática de jugador.', ['http_status' => 422]);
     }
 
-    $userIdentifier = trim($userIdentifier);
     if ($userIdentifier === '') {
         return player_verification_result(false, 'invalid', 'Debes ingresar el ID del jugador.', ['http_status' => 422]);
     }

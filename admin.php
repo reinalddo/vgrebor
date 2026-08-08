@@ -2805,6 +2805,7 @@ switch ($seccion) {
                 store_config_upsert('recargas_api_key', $recargasApiKey);
                 store_config_upsert('bs_pass_stock_api_key', trim((string) ($_POST['bs_pass_stock_api_key'] ?? '')));
                 store_config_upsert('fullimpulso_api_key', trim((string) ($_POST['fullimpulso_api_key'] ?? '')));
+                store_config_upsert('recargasamerica_api_key', trim((string) ($_POST['recargasamerica_api_key'] ?? '')));
                 admin_set_flash('success', 'Datos API actualizados.');
             }
 

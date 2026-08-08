@@ -1647,6 +1647,11 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                     <input type="text" name="fullimpulso_api_key" value="<?= htmlspecialchars($cfg['fullimpulso_api_key'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control" placeholder="Pega aquí tu API KEY de FullImpulso">
                     <div class="form-text mt-2">Necesaria para vender seguidores/likes/comentarios (FullImpulso). Configúrala en los paquetes marcados como "Usar FullImpulso" en <strong>Paquetes</strong>. Déjalo vacío para desactivar esta función.</div>
                   </div>
+                  <div class="col-12">
+                    <label class="form-label">API KEY RecargasAmérica</label>
+                    <input type="text" name="recargasamerica_api_key" value="<?= htmlspecialchars($cfg['recargasamerica_api_key'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control" placeholder="Pega aquí tu API KEY de RecargasAmérica (ra_...)">
+                    <div class="form-text mt-2">Segundo proveedor de recargas de juegos (PINs y recargas directas), en paralelo a la API de recargas de arriba. Configúrala en los paquetes marcados como "RecargasAmérica" en <strong>Paquetes</strong>. Déjalo vacío para desactivar esta función.</div>
+                  </div>
                 </div>
               </div>
 
