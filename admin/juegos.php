@@ -9,6 +9,7 @@ if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'root'], t
     exit();
 }
 require_once '../includes/recargas_api.php';
+require_once '../includes/recargasamerica_api.php';
 require_once '../includes/store_config.php';
 require_once '../includes/api_discord.php';
 require_once '../includes/game_entry_window_per_game.php';
@@ -153,6 +154,32 @@ function ensure_juegos_categoria_api_discord_3_column(mysqli $mysqli): void {
     }
 }
 
+// RecargasAmérica no tiene "categoría" real en su API (su catálogo de
+// /products/pins mezcla productos de todos los juegos) — estos 3 slots
+// guardan una PALABRA CLAVE de texto libre (ej. "Free Fire") que se usa
+// para pre-filtrar el catálogo completo por nombre de producto en
+// admin/paquetes.php, no un ID de categoría real como en GiftVen.
+function ensure_juegos_categoria_api_recargasamerica_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juegos LIKE 'categoria_api_recargasamerica'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juegos ADD COLUMN categoria_api_recargasamerica VARCHAR(120) NULL AFTER categoria_api_discord_3");
+    }
+}
+
+function ensure_juegos_categoria_api_recargasamerica_2_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juegos LIKE 'categoria_api_recargasamerica_2'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juegos ADD COLUMN categoria_api_recargasamerica_2 VARCHAR(120) NULL AFTER categoria_api_recargasamerica");
+    }
+}
+
+function ensure_juegos_categoria_api_recargasamerica_3_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juegos LIKE 'categoria_api_recargasamerica_3'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juegos ADD COLUMN categoria_api_recargasamerica_3 VARCHAR(120) NULL AFTER categoria_api_recargasamerica_2");
+    }
+}
+
 function ensure_juegos_precio_markup_pct_column(mysqli $mysqli): void {
     $result = $mysqli->query("SHOW COLUMNS FROM juegos LIKE 'precio_markup_pct'");
     if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
@@ -254,6 +281,9 @@ ensure_juegos_categoria_api_2_column($mysqli);
 ensure_juegos_categoria_api_discord_2_column($mysqli);
 ensure_juegos_categoria_api_3_column($mysqli);
 ensure_juegos_categoria_api_discord_3_column($mysqli);
+ensure_juegos_categoria_api_recargasamerica_column($mysqli);
+ensure_juegos_categoria_api_recargasamerica_2_column($mysqli);
+ensure_juegos_categoria_api_recargasamerica_3_column($mysqli);
 ensure_juegos_precio_markup_pct_column($mysqli);
 ensure_juegos_orden_column($mysqli);
 ensure_juegos_orden_catbar_column($mysqli);
@@ -427,6 +457,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
         : trim((string) ($currentGame['categoria_api_discord'] ?? ''));
     $edit_categoria_api_discord_2 = $discordApiEnabled ? $apiSelection['discord2'] : '';
     $edit_categoria_api_discord_3 = $discordApiEnabled ? $apiSelection['discord3'] : '';
+    // Palabras clave de RecargasAmérica: texto libre, sin la exclusividad
+    // giftven/discord (son un filtro de catálogo, no un proceso alternativo).
+    $edit_categoria_api_recargasamerica = substr(trim((string) ($_POST['edit_categoria_api_recargasamerica'] ?? '')), 0, 120);
+    $edit_categoria_api_recargasamerica_2 = substr(trim((string) ($_POST['edit_categoria_api_recargasamerica_2'] ?? '')), 0, 120);
+    $edit_categoria_api_recargasamerica_3 = substr(trim((string) ($_POST['edit_categoria_api_recargasamerica_3'] ?? '')), 0, 120);
     $edit_api_free_fire = $apiSelection['api_free_fire'];
     $edit_activo = isset($_POST['edit_activo']) ? 1 : 0;
     $edit_moneda_fija_id = isset($_POST['edit_moneda_fija_id']) && $_POST['edit_moneda_fija_id'] !== '' ? intval($_POST['edit_moneda_fija_id']) : null;
@@ -512,9 +547,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
         $edit_badge2_imagen = $currentBadge2Image;
     }
 
-    $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, imagen_catbar=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_2=?, categoria_api_3=?, categoria_api_discord=?, categoria_api_discord_2=?, categoria_api_discord_3=?, activo=?, moneda_fija_id=?, sticker_texto=?, sticker_icono=?, sticker_color_fondo=?, sticker_imagen=?, badge2_texto=?, badge2_icono=?, badge2_color_fondo=?, badge2_imagen=?, precio_markup_pct=? WHERE id=?");
-    // Types: 7s + 2i + 6s(cat_api..cat_discord3) + 2i(activo,moneda) + 4s(stickers) + 4s(badge2) + 1d(markup) + 1i(WHERE id) = 27
-    $stmt->bind_param('sssssss'.'ii'.'ssssss'.'ii'.'ssss'.'ssss'.'di', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $nextCatbarImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_2, $edit_categoria_api_3, $edit_categoria_api_discord, $edit_categoria_api_discord_2, $edit_categoria_api_discord_3, $edit_activo, $edit_moneda_fija_id, $edit_sticker_texto, $edit_sticker_icono, $edit_sticker_color_fondo, $edit_sticker_imagen, $edit_badge2_texto, $edit_badge2_icono, $edit_badge2_color_fondo, $edit_badge2_imagen, $edit_precio_markup_pct, $edit_id);
+    $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, imagen_catbar=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_2=?, categoria_api_3=?, categoria_api_discord=?, categoria_api_discord_2=?, categoria_api_discord_3=?, categoria_api_recargasamerica=NULLIF(?, ''), categoria_api_recargasamerica_2=NULLIF(?, ''), categoria_api_recargasamerica_3=NULLIF(?, ''), activo=?, moneda_fija_id=?, sticker_texto=?, sticker_icono=?, sticker_color_fondo=?, sticker_imagen=?, badge2_texto=?, badge2_icono=?, badge2_color_fondo=?, badge2_imagen=?, precio_markup_pct=? WHERE id=?");
+    // Types: 7s + 2i + 6s(cat_api..cat_discord3) + 3s(recargasamerica slots) + 2i(activo,moneda) + 4s(stickers) + 4s(badge2) + 1d(markup) + 1i(WHERE id) = 30
+    $stmt->bind_param('sssssss'.'ii'.'ssssss'.'sss'.'ii'.'ssss'.'ssss'.'di', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $nextCatbarImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_2, $edit_categoria_api_3, $edit_categoria_api_discord, $edit_categoria_api_discord_2, $edit_categoria_api_discord_3, $edit_categoria_api_recargasamerica, $edit_categoria_api_recargasamerica_2, $edit_categoria_api_recargasamerica_3, $edit_activo, $edit_moneda_fija_id, $edit_sticker_texto, $edit_sticker_icono, $edit_sticker_color_fondo, $edit_sticker_imagen, $edit_badge2_texto, $edit_badge2_icono, $edit_badge2_color_fondo, $edit_badge2_imagen, $edit_precio_markup_pct, $edit_id);
     $stmt->execute();
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
     game_set_categories($mysqli, $edit_id, $catIds);
@@ -538,6 +573,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $categoria_api_discord  = $discordApiEnabled ? $apiSelection['discord'] : '';
     $categoria_api_discord_2 = $discordApiEnabled ? $apiSelection['discord2'] : '';
     $categoria_api_discord_3 = $discordApiEnabled ? $apiSelection['discord3'] : '';
+    $categoria_api_recargasamerica = substr(trim((string) ($_POST['categoria_api_recargasamerica'] ?? '')), 0, 120);
+    $categoria_api_recargasamerica_2 = substr(trim((string) ($_POST['categoria_api_recargasamerica_2'] ?? '')), 0, 120);
+    $categoria_api_recargasamerica_3 = substr(trim((string) ($_POST['categoria_api_recargasamerica_3'] ?? '')), 0, 120);
     $api_free_fire = $apiSelection['api_free_fire'];
     $precio_markup_pct = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['precio_markup_pct'] ?? '0'))))));
     $activo = isset($_POST['activo']) ? 1 : 0;
@@ -562,9 +600,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $badge2_color_fondo  = preg_match('/^#[0-9a-fA-F]{3,6}$/', $rawBadge2ColorC) ? $rawBadge2ColorC : '#0f1a2e';
     $badge2UploadC       = game_badge2_store_upload($_FILES['badge2_imagen'] ?? []);
     $badge2_imagen       = ($badge2UploadC['ok'] && $badge2UploadC['path'] !== '') ? $badge2UploadC['path'] : '';
-    $stmt = $mysqli->prepare("INSERT INTO juegos (nombre, imagen, imagen_hero, imagen_paquete, imagen_catbar, descripcion, slug, moneda_fija_id, popular, api_free_fire, categoria_api, categoria_api_2, categoria_api_3, categoria_api_discord, categoria_api_discord_2, categoria_api_discord_3, activo, orden, sticker_texto, sticker_icono, sticker_color_fondo, sticker_imagen, badge2_texto, badge2_icono, badge2_color_fondo, badge2_imagen, precio_markup_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    // Types: 7s + 3i(moneda,popular,api_ff) + 6s(cat_api..cat_discord3) + 2i(activo,orden) + 4s(stickers) + 4s(badge2) + 1d(markup) = 27
-    $stmt->bind_param('sssssss'.'iii'.'ssssss'.'ii'.'ssss'.'ssss'.'d', $nombre, $imagen, $imagen_hero, $imagen_paquete, $imagen_catbar, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_2, $categoria_api_3, $categoria_api_discord, $categoria_api_discord_2, $categoria_api_discord_3, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen, $badge2_texto, $badge2_icono, $badge2_color_fondo, $badge2_imagen, $precio_markup_pct);
+    $stmt = $mysqli->prepare("INSERT INTO juegos (nombre, imagen, imagen_hero, imagen_paquete, imagen_catbar, descripcion, slug, moneda_fija_id, popular, api_free_fire, categoria_api, categoria_api_2, categoria_api_3, categoria_api_discord, categoria_api_discord_2, categoria_api_discord_3, categoria_api_recargasamerica, categoria_api_recargasamerica_2, categoria_api_recargasamerica_3, activo, orden, sticker_texto, sticker_icono, sticker_color_fondo, sticker_imagen, badge2_texto, badge2_icono, badge2_color_fondo, badge2_imagen, precio_markup_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    // Types: 7s + 3i(moneda,popular,api_ff) + 6s(cat_api..cat_discord3) + 3s(recargasamerica slots) + 2i(activo,orden) + 4s(stickers) + 4s(badge2) + 1d(markup) = 30
+    $stmt->bind_param('sssssss'.'iii'.'ssssss'.'sss'.'ii'.'ssss'.'ssss'.'d', $nombre, $imagen, $imagen_hero, $imagen_paquete, $imagen_catbar, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_2, $categoria_api_3, $categoria_api_discord, $categoria_api_discord_2, $categoria_api_discord_3, $categoria_api_recargasamerica, $categoria_api_recargasamerica_2, $categoria_api_recargasamerica_3, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen, $badge2_texto, $badge2_icono, $badge2_color_fondo, $badge2_imagen, $precio_markup_pct);
     $stmt->execute();
     $juego_id = $mysqli->insert_id;
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
@@ -706,6 +744,23 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 </select>
                 <div class="form-text mt-2" style="color:#8be9fd;">Tercera categoría de TiendaGiftVen opcional.</div>
             </div>
+            <?php if (function_exists('recargasamerica_api_is_configured') && recargasamerica_api_is_configured()): ?>
+            <div class="form-check mb-3">
+                <label class="form-label text-neon" for="editCategoriaApiRecargasAmerica">Juegos API RecargasAmérica (Slot 1)</label>
+                <input type="text" name="edit_categoria_api_recargasamerica" id="editCategoriaApiRecargasAmerica" value="<?= htmlspecialchars((string) ($juego_edit['categoria_api_recargasamerica'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="Ej: Free Fire" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                <div class="form-text mt-2" style="color:#8be9fd;">Palabra clave para filtrar el catálogo de RecargasAmérica por este juego (busca dentro del nombre del producto).</div>
+            </div>
+            <div class="form-check mb-3">
+                <label class="form-label text-neon" for="editCategoriaApiRecargasAmerica2">Juegos API RecargasAmérica (Slot 2 — opcional)</label>
+                <input type="text" name="edit_categoria_api_recargasamerica_2" id="editCategoriaApiRecargasAmerica2" value="<?= htmlspecialchars((string) ($juego_edit['categoria_api_recargasamerica_2'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="— Sin segundo slot —" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                <div class="form-text mt-2" style="color:#8be9fd;">Segunda palabra clave opcional de RecargasAmérica.</div>
+            </div>
+            <div class="form-check mb-3">
+                <label class="form-label text-neon" for="editCategoriaApiRecargasAmerica3">Juegos API RecargasAmérica (Slot 3 — opcional)</label>
+                <input type="text" name="edit_categoria_api_recargasamerica_3" id="editCategoriaApiRecargasAmerica3" value="<?= htmlspecialchars((string) ($juego_edit['categoria_api_recargasamerica_3'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="— Sin tercer slot —" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                <div class="form-text mt-2" style="color:#8be9fd;">Tercera palabra clave opcional de RecargasAmérica.</div>
+            </div>
+            <?php endif; ?>
             <?php if ($discordApiEnabled): ?>
             <div class="form-check mb-3">
                 <label class="form-label text-neon" for="editDiscordApiInput">Juegos API Discord (Slot 1)</label>
@@ -1150,6 +1205,23 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 </select>
                 <div class="form-text mt-2" style="color:#8be9fd;">Tercera categoría TiendaGiftVen opcional.</div>
             </div>
+            <?php if (function_exists('recargasamerica_api_is_configured') && recargasamerica_api_is_configured()): ?>
+            <div class="form-check mt-3">
+                <label class="form-label" for="categoriaApiRecargasAmerica" style="color:#00fff7;">Juegos API RecargasAmérica (Slot 1)</label>
+                <input type="text" name="categoria_api_recargasamerica" id="categoriaApiRecargasAmerica" placeholder="Ej: Free Fire" class="form-control" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;">
+                <div class="form-text mt-2" style="color:#8be9fd;">Palabra clave para filtrar el catálogo de RecargasAmérica por este juego (busca dentro del nombre del producto).</div>
+            </div>
+            <div class="form-check mt-3">
+                <label class="form-label" for="categoriaApiRecargasAmerica2" style="color:#00fff7;">Juegos API RecargasAmérica (Slot 2 — opcional)</label>
+                <input type="text" name="categoria_api_recargasamerica_2" id="categoriaApiRecargasAmerica2" placeholder="— Sin segundo slot —" class="form-control" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;">
+                <div class="form-text mt-2" style="color:#8be9fd;">Segunda palabra clave opcional de RecargasAmérica.</div>
+            </div>
+            <div class="form-check mt-3">
+                <label class="form-label" for="categoriaApiRecargasAmerica3" style="color:#00fff7;">Juegos API RecargasAmérica (Slot 3 — opcional)</label>
+                <input type="text" name="categoria_api_recargasamerica_3" id="categoriaApiRecargasAmerica3" placeholder="— Sin tercer slot —" class="form-control" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;">
+                <div class="form-text mt-2" style="color:#8be9fd;">Tercera palabra clave opcional de RecargasAmérica.</div>
+            </div>
+            <?php endif; ?>
             <?php if ($discordApiEnabled): ?>
             <div class="form-check mt-3">
                 <label class="form-label" for="categoriaDiscordApiInput" style="color:#00fff7;">Juegos API Discord (Slot 1)</label>

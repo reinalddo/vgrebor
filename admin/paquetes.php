@@ -755,12 +755,19 @@ $juegoCategoriaApi3       = trim((string) ($juego['categoria_api_3'] ?? ''));
 $juegoCategoriaApiDiscord  = trim((string) ($juego['categoria_api_discord'] ?? ''));
 $juegoCategoriaApiDiscord2 = trim((string) ($juego['categoria_api_discord_2'] ?? ''));
 $juegoCategoriaApiDiscord3 = trim((string) ($juego['categoria_api_discord_3'] ?? ''));
+$juegoCategoriaApiRecargasAmerica  = trim((string) ($juego['categoria_api_recargasamerica'] ?? ''));
+$juegoCategoriaApiRecargasAmerica2 = trim((string) ($juego['categoria_api_recargasamerica_2'] ?? ''));
+$juegoCategoriaApiRecargasAmerica3 = trim((string) ($juego['categoria_api_recargasamerica_3'] ?? ''));
 $hasGiftVenCatalog  = $juegoCategoriaApi !== '';
 $hasGiftVenCatalog2 = $juegoCategoriaApi2 !== '';
 $hasGiftVenCatalog3 = $juegoCategoriaApi3 !== '';
 $hasDiscordCatalog  = $juegoCategoriaApiDiscord !== '' && $discordApiEnabled;
 $hasDiscordCatalog2 = $juegoCategoriaApiDiscord2 !== '' && $discordApiEnabled;
 $hasDiscordCatalog3 = $juegoCategoriaApiDiscord3 !== '' && $discordApiEnabled;
+$recargasAmericaApiAvailableGlobal = function_exists('recargasamerica_api_is_configured') && recargasamerica_api_is_configured();
+$hasRecargasAmericaCatalog  = $juegoCategoriaApiRecargasAmerica !== '' && $recargasAmericaApiAvailableGlobal;
+$hasRecargasAmericaCatalog2 = $juegoCategoriaApiRecargasAmerica2 !== '' && $recargasAmericaApiAvailableGlobal;
+$hasRecargasAmericaCatalog3 = $juegoCategoriaApiRecargasAmerica3 !== '' && $recargasAmericaApiAvailableGlobal;
 $usesApiCatalog     = $hasGiftVenCatalog;
 $usesLegacyFreeFire = !$hasGiftVenCatalog && !$hasDiscordCatalog && !empty($juego['api_free_fire']);
 
@@ -797,13 +804,19 @@ if ($discordActiveSlots > 1) {
 if ($usesLegacyFreeFire) {
     $packageSourceItems[] = ['value' => 'free_fire', 'provider' => 'free_fire', 'source_key' => '', 'label' => admin_package_provider_label('free_fire')];
 }
-// RecargasAmérica no tiene "categoría" a nivel de juego (su catálogo de
-// /products/pins no se filtra por juego en la API) — a diferencia de
-// GiftVen/Discord, aparece como opción disponible en CUALQUIER juego en
-// cuanto la API KEY está configurada, y el admin busca el producto correcto
-// dentro del catálogo completo.
-if (function_exists('recargasamerica_api_is_configured') && recargasamerica_api_is_configured()) {
-    $packageSourceItems[] = ['value' => 'recargasamerica', 'provider' => 'recargasamerica', 'source_key' => '', 'label' => admin_package_provider_label('recargasamerica')];
+// RecargasAmérica no tiene "categoría" real en su API (su catálogo de
+// /products/pins mezcla productos de todos los juegos) — cada slot guarda
+// una PALABRA CLAVE de texto libre que se usa para pre-filtrar el catálogo
+// completo por nombre de producto, en vez de una categoría real como
+// GiftVen. Mismo patrón de slots 1/2/3 para que el juego pueda tener varios
+// filtros distintos (ej. "Free Fire" y "FF").
+$recargasAmericaActiveSlots = ($hasRecargasAmericaCatalog ? 1 : 0) + ($hasRecargasAmericaCatalog2 ? 1 : 0) + ($hasRecargasAmericaCatalog3 ? 1 : 0);
+if ($recargasAmericaActiveSlots > 1) {
+    if ($hasRecargasAmericaCatalog)  $packageSourceItems[] = ['value' => 'recargasamerica_1', 'provider' => 'recargasamerica', 'source_key' => $juegoCategoriaApiRecargasAmerica,  'label' => 'RecargasAmérica: ' . $juegoCategoriaApiRecargasAmerica];
+    if ($hasRecargasAmericaCatalog2) $packageSourceItems[] = ['value' => 'recargasamerica_2', 'provider' => 'recargasamerica', 'source_key' => $juegoCategoriaApiRecargasAmerica2, 'label' => 'RecargasAmérica: ' . $juegoCategoriaApiRecargasAmerica2];
+    if ($hasRecargasAmericaCatalog3) $packageSourceItems[] = ['value' => 'recargasamerica_3', 'provider' => 'recargasamerica', 'source_key' => $juegoCategoriaApiRecargasAmerica3, 'label' => 'RecargasAmérica: ' . $juegoCategoriaApiRecargasAmerica3];
+} elseif ($hasRecargasAmericaCatalog) {
+    $packageSourceItems[] = ['value' => 'recargasamerica', 'provider' => 'recargasamerica', 'source_key' => $juegoCategoriaApiRecargasAmerica, 'label' => admin_package_provider_label('recargasamerica')];
 }
 foreach ($packageSourceItems as $item) {
     $packageSourceValueMap[$item['value']] = ['provider' => $item['provider'], 'source_key' => $item['source_key']];
@@ -879,7 +892,7 @@ if ($hasGiftVenCatalog3) {
     }
 }
 
-$recargasAmericaAvailable = function_exists('recargasamerica_api_is_configured') && recargasamerica_api_is_configured();
+$recargasAmericaAvailable = $recargasAmericaApiAvailableGlobal;
 $recargasAmericaProducts = [];
 $recargasAmericaProductsById = [];
 $recargasAmericaProductsError = null;
@@ -893,6 +906,23 @@ if ($recargasAmericaAvailable) {
         $recargasAmericaProductsError = $e->getMessage();
     }
 }
+
+// Catálogo pre-filtrado por palabra clave, uno por cada slot activo del
+// juego (ver categoria_api_recargasamerica en admin/juegos.php) — evita que
+// el admin tenga que buscar a mano entre el catálogo completo (mezcla de
+// todos los juegos).
+function admin_package_filter_recargasamerica_products(array $products, string $keyword): array {
+    $keyword = mb_strtolower(trim($keyword), 'UTF-8');
+    if ($keyword === '') {
+        return $products;
+    }
+    return array_values(array_filter($products, static function (array $product) use ($keyword): bool {
+        return str_contains(mb_strtolower((string) ($product['name'] ?? ''), 'UTF-8'), $keyword);
+    }));
+}
+$recargasAmericaProducts1 = $hasRecargasAmericaCatalog  ? admin_package_filter_recargasamerica_products($recargasAmericaProducts, $juegoCategoriaApiRecargasAmerica)  : [];
+$recargasAmericaProducts2 = $hasRecargasAmericaCatalog2 ? admin_package_filter_recargasamerica_products($recargasAmericaProducts, $juegoCategoriaApiRecargasAmerica2) : [];
+$recargasAmericaProducts3 = $hasRecargasAmericaCatalog3 ? admin_package_filter_recargasamerica_products($recargasAmericaProducts, $juegoCategoriaApiRecargasAmerica3) : [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['sync_discord_catalog'])) {
     if (!$hasDiscordCatalog) {
@@ -1741,19 +1771,56 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <div class="form-text mt-2" style="color:#8be9fd;">Categoría API vinculada: <?= htmlspecialchars($juegoCategoriaApi, ENT_QUOTES, 'UTF-8') ?></div>
             </div>
         <?php endif; ?>
-        <?php if ($recargasAmericaAvailable): ?>
+        <?php if ($recargasAmericaActiveSlots > 1): ?>
+            <?php if ($hasRecargasAmericaCatalog): ?>
+            <div class="col-md-6" data-package-source-panel="recargasamerica_1">
+                <label class="form-label text-neon">Producto RecargasAmérica — <?= htmlspecialchars($juegoCategoriaApiRecargasAmerica, ENT_QUOTES, 'UTF-8') ?></label>
+                <select name="paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($recargasAmericaProducts1 as $raProduct): ?>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-text mt-2" style="color:#8be9fd;">Filtrado por: "<?= htmlspecialchars($juegoCategoriaApiRecargasAmerica, ENT_QUOTES, 'UTF-8') ?>" (<?= count($recargasAmericaProducts1) ?> productos).</div>
+            </div>
+            <?php endif; ?>
+            <?php if ($hasRecargasAmericaCatalog2): ?>
+            <div class="col-md-6" data-package-source-panel="recargasamerica_2">
+                <label class="form-label text-neon">Producto RecargasAmérica — <?= htmlspecialchars($juegoCategoriaApiRecargasAmerica2, ENT_QUOTES, 'UTF-8') ?></label>
+                <select name="paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($recargasAmericaProducts2 as $raProduct): ?>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-text mt-2" style="color:#8be9fd;">Filtrado por: "<?= htmlspecialchars($juegoCategoriaApiRecargasAmerica2, ENT_QUOTES, 'UTF-8') ?>" (<?= count($recargasAmericaProducts2) ?> productos).</div>
+            </div>
+            <?php endif; ?>
+            <?php if ($hasRecargasAmericaCatalog3): ?>
+            <div class="col-md-6" data-package-source-panel="recargasamerica_3">
+                <label class="form-label text-neon">Producto RecargasAmérica — <?= htmlspecialchars($juegoCategoriaApiRecargasAmerica3, ENT_QUOTES, 'UTF-8') ?></label>
+                <select name="paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($recargasAmericaProducts3 as $raProduct): ?>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-text mt-2" style="color:#8be9fd;">Filtrado por: "<?= htmlspecialchars($juegoCategoriaApiRecargasAmerica3, ENT_QUOTES, 'UTF-8') ?>" (<?= count($recargasAmericaProducts3) ?> productos).</div>
+            </div>
+            <?php endif; ?>
+        <?php elseif ($hasRecargasAmericaCatalog): ?>
             <div class="col-md-6" data-package-source-panel="recargasamerica">
                 <label class="form-label text-neon">Producto RecargasAmérica</label>
                 <select name="paquete_api" <?= $packageSourceSelectionEnabled ? 'data-package-source-required="1"' : 'required' ?> class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
                     <option value="">Selecciona un producto</option>
-                    <?php foreach ($recargasAmericaProducts as $raProduct): ?>
+                    <?php foreach ($recargasAmericaProducts1 as $raProduct): ?>
                         <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
                 <?php if ($recargasAmericaProductsError !== null): ?>
                     <div class="form-text mt-2 text-danger">No se pudo cargar el catálogo de RecargasAmérica: <?= htmlspecialchars($recargasAmericaProductsError, ENT_QUOTES, 'UTF-8') ?></div>
                 <?php else: ?>
-                    <div class="form-text mt-2" style="color:#8be9fd;">Catálogo completo (PINs y recargas de todos los juegos) — busca por nombre.</div>
+                    <div class="form-text mt-2" style="color:#8be9fd;">Filtrado por: "<?= htmlspecialchars($juegoCategoriaApiRecargasAmerica, ENT_QUOTES, 'UTF-8') ?>" (<?= count($recargasAmericaProducts1) ?> productos).</div>
                 <?php endif; ?>
             </div>
         <?php endif; ?>
@@ -2513,12 +2580,46 @@ if (isset($_GET['editar'])) {
                 </select>
             </div>
         <?php endif; ?>
-        <?php if ($recargasAmericaAvailable): ?>
+        <?php if ($recargasAmericaActiveSlots > 1): ?>
+            <?php if ($hasRecargasAmericaCatalog): ?>
+            <div class="mb-3" data-package-source-panel="recargasamerica_1">
+                <label class="form-label text-neon">Producto RecargasAmérica — <?= htmlspecialchars($juegoCategoriaApiRecargasAmerica, ENT_QUOTES, 'UTF-8') ?></label>
+                <select name="edit_paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($recargasAmericaProducts1 as $raProduct): ?>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= ($paqEditSelectedSource === 'recargasamerica_1' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0)) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
+            <?php if ($hasRecargasAmericaCatalog2): ?>
+            <div class="mb-3" data-package-source-panel="recargasamerica_2">
+                <label class="form-label text-neon">Producto RecargasAmérica — <?= htmlspecialchars($juegoCategoriaApiRecargasAmerica2, ENT_QUOTES, 'UTF-8') ?></label>
+                <select name="edit_paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($recargasAmericaProducts2 as $raProduct): ?>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= ($paqEditSelectedSource === 'recargasamerica_2' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0)) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
+            <?php if ($hasRecargasAmericaCatalog3): ?>
+            <div class="mb-3" data-package-source-panel="recargasamerica_3">
+                <label class="form-label text-neon">Producto RecargasAmérica — <?= htmlspecialchars($juegoCategoriaApiRecargasAmerica3, ENT_QUOTES, 'UTF-8') ?></label>
+                <select name="edit_paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($recargasAmericaProducts3 as $raProduct): ?>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= ($paqEditSelectedSource === 'recargasamerica_3' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0)) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
+        <?php elseif ($hasRecargasAmericaCatalog): ?>
             <div class="mb-3" data-package-source-panel="recargasamerica">
                 <label class="form-label text-neon">Producto RecargasAmérica</label>
                 <select name="edit_paquete_api" <?= $packageSourceSelectionEnabled ? 'data-package-source-required="1"' : 'required' ?> class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
                     <option value="">Selecciona un producto</option>
-                    <?php foreach ($recargasAmericaProducts as $raProduct): ?>
+                    <?php foreach ($recargasAmericaProducts1 as $raProduct): ?>
                         <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
