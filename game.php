@@ -5,6 +5,7 @@ require_once __DIR__ . "/includes/store_config.php";
 require_once __DIR__ . "/includes/currency.php";
 require_once __DIR__ . "/includes/payment_methods.php";
 require_once __DIR__ . "/includes/recargas_api.php";
+require_once __DIR__ . "/includes/recargasamerica_api.php";
 require_once __DIR__ . "/includes/api_discord.php";
 require_once __DIR__ . "/includes/slugify.php";
 require_once __DIR__ . "/includes/player_verification.php";
@@ -480,6 +481,29 @@ include __DIR__ . "/includes/header.php";
     while ($pack = $resPaq->fetch_assoc()) {
       $paquetes[] = $pack;
     }
+    // Mismo mecanismo de sincronización de precio que GiftVen (ver
+    // $apiProductsById arriba), pero para RecargasAmérica: solo se consulta
+    // el catálogo en vivo si este juego realmente tiene algún paquete de
+    // ese proveedor — RecargasAmérica no filtra por categoría, así que su
+    // catálogo es el completo (todos los juegos mezclados) y no vale la
+    // pena pedirlo si este juego no lo usa.
+    $recargasAmericaProductsById = [];
+    $usesRecargasAmericaCatalogGame = false;
+    foreach ($paquetes as $pack) {
+      if (trim((string) ($pack['api_provider'] ?? '')) === 'recargasamerica') {
+        $usesRecargasAmericaCatalogGame = true;
+        break;
+      }
+    }
+    if ($usesRecargasAmericaCatalogGame && recargasamerica_api_is_configured()) {
+      try {
+        foreach (recargasamerica_api_fetch_products_pins() as $raProduct) {
+          $recargasAmericaProductsById[(int) ($raProduct['id'] ?? 0)] = $raProduct;
+        }
+      } catch (Throwable $e) {
+        $recargasAmericaProductsById = [];
+      }
+    }
     // Un paquete asignado a una categoría desactivada no debe aparecer en la
     // tienda (ni en su tab ni en "Otros"), a diferencia de uno sin categoría.
     $allPackageCategoriesByIdForGame = [];
@@ -550,7 +574,17 @@ include __DIR__ . "/includes/header.php";
     <?php foreach ($paquetes as $pack):
         $packApiId = (int) ($pack['paquete_api'] ?? 0);
         $packManualOverride = !empty($pack['precio_manual_override']);
-        $packApiRawPrice = (!$packManualOverride && $packApiId > 0 && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
+        // Se distingue por api_provider ANTES de mirar los catálogos: los
+        // IDs de producto de GiftVen y RecargasAmérica son de sistemas
+        // externos independientes y pueden coincidir por coincidencia — sin
+        // este chequeo, un paquete de RecargasAmérica con el mismo ID
+        // numérico que un producto de GiftVen tomaría el precio equivocado.
+        $packPricingProvider = trim((string) ($pack['api_provider'] ?? ''));
+        if (!$packManualOverride && $packApiId > 0 && $packPricingProvider === 'recargasamerica' && isset($recargasAmericaProductsById[$packApiId])) {
+            $packApiRawPrice = floatval($recargasAmericaProductsById[$packApiId]['price'] ?? 0);
+        } else {
+            $packApiRawPrice = (!$packManualOverride && $packApiId > 0 && $packPricingProvider !== 'recargasamerica' && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
+        }
         $precio_base = ($packApiRawPrice !== null)
             ? max(0.0, round($packApiRawPrice * (1 + $gameMarkupPct / 100), 2))
             : floatval($pack['precio']);
