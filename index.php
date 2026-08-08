@@ -3201,14 +3201,14 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           }
           .gg-drops-image-wrap {
             width: 80%;
-            aspect-ratio: 4 / 3;
+            aspect-ratio: 1511 / 704;
             background: #111927;
             overflow: hidden;
           }
           .gg-drops-image-wrap img {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: contain;
             display: block;
           }
           .gg-drops-image-fallback {
@@ -3240,12 +3240,12 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             align-items: center;
             justify-content: space-between;
             gap: 0.5rem;
-            padding: 0.6rem 0.7rem;
+            padding: 0.45rem 0.7rem;
             border-top: 1px solid rgba(34,211,238,0.12);
           }
           .gg-drops-game-label {
             font-family: 'Oxanium', sans-serif;
-            font-size: 0.82rem;
+            font-size: 0.92rem;
             font-weight: 800;
             letter-spacing: 0.06em;
             text-transform: uppercase;
@@ -3263,13 +3263,13 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             flex-shrink: 0;
           }
           .gg-drops-price-original {
-            font-size: 0.72rem;
+            font-size: 0.8rem;
             color: #475569;
             text-decoration: line-through;
             white-space: nowrap;
           }
           .gg-drops-price-actual {
-            font-size: 1rem;
+            font-size: 1.12rem;
             font-weight: 800;
             color: #22d3ee;
             white-space: nowrap;
