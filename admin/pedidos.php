@@ -519,8 +519,17 @@ function order_can_retry_recharge(array $order): bool {
     return !in_array($discordStatus, ['sent', 'processing', 'confirmed'], true);
   }
 
+  // recargas_api_pedido_id es compartida por GiftVen y RecargasAmérica. Para
+  // GiftVen, tenerla llena significa que ya hay una orden real vinculada en
+  // el proveedor — ahí se usa "Sincronizar API", no reenviar. Para
+  // RecargasAmérica, en cambio, esa misma columna solo guarda la referencia
+  // del ÚLTIMO intento (que puede haber quedado incierto/pendiente) —
+  // recargasamerica_dispatch_or_recover() ya decide de forma segura si debe
+  // reconsultar esa referencia o comprar de nuevo, así que el botón debe
+  // seguir disponible.
   $providerOrderId = trim((string) ($order['recargas_api_pedido_id'] ?? ''));
-  if ($providerOrderId !== '') {
+  $apiProvider = strtolower(trim((string) ($order['api_provider'] ?? '')));
+  if ($providerOrderId !== '' && $apiProvider !== 'recargasamerica') {
     return false;
   }
 

@@ -6176,6 +6176,68 @@ function execute_catalog_api_purchase(int $productId, ?string $userIdentifier, a
     return summarize_catalog_api_purchase_results($attemptResults, $purchaseQuantity);
 }
 
+// A diferencia de GiftVen, RecargasAmérica no expone un endpoint para listar
+// compras recientes — solo se puede reconsultar una compra puntual si ya se
+// guardó su referencia/transaction_id. Por eso la recuperación es más
+// simple: si el pedido YA tiene una referencia guardada (de un intento
+// anterior que sí obtuvo respuesta del proveedor), se reconsulta su estado
+// real en vez de comprar de nuevo a ciegas — evita duplicar la recarga. Si
+// NO hay referencia guardada, la única forma de llegar aquí es que el
+// intento anterior nunca obtuvo respuesta (excepción de red/timeout puro
+// antes de que el proveedor devolviera nada), así que reintentar la compra
+// es seguro.
+function recargasamerica_dispatch_or_recover(array $order): array {
+    $existingReference = trim((string) ($order['recargas_api_pedido_id'] ?? ''));
+
+    if ($existingReference === '') {
+        $productId = (int) ($order['paquete_api'] ?? 0);
+        $tipo = strtolower(trim((string) ($order['recargasamerica_tipo'] ?? 'recharge'))) === 'pin' ? 'pin' : 'recharge';
+        return execute_recargasamerica_purchase($productId, $tipo, (string) ($order['user_identifier'] ?? ''), order_purchase_quantity($order));
+    }
+
+    try {
+        $statusResponse = recargasamerica_api_fetch_order_status($existingReference);
+    } catch (Throwable $e) {
+        return [
+            'success' => false,
+            'accepted' => false,
+            'needs_manual_review' => true,
+            'message' => 'No se pudo verificar el estado del intento anterior con RecargasAmérica: ' . $e->getMessage(),
+            'reference' => $existingReference,
+            'payload' => ['exception' => $e->getMessage()],
+        ];
+    }
+
+    $statusData = is_array($statusResponse['data'] ?? null) ? $statusResponse['data'] : [];
+    $status = strtolower(trim((string) ($statusData['status'] ?? '')));
+    $message = trim((string) ($statusData['message'] ?? $statusResponse['message'] ?? ''));
+
+    if ($status === '') {
+        // El proveedor no devolvió un estado interpretable para esta
+        // referencia: no hay certeza de si se entregó o no. Se deja para
+        // revisión manual en vez de arriesgar una compra duplicada.
+        return [
+            'success' => false,
+            'accepted' => false,
+            'needs_manual_review' => true,
+            'message' => $message !== '' ? $message : 'RecargasAmérica no devolvió un estado reconocible para este intento previo.',
+            'reference' => $existingReference,
+            'payload' => array_merge($statusData, ['recovery_check' => true]),
+        ];
+    }
+
+    $isPending = in_array($status, ['pending', 'procesando', 'processing'], true);
+
+    return [
+        'success' => !$isPending,
+        'accepted' => $isPending,
+        'needs_manual_review' => false,
+        'message' => $message !== '' ? $message : ($isPending ? 'Recarga en proceso.' : 'Compra confirmada por RecargasAmérica.'),
+        'reference' => $existingReference,
+        'payload' => array_merge($statusData, ['recovery_check' => true]),
+    ];
+}
+
 function parse_bank_movement_datetime(?string $value): ?string {
     $raw = trim((string) $value);
     if ($raw === '') {
@@ -10132,41 +10194,17 @@ if ($action === 'submit_payment') {
                     json_error('El pedido ya está siendo procesado o no está disponible.', 409);
                 }
 
-                $isRetryDispatchAttemptRASingle = trim((string) ($updatedOrder['recargas_api_ultimo_check'] ?? '')) !== ''
-                    || trim((string) ($updatedOrder['recargas_api_pedido_id'] ?? '')) !== '';
-                if ($isRetryDispatchAttemptRASingle) {
-                    json_response(append_payment_difference_response([
-                        'ok' => true,
-                        'message' => 'Pago verificado. Ya se registró un intento previo de esta recarga; un administrador la revisará y completará manualmente si hace falta.',
-                        'order_id' => $orderId,
-                        'estado' => 'pagado',
-                        'verified' => true,
-                        'pending_review' => true,
-                    ], $updatedOrder, $overpaymentAmount));
-                }
-
-                $raPreMarkSingle = $mysqli->prepare("UPDATE pedidos SET recargas_api_ultimo_check=NOW() WHERE id=? AND estado='pagado'");
-                if ($raPreMarkSingle) {
-                    $raPreMarkSingle->bind_param('i', $orderId);
-                    $raPreMarkSingle->execute();
-                    $raPreMarkSingle->close();
-                }
-
                 $raTipoSingle = strtolower(trim((string) ($updatedOrder['recargasamerica_tipo'] ?? 'recharge'))) === 'pin' ? 'pin' : 'recharge';
-                $raResSingle = execute_recargasamerica_purchase(
-                    (int) ($updatedOrder['paquete_api'] ?? 0),
-                    $raTipoSingle,
-                    (string) ($updatedOrder['user_identifier'] ?? ''),
-                    order_purchase_quantity($updatedOrder)
-                );
+                $raResSingle = recargasamerica_dispatch_or_recover($updatedOrder);
 
                 $raDataSingle = (array) ($raResSingle['payload'] ?? []);
                 $raRefSingle = (string) ($raResSingle['reference'] ?? '');
                 $raMsgSingle = (string) ($raResSingle['message'] ?? '');
                 $raPayloadSingle = json_encode($raDataSingle, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                $raHistEventSingle = !empty($raResSingle['needs_manual_review']) ? 'recargasamerica_recovery_check' : 'recargasamerica_purchase';
                 $raHistJsonSingle = append_provider_history(
                     $updatedOrder['recargas_api_historial_json'] ?? null,
-                    build_provider_history_entry('recargasamerica_purchase', $raTipoSingle, !empty($raResSingle['success']) ? 'enviado' : 'pagado', $raMsgSingle, $raRefSingle, $raRefSingle, '')
+                    build_provider_history_entry($raHistEventSingle, $raTipoSingle, !empty($raResSingle['success']) ? 'enviado' : 'pagado', $raMsgSingle, $raRefSingle, $raRefSingle, '')
                 );
 
                 if (!isset($raDataSingle['exception'])) {
@@ -10222,6 +10260,17 @@ if ($action === 'submit_payment') {
                         'provider_flow' => 'processing',
                         'provider_reference' => $raRefSingle,
                     ], $raPendingOrderSingle, $overpaymentAmount));
+                }
+
+                if (!empty($raResSingle['needs_manual_review'])) {
+                    json_response(append_payment_difference_response([
+                        'ok' => true,
+                        'message' => 'Pago verificado. ' . ($raMsgSingle ?: 'No se pudo confirmar automáticamente el estado de esta recarga.') . ' Un administrador la revisará y completará manualmente si hace falta.',
+                        'order_id' => $orderId,
+                        'estado' => 'pagado',
+                        'verified' => true,
+                        'pending_review' => true,
+                    ], $updatedOrder, $overpaymentAmount));
                 }
 
                 json_response(append_payment_difference_response([
@@ -11116,7 +11165,73 @@ if ($action === 'sync_provider_status') {
     try {
         $providerOrderId = trim((string) ($order['recargas_api_pedido_id'] ?? ''));
         $fullimpulsoOrderId = trim((string) ($order['fullimpulso_order_id'] ?? ''));
-        if ($providerOrderId !== '') {
+        // recargas_api_pedido_id es una columna genérica compartida por
+        // GiftVen Y RecargasAmérica — sin este chequeo de proveedor, un
+        // pedido de RecargasAmérica con referencia guardada terminaba
+        // consultando recargas_api_fetch_order_detail() (API de GiftVen)
+        // con un ID que nunca le perteneció, dejando al admin sin forma
+        // real de verificar/sincronizar esos pedidos.
+        if ($providerOrderId !== '' && order_uses_recargasamerica_api_provider($order)) {
+            $raSyncTipo = strtolower(trim((string) ($order['recargasamerica_tipo'] ?? 'recharge'))) === 'pin' ? 'pin' : 'recharge';
+            $raSyncPrevStatus = trim((string) ($order['estado'] ?? ''));
+            $raSyncRes = recargasamerica_dispatch_or_recover($order);
+
+            $raSyncData = (array) ($raSyncRes['payload'] ?? []);
+            $raSyncRef = (string) ($raSyncRes['reference'] ?? $providerOrderId);
+            $raSyncMsg = (string) ($raSyncRes['message'] ?? '');
+            $raSyncPayload = json_encode($raSyncData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (!is_string($raSyncPayload)) {
+                $raSyncPayload = '{}';
+            }
+            $raSyncHistEvent = !empty($raSyncRes['needs_manual_review']) ? 'admin_sync_recargasamerica_recovery_check' : 'admin_sync_recargasamerica';
+            $raSyncHistJson = append_provider_history(
+                $order['recargas_api_historial_json'] ?? null,
+                build_provider_history_entry($raSyncHistEvent, $raSyncTipo, !empty($raSyncRes['success']) ? 'enviado' : 'pagado', $raSyncMsg, $raSyncRef, $raSyncRef, '')
+            );
+
+            if (!isset($raSyncData['exception'])) {
+                $raSyncStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ? WHERE id = ? AND estado = 'pagado'");
+                if ($raSyncStmt) {
+                    $raSyncStmt->bind_param('sssssi', $raSyncRef, $raSyncMsg, $raSyncPayload, $raSyncRef, $raSyncHistJson, $orderId);
+                    $raSyncStmt->execute();
+                    $raSyncStmt->close();
+                }
+            }
+
+            if (!empty($raSyncRes['success'])) {
+                $raSyncSt = 'enviado';
+                $raSyncStmt2 = $mysqli->prepare("UPDATE pedidos SET estado = ? WHERE id = ? AND estado = 'pagado'");
+                if ($raSyncStmt2) {
+                    $raSyncStmt2->bind_param('si', $raSyncSt, $orderId);
+                    $raSyncStmt2->execute();
+                    $raSyncStmt2->close();
+                }
+            }
+
+            $raSyncedOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
+            if ($raSyncPrevStatus !== 'enviado' && trim((string) ($raSyncedOrder['estado'] ?? '')) === 'enviado') {
+                win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+                recharge_notifications_emit_for_order($mysqli, $raSyncedOrder);
+                notify_free_fire_recharge_success(
+                    $mysqli,
+                    $raSyncedOrder,
+                    trim((string) ($raSyncedOrder['metodo_pago'] ?? 'Método de pago')),
+                    trim((string) ($raSyncedOrder['numero_referencia'] ?? '')),
+                    trim((string) ($raSyncedOrder['telefono_contacto'] ?? '')),
+                    $raSyncRef,
+                    $raSyncMsg !== '' ? $raSyncMsg : 'Recarga completada por RecargasAmérica.'
+                );
+            }
+
+            $syncResult = [
+                'order' => $raSyncedOrder,
+                'provider_status' => !empty($raSyncRes['success'])
+                    ? 'enviado'
+                    : (!empty($raSyncRes['accepted']) ? 'procesando' : (!empty($raSyncRes['needs_manual_review']) ? 'revision_manual' : 'error')),
+                'provider_reference' => $raSyncRef,
+                'provider_message' => $raSyncMsg,
+            ];
+        } elseif ($providerOrderId !== '') {
             $providerDetail = recargas_api_fetch_order_detail($providerOrderId);
             $syncResult = sync_local_order_with_provider_detail($mysqli, $order, $providerDetail, true);
         } elseif ($fullimpulsoOrderId !== '') {
@@ -11546,6 +11661,80 @@ if ($action === 'admin_retry_recharge') {
         $stmt->close();
 
         json_error('La recarga no pudo completarse automaticamente: ' . $providerMessage, 409);
+    }
+
+    // ── RecargasAmérica: reenvío manual desde el admin ───────────────
+    // No existía ninguna rama para este proveedor: un pedido de
+    // RecargasAmérica que quedaba "verificado" sin poder despacharse
+    // automáticamente (ver recargasamerica_dispatch_or_recover) caía en el
+    // json_error genérico de "no tiene una recarga automática configurable"
+    // al final de esta acción, dejando al admin sin ninguna forma de
+    // reenviarlo ni verificar qué pasó — reportado como pedidos atascados
+    // en "verificado" sin poder resolverse.
+    if (order_uses_recargasamerica_api_provider($order)) {
+        $raTipo = strtolower(trim((string) ($order['recargasamerica_tipo'] ?? 'recharge'))) === 'pin' ? 'pin' : 'recharge';
+        $raRes = recargasamerica_dispatch_or_recover($order);
+
+        $raData = (array) ($raRes['payload'] ?? []);
+        $raRef = (string) ($raRes['reference'] ?? '');
+        $raMsg = (string) ($raRes['message'] ?? 'No se recibió mensaje de RecargasAmérica.');
+        $raPayload = json_encode($raData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($raPayload)) {
+            $raPayload = '{}';
+        }
+        $raHistEvent = !empty($raRes['needs_manual_review']) ? 'admin_retry_recargasamerica_recovery_check' : 'admin_retry_recargasamerica';
+        $raHistJson = append_provider_history(
+            $order['recargas_api_historial_json'] ?? null,
+            build_provider_history_entry($raHistEvent, $raTipo, !empty($raRes['success']) ? 'enviado' : 'pagado', $raMsg, $raRef, $raRef, '')
+        );
+
+        if (!isset($raData['exception'])) {
+            $stmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ? WHERE id = ? AND estado = 'pagado'");
+            if ($stmt) {
+                $stmt->bind_param('sssssi', $raRef, $raMsg, $raPayload, $raRef, $raHistJson, $orderId);
+                $stmt->execute();
+                $stmt->close();
+            }
+        }
+
+        if (!empty($raRes['success'])) {
+            $sentStatus = 'enviado';
+            $stmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+            if (!$stmt) {
+                json_error('No se pudo actualizar el pedido tras reenviar la recarga.', 500);
+            }
+            $stmt->bind_param('ssssssi', $raRef, $raMsg, $raPayload, $raRef, $raHistJson, $sentStatus, $orderId);
+            if (!$stmt->execute()) {
+                $stmt->close();
+                json_error('No se pudo guardar el resultado de la recarga.', 500);
+            }
+            $stmt->close();
+
+            $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
+            win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+            recharge_notifications_emit_for_order($mysqli, $updatedOrder);
+            json_response([
+                'ok' => true,
+                'message' => 'La recarga fue reenviada y procesada correctamente.',
+                'order_id' => $orderId,
+                'estado' => 'enviado',
+                'provider_flow' => 'completed',
+                'provider_reference' => $raRef,
+                'provider_message' => $raMsg,
+            ], 200, static function () use ($mysqli, $updatedOrder, $paymentMethodName, $verifiedReference, $phone, $raRef, $raMsg): void {
+                notify_free_fire_recharge_success($mysqli, $updatedOrder, $paymentMethodName, $verifiedReference, $phone, $raRef, $raMsg !== '' ? $raMsg : 'Recarga completada por RecargasAmérica.');
+            });
+        }
+
+        if (!empty($raRes['accepted'])) {
+            json_error('RecargasAmérica todavía está procesando esta recarga. Intenta de nuevo en unos minutos.', 409);
+        }
+
+        if (!empty($raRes['needs_manual_review'])) {
+            json_error('No se pudo confirmar el estado de esta recarga con RecargasAmérica: ' . $raMsg, 409);
+        }
+
+        json_error('La recarga no pudo completarse automaticamente: ' . $raMsg, 409);
     }
 
     if (order_uses_free_fire_api_provider($order)) {
@@ -13042,40 +13231,24 @@ if ($action === 'batch_fulfill_item') {
 
     // ── RecargasAmérica catalog API ───────────────────────────────────
     if ($pkgProvider === 'recargasamerica' && $pkgApiId > 0) {
-        // Mismo candado de reintento que GiftVen, reutilizando las mismas
-        // columnas de rastreo (genéricas por diseño, no exclusivas de un
-        // proveedor). A diferencia de GiftVen, RecargasAmérica no expone un
-        // endpoint de "pedidos/transacciones recientes" para re-verificar un
-        // intento incierto — así que si ya hubo un intento previo para este
-        // pedido, NO se reintenta la compra automáticamente: se deja para
-        // revisión manual del admin en vez de arriesgar una compra real
-        // duplicada (es preferible un pedido atascado a una recarga doble).
-        $isRetryDispatchAttemptRA = trim((string) ($order['recargas_api_ultimo_check'] ?? '')) !== ''
-            || trim((string) ($order['recargas_api_pedido_id'] ?? '')) !== '';
-        if ($isRetryDispatchAttemptRA) {
-            json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Ya se registró un intento previo de esta recarga. Un administrador la revisará y completará manualmente si hace falta.', 'pending_review' => true]);
-        }
-
-        // Se marca ANTES de llamar al proveedor (mismo motivo que GiftVen):
-        // si el proceso muere a mitad de la llamada, el próximo intento debe
-        // ver que ya hubo uno previo y NO comprar de nuevo a ciegas.
-        $preMarkRA = $mysqli->prepare("UPDATE pedidos SET recargas_api_ultimo_check=NOW() WHERE id=? AND estado='pagado'");
-        if ($preMarkRA) {
-            $preMarkRA->bind_param('i', $orderId);
-            $preMarkRA->execute();
-            $preMarkRA->close();
-        }
-
+        // recargasamerica_dispatch_or_recover() decide por sí sola si toca
+        // comprar de nuevo o reconsultar un intento previo por su
+        // referencia guardada (ver su documentación arriba) — a diferencia
+        // del candado ciego anterior, esto permite que un pedido que quedó
+        // "pendiente"/incierto avance solo en el siguiente reintento
+        // (automático del cliente o manual del admin) en vez de quedar
+        // atascado para siempre desde el primer tropiezo.
         $raTipo = strtolower(trim((string) ($order['recargasamerica_tipo'] ?? 'recharge'))) === 'pin' ? 'pin' : 'recharge';
-        $raRes = execute_recargasamerica_purchase($pkgApiId, $raTipo, (string) ($order['user_identifier'] ?? ''), $qty);
+        $raRes = recargasamerica_dispatch_or_recover($order);
 
         $raData = (array) ($raRes['payload'] ?? []);
         $raRef     = (string) ($raRes['reference'] ?? '');
         $raMsg     = (string) ($raRes['message'] ?? '');
         $raPayload = json_encode($raData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $raHistEvent = !empty($raRes['needs_manual_review']) ? 'recargasamerica_recovery_check' : 'recargasamerica_purchase';
         $raHistJson = append_provider_history(
             $order['recargas_api_historial_json'] ?? null,
-            build_provider_history_entry('recargasamerica_purchase', $raTipo, !empty($raRes['success']) ? 'enviado' : 'pagado', $raMsg, $raRef, $raRef, '')
+            build_provider_history_entry($raHistEvent, $raTipo, !empty($raRes['success']) ? 'enviado' : 'pagado', $raMsg, $raRef, $raRef, '')
         );
 
         // Igual que con GiftVen: si el proveedor SÍ respondió algo (aunque
@@ -13124,6 +13297,10 @@ if ($action === 'batch_fulfill_item') {
                 $updRA2->close();
             }
             json_response(['ok' => true, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Pedido recibido y procesándose.', 'provider_reference' => $raRef, 'processing' => true]);
+        }
+
+        if (!empty($raRes['needs_manual_review'])) {
+            json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $raMsg ?: 'No se pudo confirmar automáticamente el estado de esta recarga. Un administrador la revisará.', 'pending_review' => true, 'provider_message' => $raMsg]);
         }
 
         json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $raMsg ?: 'La recarga no fue procesada por RecargasAmérica.', 'provider_message' => $raMsg]);
