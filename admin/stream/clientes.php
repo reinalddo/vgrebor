@@ -11,6 +11,7 @@ require __DIR__ . '/_layout.php';
 require __DIR__ . '/../../api/wa/_wa.php';
 require __DIR__ . '/../../api/wallet/_helpers.php';
 require_once __DIR__ . '/../../api/_audit.php';
+require_once __DIR__ . '/../_streaming.php';   // D5: st_rev_puede_exportar (bloqueo de descarga)
 admin_require_login();
 if (!admin_es_admin() && !in_array(admin_wa_area(), ['streaming', 'ambas'], true)) {
   http_response_code(403);
@@ -22,10 +23,18 @@ $OWNER = (int) stream_owner_id();
 
 // ── Export CSV / Plantilla ──
 if (($_GET['export'] ?? '') === 'plantilla') {
+  if ($OWNER > 0 && function_exists('st_rev_puede_exportar') && !st_rev_puede_exportar($pdo)) {
+    http_response_code(403); exit('El administrador deshabilitó la descarga de tus clientes.');
+  }
   header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename="plantilla-clientes.csv"');
   echo "\xEF\xBB\xBF"; $o = fopen('php://output', 'w'); fputcsv($o, ['Nombre', 'WhatsApp', 'Correo', 'Comentarios']); fputcsv($o, ['Juan Perez', '+584120000000', 'juan@mail.com', 'nota opcional']); fclose($o); exit;
 }
 if (($_GET['export'] ?? '') === 'csv') {
+  // D5: el admin puede quitarle al revendedor el permiso de exportar sus clientes (anti-secuestro).
+  if ($OWNER > 0 && function_exists('st_rev_puede_exportar') && !st_rev_puede_exportar($pdo)) {
+    http_response_code(403);
+    exit('El administrador deshabilitó la descarga de tus clientes.');
+  }
   header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename="clientes.csv"');
   echo "\xEF\xBB\xBF"; $o = fopen('php://output', 'w'); fputcsv($o, ['Nombre', 'WhatsApp', 'Correo', 'Comentarios', 'Tipo', 'Fecha']);
   try { foreach ($pdo->query("SELECT nombre,wa,email,notas,tipo,creado_en FROM streaming_clientes WHERE owner_id=$OWNER ORDER BY nombre") as $r) fputcsv($o, [$r['nombre'], "\t" . $r['wa'], $r['email'], $r['notas'], $r['tipo'], $r['creado_en']]); } catch (Throwable $e) {}
@@ -208,9 +217,11 @@ stream_head('Clientes', 'clientes');
   </div>
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <button onclick="abrirNuevo()" class="btn primary"><i data-lucide="user-plus"></i> Nuevo Cliente</button>
-    <a href="?export=plantilla" class="btn ghost"><i data-lucide="file-down"></i> Plantilla</a>
     <button onclick="abrir('m-masivo')" class="btn ghost"><i data-lucide="upload-cloud"></i> Carga Masiva</button>
+    <?php if ($OWNER <= 0 || !function_exists('st_rev_puede_exportar') || st_rev_puede_exportar($pdo)): ?>
+    <a href="?export=plantilla" class="btn ghost"><i data-lucide="file-down"></i> Plantilla</a>
     <a href="?export=csv" class="btn ghost"><i data-lucide="file-spreadsheet"></i> Exportar</a>
+    <?php endif; ?>
   </div>
 </div>
 

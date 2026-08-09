@@ -20,7 +20,16 @@ $OWNER = (int) stream_owner_id();
 $hoy = new DateTimeImmutable('today');
 // AISLAMIENTO POR DUEÑO (owner_id) SIEMPRE: cada panel (admin=0 / revendedor=su id) solo ve lo suyo.
 // Además, un empleado (no dueño) NO ve ni toca ventas del inventario de REVENDEDORES.
-$scopeRev = 'v.owner_id=' . $OWNER . ($verCostos ? '' : ' AND (v.revendedor_id IS NULL OR v.revendedor_id = 0)');
+// En el panel del REVENDEDOR: ve SUS ventas (owner=su id) + las que el admin le ASIGNÓ o le vendió del
+// stock (revendedor_id = su id). Antes las asignadas y sus compras del stock no le salían. #11
+$esRevCtx = function_exists('stream_ctx') && stream_ctx() === 'revendedor';
+if ($esRevCtx) {
+  // El revendedor ve SUS ventas (owner = él). Lo que el admin le asigna llega como venta SUYA
+  // (creada por st_rev_entregar con owner=él), así que con owner alcanza — sin duplicar la del admin.
+  $scopeRev = 'v.owner_id=' . $OWNER;
+} else {
+  $scopeRev = 'v.owner_id=' . $OWNER . ($verCostos ? '' : ' AND (v.revendedor_id IS NULL OR v.revendedor_id = 0)');
+}
 
 function v_dias(?string $venc, DateTimeImmutable $hoy): ?int {
   if (!$venc) return null;
@@ -34,6 +43,15 @@ function st_log(PDO $pdo, int $vid, string $evento, string $desc = ''): void {
 /** ¿Este usuario puede ver/tocar esta venta? El dueño sí siempre; un empleado NO si la venta es de un revendedor. */
 function st_puede_ver(PDO $pdo, int $vid, bool $esDueno): bool {
   if ($esDueno) return true;
+  // PANEL DEL REVENDEDOR: manda lo SUYO (owner_id = su id) — puede eliminarlo y, al hacerlo, el
+  // perfil vuelve a SU stock. Las ventas que son del ADMIN (owner_id=0) y solo van etiquetadas con
+  // su revendedor_id NO las toca: ésas son el registro del admin, ella solo las ve.
+  if (function_exists('stream_ctx') && stream_ctx() === 'revendedor') {
+    $mio = (int) stream_owner_id();
+    try { $o = $pdo->query("SELECT owner_id FROM streaming_ventas WHERE id=" . (int) $vid)->fetchColumn(); }
+    catch (Throwable $e) { return false; }
+    return ((int) $o === $mio && $mio > 0);
+  }
   try { $r = $pdo->query("SELECT revendedor_id FROM streaming_ventas WHERE id=" . (int) $vid)->fetchColumn(); }
   catch (Throwable $e) { return true; }   // si la columna no existe en este entorno, no restringimos
   return ($r === null || (int) $r === 0);
@@ -43,22 +61,32 @@ function st_puede_ver(PDO $pdo, int $vid, bool $esDueno): bool {
 if (isset($_GET['ajax'])) {
   header('Content-Type: application/json; charset=utf-8');
   $id = (int) ($_GET['id'] ?? 0);
-  // Guarda de aislamiento (anti-IDOR): la venta DEBE ser del dueño del contexto (protege venta/hermanas/registro/notas).
-  if ($id > 0 && !st_venta($pdo, $id)) { echo json_encode(['ok' => false]); exit; }
-  if (!st_puede_ver($pdo, $id, $verCostos)) { echo json_encode(['ok' => false]); exit; }
+  // ¿Venta ASIGNADA a este revendedor (del admin, con revendedor_id = él)? La puede VER para asignarle
+  // un cliente / editar la fecha de SU cliente / notificar — NO borrarla (eso se bloquea en el POST).
+  $ajOwn = (int) (function_exists('stream_owner_id') ? stream_owner_id() : 0);
+  $asigMia = false;
+  if ($id > 0 && $esRevCtx && $ajOwn > 0) {
+    try { $ck = $pdo->prepare("SELECT 1 FROM streaming_ventas WHERE id=? AND revendedor_id=? LIMIT 1"); $ck->execute([$id, $ajOwn]); $asigMia = (bool) $ck->fetchColumn(); } catch (Throwable $e) {}
+  }
+  // Guarda de aislamiento (anti-IDOR): la venta DEBE ser del dueño del contexto (o asignada a este revendedor).
+  if ($id > 0 && !$asigMia && !st_venta($pdo, $id)) { echo json_encode(['ok' => false]); exit; }
+  if (!$asigMia && !st_puede_ver($pdo, $id, $verCostos)) { echo json_encode(['ok' => false]); exit; }
   if ($_GET['ajax'] === 'venta') {
     $v = st_venta($pdo, $id);
+    if (!$v && $asigMia) { try { $q = $pdo->prepare("SELECT * FROM streaming_ventas WHERE id=? LIMIT 1"); $q->execute([$id]); $v = $q->fetch(PDO::FETCH_ASSOC) ?: null; } catch (Throwable $e) {} }
     if (!$v) { echo json_encode(['ok' => false]); exit; }
     // Nombre del revendedor: «Notificar» lo usa para avisar que ese cliente NO es tuyo antes de
     // escribirle (cliente_wa en una venta de revendedor es el cliente DE ÉL, no tuyo).
     if (!empty($v['revendedor_id'])) {
       try {
-        $qr = $pdo->prepare("SELECT nombre FROM usuarios WHERE id=?");
+        $qr = $pdo->prepare("SELECT nombre, telefono FROM usuarios WHERE id=?");
         $qr->execute([(int) $v['revendedor_id']]);
-        $v['rev_nombre'] = $qr->fetchColumn() ?: null;
+        $ru = $qr->fetch(PDO::FETCH_ASSOC) ?: [];
+        $v['rev_nombre'] = $ru['nombre'] ?? null;
+        $v['rev_wa'] = preg_replace('/\D/', '', (string) ($ru['telefono'] ?? ''));   // #15: para avisar al revendedor
       } catch (Throwable $e) {}
     }
-    echo json_encode(['ok' => true, 'venta' => $v, 'msgs' => ['credenciales' => stream_msg_credenciales($v), 'recordatorio' => stream_msg_recordatorio($v)]]);
+    echo json_encode(['ok' => true, 'venta' => $v, 'msgs' => ['credenciales' => stream_msg_credenciales($v), 'recordatorio' => stream_msg_recordatorio($v), 'aviso_rev' => stream_msg_aviso_revendedor($v)]]);
     exit;
   }
   // ¿Qué OTRAS ventas viven en la misma cuenta? Si la cuenta murió, hay que mover a TODOS sus
@@ -97,6 +125,11 @@ if (isset($_GET['ajax'])) {
 
 // ── Export CSV (botón Excel) ──
 if (($_GET['export'] ?? '') === 'csv') {
+  // D5: el admin puede quitarle al revendedor el permiso de exportar sus ventas (anti-secuestro).
+  if ($esRevCtx && function_exists('st_rev_puede_exportar') && !st_rev_puede_exportar($pdo)) {
+    http_response_code(403);
+    exit('El administrador deshabilitó la descarga de tus ventas.');
+  }
   header('Content-Type: text/csv; charset=utf-8');
   header('Content-Disposition: attachment; filename="ventas.csv"');
   echo "\xEF\xBB\xBF";
@@ -115,12 +148,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $msg = '';
   try {
     $vid = (int) ($_POST['id'] ?? 0);
+    // ¿Venta ASIGNADA a este revendedor? Puede EDITARLA (solo cliente + fecha, ver handler) y NOTIFICAR
+    // a su cliente — pero NO eliminarla/reemplazarla/etc. (esas siguen bloqueadas por st_puede_ver).
+    $pOwn = (int) (function_exists('stream_owner_id') ? stream_owner_id() : 0);
+    $asigMia = false;
+    if ($esRevCtx && $vid > 0 && $pOwn > 0) {
+      try { $ck = $pdo->prepare("SELECT 1 FROM streaming_ventas WHERE id=? AND revendedor_id=? LIMIT 1"); $ck->execute([$vid, $pOwn]); $asigMia = (bool) $ck->fetchColumn(); } catch (Throwable $e) {}
+    }
+    $permAsignada = $asigMia && ($a === 'editar_venta' || $a === 'notificar');
     // OJO: este guard NO protege al LOTE — con id=0, st_puede_ver hace fetchColumn()→false y
     // (int)false===0 en su return → devuelve TRUE (fail-open). El lote valida el permiso EN SQL
     // sobre todo el conjunto (ver 'lote_ventas'), no fila por fila.
-    if ($a !== 'lote_ventas' && !st_puede_ver($pdo, $vid, $verCostos)) throw new Exception('No tienes acceso a esa venta (es de un revendedor).');
-    // Guarda de aislamiento por dueño (anti-IDOR): la venta DEBE ser del contexto actual.
-    if ($a !== 'lote_ventas' && $vid > 0 && !st_venta($pdo, $vid)) throw new Exception('Venta no encontrada.');
+    if ($a !== 'lote_ventas' && !$permAsignada && !st_puede_ver($pdo, $vid, $verCostos)) throw new Exception('No tienes acceso a esa venta (es de un revendedor).');
+    // Guarda de aislamiento por dueño (anti-IDOR): la venta DEBE ser del contexto actual (o asignada a él).
+    if ($a !== 'lote_ventas' && $vid > 0 && !$permAsignada && !st_venta($pdo, $vid)) throw new Exception('Venta no encontrada.');
     if ($a === 'notificar') {
       $v = st_venta($pdo, $vid);
       $texto = trim((string) ($_POST['mensaje'] ?? ''));
@@ -146,6 +187,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $nueva = date('Y-m-d', strtotime($base . " +$meses months"));
       }
       $pdo->prepare("UPDATE streaming_ventas SET fecha_vencimiento=?, estado='activa', recordado=0, recordado_at=NULL WHERE id=?")->execute([$nueva, $vid]);
+      // Al renovar se reinicia el contador de cambios de nombre/PIN del perfil de esta venta (2 nuevos).
+      try { $pdo->prepare("UPDATE streaming_perfiles SET cambios_np=0 WHERE venta_id=?")->execute([$vid]); } catch (Throwable $e) {}
       // Registrar el pago de la renovación (método/ref/comprobante)
       $comp = null;
       if (!empty($_FILES['comprobante']['tmp_name']) && is_uploaded_file($_FILES['comprobante']['tmp_name']) && (int) $_FILES['comprobante']['error'] === 0 && (int) $_FILES['comprobante']['size'] <= 4 * 1024 * 1024) {
@@ -177,14 +220,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     elseif ($a === 'editar_venta') {
       $venc = ($_POST['fecha_vencimiento'] ?? '') ?: null;
-      $pdo->prepare("UPDATE streaming_ventas SET cliente_nombre=?, cliente_wa=?, plataforma=?, perfil=?, pin=?, correo=?, clave=?, precio=?, fecha_vencimiento=COALESCE(?, fecha_vencimiento), metodo_pago=?, notas=? WHERE id=?")
-          ->execute([
-            trim((string) ($_POST['cliente_nombre'] ?? '')) ?: null, wa_norm((string) ($_POST['cliente_wa'] ?? '')) ?: null,
-            trim((string) ($_POST['plataforma'] ?? '')) ?: 'Streaming', trim((string) ($_POST['perfil'] ?? '')) ?: null,
-            trim((string) ($_POST['pin'] ?? '')) ?: null, trim((string) ($_POST['correo'] ?? '')) ?: null,
-            trim((string) ($_POST['clave'] ?? '')) ?: null, ($_POST['precio'] ?? '') !== '' ? (float) $_POST['precio'] : null,
-            $venc, trim((string) ($_POST['metodo_pago'] ?? '')) ?: null, trim((string) ($_POST['notas'] ?? '')) ?: null, $vid,
-          ]);
+      // El REVENDEDOR solo edita TODO si es cuenta completa; si es perfil, solo puede tocar los datos
+      // de SU cliente (nombre, WhatsApp, precio) y la fecha de vencimiento — no el correo/clave/perfil/PIN.
+      $vtipo = (string) ($pdo->query("SELECT tipo FROM streaming_ventas WHERE id=$vid")->fetchColumn() ?: 'perfil');
+      // El revendedor edita SOLO cliente/WhatsApp/precio/fecha si: es un perfil, o es una venta ASIGNADA
+      // por el admin (para poder asignarle un cliente y darle la fecha a SU cliente / garantía). Cuenta
+      // completa PROPIA → edita todo. Guarda de aislamiento en el WHERE (no puede tocar ventas ajenas).
+      if ($esRevCtx && ($vtipo !== 'cuenta' || !empty($asigMia))) {
+        // El revendedor edita: cliente, WhatsApp, PRECIO, MÉTODO DE PAGO, fecha del cliente y NOMBRE/PIN
+        // del perfil (máx 2 veces por periodo; se reinicia al renovar; cuenta completa sin límite).
+        // NUNCA toca plataforma / correo / clave.
+        $nPerfil = trim((string) ($_POST['perfil'] ?? ''));
+        $nPin    = trim((string) ($_POST['pin'] ?? ''));
+        if ($nPerfil !== '' || $nPin !== '') {
+          $pf = $pdo->query("SELECT id, COALESCE(cambios_np,0) AS cn FROM streaming_perfiles WHERE venta_id=$vid LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+          $esCompletaV = ($vtipo === 'cuenta');
+          if ($pf && !$esCompletaV && (int) $pf['cn'] >= 2) {
+            throw new Exception('⚠ Ya cambiaste el nombre/PIN 2 veces este periodo. Se reinicia al renovar.');
+          }
+          if ($pf) {
+            $sp = []; $ap = [];
+            if ($nPerfil !== '') { $sp[] = 'etiqueta=?'; $ap[] = mb_substr($nPerfil, 0, 60); }
+            if ($nPin !== '')    { $sp[] = 'pin=?'; $ap[] = $nPin; }
+            if ($sp) { $ap[] = (int) $pf['id']; $pdo->prepare("UPDATE streaming_perfiles SET " . implode(',', $sp) . " WHERE id=?")->execute($ap); }
+            if (!$esCompletaV) { try { $pdo->prepare("UPDATE streaming_perfiles SET cambios_np=COALESCE(cambios_np,0)+1 WHERE id=?")->execute([(int) $pf['id']]); } catch (Throwable $e) {} }
+          }
+        }
+        // El precio que edita el revendedor es SU PRECIO DE VENTA (lo que le cobra a su cliente), NO el
+        // costo. Se guarda en precio Y en precio_venta_cliente para que quede claro que es el de venta.
+        $pVentaRev = ($_POST['precio'] ?? '') !== '' ? (float) str_replace(',', '.', (string) $_POST['precio']) : null;
+        $pdo->prepare("UPDATE streaming_ventas SET cliente_nombre=?, cliente_wa=?, perfil=COALESCE(?,perfil), pin=COALESCE(?,pin), precio=?, precio_venta_cliente=?, metodo_pago=?, fecha_vencimiento=COALESCE(?, fecha_vencimiento) WHERE id=? AND (owner_id=? OR revendedor_id=?)")
+            ->execute([
+              trim((string) ($_POST['cliente_nombre'] ?? '')) ?: null, wa_norm((string) ($_POST['cliente_wa'] ?? '')) ?: null,
+              $nPerfil !== '' ? $nPerfil : null, $nPin !== '' ? $nPin : null,
+              $pVentaRev, $pVentaRev,
+              trim((string) ($_POST['metodo_pago'] ?? '')) ?: null,
+              $venc, $vid, $pOwn, $pOwn,
+            ]);
+      } else {
+        $pdo->prepare("UPDATE streaming_ventas SET cliente_nombre=?, cliente_wa=?, plataforma=?, perfil=?, pin=?, correo=?, clave=?, precio=?, fecha_vencimiento=COALESCE(?, fecha_vencimiento), metodo_pago=?, notas=? WHERE id=?")
+            ->execute([
+              trim((string) ($_POST['cliente_nombre'] ?? '')) ?: null, wa_norm((string) ($_POST['cliente_wa'] ?? '')) ?: null,
+              trim((string) ($_POST['plataforma'] ?? '')) ?: 'Streaming', trim((string) ($_POST['perfil'] ?? '')) ?: null,
+              trim((string) ($_POST['pin'] ?? '')) ?: null, trim((string) ($_POST['correo'] ?? '')) ?: null,
+              trim((string) ($_POST['clave'] ?? '')) ?: null, ($_POST['precio'] ?? '') !== '' ? (float) $_POST['precio'] : null,
+              $venc, trim((string) ($_POST['metodo_pago'] ?? '')) ?: null, trim((string) ($_POST['notas'] ?? '')) ?: null, $vid,
+            ]);
+      }
       st_log($pdo, $vid, 'editada', 'Venta editada');
       $msg = '✓ Venta actualizada.';
     }
@@ -342,12 +424,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if ($fallidos || $sinWa) $msg = '⚠' . mb_substr($msg, 1);   // que el banner salga en rojo, no en verde
     }
     elseif ($a === 'eliminar_venta') {
+      // Info ANTES de borrar: si es una venta del ADMIN a un REVENDEDOR, al eliminarla hay que quitarle
+      // su cuenta espejo (que ya no la tenga); el perfil del admin, aparte, vuelve al stock del admin.
+      $vinfo = $pdo->query("SELECT revendedor_id, cuenta_id FROM streaming_ventas WHERE id=" . (int) $vid)->fetch(PDO::FETCH_ASSOC) ?: [];
       st_log($pdo, $vid, 'eliminada', 'Venta eliminada desde el panel');   // ANTES del DELETE: el registro no tiene FK y sobrevive
       // AND estado='vendido': sin ese filtro también devolvía a 'libre' los perfiles que la
       // reconciliación de PAC marcó 'inactivo' → stock inflado y vendías lo que no tienes.
+      // #16: el perfil vuelve al stock como P{n} (su posición en la cuenta), NO con el nombre del
+      // cliente que le quedó de la venta.
+      $frows = $pdo->query("SELECT id, cuenta_id FROM streaming_perfiles WHERE venta_id=" . (int) $vid . " AND estado='vendido'")->fetchAll(PDO::FETCH_ASSOC);
       $pdo->prepare("UPDATE streaming_perfiles SET estado='libre', venta_id=NULL WHERE venta_id=? AND estado='vendido'")->execute([$vid]);
+      $rnP = $pdo->prepare("UPDATE streaming_perfiles SET etiqueta=? WHERE id=?");
+      foreach ($frows as $fr) { $pos = (int) $pdo->query("SELECT COUNT(*) FROM streaming_perfiles WHERE cuenta_id=" . (int) $fr['cuenta_id'] . " AND id<=" . (int) $fr['id'])->fetchColumn(); $rnP->execute(['P' . max(1, $pos), (int) $fr['id']]); }
       $pdo->prepare("DELETE FROM streaming_ventas WHERE id=?")->execute([$vid]);
-      $msg = '✓ Venta eliminada (perfil liberado).';
+      // Si la borró el ADMIN y era una venta a un revendedor → quitarle su cuenta espejo de todos lados.
+      $qRev = 0;
+      if (!$esRevCtx && (int) ($vinfo['revendedor_id'] ?? 0) > 0 && (int) ($vinfo['cuenta_id'] ?? 0) > 0 && function_exists('st_rev_quitar_por_origen')) {
+        // Pasa los perfiles del admin de ESTA venta → al revendedor se le quita SOLO ese perfil (no toda
+        // la cuenta si tiene otros perfiles del mismo correo); el bot desasigna solo si no le queda ninguno.
+        try { $qRev = st_rev_quitar_por_origen($pdo, (int) $vinfo['revendedor_id'], (int) $vinfo['cuenta_id'], array_column($frows, 'id')); } catch (Throwable $e) {}
+      }
+      $msg = $qRev > 0
+        ? '✓ Venta eliminada. El perfil vuelve a TU stock y se le quitó al revendedor.'
+        : '✓ Venta eliminada. El perfil vuelve al stock (renombrado P#).';
     }
     // ── LOTE de ventas: renovar / eliminar varias ─────────────────────────────────────────────
     // ids en UN solo campo ("12,45,78"): con ids[] el límite max_input_vars (1000) los trunca EN
@@ -358,19 +457,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if (!$ids) throw new Exception('No seleccionaste ninguna venta.');
       if (count($ids) > 200) throw new Exception('Máximo 200 ventas por lote (seleccionaste ' . count($ids) . ').');
       $in = implode(',', $ids);
-      // PERMISO EN SQL (no fila por fila): aislamiento por dueño SIEMPRE + el empleado nunca toca ventas de revendedores.
-      $gate = 'owner_id=' . $OWNER . ($verCostos ? '' : ' AND (revendedor_id IS NULL OR revendedor_id = 0)');
+      // PERMISO EN SQL (no fila por fila): aislamiento por dueño SIEMPRE (owner_id = contexto). El filtro
+      // extra "sin revendedor_id" es SOLO para EMPLEADOS del admin (que no deben tocar ventas atribuidas a
+      // revendedores). NO aplica al REVENDEDOR: sus PROPIAS ventas llevan revendedor_id = su id, así que ese
+      // filtro la excluía a ella misma → "omitidas: son de revendedores" al intentar borrar SUS ventas. #bugfix
+      $gate = 'owner_id=' . $OWNER;
+      if (!$verCostos && !$esRevCtx) { $gate .= ' AND (revendedor_id IS NULL OR revendedor_id = 0)'; }
 
       $pdo->beginTransaction();
       try {
         // FOR UPDATE: evita la carrera contra compras en vivo mientras liberamos perfiles.
-        // AND estado <> 'cancelada': una venta cancelada NO se revive. st_eliminar_cuenta() las deja
-        // así a propósito (cuenta_id=NULL) para que no queden zombis; sin este filtro el lote las
-        // volvía a poner 'activa' sin cuenta ni perfil → recordatorios al cliente, KPIs falseados y
-        // el revendedor podía volver a gastar saldo renovando una cuenta que ya no existe.
-        $rows = $pdo->query("SELECT id, revendedor_id, fecha_inicio, fecha_vencimiento
+        // El filtro "estado <> 'cancelada'" SOLO aplica al RENOVAR (una venta cancelada NO se revive:
+        // st_eliminar_cuenta() las deja con cuenta_id=NULL para que no queden zombis). Al ELIMINAR sí se
+        // pueden borrar las canceladas (son justamente las FANTASMA que el revendedor quiere limpiar).
+        $estadoGate = ($op === 'eliminar') ? '' : " AND estado <> 'cancelada'";
+        $rows = $pdo->query("SELECT id, revendedor_id, cuenta_id, fecha_inicio, fecha_vencimiento
                                FROM streaming_ventas
-                              WHERE id IN ($in) AND $gate AND estado <> 'cancelada' FOR UPDATE")->fetchAll(PDO::FETCH_ASSOC);
+                              WHERE id IN ($in) AND $gate $estadoGate FOR UPDATE")->fetchAll(PDO::FETCH_ASSOC);
         $saltadas = count($ids) - count($rows);
         $n = 0;
 
@@ -411,20 +514,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         elseif ($op === 'eliminar') {
           if ((string) ($_POST['confirmar'] ?? '') !== 'ELIMINAR') throw new Exception('Escribe ELIMINAR para confirmar.');
+          $nq = 0;   // cuántas cuentas espejo se le quitaron a revendedores
           $libera = $pdo->prepare("UPDATE streaming_perfiles SET estado='libre', venta_id=NULL WHERE venta_id=? AND estado='vendido'");
           $del = $pdo->prepare("DELETE FROM streaming_ventas WHERE id=?");
+          $rnP = $pdo->prepare("UPDATE streaming_perfiles SET etiqueta=? WHERE id=?");   // #16: renombrar a P{n}
           foreach ($rows as $r) {
             st_log($pdo, (int) $r['id'], 'eliminada', 'Eliminada en lote');   // antes del DELETE
+            $frows = $pdo->query("SELECT id, cuenta_id FROM streaming_perfiles WHERE venta_id=" . (int) $r['id'] . " AND estado='vendido'")->fetchAll(PDO::FETCH_ASSOC);
             $libera->execute([(int) $r['id']]);
+            foreach ($frows as $fr) { $pos = (int) $pdo->query("SELECT COUNT(*) FROM streaming_perfiles WHERE cuenta_id=" . (int) $fr['cuenta_id'] . " AND id<=" . (int) $fr['id'])->fetchColumn(); $rnP->execute(['P' . max(1, $pos), (int) $fr['id']]); }
             $del->execute([(int) $r['id']]);
             $n += $del->rowCount();
+            // Si el ADMIN borra una venta a un revendedor → quitarle SOLO ese perfil (no toda la cuenta si
+            // tiene otros del mismo correo); el bot desasigna solo cuando no le quede ninguno de ese correo.
+            if (!$esRevCtx && (int) ($r['revendedor_id'] ?? 0) > 0 && (int) ($r['cuenta_id'] ?? 0) > 0 && function_exists('st_rev_quitar_por_origen')) {
+              try { $nq += st_rev_quitar_por_origen($pdo, (int) $r['revendedor_id'], (int) $r['cuenta_id'], array_column($frows, 'id')); } catch (Throwable $e) {}
+            }
           }
-          $msg = "✓ $n venta(s) eliminadas (perfiles liberados).";
+          $msg = "✓ $n venta(s) eliminadas (perfiles liberados)" . ($nq > 0 ? " · se le quitó $nq cuenta(s) a revendedor(es)" : '') . '.';
+        }
+        elseif ($op === 'precios') {
+          // Cambiar el PRECIO DE VENTA de varias ventas a la vez (útil para revendedor: cambia lo que
+          // cobra a sus clientes sin tocar el costo). Se guarda en precio y precio_venta_cliente.
+          $nuevoPrecio = ($_POST['precio'] ?? '') !== '' ? (float) str_replace(',', '.', (string) $_POST['precio']) : null;
+          if ($nuevoPrecio === null || $nuevoPrecio < 0) throw new Exception('Escribe un precio válido.');
+          $upPr = $pdo->prepare("UPDATE streaming_ventas SET precio=?, precio_venta_cliente=? WHERE id=?");
+          foreach ($rows as $r) { $upPr->execute([$nuevoPrecio, $nuevoPrecio, (int) $r['id']]); $n += $upPr->rowCount(); }
+          $msg = "✓ Precio de venta \$" . number_format($nuevoPrecio, 2) . " aplicado a $n venta(s).";
         }
         else throw new Exception('Operación de lote no válida.');
 
         $pdo->commit();
-        if ($saltadas > 0) $msg .= " $saltadas omitida(s): son de revendedores y no tienes acceso.";
+        if ($saltadas > 0) $msg .= " $saltadas omitida(s): " . ($esRevCtx ? 'no eran tuyas o ya no existen.' : 'son de revendedores y no tienes acceso.');
       } catch (Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
     }
   } catch (Throwable $e) { $msg = '⚠ ' . $e->getMessage(); }
@@ -440,6 +561,10 @@ $hoyStr = date('Y-m-d');
 if ($f === 'vencidas')        $where = "(v.estado='vencida' OR (v.estado='activa' AND v.fecha_vencimiento < '$hoyStr'))";
 elseif ($f === 'pendientes')  $where = "v.entregada=0 AND v.estado<>'cancelada'";
 else                          $where = "1=1";
+// D3: filtro por REVENDEDOR (solo el dueño). rev>0 → ese revendedor · rev=-1 → ventas directas (sin revendedor).
+$revF = isset($_GET['rev']) ? (int) $_GET['rev'] : 0;
+if (!$esRevCtx && $revF > 0)        $where .= " AND v.revendedor_id = " . $revF;
+elseif (!$esRevCtx && $revF === -1) $where .= " AND (v.revendedor_id IS NULL OR v.revendedor_id = 0)";
 $hasEmailActivar = false;
 try { $hasEmailActivar = (bool) $pdo->query("SHOW COLUMNS FROM streaming_ventas LIKE 'email_activar'")->fetch(); } catch (Throwable $e) {}
 $emailSel = $hasEmailActivar ? ', v.email_activar, v.entregada' : ", NULL AS email_activar, v.entregada";
@@ -450,12 +575,17 @@ try {
   // tuyo). NO se toca el COALESCE del cliente ni el $scopeRev (ese es el blindaje que le oculta al
   // empleado las ventas de revendedores).
   $ventas = $pdo->query("SELECT v.id, v.plataforma, v.tipo, COALESCE(cl.nombre, v.cliente_nombre) AS cliente, v.cliente_wa,
-                          v.correo, v.clave, v.perfil, v.pin, v.precio, v.precio_renovacion, v.fecha_vencimiento, v.estado, COALESCE(pl.modo_entrega,'perfil') AS modo,
-                          v.revendedor_id, ru.nombre AS rev_nombre$emailSel
+                          v.correo, v.clave, v.perfil, v.pin, v.precio, v.precio_venta_cliente, v.precio_renovacion, v.fecha_vencimiento, v.estado, COALESCE(pl.modo_entrega,'perfil') AS modo,
+                          v.revendedor_id, ru.nombre AS rev_nombre, ru.telefono AS rev_wa, cc.vencimiento AS corte$emailSel
                          FROM streaming_ventas v LEFT JOIN streaming_clientes cl ON cl.id=v.cliente_id
                          LEFT JOIN streaming_plataformas pl ON pl.nombre=v.plataforma AND pl.owner_id=v.owner_id
+                         LEFT JOIN streaming_cuentas cc ON cc.id = v.cuenta_id
                          LEFT JOIN usuarios ru ON ru.id = v.revendedor_id
-                         WHERE ($where) AND $scopeRev ORDER BY v.id DESC LIMIT 3000")->fetchAll(PDO::FETCH_ASSOC);
+                         WHERE ($where) AND $scopeRev
+                         ORDER BY CASE WHEN v.estado='cancelada' THEN 2
+                                       WHEN (v.estado='vencida' OR v.fecha_vencimiento < '$hoyStr') THEN 0
+                                       ELSE 1 END ASC,
+                                  v.fecha_vencimiento ASC, v.id DESC LIMIT 3000")->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {}
 
 // Cuentas destino para "Reemplazar": solo las que PUEDEN recibir al cliente.
@@ -479,6 +609,17 @@ try {
 $platsList = [];
 foreach ($ventas as $vv) { $p = trim((string) ($vv['plataforma'] ?? '')); if ($p !== '' && !in_array($p, $platsList, true)) $platsList[] = $p; }
 sort($platsList);
+
+// D3: lista de revendedores para el filtro del dueño (solo los que tienen ventas atribuidas).
+$revList = [];
+if (!$esRevCtx) {
+  try {
+    $revList = $pdo->query("SELECT DISTINCT u.id, COALESCE(NULLIF(u.nombre,''), u.username) AS nombre
+                             FROM streaming_ventas v JOIN usuarios u ON u.id = v.revendedor_id
+                            WHERE v.revendedor_id IS NOT NULL AND v.revendedor_id > 0
+                            ORDER BY nombre")->fetchAll(PDO::FETCH_ASSOC);
+  } catch (Throwable $e) { $revList = []; }
+}
 
 stream_head('Ventas', 'ventas');
 ?>
@@ -527,9 +668,18 @@ stream_head('Ventas', 'ventas');
 </div>
 
 <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:16px">
-  <a href="?f=vencidas" class="btn <?= $f === 'vencidas' ? 'primary' : 'ghost' ?>"><i data-lucide="alert-triangle"></i> Vencidas</a>
-  <a href="?f=todas" class="btn <?= $f === 'todas' ? 'primary' : 'ghost' ?>"><i data-lucide="eye"></i> Todas <?= $f === 'todas' ? '✓' : '' ?></a>
-  <a href="?export=csv&f=<?= h($f) ?>" class="btn ghost"><i data-lucide="file-spreadsheet"></i> Excel</a>
+  <a href="?f=vencidas&rev=<?= (int) $revF ?>" class="btn <?= $f === 'vencidas' ? 'primary' : 'ghost' ?>"><i data-lucide="alert-triangle"></i> Vencidas</a>
+  <a href="?f=todas&rev=<?= (int) $revF ?>" class="btn <?= $f === 'todas' ? 'primary' : 'ghost' ?>"><i data-lucide="eye"></i> Todas <?= $f === 'todas' ? '✓' : '' ?></a>
+  <?php if (!$esRevCtx || !function_exists('st_rev_puede_exportar') || st_rev_puede_exportar($pdo)): ?>
+  <a href="?export=csv&f=<?= h($f) ?>&rev=<?= (int) $revF ?>" class="btn ghost"><i data-lucide="file-spreadsheet"></i> Excel</a>
+  <?php endif; ?>
+  <?php if (!$esRevCtx && $revList): ?>
+  <select onchange="location.href='?f=<?= h($f) ?>&rev='+encodeURIComponent(this.value)" class="input" style="width:auto" title="Filtrar por revendedor">
+    <option value="0"<?= $revF === 0 ? ' selected' : '' ?>>Todos los revendedores</option>
+    <option value="-1"<?= $revF === -1 ? ' selected' : '' ?>>— Ventas directas (sin revendedor)</option>
+    <?php foreach ($revList as $rv): ?><option value="<?= (int) $rv['id'] ?>"<?= $revF === (int) $rv['id'] ? ' selected' : '' ?>><?= h($rv['nombre']) ?></option><?php endforeach; ?>
+  </select>
+  <?php endif; ?>
   <select id="fplat" onchange="aplicarFiltro()" class="input" style="width:auto">
     <option value="">Todas las plataformas</option>
     <?php foreach ($platsList as $p): ?><option value="<?= h(mb_strtolower($p)) ?>"><?= h($p) ?></option><?php endforeach; ?>
@@ -547,6 +697,11 @@ stream_head('Ventas', 'ventas');
     <option value="rev">Solo de revendedores</option>
   </select>
   <?php endif; ?>
+  <select id="forden" onchange="ordenarVentas()" class="input" style="width:auto">
+    <option value="">Orden por defecto</option>
+    <option value="venc-asc">Vence primero</option>
+    <option value="venc-desc">Vence último</option>
+  </select>
   <span style="font-size:12px;color:var(--faint)" class="hidden sm:inline">Mostrar <select id="mostrar" onchange="limitar(this.value)" class="input" style="width:auto;display:inline-block;padding:5px 8px"><option>25</option><option>50</option><option>100</option><option value="0">Todas</option></select> registros</span>
   <span style="margin-left:auto"></span>
   <input id="buscar" class="input" style="width:16rem;max-width:55%" placeholder="Buscar cliente, plataforma, correo, revendedor…">
@@ -558,6 +713,7 @@ stream_head('Ventas', 'ventas');
     <b style="color:var(--acc)"><span id="bulk-n">0</span> seleccionada(s)</b>
     <span id="bulk-rev" style="display:none;font-size:11.5px;color:var(--warn)">⚠ <b id="bulk-rev-n">0</b> son de revendedores</span>
     <button type="button" onclick="bulkRenovar()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="refresh-cw" style="width:14px;height:14px"></i> Renovar varias</button>
+    <button type="button" onclick="bulkPrecios()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="dollar-sign" style="width:14px;height:14px"></i> Cambiar precios</button>
     <button type="button" onclick="bulkEliminar()" class="btn ghost" style="padding:5px 12px;font-size:12.5px;color:var(--err);border-color:rgba(239,68,68,.4)"><i data-lucide="trash-2" style="width:14px;height:14px"></i> Eliminar varias</button>
     <button type="button" onclick="document.querySelectorAll('.ck-row').forEach(c=>c.checked=false);ckSync()" class="btn ghost" style="padding:5px 12px;font-size:12.5px;margin-left:auto">Quitar selección</button>
   </div>
@@ -578,9 +734,10 @@ stream_head('Ventas', 'ventas');
       $revNom = $esRev ? (trim((string) ($v['rev_nombre'] ?? '')) ?: ('#' . (int) $v['revendedor_id'])) : '';
       $busca = mb_strtolower(($v['cliente'] ?? '') . ' ' . ($v['plataforma'] ?? '') . ' ' . ($v['correo'] ?? '') . ' ' . $revNom);
       $estKey = $d === null ? 'sin' : ($d < 0 ? 'venc' : ($d <= 5 ? 'pronto' : 'activo'));
+      $esManualV = in_array($v['modo'] ?? 'perfil', ['email_manual', 'invitacion', 'activacion'], true);
     ?>
-      <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower((string) $v['plataforma'])) ?>" data-est="<?= h($estKey) ?>" data-src="<?= $esRev ? 'rev' : 'propia' ?>">
-        <td style="position:sticky;left:0;background:var(--surface);z-index:1"><input type="checkbox" class="ck-row" value="<?= (int) $v['id'] ?>" data-rev="<?= $esRev ? '1' : '0' ?>" onclick="event.stopPropagation();ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"></td>
+      <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower((string) $v['plataforma'])) ?>" data-est="<?= h($estKey) ?>" data-src="<?= $esRev ? 'rev' : 'propia' ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>" data-rev="<?= h(mb_strtolower($revNom)) ?>">
+        <td style="position:sticky;left:0;background:var(--surface);z-index:1"><input type="checkbox" class="ck-row" value="<?= (int) $v['id'] ?>" data-rev="<?= ($esRev && !$esRevCtx) ? '1' : '0' ?>" onclick="event.stopPropagation();ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"></td>
         <td style="font-weight:600">
           <?php if ($esRev): ?>
             <span class="pill acc" style="font-size:9px">REVENDEDOR</span>
@@ -592,49 +749,69 @@ stream_head('Ventas', 'ventas');
         </td>
         <td><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:9px;height:9px;border-radius:50%;background:<?= h($pcolor) ?>"></span><?= h($v['plataforma']) ?></span></td>
         <td style="color:var(--faint);font-size:11.5px">
-        <?php if (($v['modo'] ?? 'perfil') === 'email_manual'):
+        <?php if ($esManualV):
                 $cliEmail = $v['email_activar'] ?: ((strpos((string) $v['perfil'], '@') !== false) ? $v['perfil'] : ''); ?>
           <?php if ($cliEmail): ?><span style="color:var(--text)"><?= h($cliEmail) ?></span><?php else: ?>—<?php endif; ?>
           <?php if ((int) ($v['entregada'] ?? 1) === 0): ?> <span class="pill wait" style="font-size:9px">por activar</span><?php endif; ?>
-          <?php if (!empty($v['correo'])): ?><br><span style="font-size:10px;color:var(--faint)">cuenta: <?= h($v['correo']) ?></span><?php endif; ?>
+          <?php if (!empty($v['clave'])): ?><br><span style="font-size:10px;color:var(--faint)">🔑 <?= h($v['clave']) ?></span><?php endif; ?>
         <?php else: ?>
           <?= h($v['correo'] ?: '—') ?>
+          <?php if (!empty($v['clave'])): ?><br><span style="font-size:10px;color:var(--faint)">🔑 <?= h($v['clave']) ?></span><?php endif; ?>
         <?php endif; ?>
         </td>
-        <td style="color:var(--muted)"><?= (($v['modo'] ?? 'perfil') === 'email_manual') ? '—' : h($v['perfil'] ?: '—') ?></td>
-        <td style="color:var(--muted)"><?= (($v['modo'] ?? 'perfil') === 'email_manual') ? '—' : h($v['pin'] ?: '—') ?></td>
+        <td style="color:var(--muted)"><?= $esManualV ? '—' : h($v['perfil'] ?: '—') ?></td>
+        <td style="color:var(--muted)"><?= $esManualV ? '—' : h($v['pin'] ?: '—') ?></td>
         <td class="amt"><?= $v['precio'] !== null ? '$' . number_format((float) $v['precio'], 2) : '—' ?>
+          <?php if ($esRevCtx && $v['precio_venta_cliente'] !== null && (float) $v['precio_venta_cliente'] > 0 && (float) $v['precio_venta_cliente'] !== (float) $v['precio']): ?>
+            <div style="font-size:10px;color:var(--good);font-weight:600" title="Precio de venta a tu cliente">venta $<?= number_format((float) $v['precio_venta_cliente'], 2) ?></div>
+          <?php endif; ?>
           <?php if ($v['precio_renovacion'] !== null && (float) $v['precio_renovacion'] > 0 && (float) $v['precio_renovacion'] !== (float) $v['precio']): ?>
             <div style="font-size:10px;color:var(--faint);font-weight:400">renov. $<?= number_format((float) $v['precio_renovacion'], 2) ?></div>
           <?php endif; ?>
         </td>
-        <td style="color:var(--muted)"><?= $v['fecha_vencimiento'] ? date('d/m/Y', strtotime($v['fecha_vencimiento'])) : '—' ?></td>
+        <td style="color:var(--muted)"><?= $v['fecha_vencimiento'] ? date('d/m/Y', strtotime($v['fecha_vencimiento'])) : '—' ?>
+          <?php if ($esRevCtx && !empty($v['corte']) && (empty($v['fecha_vencimiento']) || substr((string) $v['corte'], 0, 10) !== substr((string) $v['fecha_vencimiento'], 0, 10))): ?>
+            <div style="font-size:10px;color:var(--faint)" title="Tu fecha de corte, desde que la compraste">🛒 tu corte: <?= h(date('d/m/Y', strtotime((string) $v['corte']))) ?></div>
+          <?php endif; ?>
+        </td>
         <td><span class="<?= $badge ?>"><?= h($txt) ?></span></td>
         <td style="text-align:center;white-space:nowrap">
           <?php
-            $waNum = preg_replace('/\D+/', '', (string) ($v['cliente_wa'] ?? ''));
-            if ($waNum !== ''):
-              $vencTxt = !empty($v['fecha_vencimiento']) ? date('d/m/Y', strtotime((string) $v['fecha_vencimiento'])) : '';
-              $tiendaNom = function_exists('stream_store_cfg') ? stream_store_cfg('nombre_tienda', '') : '';
-              $waMsg = 'Hola ' . trim((string) ($v['cliente'] ?? '')) . ' 👋 '
-                     . ($tiendaNom !== '' ? 'Te escribimos de ' . $tiendaNom . '. ' : '')
-                     . 'Te recordamos que tu servicio de ' . trim((string) ($v['plataforma'] ?? 'streaming'))
-                     . ($vencTxt !== '' ? ' vence el ' . $vencTxt : ' está por vencer')
-                     . '. Escríbenos para renovarlo y que no se te corte. ¡Gracias!';
-              // Mensaje 2: DATOS DE LA COMPRA (credenciales) para enviar por WhatsApp.
-              $datosLineas = ['Hola ' . trim((string) ($v['cliente'] ?? '')) . ' 👋 Estos son los datos de tu ' . trim((string) ($v['plataforma'] ?? 'servicio')) . ':'];
-              if (trim((string) ($v['correo'] ?? '')) !== '') { $datosLineas[] = '📧 Correo: ' . trim((string) $v['correo']); }
-              if (trim((string) ($v['clave'] ?? '')) !== '')  { $datosLineas[] = '🔑 Clave: ' . trim((string) $v['clave']); }
-              if (trim((string) ($v['perfil'] ?? '')) !== '') { $datosLineas[] = '👤 Perfil: ' . trim((string) $v['perfil']); }
-              if (trim((string) ($v['pin'] ?? '')) !== '')    { $datosLineas[] = '🔒 PIN: ' . trim((string) $v['pin']); }
-              if ($vencTxt !== '') { $datosLineas[] = '📅 Vence: ' . $vencTxt; }
-              $datosLineas[] = '¡Gracias por tu compra!';
-              $waDatos = implode("\n", $datosLineas);
+            $vencTxt = !empty($v['fecha_vencimiento']) ? date('d/m/Y', strtotime((string) $v['fecha_vencimiento'])) : '';
+            if (!empty($v['revendedor_id'])):
+              // Venta de REVENDEDOR → los avisos van AL REVENDEDOR (icono AZUL), no a su cliente.
+              $revWa = preg_replace('/\D+/', '', (string) ($v['rev_wa'] ?? ''));
+              if ($revWa !== ''):
+                $waRev = function_exists('stream_msg_aviso_revendedor') ? stream_msg_aviso_revendedor(['plataforma' => $v['plataforma'], 'cliente_nombre' => $v['cliente'], 'fecha_vencimiento' => $v['fecha_vencimiento']]) : ('Aviso: el ' . $v['plataforma'] . ' de ' . $v['cliente'] . ($vencTxt ? ' vence el ' . $vencTxt : '') . '. Avísale a tu cliente.');
           ?>
-            <a href="https://wa.me/<?= h($waNum) ?>?text=<?= h(rawurlencode($waDatos)) ?>" target="_blank" rel="noopener" class="iconbtn" style="width:32px;height:32px;color:#2563eb" title="Enviar datos de la compra por WhatsApp"><i data-lucide="send"></i></a>
-            <a href="https://wa.me/<?= h($waNum) ?>?text=<?= h(rawurlencode($waMsg)) ?>" target="_blank" rel="noopener" class="iconbtn" style="width:32px;height:32px;color:#16a34a" title="Avisar vencimiento por WhatsApp"><i data-lucide="message-circle"></i></a>
+            <a href="https://wa.me/<?= h($revWa) ?>?text=<?= h(rawurlencode($waRev)) ?>" target="_blank" rel="noopener" class="iconbtn" style="width:32px;height:32px;color:#2563eb" title="Avisar vencimiento al revendedor"><i data-lucide="message-circle"></i></a>
+          <?php else: ?><span style="font-size:10px;color:var(--faint)" title="El revendedor no tiene WhatsApp cargado">sin WA</span><?php endif; ?>
+          <button onclick="return commNotif(<?= (int) $v['id'] ?>)" class="iconbtn" style="width:32px;height:32px;color:#2563eb" title="Mensaje personalizado (datos, etc.)"><i data-lucide="message-square-plus"></i></button>
+          <?php else:
+              // Venta a CLIENTE → avisos al cliente (icono VERDE). Datos de la compra + recordatorio.
+              $waNum = preg_replace('/\D+/', '', (string) ($v['cliente_wa'] ?? ''));
+              if ($waNum !== ''):
+                $tiendaNom = function_exists('stream_store_cfg') ? stream_store_cfg('nombre_tienda', '') : '';
+                $waMsg = 'Hola ' . trim((string) ($v['cliente'] ?? '')) . ' 👋 '
+                       . ($tiendaNom !== '' ? 'Te escribimos de ' . $tiendaNom . '. ' : '')
+                       . 'Te recordamos que tu servicio de ' . trim((string) ($v['plataforma'] ?? 'streaming'))
+                       . ($vencTxt !== '' ? ' vence el ' . $vencTxt : ' está por vencer')
+                       . '. Escríbenos para renovarlo y que no se te corte. ¡Gracias!';
+                $datosLineas = ['Hola ' . trim((string) ($v['cliente'] ?? '')) . ' 👋 Estos son los datos de tu ' . trim((string) ($v['plataforma'] ?? 'servicio')) . ':'];
+                if (trim((string) ($v['correo'] ?? '')) !== '') { $datosLineas[] = '📧 Correo: ' . trim((string) $v['correo']); }
+                if (trim((string) ($v['clave'] ?? '')) !== '')  { $datosLineas[] = '🔑 Clave: ' . trim((string) $v['clave']); }
+                if (trim((string) ($v['perfil'] ?? '')) !== '') { $datosLineas[] = '👤 Perfil: ' . trim((string) $v['perfil']); }
+                if (trim((string) ($v['pin'] ?? '')) !== '')    { $datosLineas[] = '🔒 PIN: ' . trim((string) $v['pin']); }
+                if ($vencTxt !== '') { $datosLineas[] = '📅 Vence: ' . $vencTxt; }
+                $datosLineas[] = '¡Gracias por tu compra!';
+                $waDatos = implode("\n", $datosLineas);
+          ?>
+            <a href="https://wa.me/<?= h($waNum) ?>?text=<?= h(rawurlencode($waDatos)) ?>" target="_blank" rel="noopener" class="iconbtn" style="width:32px;height:32px;color:#16a34a" title="Enviar datos de la compra al cliente"><i data-lucide="send"></i></a>
+            <a href="https://wa.me/<?= h($waNum) ?>?text=<?= h(rawurlencode($waMsg)) ?>" target="_blank" rel="noopener" class="iconbtn" style="width:32px;height:32px;color:#16a34a" title="Avisar vencimiento al cliente"><i data-lucide="message-circle"></i></a>
           <?php endif; ?>
-          <button onclick="menu(event,<?= (int) $v['id'] ?>)" class="iconbtn" style="width:32px;height:32px"><i data-lucide="more-vertical"></i></button>
+          <button onclick="return commNotif(<?= (int) $v['id'] ?>)" class="iconbtn" style="width:32px;height:32px;color:#16a34a" title="Mensaje personalizado por WhatsApp"><i data-lucide="message-square-plus"></i></button>
+          <?php endif; ?>
+          <button onclick="menu(event,<?= (int) $v['id'] ?>)" class="iconbtn" style="width:32px;height:32px" title="Más acciones (personalizado, renovar, editar…)"><i data-lucide="more-vertical"></i></button>
         </td>
       </tr>
     <?php endforeach; ?>
@@ -667,14 +844,15 @@ stream_head('Ventas', 'ventas');
       <!-- Este cliente es de un REVENDEDOR: escribirle desde el número de CONEC.VE le revela que su
            proveedor nos compra a nosotros. Se avisa ANTES de enviar, no después. -->
       <div id="n-rev" style="display:none;padding:10px 12px;border-radius:9px;background:rgba(245,166,35,.10);border:1px solid rgba(245,166,35,.35);font-size:12px;color:var(--warn);margin-bottom:12px;line-height:1.6">
-        ⚠ <b>Este cliente NO es tuyo: es de <span id="n-rev-nom">un revendedor</span>.</b><br>
-        Si le escribes, le llega un mensaje del número de CONEC.VE con un link de conecta2ve.com y se
-        entera de que su proveedor nos compra a nosotros. Normalmente el revendedor le avisa a su gente.
+        ⚠ <b>Este cliente es de <span id="n-rev-nom">un revendedor</span>.</b><br>
+        Normalmente es el revendedor quien avisa a su propia gente. Puedes enviarle el aviso al
+        <b>revendedor</b> para que él lo reenvíe a su cliente.
       </div>
       <div class="field"><label>Tipo de Mensaje</label>
         <select id="n-tipo" onchange="rellenarMsg()" class="input"><option value="credenciales">Datos de Acceso</option><option value="recordatorio">Recordatorio de renovación</option><option value="custom">Personalizado</option></select></div>
       <div class="field"><label>Mensaje</label><textarea name="mensaje" id="n-msg" rows="7" class="input" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></textarea></div>
-      <div style="display:flex;justify-content:flex-end;gap:8px"><button type="button" onclick="copiar()" class="btn ghost"><i data-lucide="copy"></i> Copiar Datos</button>
+      <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap"><button type="button" onclick="copiar()" class="btn ghost"><i data-lucide="copy"></i> Copiar Datos</button>
+        <a id="n-rev-wa" href="#" target="_blank" rel="noopener" class="btn ghost" style="display:none;color:#2563eb"><i data-lucide="message-circle"></i> Avisar al revendedor</a>
         <button class="btn primary"><i data-lucide="message-circle"></i> Enviar por WhatsApp</button></div>
     </form>
   </div>
@@ -704,6 +882,15 @@ stream_head('Ventas', 'ventas');
       <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Vas a eliminar <b id="le-n" style="color:var(--err)">0</b> venta(s). Los perfiles se liberan. <b>Esto no se deshace.</b></p>
       <div class="field" style="margin-bottom:12px"><label class="flbl">Escribe <b>ELIMINAR</b> para confirmar</label><input name="confirmar" id="le-conf" class="input" placeholder="ELIMINAR" autocomplete="off"></div>
       <button class="btn" style="width:100%;background:var(--err);color:#fff">Eliminar definitivamente</button>
+    </form>
+  </div>
+
+  <div id="m-lote-precios" class="hidden modal" style="max-width:26rem">
+    <div class="modal-hd"><h3><i data-lucide="dollar-sign"></i> Cambiar precio de venta</h3><button onclick="cerrar()" class="modal-x"><i data-lucide="x"></i></button></div>
+    <form method="post" class="modal-bd"><input type="hidden" name="_csrf" value="<?= h(csrf_token()) ?>"><input type="hidden" name="accion" value="lote_ventas"><input type="hidden" name="op" value="precios"><input type="hidden" name="ids" id="lp-ids"><input type="hidden" name="f" value="<?= h($f) ?>">
+      <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Nuevo <b>precio de venta</b> para <b id="lp-n" style="color:var(--acc)">0</b> venta(s). Es lo que le cobras a tu cliente (no el costo).</p>
+      <div class="field" style="margin-bottom:12px"><label class="flbl">Precio de venta</label><div style="display:flex"><span style="padding:0 10px;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--border);border-right:0;border-radius:9px 0 0 9px;color:var(--muted)">$</span><input name="precio" type="number" step="0.01" min="0" class="input" style="border-radius:0 9px 9px 0" placeholder="Ej: 3.50" required></div></div>
+      <button class="btn primary" style="width:100%">Aplicar a todas</button>
     </form>
   </div>
 
@@ -795,8 +982,9 @@ stream_head('Ventas', 'ventas');
       <div class="field" style="margin:0"><label>Perfil</label><input name="perfil" id="e-perfil" class="input"></div>
       <div class="field" style="margin:0"><label>PIN</label><input name="pin" id="e-pin" class="input"></div>
       <div class="field" style="margin:0"><label>Fecha de Renovación</label><input type="date" name="fecha_vencimiento" id="e-venc" class="input"></div>
-      <div class="field" style="margin:0"><label>Precio</label><div style="display:flex"><span style="padding:0 10px;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--border);border-right:0;border-radius:9px 0 0 9px;color:var(--muted)">$</span><input name="precio" id="e-precio" type="number" step="0.01" class="input" style="border-radius:0 9px 9px 0"></div></div>
+      <div class="field" style="margin:0"><label><?= $esRevCtx ? 'Precio de venta (a tu cliente)' : 'Precio' ?></label><div style="display:flex"><span style="padding:0 10px;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--border);border-right:0;border-radius:9px 0 0 9px;color:var(--muted)">$</span><input name="precio" id="e-precio" type="number" step="0.01" class="input" style="border-radius:0 9px 9px 0"></div></div>
       <div class="field" style="margin:0"><label>Método de Pago</label><input name="metodo_pago" id="e-met" class="input" placeholder="Sin especificar"></div>
+      <div id="e-limite-nota" class="md:col-span-2" style="display:none;font-size:11px;color:var(--faint);margin:0">Puedes cambiar <b>nombre y PIN</b> del perfil máx. <b>2 veces</b> por periodo (se reinicia al renovar). <b>Plataforma, correo y clave</b> solo los cambia la tienda.</div>
       <div class="md:col-span-2" style="display:flex;justify-content:flex-end;gap:8px;padding-top:2px"><button type="button" onclick="cerrar()" class="btn ghost">Cancelar</button><button class="btn primary">Guardar Cambios</button></div>
     </form>
   </div>
@@ -890,17 +1078,22 @@ stream_head('Ventas', 'ventas');
       : 'No hay cuentas con perfiles libres en esa plataforma.';
     sel.disabled = !lista.length;
   }
-  let N_REV='';   // nombre del revendedor dueño de la venta abierta ('' = es venta tuya)
+  let N_REV='', N_REV_WA='', N_REV_MSG='';   // datos del revendedor dueño de la venta ('' = venta tuya)
+  function commNotif(id){ VID=id; mNotificar(); return false; }   // abrir Notificar (mensaje personalizado) desde la fila
   async function mNotificar(){ m3.classList.add('hidden'); setId('n-id'); const r=await fetchVenta(); if(!r.ok)return; VMSGS=r.msgs;
     const v=r.venta;
     // Ojo: le vas a escribir al cliente DEL REVENDEDOR, no al tuyo. Se avisa antes, no después.
     N_REV = (v.revendedor_id && Number(v.revendedor_id)>0) ? (v.rev_nombre||'un revendedor') : '';
+    N_REV_WA = v.rev_wa || ''; N_REV_MSG = (r.msgs && r.msgs.aviso_rev) || '';
     document.getElementById('n-rev').style.display = N_REV?'block':'none';
     if(N_REV) document.getElementById('n-rev-nom').textContent = N_REV;
+    // #15: enlace para avisar AL REVENDEDOR (para que él avise a su cliente), si tiene WhatsApp.
+    const brw=document.getElementById('n-rev-wa');
+    if(brw){ if(N_REV && N_REV_WA){ brw.href='https://wa.me/'+N_REV_WA+'?text='+encodeURIComponent(N_REV_MSG||''); brw.style.display=''; } else { brw.style.display='none'; } }
     document.getElementById('n-tipo').value='credenciales'; rellenarMsg(); abrir('m-notif'); }
   function nConfirmar(){
     if(!N_REV) return true;
-    return confirm('Este cliente es de '+N_REV+', no tuyo.\n\nSi le escribes desde CONEC.VE se entera de que su proveedor nos compra a nosotros.\n\n¿Enviar igual?');
+    return confirm('Este cliente es de '+N_REV+' (un revendedor).\n\nNormalmente es el revendedor quien avisa a su propia gente.\n\n¿Enviar igual?');
   }
   function rellenarMsg(){ const t=document.getElementById('n-tipo').value; const ta=document.getElementById('n-msg'); if(t==='custom'){ if(!ta.value) ta.value=''; } else ta.value=VMSGS[t]||''; }
   function copiar(){ navigator.clipboard.writeText(document.getElementById('n-msg').value); }
@@ -912,10 +1105,22 @@ stream_head('Ventas', 'ventas');
     abrir('m-renovar'); }
   async function mRegistro(){ m3.classList.add('hidden'); abrir('m-registro'); const b=document.getElementById('reg-body'); b.innerHTML='Cargando…'; const r=await fetch('?ajax=registro&id='+VID).then(x=>x.json()); b.innerHTML = r.items&&r.items.length? r.items.map(i=>`<div style="border-left:2px solid var(--accent);padding:4px 0 4px 12px;margin-bottom:6px"><div style="font-weight:600;text-transform:capitalize">${esc(i.evento)}</div><div style="font-size:12px;color:var(--muted)">${esc(i.descripcion)}</div><div style="font-size:10.5px;color:var(--faint)">${new Date(i.creado_en.replace(' ','T')).toLocaleString('es-VE')} ${i.quien?'· '+esc(i.quien):''}</div></div>`).join('') : '<div class="empty">Sin movimientos registrados.</div>'; }
   async function mNota(){ m3.classList.add('hidden'); setId('nt-id'); abrir('m-nota'); const r=await fetch('?ajax=notas&id='+VID).then(x=>x.json()); const p=document.getElementById('nt-prev'); p.innerHTML=r.items&&r.items.length? r.items.map(i=>`<div style="background:var(--surface-2);border-radius:8px;padding:8px;color:var(--muted)">${esc(i.nota)} <span style="color:var(--faint)">· ${new Date(i.creado_en.replace(' ','T')).toLocaleDateString('es-VE')}</span></div>`).join('') : ''; }
+  const ES_REV = <?= $esRevCtx ? 'true' : 'false' ?>;
   async function mEditar(){ m3.classList.add('hidden'); setId('e-id'); const r=await fetchVenta(); if(!r.ok)return; const v=r.venta;
-    e_set('e-cli',v.cliente_nombre); e_set('e-wa',v.cliente_wa); e_set('e-plat',v.plataforma); e_set('e-correo',v.correo); e_set('e-clave',v.clave); e_set('e-perfil',v.perfil); e_set('e-pin',v.pin); e_set('e-precio',v.precio); e_set('e-met',v.metodo_pago); document.getElementById('e-venc').value=(v.fecha_vencimiento||'').slice(0,10); abrir('m-editar'); }
+    e_set('e-cli',v.cliente_nombre); e_set('e-wa',v.cliente_wa); e_set('e-plat',v.plataforma); e_set('e-correo',v.correo); e_set('e-clave',v.clave); e_set('e-perfil',v.perfil); e_set('e-pin',v.pin);
+    // El revendedor ve/edita su PRECIO DE VENTA (no el costo): usa precio_venta_cliente si existe.
+    e_set('e-precio', (ES_REV && v.precio_venta_cliente!=null && v.precio_venta_cliente!=='') ? v.precio_venta_cliente : v.precio);
+    e_set('e-met',v.metodo_pago); document.getElementById('e-venc').value=(v.fecha_vencimiento||'').slice(0,10);
+    // El revendedor (perfil): SÍ edita cliente/WhatsApp/precio/método/fecha y NOMBRE-PIN del perfil
+    // (máx 2 veces, se reinicia al renovar). SOLO bloquea plataforma / correo / clave. Cuenta completa: todo.
+    var soloCliente = ES_REV && (v.tipo !== 'cuenta');
+    ['e-plat','e-correo','e-clave'].forEach(function(id){ var el=document.getElementById(id); if(el){ el.readOnly=soloCliente; el.style.opacity=soloCliente?'.5':'1'; el.title=soloCliente?'Solo lo cambia la tienda':''; } });
+    ['e-perfil','e-pin','e-met'].forEach(function(id){ var el=document.getElementById(id); if(el){ el.readOnly=false; el.style.opacity='1'; el.title=''; } });
+    var nota=document.getElementById('e-limite-nota'); if(nota) nota.style.display=soloCliente?'block':'none';
+    abrir('m-editar'); }
   function e_set(id,val){ document.getElementById(id).value = val==null?'':val; }
   function mEliminar(){ m3.classList.add('hidden'); setId('el-id'); abrir('m-eliminar'); }
+  function ordenarVentas(){ const v=document.getElementById('forden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const mul=v==='venc-desc'?-1:1; rows.sort((a,b)=>((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul); rows.forEach(r=>tb.appendChild(r)); aplicarFiltro(); }
   let LIM=25;
   function aplicarFiltro(){
     const q=(document.getElementById('buscar').value||'').toLowerCase().trim();
@@ -954,6 +1159,7 @@ stream_head('Ventas', 'ventas');
   }
   function bulkRenovar(){ const i=ckIds(); if(!i.length) return; document.getElementById('lr-ids').value=i.join(','); document.getElementById('lr-n').textContent=i.length; const nr=ckMarcados().filter(c=>c.dataset.rev==='1').length; document.getElementById('lr-rev').style.display=nr>0?'':'none'; document.getElementById('lr-rev-n').textContent=nr; abrir('m-lote-renovar'); }
   function bulkEliminar(){ const i=ckIds(); if(!i.length) return; document.getElementById('le-ids').value=i.join(','); document.getElementById('le-n').textContent=i.length; document.getElementById('le-conf').value=''; abrir('m-lote-eliminar'); }
+  function bulkPrecios(){ const i=ckIds(); if(!i.length) return; document.getElementById('lp-ids').value=i.join(','); document.getElementById('lp-n').textContent=i.length; abrir('m-lote-precios'); }
   function limitar(n){ LIM=parseInt(n)||0; aplicarFiltro(); }
   document.getElementById('buscar')?.addEventListener('input',aplicarFiltro);
   aplicarFiltro();

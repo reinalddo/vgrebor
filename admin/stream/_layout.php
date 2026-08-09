@@ -13,10 +13,14 @@ if (!defined('CONEC_ADMIN')) { http_response_code(403); exit('Acceso denegado');
 
 /** Menú lateral — solo las secciones que el dueño pidió (Dashboard, Ventas, Clientes, Plataformas). */
 function stream_nav_items(): array {
-  // Contador de activaciones manuales pendientes (Canva/correo) para el badge del menú.
-  $pa = 0;
-  try { $pa = (int) db()->query("SELECT COUNT(*) FROM streaming_ventas WHERE entregada=0 AND estado<>'cancelada' AND email_activar IS NOT NULL AND email_activar<>''")->fetchColumn(); } catch (Throwable $e) {}
   $esRev = function_exists('stream_ctx') && stream_ctx() === 'revendedor';
+  // Contador de activaciones manuales pendientes (Canva/correo) para el badge del menú.
+  // SCOPE por owner del contexto: así el badge cuadra con lo que muestra pendientes.php (antes contaba
+  // la venta del admin Y la del revendedor → decía 2 cuando era 1). El ADMIN aprueba; el REVENDEDOR
+  // solo VE si las suyas están aprobadas o pendientes (vista de solo lectura).
+  $ownPa = (int) (function_exists('stream_owner_id') ? stream_owner_id() : 0);
+  $pa = 0;
+  try { $pa = (int) db()->query("SELECT COUNT(*) FROM streaming_ventas WHERE owner_id=$ownPa AND entregada=0 AND estado<>'cancelada' AND email_activar IS NOT NULL AND email_activar<>''")->fetchColumn(); } catch (Throwable $e) {}
   $items = [
     ['key' => 'dashboard', 'label' => 'Dashboard', 'icon' => 'layout-dashboard', 'href' => 'dashboard.php'],
   ];
@@ -26,14 +30,16 @@ function stream_nav_items(): array {
     $items[] = ['key' => 'saldo', 'label' => 'Mi saldo', 'icon' => 'wallet', 'href' => 'saldo.php'];
   }
   $items = array_merge($items, [
-    ['key' => 'ventas', 'label' => 'Ventas', 'icon' => 'shopping-cart', 'href' => 'ventas.php', 'sub' => [
+    ['key' => 'ventas', 'label' => 'Ventas' . ($pa ? " ($pa)" : ''), 'icon' => 'shopping-cart', 'href' => 'ventas.php', 'sub' => array_values(array_filter([
       ['key' => 'ventas', 'label' => 'Todas las Ventas', 'href' => 'ventas.php'],
-      ['key' => 'ventas-pendientes', 'label' => 'Pendientes de aprobar' . ($pa ? " ($pa)" : ''), 'href' => 'pendientes.php'],
+      // ADMIN: activa/aprueba. REVENDEDOR: solo VE si las suyas están aprobadas o pendientes.
+      ['key' => 'ventas-pendientes', 'label' => ($esRev ? 'Pendientes' : 'Pendientes de aprobar') . ($pa ? " ($pa)" : ''), 'href' => 'pendientes.php'],
       ['key' => 'ventas-vencimientos', 'label' => 'Vencimientos', 'href' => 'ventas.php?f=vencidas'],
-    ]],
+    ]))],
     ['key' => 'clientes', 'label' => 'Clientes', 'icon' => 'users', 'href' => 'clientes.php'],
     ['key' => 'plataformas', 'label' => 'Plataformas', 'icon' => 'layers', 'href' => 'cuentas.php', 'sub' => array_values(array_filter([
       ['key' => 'cuentas', 'label' => 'Cuentas', 'href' => 'cuentas.php'],
+      ['key' => 'perfiles', 'label' => 'Perfiles', 'href' => 'perfiles.php'],
       ['key' => 'tipos', 'label' => 'Tipos de Plataforma', 'href' => 'tipos.php'],
       (function_exists('admin_es_admin') && admin_es_admin()) ? ['key' => 'proveedores', 'label' => 'Proveedores', 'href' => 'proveedores.php'] : null,
     ]))],
@@ -46,6 +52,13 @@ function stream_nav_items(): array {
     $items[] = ['key' => 'recargas', 'label' => 'Recargas', 'icon' => 'zap', 'href' => 'recargas.php'];
     $items[] = ['key' => 'mi-api', 'label' => 'Mi API', 'icon' => 'code', 'href' => 'mi-api.php'];
   }
+  // Historial de notificaciones/cambios (Fase 3), con badge de no leídas. Va al final para todos.
+  $nn = 0;
+  try {
+    require_once __DIR__ . '/../../api/_rev_avisos.php';
+    if (function_exists('stream_notif_no_leidas')) $nn = (int) stream_notif_no_leidas(db(), (int) stream_owner_id());
+  } catch (Throwable $e) { $nn = 0; }
+  $items[] = ['key' => 'notificaciones', 'label' => 'Notificaciones' . ($nn ? " ($nn)" : ''), 'icon' => 'bell', 'href' => 'notificaciones.php'];
   return $items;
 }
 
@@ -64,6 +77,24 @@ function stream_store_cfg(string $clave, string $default = ''): string {
 }
 
 function stream_head(string $title, string $active = '', bool $fullBleed = false): void {
+  // GATE de PAUSA: un revendedor DESACTIVADO (rev_activo=0) NO puede usar su panel — se le muestra un
+  // aviso y no se carga la página. Conserva todos sus datos; solo el admin lo reactiva. (Antes la pausa
+  // solo bloqueaba comprar/recargar; el cliente pidió que "desactivar" corte el acceso completo.)
+  if (function_exists('stream_ctx') && stream_ctx() === 'revendedor') {
+    $oid = (int) (function_exists('stream_owner_id') ? stream_owner_id() : 0);
+    $pausado = false;
+    if ($oid > 0) { try { $pausado = ((int) (db()->query("SELECT COALESCE(rev_activo,1) FROM usuarios WHERE id=$oid")->fetchColumn() ?? 1)) === 0; } catch (Throwable $e) { $pausado = false; } }
+    if ($pausado) {
+      http_response_code(403);
+      echo '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cuenta en pausa</title></head>'
+         . '<body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b0f16;color:#e7eaf0;display:grid;place-items:center;min-height:100vh;margin:0">'
+         . '<div style="max-width:430px;text-align:center;padding:32px"><div style="font-size:46px">⏸</div>'
+         . '<h1 style="font-size:21px;margin:.4em 0">Tu cuenta está en pausa</h1>'
+         . '<p style="color:#98a2b3;line-height:1.65">El administrador pausó temporalmente tu acceso al panel. Tus cuentas, ventas y saldo se conservan intactos. Contáctalo para reactivarla.</p>'
+         . '<p style="margin-top:22px"><a href="/logout.php" style="color:#8ea2ff">Cerrar sesión</a></p></div></body></html>';
+      exit;
+    }
+  }
   $u = function_exists('get_current_user_data') ? (get_current_user_data() ?: []) : [];
   $nombre = (string) ($u['nombre'] ?? 'Admin');
   $primer = trim(explode(' ', trim($nombre))[0] ?? 'Admin'); if ($primer === '') $primer = 'Admin';
@@ -299,6 +330,7 @@ function stream_head(string $title, string $active = '', bool $fullBleed = false
       <div class="crumb">Streaming <span>/</span> <b><?= h($title) ?></b></div>
       <div class="tbtns">
         <?php $PANEL_ACTIVO = 'streaming'; include dirname(__DIR__) . '/_panel_switch.php'; ?>
+        <a href="https://streaming.reborxstore.com" target="_blank" rel="noopener" class="iconbtn" title="Gestión de códigos (bot)"><i data-lucide="terminal-square"></i></a>
         <button id="theme-toggle" class="iconbtn" title="Cambiar tema"><i data-lucide="moon"></i></button>
         <?php if ($storeWaDigits !== ''): ?><a href="https://wa.me/<?= h($storeWaDigits) ?>" target="_blank" rel="noopener" class="iconbtn" style="color:#16a34a" title="WhatsApp de la tienda"><i data-lucide="message-circle"></i></a><?php endif; ?>
         <div class="user"><div class="ava"><?= h($ini) ?></div><div><b><?= h($primer) ?></b><span>Streaming</span></div></div>

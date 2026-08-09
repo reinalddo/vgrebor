@@ -23,11 +23,16 @@ $saldo = wallet_saldo($pdo, $uid);
 $juegos = [];
 try {
     $rows = $pdo->query("SELECT p.id, p.juego_id, p.nombre, p.cantidad, p.precio_revendedor, p.imagen_icono,
-            j.nombre AS juego_nombre
+            j.nombre AS juego_nombre, j.sticker_imagen AS juego_img, j.sticker_icono AS juego_icono, j.sticker_color_fondo AS juego_color
         FROM juego_paquetes p JOIN juegos j ON j.id = p.juego_id
         WHERE p.activo = 1 AND j.activo = 1 AND p.precio_revendedor IS NOT NULL AND p.precio_revendedor > 0
         ORDER BY j.nombre, p.orden, p.id")->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($rows as $r) { $juegos[$r['juego_nombre']][] = $r; }
+    // Guarda la imagen/color del juego junto al grupo (para el icono tipo app antes del título).
+    foreach ($rows as $r) {
+        $jn = $r['juego_nombre'];
+        if (!isset($juegos[$jn])) $juegos[$jn] = ['img' => $r['juego_img'] ?? '', 'icono' => $r['juego_icono'] ?? '', 'color' => $r['juego_color'] ?? '', 'paquetes' => []];
+        $juegos[$jn]['paquetes'][] = $r;
+    }
 } catch (Throwable $e) {}
 
 $recargarUrl = function_exists('app_path') ? app_path('/api/revendedor/recargar.php') : '/api/revendedor/recargar.php';
@@ -47,13 +52,29 @@ stream_head('Recargas', 'recargas');
     Aún no hay recargas con precio de revendedor. El administrador debe fijarlos en «Precios recargas».
   </div>
 <?php else: ?>
-  <?php foreach ($juegos as $juegoNombre => $paquetes): ?>
+  <?php foreach ($juegos as $juegoNombre => $g):
+    $paquetes = $g['paquetes'];
+    // Imagen del juego (tipo app) para el círculo antes del título.
+    $jImg = trim((string) ($g['img'] ?? '')) ?: trim((string) ($g['icono'] ?? ''));
+    $jColor = trim((string) ($g['color'] ?? '')) ?: '#3f4fb5';
+    $jIni = mb_strtoupper(mb_substr($juegoNombre, 0, 1)); ?>
     <div class="card" style="margin-bottom:14px;padding:0;overflow:hidden">
-      <div class="card-hd" style="padding:12px 16px"><i data-lucide="gamepad-2"></i><h2><?= h($juegoNombre) ?></h2><span class="pill-count"><?= count($paquetes) ?></span></div>
+      <div class="card-hd" style="padding:12px 16px;display:flex;align-items:center;gap:10px">
+        <?php if ($jImg !== ''): ?>
+          <img src="<?= h($jImg) ?>" alt="" style="width:34px;height:34px;border-radius:50%;object-fit:cover;background:var(--surface-2);border:1px solid var(--border)">
+        <?php else: ?>
+          <span style="width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-weight:800;color:#fff;background:<?= h($jColor) ?>;flex:0 0 auto"><?= h($jIni) ?></span>
+        <?php endif; ?>
+        <h2 style="margin:0"><?= h($juegoNombre) ?></h2><span class="pill-count"><?= count($paquetes) ?></span>
+      </div>
       <div style="padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
-        <?php foreach ($paquetes as $p): ?>
+        <?php foreach ($paquetes as $p): $pImg = trim((string) ($p['imagen_icono'] ?? '')); ?>
           <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:8px">
-            <div style="font-weight:800"><?= h($p['nombre']) ?></div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <?php if ($pImg !== ''): ?><img src="<?= h($pImg) ?>" alt="" style="width:26px;height:26px;border-radius:7px;object-fit:cover;background:var(--surface-2);flex:0 0 auto">
+              <?php elseif ($jImg !== ''): ?><img src="<?= h($jImg) ?>" alt="" style="width:26px;height:26px;border-radius:7px;object-fit:cover;background:var(--surface-2);flex:0 0 auto"><?php endif; ?>
+              <div style="font-weight:800"><?= h($p['nombre']) ?></div>
+            </div>
             <div class="muted" style="font-size:12px"><?= h($p['cantidad'] ?: '') ?></div>
             <div class="tnum" style="font-size:18px;font-weight:800">$<?= number_format((float) $p['precio_revendedor'], 2) ?></div>
             <button class="btn primary" style="padding:7px 10px"
@@ -74,8 +95,10 @@ stream_head('Recargas', 'recargas');
       <button onclick="rcCerrar()" class="iconbtn"><i data-lucide="x"></i></button>
     </div>
     <p class="muted" style="font-size:13px;margin:0 0 14px" id="rcInfo"></p>
-    <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px">ID del jugador</label>
-    <input id="rcPlayer" placeholder="ID del jugador / usuario" style="width:100%;margin-bottom:12px;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
+    <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px">ID del jugador <span style="color:var(--faint);font-weight:400">(las gift cards no lo necesitan)</span></label>
+    <input id="rcPlayer" placeholder="ID del jugador / usuario (vacío en gift cards)" style="width:100%;margin-bottom:12px;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
+    <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px">Zona / ID de servidor <span style="color:var(--faint);font-weight:400">(solo si el juego lo pide, ej. Mobile Legends)</span></label>
+    <input id="rcZone" placeholder="Ej: 2001 (déjalo vacío si no aplica)" style="width:100%;margin-bottom:12px;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
     <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px">Cantidad</label>
     <input id="rcQty" type="number" min="1" max="50" value="1" style="width:100%;margin-bottom:16px;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
     <button id="rcBtn" class="btn primary" style="width:100%" onclick="rcConfirmar()"><i data-lucide="check"></i> Confirmar y pagar con saldo</button>
@@ -92,6 +115,7 @@ function rcComprar(p){
   document.getElementById('rcTitle').textContent = 'Recargar ' + p.juego;
   document.getElementById('rcInfo').textContent = p.paq + ' · $' + p.precio.toFixed(2) + ' por unidad (se descuenta de tu saldo).';
   document.getElementById('rcPlayer').value = '';
+  { const z = document.getElementById('rcZone'); if (z) z.value = ''; }
   document.getElementById('rcQty').value = 1;
   document.getElementById('rcResult').innerHTML = '';
   document.getElementById('rcBtn').disabled = false;
@@ -104,27 +128,31 @@ document.getElementById('mRec').addEventListener('click', e => { if (e.target.id
 async function rcConfirmar(){
   if (!rcSel) return;
   const player = document.getElementById('rcPlayer').value.trim();
+  const zone = (document.getElementById('rcZone')?.value || '').trim();
   const qty = Math.max(1, parseInt(document.getElementById('rcQty').value||'1'));
   const res = document.getElementById('rcResult');
-  if (!player){ res.innerHTML = '<span style="color:var(--bad)">Escribe el ID del jugador.</span>'; return; }
+  // Zona/servidor (opcional): se envía con todos los alias que usa la tienda por si el juego lo pide.
+  let pfieldsJson = '';
+  if (zone){ pfieldsJson = JSON.stringify({ zone_id: zone, input2: zone, server_id: zone, zone: zone }); }
   const btn = document.getElementById('rcBtn'); btn.disabled = true;
   try {
-    // 0) Verificar el ID del jugador (reusa el verificador de la tienda) antes de cobrar.
-    res.innerHTML = 'Verificando el ID del jugador…';
-    const fdv = new FormData();
-    fdv.append('game_id', rcSel.gid); fdv.append('package_id', rcSel.pid); fdv.append('user_identifier', player);
-    const rv = await fetch(VERIFY_URL, {method:'POST', body:fdv, headers:{'X-Requested-With':'XMLHttpRequest'}});
-    let dv = {}; try { dv = await rv.json(); } catch(e){}
-    // Bloquear SOLO si el verificador confirma que el ID es inválido/no existe.
-    // (unsupported = el juego no tiene verificación automática · unavailable = servicio caído → dejar
-    //  comprar igual, como hace la tienda pública. Antes bloqueaba TODO juego sin verificación.)
-    const vstatus = (dv && dv.status ? String(dv.status) : '').toLowerCase();
-    if (dv && dv.ok === false && (vstatus === 'not_found' || vstatus === 'invalid')){
-      res.innerHTML = '<span style="color:var(--bad)">✗ '+(dv.message||'El ID del jugador no es válido. Revísalo.')+'</span>';
-      btn.disabled = false; return;
-    }
-    if (dv && dv.player_name){
-      res.innerHTML = '<span style="color:var(--good)">✓ Jugador: '+dv.player_name+'</span> · Procesando pago…';
+    // 0) Verificar el ID del jugador SOLO si se escribió uno (las gift cards no llevan ID → se salta).
+    if (player){
+      res.innerHTML = 'Verificando el ID del jugador…';
+      const fdv = new FormData();
+      fdv.append('game_id', rcSel.gid); fdv.append('package_id', rcSel.pid); fdv.append('user_identifier', player);
+      if (zone){ fdv.append('zone_id', zone); fdv.append('input2', zone); fdv.append('server_id', zone); if (pfieldsJson) fdv.append('player_fields_json', pfieldsJson); }
+      const rv = await fetch(VERIFY_URL, {method:'POST', body:fdv, headers:{'X-Requested-With':'XMLHttpRequest'}});
+      let dv = {}; try { dv = await rv.json(); } catch(e){}
+      // Bloquear SOLO si el verificador confirma que el ID es inválido/no existe.
+      // (unsupported = el juego no tiene verificación automática · unavailable = servicio caído → dejar
+      //  comprar igual, como hace la tienda pública. Antes bloqueaba TODO juego sin verificación.)
+      const vstatus = (dv && dv.status ? String(dv.status) : '').toLowerCase();
+      if (dv && dv.ok === false && (vstatus === 'not_found' || vstatus === 'invalid')){
+        res.innerHTML = '<span style="color:var(--bad)">✗ '+(dv.message||'El ID del jugador no es válido. Revísalo.')+'</span>';
+        btn.disabled = false; return;
+      }
+      res.innerHTML = (dv && dv.player_name) ? '<span style="color:var(--good)">✓ Jugador: '+dv.player_name+'</span> · Procesando pago…' : 'Procesando pago…';
     } else {
       res.innerHTML = 'Procesando pago…';
     }
@@ -132,6 +160,7 @@ async function rcConfirmar(){
     const fd = new FormData();
     fd.append('game_id', rcSel.gid); fd.append('package_id', rcSel.pid);
     fd.append('user_identifier', player); fd.append('quantity', qty);
+    if (pfieldsJson){ fd.append('player_fields_json', pfieldsJson); }
     const r1 = await fetch(RC_URL, {method:'POST', body:fd, headers:{'X-Requested-With':'XMLHttpRequest'}});
     const d1 = await r1.json();
     if (!d1.ok){ res.innerHTML = '<span style="color:var(--bad)">'+(d1.message||'No se pudo procesar.')+'</span>'; btn.disabled=false; return; }

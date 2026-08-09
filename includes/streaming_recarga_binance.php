@@ -1,0 +1,455 @@
+<?php
+/**
+ * includes/streaming_recarga_binance.php
+ * Verificación AUTOMÁTICA de una recarga de SALDO del revendedor pagada por Binance (verificador
+ * "apicentral.pro" · el mismo que usa la tienda en los juegos). Replica EXACTO el motor de la tienda:
+ *   - referencia = últimos N dígitos (config binance_pagonorte_referencia_digitos), con ceros a la izq.
+ *   - monto = igualdad a 2 decimales.
+ *   - solo movimientos recientes (defensa contra reusar uno viejo).
+ *   - GUARDA ANTI-DOBLE-COBRO atómica: cada movimiento se "reclama" una sola vez (columna checked +
+ *     wallet_recarga_id) con un UPDATE condicional; si dos personas envían a la vez, solo una acredita.
+ *
+ * SEGURIDAD: el fetch a la API es best-effort con INSERT IGNORE → NUNCA sobrescribe los montos que la
+ * tienda ya sincronizó (no corrompe su verificación de pedidos). Si algo falla o no casa, NO acredita
+ * (queda 'pendiente' para aprobación manual). Nunca acredita de más.
+ *
+ * Uso: sbr_binance_verify_and_credit($pdo, $uid, $recId, $reportedRef, $amount): array
+ *   → ['credited'=>bool, 'message'=>string]
+ */
+
+require_once __DIR__ . '/store_config.php';
+require_once __DIR__ . '/../api/wallet/_helpers.php';
+
+if (!function_exists('sbr_cfg')) {
+    /** Lee una config de la tienda con FALLBACK: primero configuracion_general (store_config_get) y,
+     *  si viene vacía, la tabla `configuracion`. Muchos tenants guardan binance_pagonorte_* / ff_bank_*
+     *  en `configuracion` (no en `configuracion_general`) → sin este fallback la verificación NUNCA
+     *  encontraba el token y la recarga quedaba pendiente ("por binance/bnc siguen pendiente"). */
+    function sbr_cfg(string $key, string $default = ''): string {
+        $v = trim((string) store_config_get($key, ''));
+        if ($v !== '') return $v;
+        try {
+            $pdo = function_exists('db') ? db() : null;
+            if ($pdo instanceof PDO) {
+                foreach (['configuracion', 'configuracion_general'] as $t) {
+                    try {
+                        $st = $pdo->prepare("SELECT valor FROM $t WHERE clave=? LIMIT 1");
+                        $st->execute([$key]);
+                        $val = trim((string) ($st->fetchColumn() ?: ''));
+                        if ($val !== '') return $val;
+                    } catch (Throwable $e) {}
+                }
+            }
+        } catch (Throwable $e) {}
+        return $default;
+    }
+}
+if (!function_exists('sbr_binance_enabled')) {
+    function sbr_binance_enabled(): bool {
+        return sbr_cfg('binance_pagonorte_token') !== '';
+    }
+}
+if (!function_exists('sbr_binance_digits')) {
+    function sbr_binance_digits(): int {
+        return max(0, min(120, (int) sbr_cfg('binance_pagonorte_referencia_digitos', '0')));
+    }
+}
+if (!function_exists('sbr_norm_digits')) {
+    // Igual que normalize_reference_digits() de la tienda.
+    function sbr_norm_digits(string $ref): string { $s = ltrim($ref, '0'); return $s !== '' ? $s : '0'; }
+}
+if (!function_exists('sbr_reference_matches')) {
+    // Igual que movement_reference_matches() de la tienda. $fullRef es la referencia GUARDADA
+    // ("BINANCE:xxxxx"); $reported es lo que escribió el revendedor.
+    function sbr_reference_matches(string $fullRef, string $reported, int $digits): bool {
+        $reported = trim($reported);
+        if ($reported === '') return false;
+        if ($digits > 0) {
+            $nr = strlen($reported) > $digits ? substr($reported, -$digits) : $reported;
+            $bs = substr($fullRef, -$digits);
+            return $fullRef === $reported || $bs === $nr || sbr_norm_digits($bs) === sbr_norm_digits($nr);
+        }
+        return $fullRef === $reported || sbr_norm_digits($fullRef) === sbr_norm_digits($reported);
+    }
+}
+if (!function_exists('sbr_norm_amount')) {
+    // Igual criterio que normalize_bank_amount() de la tienda (coma/punto → float).
+    function sbr_norm_amount($value): float {
+        if (is_numeric($value)) return round((float) $value, 2);
+        $raw = trim((string) $value);
+        if ($raw === '') return 0.0;
+        $clean = preg_replace('/[^0-9,.-]/', '', str_replace(' ', '', $raw));
+        if ($clean === null || $clean === '') return 0.0;
+        $lc = strrpos($clean, ','); $ld = strrpos($clean, '.');
+        if ($lc !== false && $ld !== false) {
+            if ($lc > $ld) { $clean = str_replace('.', '', $clean); $clean = str_replace(',', '.', $clean); }
+            else { $clean = str_replace(',', '', $clean); }
+        } elseif ($lc !== false) { $clean = str_replace('.', '', $clean); $clean = str_replace(',', '.', $clean); }
+        else { $clean = str_replace(',', '', $clean); }
+        return is_numeric($clean) ? round((float) $clean, 2) : 0.0;
+    }
+}
+if (!function_exists('sbr_ensure_columns')) {
+    function sbr_ensure_columns(PDO $pdo): void {
+        try { $pdo->exec("ALTER TABLE movimientos ADD COLUMN checked TINYINT(1) NOT NULL DEFAULT 0"); } catch (Throwable $e) {}
+        try { $pdo->exec("ALTER TABLE movimientos ADD COLUMN wallet_recarga_id INT NULL"); } catch (Throwable $e) {}
+    }
+}
+if (!function_exists('sbr_fetch_sync')) {
+    // Best-effort: trae los movimientos de la API y agrega SOLO los NUEVOS (INSERT IGNORE) para no
+    // pisar montos que la tienda ya guardó. Si falla, seguimos con lo que ya haya sincronizado.
+    function sbr_fetch_sync(PDO $pdo): void {
+        $token = sbr_cfg('binance_pagonorte_token', '');
+        if ($token === '') return;
+        $url = function_exists('store_config_build_binance_pagonorte_movements_url')
+            ? store_config_build_binance_pagonorte_movements_url($token)
+            : ('https://apicentral.pro/apis/movimientos_binance.jsp?token=' . rawurlencode($token));
+        $body = null;
+        try {
+            if (function_exists('curl_init')) {
+                $ch = curl_init($url);
+                curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_TIMEOUT => 15, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_SSL_VERIFYHOST => 0]);
+                $body = curl_exec($ch); curl_close($ch);
+            } else {
+                $body = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => 15, 'ignore_errors' => true], 'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]]));
+            }
+        } catch (Throwable $e) { $body = null; }
+        if (!is_string($body) || $body === '') return;
+        $data = json_decode($body, true);
+        if (!is_array($data) || !isset($data['movimientos']) || !is_array($data['movimientos'])) return;
+        // INSERT IGNORE → nunca sobrescribe un movimiento existente (no corrompe la data de la tienda).
+        $ins = $pdo->prepare("INSERT IGNORE INTO movimientos (referencia, descripcion, fecha_raw, fecha_movimiento, tipo, monto, moneda, payload_json) VALUES (?,?,?,?,?,?, 'USDT', ?)");
+        foreach ($data['movimientos'] as $m) {
+            if (!is_array($m)) continue;
+            $ref = trim((string) ($m['referencia'] ?? '')); if ($ref === '') continue;
+            $fecha = (string) ($m['fecha'] ?? '');
+            $fm = strtotime($fecha) ? date('Y-m-d H:i:s', strtotime($fecha)) : null;
+            try {
+                $ins->execute([
+                    substr('BINANCE:' . $ref, 0, 120),
+                    substr((string) ($m['descripcion'] ?? ''), 0, 255),
+                    substr($fecha, 0, 120),
+                    $fm,
+                    substr((string) ($m['tipo'] ?? ''), 0, 80),
+                    sbr_norm_amount($m['monto'] ?? 0),
+                    json_encode($m, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ]);
+            } catch (Throwable $e) {}
+        }
+    }
+}
+
+if (!function_exists('sbr_ref_ya_usada')) {
+    /** ¿La referencia YA fue usada? Busca un movimiento que case esa referencia pero que ya esté
+     *  RECLAMADO (por un pedido de la tienda, por otra recarga, o marcado checked). Sirve para AVISAR
+     *  claro "ya usada" y RECHAZAR la recarga (no dejarla pendiente, que el admin podría aprobar por
+     *  error → doble cobro). $filtro es el WHERE de moneda/prefijo del método (Binance/VES/genérico). */
+    function sbr_ref_ya_usada(PDO $pdo, string $reportedRef, int $digits, string $filtro): bool {
+        $reportedRef = trim($reportedRef);
+        if ($reportedRef === '') return false;
+        try {
+            $q = $pdo->query("SELECT referencia FROM movimientos
+                  WHERE ($filtro)
+                    AND (COALESCE(checked,0)=1 OR COALESCE(pedido_id,0)>0 OR COALESCE(wallet_recarga_id,0)>0)
+                    AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 15 DAY))
+                  ORDER BY id DESC LIMIT 400");
+            foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $ref) {
+                if (sbr_reference_matches((string) $ref, $reportedRef, $digits)) return true;
+            }
+        } catch (Throwable $e) {}
+        return false;
+    }
+}
+
+if (!function_exists('sbr_metodo_slug')) {
+    /** Slug de config a partir del nombre del método de pago ("Pago Móvil BNC" → "bnc"). */
+    function sbr_metodo_slug(string $metodo): string {
+        $m = mb_strtolower(trim($metodo));
+        if ($m === '') return '';
+        if (mb_strpos($m, 'binance') !== false) return 'binance';
+        if (mb_strpos($m, 'bnc') !== false) return 'bnc';
+        if (mb_strpos($m, 'zinli') !== false) return 'zinli';
+        if (mb_strpos($m, 'zelle') !== false) return 'zelle';
+        // "Pago Móvil" / "Pago Movil" / "Pago Mobil" (mal escrito con B) → todos a 'pagomovil' (usa el banco).
+        if (mb_strpos($m, 'pago') !== false && (mb_strpos($m, 'vil') !== false || mb_strpos($m, 'bil') !== false)) return 'pagomovil';
+        if (mb_strpos($m, 'movil') !== false || mb_strpos($m, 'mobil') !== false) return 'pagomovil';
+        return preg_replace('/[^a-z0-9]+/', '', $m) ?: '';
+    }
+}
+
+if (!function_exists('sbr_verify_recarga')) {
+    /**
+     * Punto de entrada ÚNICO de la verificación automática de una recarga.
+     *
+     *  - Binance  → motor probado (verificador apicentral «pagonorte»).
+     *  - Otro método (BNC, Pago Móvil…) → SOLO si el admin configuró su API de movimientos:
+     *      config `<slug>_movimientos_url` (+ opcional `<slug>_movimientos_token`,
+     *      `<slug>_referencia_digitos`, `<slug>_referencia_prefijo`).
+     *    Sin esa config NO se acredita nada: la recarga queda pendiente de aprobación manual.
+     *    Es a propósito: no se puede acreditar dinero real contra un API que no existe/no probamos.
+     *
+     * $amount       = monto a ACREDITAR en la billetera (en $, la moneda del saldo).
+     * $amountMatch  = monto REALMENTE PAGADO en la moneda del método (Bs para BNC/Pago Móvil, USDT
+     *                 ≈ $ para Binance). Es contra ESTE que se casa el movimiento del banco/Binance.
+     *                 Si es null se usa $amount (caso Binance/USDT donde $ y USDT son 1:1).
+     *
+     * Devuelve ['credited'=>bool, 'message'=>string].
+     */
+    function sbr_verify_recarga(PDO $pdo, int $uid, int $recId, string $reportedRef, float $amount, string $metodo, ?float $amountMatch = null): array {
+        $slug = sbr_metodo_slug($metodo);
+        $mm = ($amountMatch !== null && $amountMatch > 0) ? $amountMatch : $amount;
+        if ($slug === 'binance') {
+            return sbr_binance_verify_and_credit($pdo, $uid, $recId, $reportedRef, $amount, $mm);
+        }
+        // BNC / Pago Móvil (Bs/VES): reusa la MISMA conexión bancaria (ff_bank_*) que la tienda YA
+        // usa para verificar los pedidos ("el BNC que ya está en la página"). Si no está configurada,
+        // cae al genérico (por si el admin puso <slug>_movimientos_url a mano).
+        if (($slug === 'bnc' || $slug === 'pagomovil') && sbr_bank_enabled()) {
+            return sbr_bank_verify_and_credit($pdo, $uid, $recId, $reportedRef, $amount, $slug, $mm);
+        }
+        if ($slug === '') return ['credited' => false, 'message' => 'Tu recarga quedó registrada; el admin la aprueba enseguida.'];
+        $url = sbr_cfg($slug . '_movimientos_url', '');
+        if ($url === '') {
+            return ['credited' => false, 'message' => 'Tu recarga quedó registrada; el admin la aprueba enseguida.'];
+        }
+        return sbr_generic_verify_and_credit($pdo, $uid, $recId, $reportedRef, $amount, $slug, $url, $mm);
+    }
+}
+
+if (!function_exists('sbr_generic_verify_and_credit')) {
+    /** Mismo motor que Binance (match por últimos N dígitos + monto exacto + claim atómico
+     *  anti-doble-cobro), pero contra el API de movimientos que se configure para ese método. */
+    function sbr_generic_verify_and_credit(PDO $pdo, int $uid, int $recId, string $reportedRef, float $amount, string $slug, string $url, ?float $amountMatch = null): array {
+        $reportedRef = trim($reportedRef);
+        if ($reportedRef === '' || $amount <= 0) return ['credited' => false, 'message' => 'Falta la referencia o el monto.'];
+        sbr_ensure_columns($pdo);
+        $credit = round($amount, 2);   // a acreditar en $
+        $matchAmt = ($amountMatch !== null && $amountMatch > 0) ? round($amountMatch, 2) : $credit;  // pagado (moneda del método)
+        $prefijo = sbr_cfg($slug . '_referencia_prefijo', '') ?: (mb_strtoupper($slug) . ':');
+        $digits  = max(0, min(120, (int) sbr_cfg($slug . '_referencia_digitos', '0')));
+
+        // Traer movimientos (best-effort, INSERT IGNORE: nunca pisa lo que ya haya).
+        try {
+            $token = sbr_cfg($slug . '_movimientos_token', '');
+            $full = $url . ((mb_strpos($url, '?') !== false) ? '&' : '?') . ($token !== '' ? 'token=' . rawurlencode($token) : '');
+            $body = null;
+            if (function_exists('curl_init')) {
+                $ch = curl_init($full);
+                curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_TIMEOUT => 15, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_SSL_VERIFYHOST => 0]);
+                $body = curl_exec($ch); curl_close($ch);
+            } else {
+                $body = @file_get_contents($full, false, stream_context_create(['http' => ['timeout' => 15, 'ignore_errors' => true], 'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]]));
+            }
+            if (is_string($body) && $body !== '') {
+                $data = json_decode($body, true);
+                $lista = is_array($data) ? ($data['movimientos'] ?? $data['data'] ?? (array_is_list($data) ? $data : [])) : [];
+                if (is_array($lista)) {
+                    $ins = $pdo->prepare("INSERT IGNORE INTO movimientos (referencia, descripcion, fecha_raw, fecha_movimiento, tipo, monto, moneda) VALUES (?,?,?,?,?,?,?)");
+                    foreach ($lista as $m) {
+                        if (!is_array($m)) continue;
+                        $ref = trim((string) ($m['referencia'] ?? $m['reference'] ?? '')); if ($ref === '') continue;
+                        $fecha = (string) ($m['fecha'] ?? $m['date'] ?? '');
+                        $fm = strtotime($fecha) ? date('Y-m-d H:i:s', strtotime($fecha)) : null;
+                        try {
+                            $ins->execute([
+                                mb_substr($prefijo . $ref, 0, 120),
+                                mb_substr((string) ($m['descripcion'] ?? $m['description'] ?? ''), 0, 255),
+                                mb_substr($fecha, 0, 120), $fm,
+                                mb_substr((string) ($m['tipo'] ?? ''), 0, 80),
+                                sbr_norm_amount($m['monto'] ?? $m['amount'] ?? 0),
+                                mb_substr((string) ($m['moneda'] ?? 'VES'), 0, 10),
+                            ]);
+                        } catch (Throwable $e) {}
+                    }
+                }
+            }
+        } catch (Throwable $e) {}
+
+        // Match (contra el monto pagado) + claim atómico + acreditar (en $).
+        $q = $pdo->prepare("SELECT id, referencia FROM movimientos
+              WHERE referencia LIKE ? AND ROUND(monto,2) = ?
+                AND COALESCE(pedido_id,0)=0 AND COALESCE(checked,0)=0 AND COALESCE(wallet_recarga_id,0)=0
+                AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
+              ORDER BY id DESC LIMIT 100");
+        $q->execute([$prefijo . '%', $matchAmt]);
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $m) {
+            if (!sbr_reference_matches((string) $m['referencia'], $reportedRef, $digits)) continue;
+            $claim = $pdo->prepare("UPDATE movimientos SET checked=1, wallet_recarga_id=? WHERE id=? AND COALESCE(pedido_id,0)=0 AND COALESCE(checked,0)=0 AND COALESCE(wallet_recarga_id,0)=0");
+            $claim->execute([$recId, (int) $m['id']]);
+            if ($claim->rowCount() !== 1) continue;
+            try {
+                wallet_acreditar($pdo, $uid, $credit, 'recarga_' . $slug, 'Recarga ' . mb_strtoupper($slug) . ' (auto) · ref ' . $reportedRef);
+            } catch (Throwable $e) {
+                try { $pdo->prepare("UPDATE movimientos SET checked=0, wallet_recarga_id=NULL WHERE id=? AND wallet_recarga_id=?")->execute([(int) $m['id'], $recId]); } catch (Throwable $e2) {}
+                return ['credited' => false, 'message' => 'No se pudo acreditar el saldo. Intenta de nuevo.'];
+            }
+            try { $pdo->prepare("UPDATE wallet_recargas SET estado='aprobado' WHERE id=? AND usuario_id=?")->execute([$recId, $uid]); } catch (Throwable $e) {}
+            return ['credited' => true, 'message' => '✓ Pago verificado. Saldo acreditado al instante.'];
+        }
+        if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "referencia LIKE '" . str_replace("'", "''", $prefijo) . "%'")) {
+            return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en otra recarga. No se puede usar dos veces.'];
+        }
+        return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; el admin también puede aprobarlo.'];
+    }
+}
+
+/* ============================================================================
+ * BNC / PAGO MÓVIL (Bs/VES) — reusa la conexión bancaria ff_bank_* de la tienda.
+ * ========================================================================== */
+if (!function_exists('sbr_bank_config')) {
+    /** Config del verificador de banco VES que la tienda YA usa para los pedidos (pagonorte). */
+    function sbr_bank_config(): array {
+        return [
+            'base'     => (sbr_cfg('ff_bank_api_base_url', 'https://pagonorte.net')) ?: 'https://pagonorte.net',
+            'posicion' => sbr_cfg('ff_bank_posicion', ''),
+            'token'    => sbr_cfg('ff_bank_token', ''),
+            'clave'    => sbr_cfg('ff_bank_clave', ''),
+        ];
+    }
+}
+if (!function_exists('sbr_bank_enabled')) {
+    function sbr_bank_enabled(): bool {
+        $c = sbr_bank_config();
+        return $c['posicion'] !== '' && $c['token'] !== '' && $c['clave'] !== '';
+    }
+}
+if (!function_exists('sbr_bank_verify_and_credit')) {
+    /** Verifica una recarga por BNC / Pago Móvil (VES) contra la MISMA API bancaria de la tienda.
+     *  Match por referencia (exacta por defecto: bnc_referencia_digitos=0) + monto exacto, solo
+     *  movimientos VES recientes y DISPONIBLES (no usados por un pedido ni otra recarga), con claim
+     *  atómico anti-doble-cobro. El fetch es best-effort con INSERT IGNORE (no corrompe la data de la
+     *  tienda). Si nada casa, NO acredita (queda pendiente de aprobación manual). Nunca acredita de más. */
+    function sbr_bank_verify_and_credit(PDO $pdo, int $uid, int $recId, string $reportedRef, float $amount, string $slug = 'bnc', ?float $amountMatch = null): array {
+        $reportedRef = trim($reportedRef);
+        if ($reportedRef === '' || $amount <= 0) return ['credited' => false, 'message' => 'Falta la referencia o el monto.'];
+        if (!sbr_bank_enabled())               return ['credited' => false, 'message' => 'Tu recarga quedó registrada; el admin la aprueba enseguida.'];
+        sbr_ensure_columns($pdo);
+        // $amount = lo que se acredita en $ (billetera). $match = lo que se pagó en Bs (contra el movimiento).
+        $credit = round($amount, 2);
+        $match  = ($amountMatch !== null && $amountMatch > 0) ? round($amountMatch, 2) : $credit;
+        // Por defecto exige la referencia COMPLETA (0) → sin falsos positivos. El admin puede bajar a
+        // "últimos N dígitos" con config bnc_referencia_digitos.
+        // Dígitos a comparar de la referencia: usa bnc_referencia_digitos; si no está, cae al MISMO que
+        // Binance (binance_pagonorte_referencia_digitos, normalmente 6) → así el revendedor puede poner
+        // los últimos 6 dígitos igual que en Binance.
+        $digits = max(0, min(120, (int) sbr_cfg('bnc_referencia_digitos', sbr_cfg('binance_pagonorte_referencia_digitos', '0'))));
+
+        // Fetch best-effort (INSERT IGNORE por referencia UNIQUE → nunca pisa lo que la tienda sincronizó).
+        try {
+            $c = sbr_bank_config();
+            if (function_exists('store_config_build_bank_movements_url')) {
+                $url = store_config_build_bank_movements_url($c['base'] !== '' ? $c['base'] : 'https://pagonorte.net',
+                    ['posicion' => $c['posicion'], 'token' => $c['token'], 'password' => $c['clave']]);
+                $body = null;
+                if (function_exists('curl_init')) {
+                    $ch = curl_init($url);
+                    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_CONNECTTIMEOUT => 20, CURLOPT_TIMEOUT => 20, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_SSL_VERIFYHOST => 0]);
+                    $body = curl_exec($ch); curl_close($ch);
+                } else {
+                    $body = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => 20, 'ignore_errors' => true], 'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]]));
+                }
+                if (is_string($body) && $body !== '') {
+                    $data = json_decode($body, true);
+                    $lista = (is_array($data) && isset($data['movimientos']) && is_array($data['movimientos'])) ? $data['movimientos'] : [];
+                    // Los movimientos del banco se guardan SIN prefijo y moneda VES (igual que la tienda).
+                    $ins = $pdo->prepare("INSERT IGNORE INTO movimientos (referencia, descripcion, fecha_raw, fecha_movimiento, tipo, monto, moneda) VALUES (?,?,?,?,?,?, 'VES')");
+                    foreach ($lista as $m) {
+                        if (!is_array($m)) continue;
+                        $ref = trim((string) ($m['referencia'] ?? '')); if ($ref === '') continue;
+                        $fecha = (string) ($m['fecha'] ?? '');
+                        $fm = strtotime($fecha) ? date('Y-m-d H:i:s', strtotime($fecha)) : null;
+                        try {
+                            $ins->execute([
+                                mb_substr($ref, 0, 120),
+                                mb_substr((string) ($m['descripcion'] ?? ''), 0, 255),
+                                mb_substr($fecha, 0, 120), $fm,
+                                mb_substr((string) ($m['tipo'] ?? ''), 0, 80),
+                                sbr_norm_amount($m['monto'] ?? 0),
+                            ]);
+                        } catch (Throwable $e) {}
+                    }
+                }
+            }
+        } catch (Throwable $e) {}
+
+        // Match (moneda VES, sin prefijo, contra el monto en Bs) + claim atómico + acreditar (en $).
+        $q = $pdo->prepare(
+            "SELECT id, referencia FROM movimientos
+              WHERE moneda='VES' AND ROUND(monto,2) = ?
+                AND COALESCE(pedido_id,0)=0 AND COALESCE(checked,0)=0 AND COALESCE(wallet_recarga_id,0)=0
+                AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
+              ORDER BY id DESC LIMIT 200");
+        $q->execute([$match]);
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $m) {
+            if (!sbr_reference_matches((string) $m['referencia'], $reportedRef, $digits)) continue;
+            $claim = $pdo->prepare("UPDATE movimientos SET checked=1, wallet_recarga_id=? WHERE id=? AND COALESCE(pedido_id,0)=0 AND COALESCE(checked,0)=0 AND COALESCE(wallet_recarga_id,0)=0");
+            $claim->execute([$recId, (int) $m['id']]);
+            if ($claim->rowCount() !== 1) continue;   // otro se lo llevó → seguir
+            try {
+                wallet_acreditar($pdo, $uid, $credit, 'recarga_' . $slug, 'Recarga ' . mb_strtoupper($slug) . ' (auto) · ref ' . $reportedRef);
+            } catch (Throwable $e) {
+                try { $pdo->prepare("UPDATE movimientos SET checked=0, wallet_recarga_id=NULL WHERE id=? AND wallet_recarga_id=?")->execute([(int) $m['id'], $recId]); } catch (Throwable $e2) {}
+                return ['credited' => false, 'message' => 'No se pudo acreditar el saldo. Intenta de nuevo.'];
+            }
+            try { $pdo->prepare("UPDATE wallet_recargas SET estado='aprobado' WHERE id=? AND usuario_id=?")->execute([$recId, $uid]); } catch (Throwable $e) {}
+            return ['credited' => true, 'message' => '✓ Pago verificado (BNC / Pago Móvil). Saldo acreditado al instante.'];
+        }
+        if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "moneda='VES'")) {
+            return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en otra recarga. No se puede usar dos veces.'];
+        }
+        return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; el admin también puede aprobarlo.'];
+    }
+}
+
+if (!function_exists('sbr_binance_verify_and_credit')) {
+    function sbr_binance_verify_and_credit(PDO $pdo, int $uid, int $recId, string $reportedRef, float $amount, ?float $amountMatch = null): array {
+        $reportedRef = trim($reportedRef);
+        if (!sbr_binance_enabled()) return ['credited' => false, 'message' => 'Binance no está configurado.'];
+        if ($reportedRef === '' || $amount <= 0) return ['credited' => false, 'message' => 'Falta la referencia o el monto.'];
+
+        sbr_ensure_columns($pdo);
+        try { sbr_fetch_sync($pdo); } catch (Throwable $e) {}   // best-effort
+
+        $digits = sbr_binance_digits();
+        // $amount = a acreditar en $. Binance cobra en USDT ≈ $ (1:1) → el match usa el mismo monto,
+        // salvo que se pase $amountMatch (moneda distinta).
+        $credit = round($amount, 2);
+        $amount = ($amountMatch !== null && $amountMatch > 0) ? round($amountMatch, 2) : $credit;
+        // Candidatos: movimientos de Binance, DISPONIBLES (no usados por un pedido ni otra recarga),
+        // recientes (últimos 3 días) y con monto exacto. La referencia se compara en PHP (últimos N díg).
+        $q = $pdo->prepare(
+            "SELECT id, referencia, monto FROM movimientos
+              WHERE referencia LIKE 'BINANCE:%'
+                AND ROUND(monto,2) = ?
+                AND COALESCE(pedido_id,0) = 0
+                AND COALESCE(checked,0) = 0
+                AND COALESCE(wallet_recarga_id,0) = 0
+                AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
+              ORDER BY id DESC LIMIT 100"
+        );
+        $q->execute([$amount]);
+        $rows = $q->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($rows as $m) {
+            if (!sbr_reference_matches((string) $m['referencia'], $reportedRef, $digits)) continue;
+            // Claim ATÓMICO: solo si sigue disponible. Si dos envían a la vez, solo uno hace rowCount=1.
+            $claim = $pdo->prepare("UPDATE movimientos SET checked=1, wallet_recarga_id=? WHERE id=? AND COALESCE(pedido_id,0)=0 AND COALESCE(checked,0)=0 AND COALESCE(wallet_recarga_id,0)=0");
+            $claim->execute([$recId, (int) $m['id']]);
+            if ($claim->rowCount() !== 1) continue;   // otro se lo llevó → seguir buscando
+            // Acreditar el saldo y aprobar la recarga.
+            try {
+                wallet_acreditar($pdo, $uid, $credit, 'recarga_binance', 'Recarga Binance (auto) · ref ' . $reportedRef);
+            } catch (Throwable $e) {
+                // Si falla el crédito, liberar el movimiento para no dejarlo "usado" sin acreditar.
+                try { $pdo->prepare("UPDATE movimientos SET checked=0, wallet_recarga_id=NULL WHERE id=? AND wallet_recarga_id=?")->execute([(int) $m['id'], $recId]); } catch (Throwable $e2) {}
+                return ['credited' => false, 'message' => 'No se pudo acreditar el saldo. Intenta de nuevo.'];
+            }
+            try { $pdo->prepare("UPDATE wallet_recargas SET estado='aprobado' WHERE id=? AND usuario_id=?")->execute([$recId, $uid]); } catch (Throwable $e) {}
+            return ['credited' => true, 'message' => '✓ Pago de Binance verificado. Saldo acreditado al instante.'];
+        }
+        if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "referencia LIKE 'BINANCE:%'")) {
+            return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en otra recarga. No se puede usar dos veces.'];
+        }
+        return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; vuelve a intentar o el admin lo aprueba manual.'];
+    }
+}

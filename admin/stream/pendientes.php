@@ -13,15 +13,20 @@ if (!admin_es_admin() && !in_array(admin_wa_area(), ['streaming', 'ambas'], true
   http_response_code(403);
   exit('Esta sección es del área de Streaming.');
 }
+// Solo la TIENDA (admin) APRUEBA/activa. El REVENDEDOR ve esta página en modo SOLO LECTURA: para saber
+// si sus compras por invitación/activación ya se activaron o siguen pendientes (no puede aprobarlas él;
+// se le activan solas cuando el admin las aprueba). $soloLectura controla el botón y el POST.
+$soloLectura = function_exists('stream_ctx') && stream_ctx() === 'revendedor';
 $pdo = db();
 $OWNER = (int) stream_owner_id();
 
 $hasEA = false;
 try { $hasEA = (bool) $pdo->query("SHOW COLUMNS FROM streaming_ventas LIKE 'email_activar'")->fetch(); } catch (Throwable $e) {}
 
-// ── POST: aprobar (marcar activada) ──
+// ── POST: aprobar (marcar activada) — SOLO el admin; el revendedor no aprueba ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   csrf_check();
+  if ($soloLectura) { header('Location: pendientes.php'); exit; }
   $vid = (int) ($_POST['id'] ?? 0);
   $msg = '';
   if (($_POST['accion'] ?? '') === 'activar' && $vid && $hasEA) {
@@ -30,6 +35,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($upd->rowCount() > 0) {
       try { $pdo->prepare("INSERT INTO streaming_venta_registro (venta_id,evento,descripcion,usuario_id) VALUES (?,?,?,?)")
                 ->execute([$vid, 'activada', 'Aprobada: invitación enviada al correo del cliente', current_user_id()]); } catch (Throwable $e) {}
+      // COMPLETA POR ACTIVACIÓN (Spotify Familiar / YouTube Premium): si la venta tiene cupos, al aprobarla
+      // se le crea al REVENDEDOR una cuenta COMPLETA en SU stock (credenciales que pasó + N perfiles),
+      // editable, lista para revender. "Solo la completa va a stock" (el perfil se queda solo en Ventas).
+      try {
+        $hasCupos = (bool) $pdo->query("SHOW COLUMNS FROM streaming_ventas LIKE 'cupos'")->fetch();
+        if ($hasCupos) {
+          $av = $pdo->query("SELECT revendedor_id, plataforma, email_activar, clave, fecha_vencimiento, precio, COALESCE(cupos,0) AS cupos FROM streaming_ventas WHERE id=$vid")->fetch(PDO::FETCH_ASSOC);
+          if ($av && (int) $av['cupos'] > 0 && (int) $av['revendedor_id'] > 0) {
+            require_once __DIR__ . '/../_streaming.php';
+            if (function_exists('st_rev_stock_schema')) st_rev_stock_schema($pdo);
+            $rev = (int) $av['revendedor_id']; $cupos = (int) $av['cupos'];
+            // Anti-duplicado (por si se aprueba 2 veces): no crear si ya existe esa cuenta del rev.
+            $ya = $pdo->prepare("SELECT id FROM streaming_cuentas WHERE owner_id=? AND correo=? AND plataforma=? LIMIT 1");
+            $ya->execute([$rev, (string) $av['email_activar'], (string) $av['plataforma']]);
+            if (!$ya->fetchColumn()) {
+              $insC = $pdo->prepare("INSERT INTO streaming_cuentas (owner_id, plataforma, correo, clave, perfiles_total, vencimiento, costo, rev_editable) VALUES (?,?,?,?,?,?,?,1)");
+              $insC->execute([$rev, (string) $av['plataforma'], (string) $av['email_activar'], (string) $av['clave'], $cupos, $av['fecha_vencimiento'], $av['precio']]);
+              $ncid = (int) $pdo->lastInsertId();
+              $insP = $pdo->prepare("INSERT INTO streaming_perfiles (cuenta_id, etiqueta, estado) VALUES (?,?, 'libre')");
+              for ($i = 1; $i <= $cupos; $i++) $insP->execute([$ncid, 'P' . $i]);
+              // BOT de códigos: la cuenta nace con bot_asignado=0; se asigna UNA sola vez con flush (así no
+              // se descuadra el conteo de prycorreos aunque se apruebe/reintente). La cuenta ya está guardada.
+              if (function_exists('bot_codigos_flush')) { try { bot_codigos_flush($pdo, $rev); } catch (Throwable $e) {} }
+              try {
+                require_once __DIR__ . '/../../api/_rev_avisos.php';
+                if (function_exists('stream_notif_crear')) stream_notif_crear($pdo, $rev, 'compra', 'Cuenta completa activada · ' . $av['plataforma'],
+                  'Tu ' . $av['plataforma'] . ' completa ya está activada y en tu STOCK (' . $cupos . ' cupos). Ya puedes venderla.', 'cuentas.php');
+              } catch (Throwable $e) {}
+            }
+          }
+        }
+      } catch (Throwable $e) {}
+      // AUTO-APROBAR la venta del REVENDEDOR enlazada (él compró a la tienda) + avisarle. Así no le queda
+      // "pendiente fantasma" ni tiene que aprobarla él: al aprobar la tienda, la suya queda activada.
+      try {
+        $hasOrigen = (bool) $pdo->query("SHOW COLUMNS FROM streaming_ventas LIKE 'origen_venta_id'")->fetch();
+        if ($hasOrigen) {
+          $lk = $pdo->prepare("SELECT id, owner_id, plataforma, email_activar FROM streaming_ventas WHERE origen_venta_id=? AND entregada=0");
+          $lk->execute([$vid]);
+          foreach ($lk->fetchAll(PDO::FETCH_ASSOC) as $lv) {
+            $pdo->prepare("UPDATE streaming_ventas SET entregada=1 WHERE id=?")->execute([(int) $lv['id']]);
+            try {
+              require_once __DIR__ . '/../../api/_rev_avisos.php';
+              if (function_exists('stream_notif_crear')) {
+                stream_notif_crear($pdo, (int) $lv['owner_id'], 'compra', 'Activado · ' . $lv['plataforma'],
+                  'Tu compra de ' . $lv['plataforma'] . ' (' . (string) $lv['email_activar'] . ') ya fue activada por la tienda.', 'ventas.php');
+              }
+            } catch (Throwable $e) {}
+          }
+        }
+      } catch (Throwable $e) {}
       $msg = '✓ Venta aprobada y marcada como activada.';
     } else { $msg = 'No se pudo aprobar (¿ya estaba activada?).'; }
   }
@@ -37,6 +93,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   exit;
 }
 $flash = (string) ($_GET['msg'] ?? '');
+
+// ── RECONCILIACIÓN (auto, al cargar): corrige FANTASMAS ──────────────────────────────────────────
+// Compras por invitación/activación del REVENDEDOR que quedaron pendientes (entregada=0) pero cuya venta
+// del ADMIN ya fue APROBADA (entregada=1) — pasa con compras VIEJAS (antes de origen_venta_id) que no se
+// auto-aprobaron. Se marcan entregadas para que desaparezcan de "sus pendientes" y no queden fantasma.
+if ($hasEA && $OWNER > 0) {
+  try {
+    $pend = $pdo->query("SELECT id, plataforma, email_activar, revendedor_id, origen_venta_id
+                           FROM streaming_ventas
+                          WHERE owner_id=$OWNER AND entregada=0 AND email_activar IS NOT NULL AND email_activar<>''")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($pend as $pv) {
+      $ok = false;
+      if ((int) ($pv['origen_venta_id'] ?? 0) > 0) {
+        $ok = (bool) $pdo->query("SELECT 1 FROM streaming_ventas WHERE id=" . (int) $pv['origen_venta_id'] . " AND entregada=1")->fetchColumn();
+      }
+      if (!$ok) {
+        $q = $pdo->prepare("SELECT 1 FROM streaming_ventas WHERE owner_id=0 AND revendedor_id=? AND email_activar=? AND plataforma=? AND entregada=1 LIMIT 1");
+        $q->execute([(int) $pv['revendedor_id'], (string) $pv['email_activar'], (string) $pv['plataforma']]);
+        $ok = (bool) $q->fetchColumn();
+      }
+      if ($ok) { try { $pdo->prepare("UPDATE streaming_ventas SET entregada=1 WHERE id=?")->execute([(int) $pv['id']]); } catch (Throwable $e) {} }
+    }
+  } catch (Throwable $e) {}
+}
 
 // ── Lista de activaciones manuales pendientes ──
 $rows = [];
@@ -81,8 +161,10 @@ stream_head('Pendientes de aprobar', 'ventas-pendientes');
 
 <div class="pagehd">
   <div>
-    <h1>Pendientes de <span class="nm">aprobar</span></h1>
-    <p>Activaciones manuales (Canva y similares). Invita el correo del cliente desde la cuenta maestra y aprueba la venta.</p>
+    <h1>Pendientes <?= $soloLectura ? '<span class="nm">por activar</span>' : 'de <span class="nm">aprobar</span>' ?></h1>
+    <p><?= $soloLectura
+        ? 'Tus compras por invitación/activación que la tienda aún no ha activado. Cuando las active, desaparecen de aquí y te llega aviso.'
+        : 'Activaciones manuales (Canva y similares). Invita el correo del cliente desde la cuenta maestra y aprueba la venta.' ?></p>
   </div>
   <?php if ($n): ?><span class="pill wait" style="font-size:13px;padding:6px 13px"><?= $n ?> por activar</span><?php endif; ?>
 </div>
@@ -120,13 +202,18 @@ stream_head('Pendientes de aprobar', 'ventas-pendientes');
             <div class="lb">📧 Correo del cliente a invitar</div>
             <div class="vl"><?= h($r['email_activar']) ?><button class="pa-cp" type="button" onclick="paCopy(<?= h(json_encode($r['email_activar'])) ?>)">copiar</button></div>
           </div>
+          <?php if (!$soloLectura): // la cuenta MAESTRA solo la ve la tienda (no el revendedor) ?>
           <div class="pa-box">
             <div class="lb">🔑 Cuenta para activar</div>
             <div class="pa-acc-line"><span style="color:var(--faint)">Correo:</span> <b style="word-break:break-all"><?= h($r['acc_correo'] ?: '—') ?></b><?php if ($r['acc_correo']): ?><button class="pa-cp" type="button" onclick="paCopy(<?= h(json_encode($r['acc_correo'])) ?>)">copiar</button><?php endif; ?></div>
             <div class="pa-acc-line"><span style="color:var(--faint)">Clave:</span> <b style="word-break:break-all"><?= h($r['acc_clave'] ?: '—') ?></b><?php if ($r['acc_clave']): ?><button class="pa-cp" type="button" onclick="paCopy(<?= h(json_encode($r['acc_clave'])) ?>)">copiar</button><?php endif; ?></div>
           </div>
+          <?php else: ?>
+          <div class="pa-box" style="display:flex;align-items:center;gap:8px;color:var(--warn)"><i data-lucide="clock" style="width:16px;height:16px"></i> Esperando que la tienda lo active. Te avisaremos cuando esté listo.</div>
+          <?php endif; ?>
         </div>
 
+        <?php if (!$soloLectura): ?>
         <div class="pa-actions">
           <a class="btn ghost" href="https://www.canva.com/" target="_blank" rel="noopener"><i data-lucide="external-link"></i> Abrir Canva</a>
           <?php if ($wa): ?><a class="btn ghost" href="https://wa.me/<?= h($wa) ?>?text=<?= rawurlencode('¡Hola' . ($r['cliente_nombre'] ? ' ' . $r['cliente_nombre'] : '') . '! 🎨 Ya te enviamos la invitación de ' . $r['plataforma'] . ' a tu correo (' . $r['email_activar'] . '). Revisa tu bandeja y acepta la invitación. ¡Gracias!') ?>" target="_blank" rel="noopener" style="color:#16a34a"><i data-lucide="message-circle"></i> Avisar al cliente</a><?php endif; ?>
@@ -137,6 +224,7 @@ stream_head('Pendientes de aprobar', 'ventas-pendientes');
             <button class="btn primary" onclick="return confirm('¿Ya enviaste la invitación a '+<?= h(json_encode($r['email_activar'])) ?>+'? Se marcará como activada.')"><i data-lucide="check"></i> Aprobar (activada)</button>
           </form>
         </div>
+        <?php endif; // !$soloLectura ?>
       </div>
     <?php endforeach; ?>
   </div>

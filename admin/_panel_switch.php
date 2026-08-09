@@ -7,10 +7,13 @@
  */
 // Ir al panel principal por su URL amigable REAL (evita el 403 que da /admin como directorio).
 $backHref = function_exists('app_path') ? app_path('/admin/dashboard') : '/admin/dashboard';
-// Los revendedores no tienen panel principal de la tienda: para ellos, volver a su dashboard.
+$backTitle = 'Volver al panel principal';
+// Los revendedores NO tienen panel de admin: para ellos el botón lleva al INICIO de la tienda
+// (para comprar/navegar), no a un dashboard que no usan.
 if (function_exists('stream_ctx') && stream_ctx() === 'revendedor') {
-    $backHref = 'dashboard.php';
+    $backHref = function_exists('app_path') ? app_path('/') : '/';
+    $backTitle = 'Ir a la tienda';
 }
 ?>
-<a href="<?= htmlspecialchars($backHref, ENT_QUOTES, 'UTF-8') ?>" class="iconbtn" title="Volver al panel principal"><i data-lucide="layout-grid"></i></a>
+<a href="<?= htmlspecialchars($backHref, ENT_QUOTES, 'UTF-8') ?>" class="iconbtn" title="<?= htmlspecialchars($backTitle, ENT_QUOTES, 'UTF-8') ?>"><i data-lucide="<?= (isset($backTitle) && $backTitle === 'Ir a la tienda') ? 'store' : 'layout-grid' ?>"></i></a>
 <?php

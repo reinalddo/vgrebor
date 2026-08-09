@@ -1450,6 +1450,15 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
               <?php endif; ?>
               <button type="button" class="btn btn-admin w-100 rounded-3 border mb-2 fw-semibold" data-user-open="orders">Ver Pedidos</button>
               <button type="button" class="btn btn-outline-info w-100 rounded-3 border mb-2 fw-semibold" data-user-open="profile">Datos Usuario</button>
+              <?php
+                // Acceso directo al gestor de streaming: revendedor → su panel; admin/root → el del admin.
+                $streamHref = null;
+                if ($authUserRole === 'revendedor') { $streamHref = app_path('/revendedor/'); }
+                elseif (in_array($authUserRole, ['admin', 'root'], true)) { $streamHref = app_path('/admin/stream/'); }
+                if ($streamHref !== null):
+              ?>
+                <a href="<?php echo htmlspecialchars($streamHref, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-info w-100 rounded-3 border mb-2 fw-semibold">🎬 Gestión de Streaming</a>
+              <?php endif; ?>
               <a href="<?php echo htmlspecialchars($logoutUrl, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-danger w-100 rounded-3 border fw-semibold">Cerrar sesión</a>
             </div>
           <?php endif; ?>

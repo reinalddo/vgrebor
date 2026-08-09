@@ -7,6 +7,7 @@
 define('CONEC_ADMIN', true);
 require __DIR__ . '/../_auth.php';
 require __DIR__ . '/_layout.php';
+require __DIR__ . '/../_streaming.php';
 require __DIR__ . '/../../api/wallet/_helpers.php';
 admin_require_login();
 
@@ -21,15 +22,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
     $msg = '';
     if (($_POST['accion'] ?? '') === 'solicitar_recarga') {
+        if (function_exists('st_rev_pausado') && st_rev_pausado($pdo)) {
+            header('Location: saldo.php?msg=' . urlencode('⚠ Tu cuenta está pausada por el administrador. No puedes recargar por ahora.'));
+            exit;
+        }
         $monto = round(abs((float) ($_POST['monto'] ?? 0)), 2);
         $metodo = trim((string) ($_POST['metodo'] ?? '')) ?: null;
         $ref = trim((string) ($_POST['referencia'] ?? '')) ?: null;
         if ($monto <= 0) {
             $msg = '⚠ Indica un monto válido.';
+        } elseif ($ref === null) {
+            // La referencia NO es opcional: es lo que permite verificar el pago (BNC/Binance) automáticamente.
+            $msg = '⚠ Escribe la referencia del pago (Nº de referencia / ID de transacción). Es obligatoria para verificar tu recarga.';
         } else {
             $pdo->prepare("INSERT INTO wallet_recargas (usuario_id, monto, metodo, referencia, estado) VALUES (?,?,?,?, 'pendiente')")
                 ->execute([$uid, $monto, $metodo, $ref]);
-            $msg = '✓ Solicitud de recarga por $' . number_format($monto, 2) . ' registrada. Se acreditará al confirmarse el pago.';
+            $recId = (int) $pdo->lastInsertId();
+            // AUTOMÁTICO (Binance / BNC / Pago Móvil): se verifica con la API que corresponda y se
+            // acredita al instante. Si no casa, queda pendiente (aprobación manual). El monto en $ es lo
+            // que se acredita; si el método se paga en Bs (VES), el pago real (y el movimiento) van en Bs,
+            // así que se pasa el monto EN BS para casarlo (monto en $ × tasa).
+            $montoMatch = null;
+            try {
+                $mc = $pdo->prepare("SELECT UPPER(COALESCE(mo.clave,'')) FROM payment_methods pm LEFT JOIN monedas mo ON mo.id=pm.moneda_id WHERE pm.nombre=? AND pm.activo=1 LIMIT 1");
+                $mc->execute([$metodo]);
+                $clv = (string) ($mc->fetchColumn() ?: '');
+                if ($clv === 'BS' || $clv === 'VES') {
+                    $tbs = (float) ($pdo->query("SELECT tasa FROM monedas WHERE UPPER(clave)='BS' AND activo=1 LIMIT 1")->fetchColumn() ?: 0);
+                    if ($tbs > 0) $montoMatch = round($monto * $tbs, 2);
+                }
+            } catch (Throwable $e) {}
+            if ($ref !== null && $metodo !== null) {
+                require_once __DIR__ . '/../../includes/streaming_recarga_binance.php';
+                $vr = sbr_verify_recarga($pdo, $uid, $recId, $ref, $monto, $metodo, $montoMatch);
+                if (!empty($vr['reused'])) {
+                    // Referencia REPETIDA → se RECHAZA (no queda pendiente) para que el admin no la apruebe por error.
+                    try { $pdo->prepare("UPDATE wallet_recargas SET estado='rechazada' WHERE id=? AND usuario_id=?")->execute([$recId, $uid]); } catch (Throwable $e) {}
+                    $msg = $vr['message'];
+                } else {
+                    $msg = !empty($vr['credited'])
+                        ? $vr['message']
+                        : '✓ Recarga por $' . number_format($monto, 2) . ' registrada. ' . ($vr['message'] ?? 'Se acreditará al confirmarse el pago.');
+                }
+            } else {
+                $msg = '✓ Solicitud de recarga por $' . number_format($monto, 2) . ' registrada. Se acreditará al confirmarse el pago.';
+            }
+            // FASE 3: avisar al admin de la recarga (acreditada, pendiente o rechazada por referencia repetida).
+            try {
+                require_once __DIR__ . '/../../api/_rev_avisos.php';
+                $acreditada = isset($vr) && !empty($vr['credited']);
+                $repetida   = isset($vr) && !empty($vr['reused']);
+                if (!$repetida) {
+                    stream_notif_crear($pdo, 0, 'recarga',
+                        'Recarga de saldo · $' . number_format($monto, 2) . ($acreditada ? ' (acreditada automáticamente)' : ' (por aprobar)'),
+                        'Método: ' . ($metodo ?: '—') . ' · Referencia: ' . ($ref ?: '—') . ($acreditada ? "\nEl pago se verificó solo y ya se acreditó." : "\nRevísala en Revendedores → Recargas pendientes."),
+                        'revendedores.php', $uid, $recId);
+                }
+            } catch (Throwable $e) {}
         }
         header('Location: saldo.php?msg=' . urlencode($msg));
         exit;
@@ -72,6 +121,29 @@ try {
         FROM payment_methods pm LEFT JOIN monedas mo ON mo.id = pm.moneda_id
         WHERE pm.activo = 1 ORDER BY pm.nombre")->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) { $metodosPago = []; }
+
+// #6: Binance del cliente (verificador «pagonorte»). Si está configurado, se ofrece como método
+// MANUAL en la recarga del revendedor: paga a ese Binance y el admin aprueba (no usa la pasarela
+// automática, así no hay riesgo con la verificación). Los datos salen de la config de la tienda.
+try {
+    $binDatos = ''; $binActivo = false;
+    foreach (['configuracion_general', 'configuracion'] as $ct) {
+        try {
+            $bcfg = $pdo->query("SELECT clave, valor FROM $ct WHERE clave IN ('binance_pagonorte_activo','binance_pagonorte_datos','binance_pagonorte_usuario')")->fetchAll(PDO::FETCH_KEY_PAIR);
+        } catch (Throwable $e) { $bcfg = []; }
+        if ($bcfg) {
+            $d = trim((string) ($bcfg['binance_pagonorte_datos'] ?? '')) ?: trim((string) ($bcfg['binance_pagonorte_usuario'] ?? ''));
+            if (($bcfg['binance_pagonorte_activo'] ?? '0') === '1' || $d !== '') { $binDatos = $d; $binActivo = true; break; }
+        }
+    }
+    if ($binActivo) {
+        $yaHay = false;
+        foreach ($metodosPago as $mp) { if (mb_stripos((string) $mp['nombre'], 'binance') !== false) { $yaHay = true; break; } }
+        if (!$yaHay) {
+            array_unshift($metodosPago, ['id' => 0, 'nombre' => 'Binance', 'datos' => ($binDatos !== '' ? $binDatos : 'Paga por Binance y sube la referencia.'), 'qr_image_path' => null, 'referencia_digitos' => 0, 'moneda' => null, 'moneda_tasa' => null]);
+        }
+    }
+} catch (Throwable $e) {}
 
 $movs = $pdo->prepare("SELECT tipo, monto, descripcion, referencia, creado_en FROM wallet_movimientos WHERE usuario_id=? ORDER BY id DESC LIMIT 200");
 $movs->execute([$uid]);
@@ -127,8 +199,9 @@ stream_head('Mi saldo', 'saldo');
         <span style="font-weight:500;color:var(--muted);font-size:12px">· tasa <?= number_format($bsRate, 2, ',', '.') ?> Bs/$</span>
       </div>
       <?php endif; ?>
-      <div style="margin-top:10px"><label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px">Referencia del pago (opcional)</label>
-        <input name="referencia" placeholder="Nº de referencia / ID de transacción" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)"></div>
+      <div style="margin-top:10px"><label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px">Referencia del pago <span style="color:var(--bad)">*</span> (obligatoria)</label>
+        <input name="referencia" required placeholder="Nº de referencia / ID de transacción" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">La necesitamos para verificar tu pago automáticamente (BNC/Binance).</div></div>
       <?php if ($paypalOn): ?>
         <button class="btn primary" type="submit" name="pasarela" value="paypal" formaction="<?= h($recargarUrl) ?>" formmethod="post" style="width:100%;margin-top:14px;background:#0070ba"><i data-lucide="zap"></i> Pagar con PayPal (automático)</button>
       <?php endif; ?>
