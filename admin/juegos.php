@@ -187,6 +187,19 @@ function ensure_juegos_precio_markup_pct_column(mysqli $mysqli): void {
     }
 }
 
+// Margen separado para RecargasAmérica: un mismo juego puede tener paquetes
+// de GiftVen y de RecargasAmérica a la vez (proveedores independientes con
+// precios base distintos), así que no pueden compartir un solo porcentaje
+// de ganancia — instrucción explícita del cliente tras notar que el margen
+// de GiftVen no aplicaba (ni tenía sentido aplicar) a sus paquetes de
+// RecargasAmérica.
+function ensure_juegos_precio_markup_pct_recargasamerica_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juegos LIKE 'precio_markup_pct_recargasamerica'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juegos ADD COLUMN precio_markup_pct_recargasamerica DECIMAL(8,4) NOT NULL DEFAULT 0 AFTER precio_markup_pct");
+    }
+}
+
 function admin_game_normalize_api_selection(array $payload, string $giftVenKey, string $discordKey, bool $allowCombined = false): array {
     $giftVenCategory  = trim((string) ($payload[$giftVenKey] ?? ''));
     $giftVenCategory2 = trim((string) ($payload[$giftVenKey . '_2'] ?? ''));
@@ -285,6 +298,7 @@ ensure_juegos_categoria_api_recargasamerica_column($mysqli);
 ensure_juegos_categoria_api_recargasamerica_2_column($mysqli);
 ensure_juegos_categoria_api_recargasamerica_3_column($mysqli);
 ensure_juegos_precio_markup_pct_column($mysqli);
+ensure_juegos_precio_markup_pct_recargasamerica_column($mysqli);
 ensure_juegos_orden_column($mysqli);
 ensure_juegos_orden_catbar_column($mysqli);
 ensure_juegos_slug_column($mysqli);
@@ -466,6 +480,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
     $edit_activo = isset($_POST['edit_activo']) ? 1 : 0;
     $edit_moneda_fija_id = isset($_POST['edit_moneda_fija_id']) && $_POST['edit_moneda_fija_id'] !== '' ? intval($_POST['edit_moneda_fija_id']) : null;
     $edit_precio_markup_pct = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['edit_precio_markup_pct'] ?? '0'))))));
+    $edit_precio_markup_pct_recargasamerica = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['edit_precio_markup_pct_recargasamerica'] ?? '0'))))));
     $edit_imagen = admin_game_store_upload($_FILES['edit_imagen'] ?? [], 'juego_');
     $edit_imagen_hero = admin_game_store_upload($_FILES['edit_imagen_hero'] ?? [], 'juegohero_');
     $edit_imagen_paquete = admin_game_store_upload($_FILES['edit_imagen_paquete'] ?? [], 'juegopaq_');
@@ -547,9 +562,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
         $edit_badge2_imagen = $currentBadge2Image;
     }
 
-    $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, imagen_catbar=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_2=?, categoria_api_3=?, categoria_api_discord=?, categoria_api_discord_2=?, categoria_api_discord_3=?, categoria_api_recargasamerica=NULLIF(?, ''), categoria_api_recargasamerica_2=NULLIF(?, ''), categoria_api_recargasamerica_3=NULLIF(?, ''), activo=?, moneda_fija_id=?, sticker_texto=?, sticker_icono=?, sticker_color_fondo=?, sticker_imagen=?, badge2_texto=?, badge2_icono=?, badge2_color_fondo=?, badge2_imagen=?, precio_markup_pct=? WHERE id=?");
-    // Types: 7s + 2i + 6s(cat_api..cat_discord3) + 3s(recargasamerica slots) + 2i(activo,moneda) + 4s(stickers) + 4s(badge2) + 1d(markup) + 1i(WHERE id) = 30
-    $stmt->bind_param('sssssss'.'ii'.'ssssss'.'sss'.'ii'.'ssss'.'ssss'.'di', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $nextCatbarImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_2, $edit_categoria_api_3, $edit_categoria_api_discord, $edit_categoria_api_discord_2, $edit_categoria_api_discord_3, $edit_categoria_api_recargasamerica, $edit_categoria_api_recargasamerica_2, $edit_categoria_api_recargasamerica_3, $edit_activo, $edit_moneda_fija_id, $edit_sticker_texto, $edit_sticker_icono, $edit_sticker_color_fondo, $edit_sticker_imagen, $edit_badge2_texto, $edit_badge2_icono, $edit_badge2_color_fondo, $edit_badge2_imagen, $edit_precio_markup_pct, $edit_id);
+    $stmt = $mysqli->prepare("UPDATE juegos SET nombre=?, descripcion=?, slug=?, imagen=?, imagen_hero=?, imagen_paquete=?, imagen_catbar=?, popular=?, api_free_fire=?, categoria_api=?, categoria_api_2=?, categoria_api_3=?, categoria_api_discord=?, categoria_api_discord_2=?, categoria_api_discord_3=?, categoria_api_recargasamerica=NULLIF(?, ''), categoria_api_recargasamerica_2=NULLIF(?, ''), categoria_api_recargasamerica_3=NULLIF(?, ''), activo=?, moneda_fija_id=?, sticker_texto=?, sticker_icono=?, sticker_color_fondo=?, sticker_imagen=?, badge2_texto=?, badge2_icono=?, badge2_color_fondo=?, badge2_imagen=?, precio_markup_pct=?, precio_markup_pct_recargasamerica=? WHERE id=?");
+    // Types: 7s + 2i + 6s(cat_api..cat_discord3) + 3s(recargasamerica slots) + 2i(activo,moneda) + 4s(stickers) + 4s(badge2) + 2d(markup giftven+recargasamerica) + 1i(WHERE id) = 31
+    $stmt->bind_param('sssssss'.'ii'.'ssssss'.'sss'.'ii'.'ssss'.'ssss'.'ddi', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $nextCatbarImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_2, $edit_categoria_api_3, $edit_categoria_api_discord, $edit_categoria_api_discord_2, $edit_categoria_api_discord_3, $edit_categoria_api_recargasamerica, $edit_categoria_api_recargasamerica_2, $edit_categoria_api_recargasamerica_3, $edit_activo, $edit_moneda_fija_id, $edit_sticker_texto, $edit_sticker_icono, $edit_sticker_color_fondo, $edit_sticker_imagen, $edit_badge2_texto, $edit_badge2_icono, $edit_badge2_color_fondo, $edit_badge2_imagen, $edit_precio_markup_pct, $edit_precio_markup_pct_recargasamerica, $edit_id);
     $stmt->execute();
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
     game_set_categories($mysqli, $edit_id, $catIds);
@@ -578,6 +593,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $categoria_api_recargasamerica_3 = substr(trim((string) ($_POST['categoria_api_recargasamerica_3'] ?? '')), 0, 120);
     $api_free_fire = $apiSelection['api_free_fire'];
     $precio_markup_pct = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['precio_markup_pct'] ?? '0'))))));
+    $precio_markup_pct_recargasamerica = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['precio_markup_pct_recargasamerica'] ?? '0'))))));
     $activo = isset($_POST['activo']) ? 1 : 0;
     $orden = admin_game_next_order($mysqli);
     $imagen = admin_game_store_upload($_FILES['imagen'] ?? [], 'juego_');
@@ -600,9 +616,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $badge2_color_fondo  = preg_match('/^#[0-9a-fA-F]{3,6}$/', $rawBadge2ColorC) ? $rawBadge2ColorC : '#0f1a2e';
     $badge2UploadC       = game_badge2_store_upload($_FILES['badge2_imagen'] ?? []);
     $badge2_imagen       = ($badge2UploadC['ok'] && $badge2UploadC['path'] !== '') ? $badge2UploadC['path'] : '';
-    $stmt = $mysqli->prepare("INSERT INTO juegos (nombre, imagen, imagen_hero, imagen_paquete, imagen_catbar, descripcion, slug, moneda_fija_id, popular, api_free_fire, categoria_api, categoria_api_2, categoria_api_3, categoria_api_discord, categoria_api_discord_2, categoria_api_discord_3, categoria_api_recargasamerica, categoria_api_recargasamerica_2, categoria_api_recargasamerica_3, activo, orden, sticker_texto, sticker_icono, sticker_color_fondo, sticker_imagen, badge2_texto, badge2_icono, badge2_color_fondo, badge2_imagen, precio_markup_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    // Types: 7s + 3i(moneda,popular,api_ff) + 6s(cat_api..cat_discord3) + 3s(recargasamerica slots) + 2i(activo,orden) + 4s(stickers) + 4s(badge2) + 1d(markup) = 30
-    $stmt->bind_param('sssssss'.'iii'.'ssssss'.'sss'.'ii'.'ssss'.'ssss'.'d', $nombre, $imagen, $imagen_hero, $imagen_paquete, $imagen_catbar, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_2, $categoria_api_3, $categoria_api_discord, $categoria_api_discord_2, $categoria_api_discord_3, $categoria_api_recargasamerica, $categoria_api_recargasamerica_2, $categoria_api_recargasamerica_3, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen, $badge2_texto, $badge2_icono, $badge2_color_fondo, $badge2_imagen, $precio_markup_pct);
+    $stmt = $mysqli->prepare("INSERT INTO juegos (nombre, imagen, imagen_hero, imagen_paquete, imagen_catbar, descripcion, slug, moneda_fija_id, popular, api_free_fire, categoria_api, categoria_api_2, categoria_api_3, categoria_api_discord, categoria_api_discord_2, categoria_api_discord_3, categoria_api_recargasamerica, categoria_api_recargasamerica_2, categoria_api_recargasamerica_3, activo, orden, sticker_texto, sticker_icono, sticker_color_fondo, sticker_imagen, badge2_texto, badge2_icono, badge2_color_fondo, badge2_imagen, precio_markup_pct, precio_markup_pct_recargasamerica) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    // Types: 7s + 3i(moneda,popular,api_ff) + 6s(cat_api..cat_discord3) + 3s(recargasamerica slots) + 2i(activo,orden) + 4s(stickers) + 4s(badge2) + 2d(markup giftven+recargasamerica) = 31
+    $stmt->bind_param('sssssss'.'iii'.'ssssss'.'sss'.'ii'.'ssss'.'ssss'.'dd', $nombre, $imagen, $imagen_hero, $imagen_paquete, $imagen_catbar, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_2, $categoria_api_3, $categoria_api_discord, $categoria_api_discord_2, $categoria_api_discord_3, $categoria_api_recargasamerica, $categoria_api_recargasamerica_2, $categoria_api_recargasamerica_3, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen, $badge2_texto, $badge2_icono, $badge2_color_fondo, $badge2_imagen, $precio_markup_pct, $precio_markup_pct_recargasamerica);
     $stmt->execute();
     $juego_id = $mysqli->insert_id;
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
@@ -803,12 +819,20 @@ if ($gcatAssignResult instanceof mysqli_result) {
             </div>
             <?php endif; ?>
             <div class="mb-3">
-                <label class="form-label text-neon">Margen de ganancia API (%)</label>
+                <label class="form-label text-neon">Margen de ganancia GiftVen (%)</label>
                 <div class="input-group">
                     <input type="number" name="edit_precio_markup_pct" step="0.01" min="0" max="10000" value="<?= htmlspecialchars(number_format((float) ($juego_edit['precio_markup_pct'] ?? 0), 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
                     <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">%</span>
                 </div>
-                <div class="form-text mt-2" style="color:#8be9fd;">Porcentaje de ganancia sobre el precio de la API. Ej: 50 → precio API x1.5. Se aplica automáticamente en tiempo real cuando el dueño de la API modifica sus precios.</div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Porcentaje de ganancia sobre el precio de GiftVen. Ej: 50 → precio API x1.5. Se aplica automáticamente en tiempo real cuando el dueño de la API modifica sus precios.</div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label text-neon">Margen de ganancia RecargasAmérica (%)</label>
+                <div class="input-group">
+                    <input type="number" name="edit_precio_markup_pct_recargasamerica" step="0.01" min="0" max="10000" value="<?= htmlspecialchars(number_format((float) ($juego_edit['precio_markup_pct_recargasamerica'] ?? 0), 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                    <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">%</span>
+                </div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Porcentaje de ganancia sobre el precio de RecargasAmérica — independiente del margen de GiftVen. Ej: 50 → precio API x1.5.</div>
             </div>
             <div class="form-check mb-3">
                 <input type="checkbox" name="edit_activo" class="form-check-input" id="editActivoCheck" <?= !isset($juego_edit['activo']) || !empty($juego_edit['activo']) ? 'checked' : '' ?>>
@@ -1264,12 +1288,20 @@ if ($gcatAssignResult instanceof mysqli_result) {
             </div>
             <?php endif; ?>
             <div class="mt-3">
-                <label class="form-label" style="color:#00fff7;">Margen de ganancia API (%)</label>
+                <label class="form-label" style="color:#00fff7;">Margen de ganancia GiftVen (%)</label>
                 <div class="input-group">
                     <input type="number" name="precio_markup_pct" step="0.01" min="0" max="10000" value="0" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
                     <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">%</span>
                 </div>
-                <div class="form-text mt-2" style="color:#8be9fd;">Porcentaje de ganancia sobre el precio de la API. Ej: 50 → precio API x1.5. 0 = precio directo de la API.</div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Porcentaje de ganancia sobre el precio de GiftVen. Ej: 50 → precio API x1.5. 0 = precio directo de la API.</div>
+            </div>
+            <div class="mt-3">
+                <label class="form-label" style="color:#00fff7;">Margen de ganancia RecargasAmérica (%)</label>
+                <div class="input-group">
+                    <input type="number" name="precio_markup_pct_recargasamerica" step="0.01" min="0" max="10000" value="0" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                    <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">%</span>
+                </div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Porcentaje de ganancia sobre el precio de RecargasAmérica — independiente del margen de GiftVen. 0 = precio directo de la API.</div>
             </div>
             <div class="form-check mt-3">
                 <input type="checkbox" name="activo" class="form-check-input" id="activoCheck" checked>
@@ -1714,12 +1746,18 @@ if ($gcatAssignResult instanceof mysqli_result) {
             </select>
             <div class="text-xs text-slate-400 mb-2">Slot 3: tercer comando Discord opcional.</div>
             <?php endif; ?>
-            <label class="block text-slate-300 font-medium mb-1">Margen de ganancia API (%):</label>
+            <label class="block text-slate-300 font-medium mb-1">Margen de ganancia GiftVen (%):</label>
             <div class="flex items-center mb-2">
                 <input type="number" name="edit_precio_markup_pct" step="0.01" min="0" max="10000" value="<?= htmlspecialchars(number_format((float) ($juego_edit['precio_markup_pct'] ?? 0), 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>" class="w-full rounded-lg px-3 py-2 bg-slate-800 text-white" style="border:1px solid #22d3ee;">
                 <span class="ml-2 text-slate-300 whitespace-nowrap">%</span>
             </div>
             <div class="text-xs text-slate-400 mb-2">Ej: 50 → precio API x1.5. Se aplica en tiempo real al cambiar el proveedor sus precios.</div>
+            <label class="block text-slate-300 font-medium mb-1">Margen de ganancia RecargasAmérica (%):</label>
+            <div class="flex items-center mb-2">
+                <input type="number" name="edit_precio_markup_pct_recargasamerica" step="0.01" min="0" max="10000" value="<?= htmlspecialchars(number_format((float) ($juego_edit['precio_markup_pct_recargasamerica'] ?? 0), 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>" class="w-full rounded-lg px-3 py-2 bg-slate-800 text-white" style="border:1px solid #22d3ee;">
+                <span class="ml-2 text-slate-300 whitespace-nowrap">%</span>
+            </div>
+            <div class="text-xs text-slate-400 mb-2">Independiente del margen de GiftVen.</div>
             <label class="block text-slate-300 mb-1">Imagen actual:</label>
             <?php if ($juego_edit['imagen']): ?>
                 <img src="/<?= htmlspecialchars($juego_edit['imagen']) ?>" alt="Imagen actual" class="mb-2 rounded-lg max-h-32">

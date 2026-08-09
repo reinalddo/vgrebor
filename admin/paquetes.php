@@ -711,6 +711,27 @@ $res_juego->bind_param('i', $juego_id);
 $res_juego->execute();
 $juego = $res_juego->get_result()->fetch_assoc();
 $adminPackageMarkupPct = floatval($juego['precio_markup_pct'] ?? 0);
+$adminPackageMarkupPctRecargasamerica = floatval($juego['precio_markup_pct_recargasamerica'] ?? 0);
+
+// Precio API + margen correcto para un paquete, sin importar el proveedor —
+// mismo criterio que game.php: se distingue por api_provider ANTES de
+// mirar los catálogos (IDs de GiftVen y RecargasAmérica son de sistemas
+// independientes y pueden coincidir por coincidencia), y cada proveedor usa
+// su propio margen de ganancia (no pueden compartir el mismo %).
+function admin_package_raw_price_and_markup(array $package, array $apiProductsById, array $recargasAmericaProductsById, float $markupGiftven, float $markupRecargasamerica): array {
+    $apiId = (int) ($package['paquete_api'] ?? 0);
+    $provider = trim((string) ($package['api_provider'] ?? ''));
+
+    if ($apiId > 0 && $provider === 'recargasamerica' && isset($recargasAmericaProductsById[$apiId])) {
+        return [floatval($recargasAmericaProductsById[$apiId]['price'] ?? 0), $markupRecargasamerica];
+    }
+
+    if ($apiId > 0 && $provider !== 'recargasamerica' && isset($apiProductsById[$apiId])) {
+        return [floatval($apiProductsById[$apiId]['precio']), $markupGiftven];
+    }
+
+    return [null, 0.0];
+}
 $packageCategories = package_category_list($mysqli, $juego_id);
 $packageCategoryNotice = trim((string) ($_GET['package_category_notice'] ?? ''));
 $packageCategoryError = trim((string) ($_GET['package_category_error'] ?? ''));
@@ -1908,6 +1929,9 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
             <?php if ($adminPackageMarkupPct > 0): ?>
                 <div class="form-text mt-1" style="color:#8be9fd;">Para paquetes TiendaGiftVen el precio se calcula automáticamente: precio API × <?= number_format(1 + $adminPackageMarkupPct / 100, 4) ?> (margen <?= number_format($adminPackageMarkupPct, 2) ?>%). Este campo se usa como respaldo si la API no responde.</div>
             <?php endif; ?>
+            <?php if ($adminPackageMarkupPctRecargasamerica > 0): ?>
+                <div class="form-text mt-1" style="color:#8be9fd;">Para paquetes RecargasAmérica el precio se calcula automáticamente: precio API × <?= number_format(1 + $adminPackageMarkupPctRecargasamerica / 100, 4) ?> (margen <?= number_format($adminPackageMarkupPctRecargasamerica, 2) ?>%). Este campo se usa como respaldo si la API no responde.</div>
+            <?php endif; ?>
             <div class="form-check mt-2">
                 <input type="checkbox" name="precio_manual_override" class="form-check-input" id="precioManualCheck">
                 <label class="form-check-label" for="precioManualCheck" style="color:#f9a825;font-size:0.875rem;">Usar precio manual (ignorar precio de API)</label>
@@ -2314,11 +2338,10 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                     </td>
                     <td class="text-neon" style="background:#181f2a; color:#22d3ee;">
                         <?php
-                        $pAdminApiId = (int) ($p['paquete_api'] ?? 0);
-                        $pAdminApiRaw = ($pAdminApiId > 0 && isset($apiProductsById[$pAdminApiId])) ? floatval($apiProductsById[$pAdminApiId]['precio']) : null;
+                        [$pAdminApiRaw, $pAdminMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica);
                         $pAdminManualOverride = !empty($p['precio_manual_override']);
                         $pAdminDisplayPrice = (!$pAdminManualOverride && $pAdminApiRaw !== null)
-                            ? max(0.0, round($pAdminApiRaw * (1 + $adminPackageMarkupPct / 100), 2))
+                            ? max(0.0, round($pAdminApiRaw * (1 + $pAdminMarkupPct / 100), 2))
                             : floatval($p['precio']);
                         ?>
                         $<?= number_format($pAdminDisplayPrice, 2) ?>
@@ -2407,11 +2430,10 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                         <div style="color:#fff;"><span class="fw-semibold">Monto FF:</span> <?= htmlspecialchars($packageProviderReference, ENT_QUOTES, 'UTF-8') ?></div>
                     <?php endif; ?>
                     <?php
-                    $pCardApiId = (int) ($p['paquete_api'] ?? 0);
-                    $pCardApiRaw = ($pCardApiId > 0 && isset($apiProductsById[$pCardApiId])) ? floatval($apiProductsById[$pCardApiId]['precio']) : null;
+                    [$pCardApiRaw, $pCardMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica);
                     $pCardManualOverride = !empty($p['precio_manual_override']);
                     $pCardDisplayPrice = (!$pCardManualOverride && $pCardApiRaw !== null)
-                        ? max(0.0, round($pCardApiRaw * (1 + $adminPackageMarkupPct / 100), 2))
+                        ? max(0.0, round($pCardApiRaw * (1 + $pCardMarkupPct / 100), 2))
                         : floatval($p['precio']);
                     ?>
                     <div class="text-neon" style="color:#22d3ee;"><span class="fw-semibold">Precio:</span> $<?= number_format($pCardDisplayPrice, 2) ?><?php if ($pCardManualOverride): ?> <span class="small" style="color:#f9a825;">Manual</span><?php elseif ($pCardApiRaw !== null): ?> <span class="small" style="color:#8be9fd;">(API: $<?= number_format($pCardApiRaw, 4) ?>)</span><?php endif; ?></div>
@@ -2706,19 +2728,19 @@ if (isset($_GET['editar'])) {
         <div class="mb-3">
             <label class="form-label text-neon">Precio USD</label>
             <input type="number" step="0.01" name="edit_precio" value="<?= htmlspecialchars($paq_edit['precio']) ?>" required class="form-control" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;" data-discord-catalog-field="price">
-            <?php if ($adminPackageMarkupPct > 0 && $paqEditProvider === 'giftven'): ?>
+            <?php if ($paqEditProvider === 'giftven' || $paqEditProvider === 'recargasamerica'): ?>
                 <?php
-                $paqEditApiId = (int) ($paq_edit['paquete_api'] ?? 0);
-                $paqEditApiRaw = ($paqEditApiId > 0 && isset($apiProductsById[$paqEditApiId])) ? floatval($apiProductsById[$paqEditApiId]['precio']) : null;
-                $paqEditComputedPrice = $paqEditApiRaw !== null ? max(0.0, round($paqEditApiRaw * (1 + $adminPackageMarkupPct / 100), 2)) : null;
+                [$paqEditApiRaw, $paqEditMarkupPct] = admin_package_raw_price_and_markup($paq_edit, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica);
+                $paqEditComputedPrice = $paqEditApiRaw !== null ? max(0.0, round($paqEditApiRaw * (1 + $paqEditMarkupPct / 100), 2)) : null;
                 $paqEditManualOverride = !empty($paq_edit['precio_manual_override']);
+                $paqEditProviderLabel = admin_package_provider_label($paqEditProvider);
                 ?>
                 <?php if ($paqEditManualOverride): ?>
                     <div class="form-text mt-1" style="color:#f9a825;">Precio manual activo. El precio de la API no se aplicará a este paquete.</div>
                 <?php elseif ($paqEditComputedPrice !== null): ?>
-                    <div class="form-text mt-1" style="color:#22d3ee;">Precio vigente (API + margen): <strong>$<?= number_format($paqEditComputedPrice, 2) ?></strong> — API base: $<?= number_format($paqEditApiRaw, 4) ?> × <?= number_format(1 + $adminPackageMarkupPct / 100, 4) ?></div>
+                    <div class="form-text mt-1" style="color:#22d3ee;">Precio vigente (<?= htmlspecialchars($paqEditProviderLabel, ENT_QUOTES, 'UTF-8') ?> + margen): <strong>$<?= number_format($paqEditComputedPrice, 2) ?></strong> — API base: $<?= number_format($paqEditApiRaw, 4) ?> × <?= number_format(1 + $paqEditMarkupPct / 100, 4) ?></div>
                 <?php else: ?>
-                    <div class="form-text mt-1" style="color:#8be9fd;">Margen configurado: <?= number_format($adminPackageMarkupPct, 2) ?>%. El precio real se calculará desde la API cuando el cliente abra el juego.</div>
+                    <div class="form-text mt-1" style="color:#8be9fd;">Margen configurado (<?= htmlspecialchars($paqEditProviderLabel, ENT_QUOTES, 'UTF-8') ?>): <?= number_format($paqEditMarkupPct, 2) ?>%. El precio real se calculará desde la API cuando el cliente abra el juego.</div>
                 <?php endif; ?>
             <?php endif; ?>
             <div class="form-check mt-2">

@@ -522,7 +522,14 @@ include __DIR__ . "/includes/header.php";
       : [];
     $packageFeaturesByPackage = package_features_for_packages($mysqli, array_map(static fn (array $package): int => (int) ($package['id'] ?? 0), $paquetes));
   ?>
-  <?php $gameMarkupPct = floatval($game['precio_markup_pct'] ?? 0); ?>
+  <?php
+    // Márgenes separados por proveedor: GiftVen y RecargasAmérica son
+    // catálogos independientes con precios base distintos, así que no
+    // pueden compartir un solo porcentaje de ganancia (instrucción
+    // explícita del cliente).
+    $gameMarkupPctGiftven = floatval($game['precio_markup_pct'] ?? 0);
+    $gameMarkupPctRecargasamerica = floatval($game['precio_markup_pct_recargasamerica'] ?? 0);
+  ?>
   <?php $priceSyncQueue = []; ?>
   <?php $bsPassStockPackageIds = []; ?>
   <?php $levelPassPackageIds = []; ?>
@@ -582,11 +589,13 @@ include __DIR__ . "/includes/header.php";
         $packPricingProvider = trim((string) ($pack['api_provider'] ?? ''));
         if (!$packManualOverride && $packApiId > 0 && $packPricingProvider === 'recargasamerica' && isset($recargasAmericaProductsById[$packApiId])) {
             $packApiRawPrice = floatval($recargasAmericaProductsById[$packApiId]['price'] ?? 0);
+            $packMarkupPct = $gameMarkupPctRecargasamerica;
         } else {
             $packApiRawPrice = (!$packManualOverride && $packApiId > 0 && $packPricingProvider !== 'recargasamerica' && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
+            $packMarkupPct = $gameMarkupPctGiftven;
         }
         $precio_base = ($packApiRawPrice !== null)
-            ? max(0.0, round($packApiRawPrice * (1 + $gameMarkupPct / 100), 2))
+            ? max(0.0, round($packApiRawPrice * (1 + $packMarkupPct / 100), 2))
             : floatval($pack['precio']);
         if (!$packManualOverride && $packApiRawPrice !== null && abs($precio_base - floatval($pack['precio'])) > 0.00001) {
             $priceSyncQueue[] = ['id' => (int) ($pack['id'] ?? 0), 'precio' => $precio_base];
