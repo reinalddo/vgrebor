@@ -161,7 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } catch (Throwable $e) {
                     if ($pdo->inTransaction()) { $pdo->rollBack(); }
                     $m = $e->getMessage();
-                    header('Location: comprar.php?msg=' . urlencode($m === 'saldo_insuficiente' ? '⚠ Saldo insuficiente. Recarga tu saldo para comprar.' : '⚠ No se pudo completar la compra. Intenta de nuevo.'));
+                    header('Location: comprar.php?msg=' . urlencode($m === 'saldo_insuficiente' ? '⚠ Saldo insuficiente. Recarga tu saldo para comprar.' : '⚠ No se pudo completar la compra: ' . mb_substr((string) $m, 0, 180)));
                     exit;
                 }
             }

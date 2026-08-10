@@ -12900,31 +12900,6 @@ if ($action === 'batch_fulfill_item') {
             });
         }
 
-        // Excepción pura que NO coincide con el patrón de timeout conocido de
-        // arriba (ej. GiftVen respondió pero con el cuerpo vacío/inválido —
-        // típico de un timeout de gateway/502 durante la compra, que es más
-        // pesada que solo consultar el catálogo). No hay garantía de que la
-        // recarga se haya completado del lado de GiftVen, así que NO se marca
-        // 'enviado' a ciegas como el caso de arriba — pero a diferencia de
-        // antes (que dejaba el pedido totalmente en blanco, sin ningún rastro,
-        // hasta que el cliente reclamaba), ahora sí se guarda un mensaje. NO se
-        // toca recargas_api_pedido_id: el próximo reintento (botón "Enviar
-        // Recarga" o automático) sigue pudiendo comprar de nuevo limpio.
-        if (isset($ppData['exception'])) {
-            $unknownExceptionMsg = 'No se pudo confirmar la recarga automáticamente: ' . $ppMsg;
-            $unknownHistJson = append_provider_history(
-                $order['recargas_api_historial_json'] ?? null,
-                build_provider_history_entry('batch_purchase_unknown_exception', $ppState, 'pagado', $unknownExceptionMsg, $ppRef, $ppOid, $ppCode)
-            );
-            $upd4 = $mysqli->prepare("UPDATE pedidos SET ff_api_mensaje=?, ff_api_payload=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=? WHERE id=? AND estado='pagado'");
-            if ($upd4) {
-                $upd4->bind_param('sssi', $unknownExceptionMsg, $ppPayload, $unknownHistJson, $orderId);
-                $upd4->execute();
-                $upd4->close();
-            }
-            json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'No se pudo confirmar tu recarga automáticamente. Un administrador la revisará y completará manualmente.', 'pending_review' => true, 'provider_message' => $ppMsg]);
-        }
-
         json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $ppMsg ?: 'La recarga no fue procesada por el proveedor.', 'provider_message' => $ppMsg]);
     }
 

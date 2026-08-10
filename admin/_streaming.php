@@ -511,6 +511,14 @@ function st_rev_stock_schema(PDO $pdo): void {
   // cuenta completa. Cuando el admin APRUEBA una compra completa por activación, se le crea al revendedor
   // una cuenta con estos cupos en su STOCK. cupos NULL/0 = activación de PERFIL (se queda solo en Ventas).
   try { $pdo->exec("ALTER TABLE streaming_ventas ADD COLUMN cupos INT NULL"); } catch (Throwable $e) {}
+  // Columnas que usa la compra por INVITACIÓN/ACTIVACIÓN (Canva/Spotify). Estaban solo en el CREATE TABLE,
+  // así que en una tabla VIEJA del cliente faltaban → el INSERT de invitación fallaba ("No se pudo
+  // completar la compra") aunque las compras NORMALES (stock) sí funcionaban (no las usan). email_activar
+  // es la clave: solo la usa la invitación. Se aseguran aquí, FUERA de la transacción.
+  try { $pdo->exec("ALTER TABLE streaming_ventas ADD COLUMN email_activar VARCHAR(160) NULL"); } catch (Throwable $e) {}
+  try { $pdo->exec("ALTER TABLE streaming_ventas ADD COLUMN precio_venta_cliente DECIMAL(10,2) NULL"); } catch (Throwable $e) {}
+  try { $pdo->exec("ALTER TABLE streaming_ventas ADD COLUMN cliente_id INT NULL"); } catch (Throwable $e) {}
+  try { $pdo->exec("ALTER TABLE streaming_ventas ADD COLUMN cliente_wa VARCHAR(30) NULL"); } catch (Throwable $e) {}
   // BOT de códigos: bandera para asignar el correo al revendedor EXACTAMENTE UNA VEZ (prycorreos cuenta
   // perfiles; ver bot_codigos_flush). 0 = falta asignar; 1 = ya asignado (o cuenta que no aplica).
   try { $pdo->exec("ALTER TABLE streaming_cuentas ADD COLUMN bot_asignado TINYINT(1) NOT NULL DEFAULT 0"); } catch (Throwable $e) {}
