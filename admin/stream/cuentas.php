@@ -551,7 +551,10 @@ try {
     "SELECT c.id, c.plataforma, c.correo, c.clave, c.costo, c.precio_venta, c.precio_reventa, c.vencimiento, c.notas, COALESCE(c.origen_cuenta_id,0) AS origen_cuenta_id,
             pr.nombre AS prov_nombre, pl.logo_url AS logo, pl.color AS color,
             (SELECT COUNT(*) FROM streaming_perfiles p WHERE p.cuenta_id=c.id AND p.estado='libre') AS libres,
-            (SELECT COUNT(*) FROM streaming_perfiles p WHERE p.cuenta_id=c.id) AS perf
+            (SELECT COUNT(*) FROM streaming_perfiles p WHERE p.cuenta_id=c.id) AS perf,
+            (SELECT GROUP_CONCAT(DISTINCT LOWER(ru.nombre) SEPARATOR ' ')
+               FROM streaming_ventas sv JOIN usuarios ru ON ru.id = sv.revendedor_id
+              WHERE sv.cuenta_id = c.id AND COALESCE(sv.revendedor_id,0) > 0) AS rev_nombres
      FROM streaming_cuentas c
      LEFT JOIN streaming_proveedores pr ON pr.id = c.proveedor_id AND pr.owner_id = c.owner_id
      LEFT JOIN streaming_plataformas pl ON pl.id = c.plataforma_id AND pl.owner_id = c.owner_id
@@ -736,6 +739,9 @@ stream_head('Cuentas', 'cuentas');
       <div><label class="flbl">Plataforma</label><select id="f-plat" onchange="filtrar()" class="input"><option value="">Todas</option><?php foreach (array_keys($inv) as $pn): ?><option value="<?= h(mb_strtolower($pn)) ?>"><?= h($pn) ?></option><?php endforeach; ?></select></div>
       <div><label class="flbl">Estado</label><select id="f-estado" onchange="filtrar()" class="input"><option value="">Todos</option><option value="vencida">Vencidas</option><option value="porvencer">Por vencer (≤5d)</option><option value="vigente">Vigentes</option></select></div>
       <div><label class="flbl">Stock</label><select id="f-stock" onchange="filtrar()" class="input"><option value="">Todo</option><option value="con">Con stock</option><option value="sin">Sin stock</option></select></div>
+      <?php if ((int) $OWNER === 0 && !empty($revList)): ?>
+      <div><label class="flbl">Revendedor</label><select id="f-rev" onchange="filtrar()" class="input"><option value="">Todos</option><?php foreach ($revList as $rv): ?><option value="<?= h(mb_strtolower((string) $rv['nombre'])) ?>"><?= h($rv['nombre']) ?></option><?php endforeach; ?></select></div>
+      <?php endif; ?>
       <?php if ($verCostos): ?><div><label class="flbl">Proveedor</label><select id="f-prov" onchange="filtrar()" class="input"><option value="">Todos</option><?php foreach ($provNames as $pn): ?><option value="<?= h(mb_strtolower($pn)) ?>"><?= h($pn) ?></option><?php endforeach; ?></select></div><?php endif; ?>
       <div><label class="flbl">Ordenar por</label><select id="f-orden" onchange="ordenar()" class="input"><option value="">— Por defecto —</option><option value="dias-asc">Vence primero</option><option value="dias-desc">Vence último</option><option value="plat-asc">Plataforma A→Z</option><option value="plat-desc">Plataforma Z→A</option></select></div>
     </div>
@@ -787,7 +793,7 @@ stream_head('Cuentas', 'cuentas');
         $fEstado = ($d === null) ? 'sinfecha' : ($d < 0 ? 'vencida' : ($d <= 5 ? 'porvencer' : 'vigente'));
         $fStock = (int) $c['libres'] > 0 ? 'con' : 'sin';
       ?>
-        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($c['plataforma'] ?? '')) ?>" data-estado="<?= $fEstado ?>" data-stock="<?= $fStock ?>" data-prov="<?= h(mb_strtolower($c['prov_nombre'] ?? '')) ?>" data-dias="<?= $d === null ? 999999 : (int) $d ?>">
+        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($c['plataforma'] ?? '')) ?>" data-estado="<?= $fEstado ?>" data-stock="<?= $fStock ?>" data-prov="<?= h(mb_strtolower($c['prov_nombre'] ?? '')) ?>" data-rev="<?= h((string) ($c['rev_nombres'] ?? '')) ?>" data-dias="<?= $d === null ? 999999 : (int) $d ?>">
           <td style="position:sticky;left:0;background:var(--surface);z-index:1"><input type="checkbox" class="ck-row" value="<?= (int) $c['id'] ?>" data-lbl="<?= h(trim(($c['plataforma'] ?? '') . ' · ' . ($c['correo'] ?? ''), ' ·')) ?>" onclick="event.stopPropagation();ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"></td>
           <td><div class="flex items-center gap-2.5">
             <?php if (!empty($c['logo'])): ?><img src="<?= h($c['logo']) ?>" class="celllogo" alt="">
@@ -1032,9 +1038,9 @@ stream_head('Cuentas', 'cuentas');
   const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function filtrar(){
     const q=(fval('f-busqueda')+' '+fval('buscar')).toLowerCase().trim().split(/\s+/).filter(Boolean);
-    const plat=fval('f-plat'), estado=fval('f-estado'), stock=fval('f-stock'), prov=fval('f-prov');
+    const plat=fval('f-plat'), estado=fval('f-estado'), stock=fval('f-stock'), prov=fval('f-prov'), rev=fval('f-rev');
     document.querySelectorAll('#tbody tr').forEach(tr=>{ const b=tr.dataset.b||'';
-      const ok = q.every(t=>b.includes(t)) && (!plat||tr.dataset.plat===plat) && (!estado||tr.dataset.estado===estado) && (!stock||tr.dataset.stock===stock) && (!prov||tr.dataset.prov===prov);
+      const ok = q.every(t=>b.includes(t)) && (!plat||tr.dataset.plat===plat) && (!estado||tr.dataset.estado===estado) && (!stock||tr.dataset.stock===stock) && (!prov||tr.dataset.prov===prov) && (!rev||(tr.dataset.rev||'').split(' ').includes(rev));
       tr.style.display=ok?'':'none';
       // REGLA DE ORO: fila oculta = DESMARCADA. Si no, marcas → filtras → "Eliminar varias"
       // borraría lo que ya no ves. Es el escenario más fácil de provocar sin querer.
@@ -1090,7 +1096,7 @@ stream_head('Cuentas', 'cuentas');
   function bulkProveedor(){ const el=document.getElementById('bp-ids'); if(!el) return; const ids=ckIds(); if(!ids.length){ alert('Marca al menos una cuenta.'); return; } el.value=ids.join(','); document.getElementById('bp-n').textContent=ids.length; abrir('m-bulk-proveedor'); }
   function bulkCosto(){ const el=document.getElementById('bc-ids'); if(!el) return; const ids=ckIds(); if(!ids.length){ alert('Marca al menos una cuenta.'); return; } el.value=ids.join(','); document.getElementById('bc-n').textContent=ids.length; abrir('m-bulk-costo'); }
   function ordenar(){ const v=document.getElementById('f-orden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1; rows.sort((a,b)=>{ if(key==='dias'){ return ((parseInt(a.dataset.dias||'0',10))-(parseInt(b.dataset.dias||'0',10)))*mul; } return String(a.dataset.plat||'').localeCompare(String(b.dataset.plat||''))*mul; }); rows.forEach(r=>tb.appendChild(r)); }
-  function resetFiltros(){ ['f-busqueda','f-plat','f-estado','f-stock','f-prov','f-orden','buscar'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';}); filtrar(); }
+  function resetFiltros(){ ['f-busqueda','f-plat','f-estado','f-stock','f-prov','f-rev','f-orden','buscar'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';}); filtrar(); }
   document.getElementById('buscar')?.addEventListener('input', filtrar);
   const ov = document.getElementById('overlay');
   function cerrarModales(){ ov.classList.add('hidden'); ov.classList.remove('flex'); document.querySelectorAll('#overlay > div').forEach(m=>m.classList.add('hidden')); }

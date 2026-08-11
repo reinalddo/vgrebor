@@ -459,6 +459,9 @@ stream_head('Perfiles', 'perfiles');
       <div><label class="flbl">Búsqueda (correo, perfil, cliente…)</label><input id="f-busqueda" oninput="filtrar()" placeholder="Buscar…" class="input"></div>
       <div><label class="flbl">Plataforma</label><select id="f-plat" onchange="filtrar()" class="input"><option value="">Todas</option><?php foreach ($platNames as $pn): ?><option value="<?= h(mb_strtolower($pn)) ?>"><?= h($pn) ?></option><?php endforeach; ?></select></div>
       <div><label class="flbl">Estado</label><select id="f-estado" onchange="filtrar()" class="input"><option value="">Todos</option><option value="libre">Libres</option><option value="vendido">Vendidos</option></select></div>
+      <?php if ((int) $OWNER === 0 && !empty($revList)): ?>
+      <div><label class="flbl">Revendedor</label><select id="f-rev" onchange="filtrar()" class="input"><option value="">Todos</option><?php foreach ($revList as $rv): ?><option value="<?= h(mb_strtolower((string) $rv['nombre'])) ?>"><?= h($rv['nombre']) ?></option><?php endforeach; ?></select></div>
+      <?php endif; ?>
       <div><label class="flbl">Ordenar por</label><select id="f-orden" onchange="ordenar()" class="input"><option value="">— Por defecto —</option><option value="plat-asc">Plataforma A→Z</option><option value="correo-asc">Correo A→Z</option><option value="venc-asc">Vence primero</option></select></div>
     </div>
   </div>
@@ -500,7 +503,7 @@ stream_head('Perfiles', 'perfiles');
         $estadoData = $it['libres'] > 0 ? 'libre' : 'vendido';
         $busca = mb_strtolower(($it['plataforma'] ?? '') . ' ' . ($it['correo'] ?? '') . ' cuenta completa ' . $asignado);
       ?>
-        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($it['plataforma'] ?? '')) ?>" data-estado="<?= h($estadoData) ?>" data-correo="<?= h(mb_strtolower($it['correo'] ?? '')) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
+        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($it['plataforma'] ?? '')) ?>" data-estado="<?= h($estadoData) ?>" data-correo="<?= h(mb_strtolower($it['correo'] ?? '')) ?>" data-rev="<?= h(mb_strtolower((string) ($it['rev_nombre'] ?? ''))) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
           <td><?php if ($it['libres'] > 0): ?><input type="checkbox" class="ck-row" value="<?= h(implode(',', $it['libres_ids'])) ?>" onclick="ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"><?php endif; ?></td>
           <td><b style="color:var(--text)"><?= h($it['plataforma']) ?></b> <span class="tag" style="font-size:10px;color:var(--accent)">Cuenta completa</span></td>
           <td style="color:var(--muted)"><?= h($it['correo'] ?: '—') ?><?php if (!empty($it['clave'])): ?><br><span style="font-size:10px;color:var(--faint)">🔑 <?= h($it['clave']) ?></span><?php endif; ?></td>
@@ -527,7 +530,7 @@ stream_head('Perfiles', 'perfiles');
         $asignado = $vend ? (($p['rev_nombre'] ? 'Rev: ' . $p['rev_nombre'] : ($p['cliente_nombre'] ?: 'Cliente')) . ($p['cliente_wa'] ? ' · ' . $p['cliente_wa'] : '')) : '';
         $busca = mb_strtolower(($p['plataforma'] ?? '') . ' ' . ($p['correo'] ?? '') . ' ' . ($p['etiqueta'] ?? '') . ' ' . $asignado);
       ?>
-        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($p['plataforma'] ?? '')) ?>" data-estado="<?= h($p['estado']) ?>" data-correo="<?= h(mb_strtolower($p['correo'] ?? '')) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
+        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($p['plataforma'] ?? '')) ?>" data-estado="<?= h($p['estado']) ?>" data-correo="<?= h(mb_strtolower($p['correo'] ?? '')) ?>" data-rev="<?= h(mb_strtolower((string) ($p['rev_nombre'] ?? ''))) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
           <td><?php if (!$vend): ?><input type="checkbox" class="ck-row" value="<?= (int) $p['id'] ?>" onclick="ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"><?php endif; ?></td>
           <td><b style="color:var(--text)"><?= h($p['plataforma']) ?></b></td>
           <td style="color:var(--muted)"><?= h($p['correo'] ?: '—') ?><?php if (!empty($p['clave'])): ?><br><span style="font-size:10px;color:var(--faint)">🔑 <?= h($p['clave']) ?></span><?php endif; ?></td>
@@ -719,11 +722,13 @@ stream_head('Perfiles', 'perfiles');
   function filtrar(){
     const q=(document.getElementById('f-busqueda').value||'').toLowerCase().trim();
     const plat=document.getElementById('f-plat').value, est=document.getElementById('f-estado').value;
+    const revEl=document.getElementById('f-rev'); const rev=revEl?revEl.value:'';
     document.querySelectorAll('#tbody tr').forEach(tr=>{
       let ok=true;
       if(q && !(tr.dataset.b||'').includes(q)) ok=false;
       if(plat && tr.dataset.plat!==plat) ok=false;
       if(est && tr.dataset.estado!==est) ok=false;
+      if(rev && (tr.dataset.rev||'')!==rev) ok=false;
       tr.style.display=ok?'':'none';
       if(!ok){ const c=tr.querySelector('.ck-row'); if(c) c.checked=false; }
     });
