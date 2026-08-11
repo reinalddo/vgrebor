@@ -15,6 +15,18 @@ if (!function_exists('recharge_notifications_is_enabled')) {
     }
 }
 
+if (!function_exists('recharge_notifications_initial_delay_seconds')) {
+    // La primera notificación de la sesión no debe aparecer apenas carga la
+    // página (se ve armada/poco creíble) — se espera este tiempo antes del
+    // primer poll. Los siguientes ciclos de polling ya respetan su propio
+    // intervalo normal, esto solo afecta el arranque.
+    function recharge_notifications_initial_delay_seconds(): int {
+        $raw = trim(store_config_get('recarga_notificaciones_delay_seg', '20'));
+        $seconds = is_numeric($raw) ? (int) $raw : 20;
+        return max(0, min(300, $seconds));
+    }
+}
+
 if (!function_exists('recharge_notifications_is_public_context')) {
     function recharge_notifications_is_public_context(): bool {
         $scriptName = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));

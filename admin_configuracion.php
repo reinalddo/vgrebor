@@ -1405,6 +1405,11 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                     <label class="form-check-label" for="recargaNotificacionesActivas">Mostrar notificaciones de recargas en todo el sitio público</label>
                   </div>
                   <div class="mb-3">
+                    <label class="form-label">Retraso antes de la primera notificación (segundos)</label>
+                    <input type="number" min="0" max="300" step="1" class="form-control" style="max-width:160px;" name="recarga_notificaciones_delay_seg" value="<?= (int) ($cfg['recarga_notificaciones_delay_seg'] ?? 20) ?>">
+                    <div class="form-text mt-2">Tiempo de espera antes de que aparezca la primera notificación al entrar a la tienda — si aparece de inmediato se ve poco convincente. 0 = sin retraso.</div>
+                  </div>
+                  <div class="mb-3">
                     <label class="form-label">Logo de la notificación</label>
                     <input type="file" name="recarga_notificaciones_logo" accept="image/png,image/jpeg,image/webp,image/gif" class="form-control">
                     <div class="form-text mt-2">Si lo dejas vacío, la notificación usará automáticamente el logo principal de la tienda.</div>

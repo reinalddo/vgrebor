@@ -2692,6 +2692,8 @@ switch ($seccion) {
                 }
 
                 store_config_upsert('recarga_notificaciones_activas', isset($_POST['recarga_notificaciones_activas']) ? '1' : '0');
+                $nextDelaySeconds = max(0, min(300, (int) ($_POST['recarga_notificaciones_delay_seg'] ?? 20)));
+                store_config_upsert('recarga_notificaciones_delay_seg', (string) $nextDelaySeconds);
                 if ($nextLogo === '') {
                     store_config_delete('recarga_notificaciones_logo');
                 } else {

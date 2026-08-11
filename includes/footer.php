@@ -9,6 +9,7 @@ $rechargeNotificationsApiUrl = app_path('/api/recharge_notifications.php');
 $rechargeNotificationsApiUrlJs = json_encode($rechargeNotificationsApiUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 $rechargeNotificationsEnabled = recharge_notifications_is_enabled() && recharge_notifications_is_public_context();
 $rechargeNotificationsEnabledJs = $rechargeNotificationsEnabled ? 'true' : 'false';
+$rechargeNotificationsInitialDelayMs = recharge_notifications_initial_delay_seconds() * 1000;
 $rechargeNotificationPosition = trim((string) store_config_get('win_points_notification_position', 'bottom-left'));
 $allowedRechargeNotificationPositions = [
   'bottom-left',
@@ -1200,19 +1201,25 @@ $rechargeNotificationsScript = <<<'SCRIPT'
       }
     };
 
-    poll(true);
-    window.setInterval(() => {
-      poll(false);
-    }, 10000);
+    const initialDelayMs = __LIVE_RECHARGE_INITIAL_DELAY_MS__;
+    let started = false;
+    window.setTimeout(() => {
+      started = true;
+      poll(true);
+      window.setInterval(() => {
+        poll(false);
+      }, 10000);
+    }, initialDelayMs);
 
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) {
+      if (started && !document.hidden) {
         poll(false);
       }
     });
   })();
 </script>
 SCRIPT;
+$rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_INITIAL_DELAY_MS__', (string) $rechargeNotificationsInitialDelayMs, $rechargeNotificationsScript);
 $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENDPOINT__', $rechargeNotificationsApiUrlJs, $rechargeNotificationsScript);
 $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $rechargeNotificationsEnabledJs, $rechargeNotificationsScript);
 ?>
