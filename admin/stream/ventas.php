@@ -476,6 +476,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                               WHERE id IN ($in) AND $gate $estadoGate FOR UPDATE")->fetchAll(PDO::FETCH_ASSOC);
         $saltadas = count($ids) - count($rows);
         $n = 0;
+        $revsFlush = [];   // revendedores nuevos a los que hay que asignarles en el bot (tras el commit)
 
         if ($op === 'renovar') {
           $hasta = trim((string) ($_POST['hasta'] ?? ''));
@@ -542,9 +543,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           foreach ($rows as $r) { $upPr->execute([$nuevoPrecio, $nuevoPrecio, (int) $r['id']]); $n += $upPr->rowCount(); }
           $msg = "✓ Precio de venta \$" . number_format($nuevoPrecio, 2) . " aplicado a $n venta(s).";
         }
+        elseif ($op === 'reasignar') {
+          // Cambiar el CLIENTE y/o el VENDEDOR (revendedor) de las ventas seleccionadas. Deja en blanco lo
+          // que no quieras cambiar. Cambiar de vendedor MUEVE la cuenta del inventario del revendedor viejo
+          // al nuevo (espejo) y actualiza el bot; solo lo hace el dueño (no un revendedor sobre sus ventas).
+          $nuevoCli = trim((string) ($_POST['cliente_nombre'] ?? ''));
+          $nuevoWa  = preg_replace('/\D+/', '', (string) ($_POST['cliente_wa'] ?? ''));
+          $revRaw   = (string) ($_POST['revendedor_id'] ?? '');   // '' = no cambiar · '0' = quitar · >0 = reasignar
+          $cambiaRev = ($revRaw !== '' && !$esRevCtx);
+          $nuevoRev = $cambiaRev ? (int) $revRaw : -1;
+          if ($nuevoCli === '' && $nuevoWa === '' && !$cambiaRev) throw new Exception('No indicaste ningún cambio (cliente o vendedor).');
+          $nCli = 0; $nRev = 0;
+          foreach ($rows as $r) {
+            $vid2 = (int) $r['id'];
+            // 1) Cliente (nombre / WhatsApp)
+            if ($nuevoCli !== '') { try { $pdo->prepare("UPDATE streaming_ventas SET cliente_nombre=?, cliente_wa=? WHERE id=?")->execute([$nuevoCli, ($nuevoWa !== '' ? $nuevoWa : null), $vid2]); $nCli++; } catch (Throwable $e) {} }
+            elseif ($nuevoWa !== '') { try { $pdo->prepare("UPDATE streaming_ventas SET cliente_wa=? WHERE id=?")->execute([$nuevoWa, $vid2]); } catch (Throwable $e) {} }
+            // 2) Vendedor (mover el espejo del revendedor viejo → nuevo)
+            if ($cambiaRev) {
+              $oldRev = (int) ($r['revendedor_id'] ?? 0);
+              $cuentaId = (int) ($r['cuenta_id'] ?? 0);
+              if ($nuevoRev !== $oldRev) {
+                $perfIds = [];
+                try { $perfIds = array_map('intval', $pdo->query("SELECT id FROM streaming_perfiles WHERE venta_id=$vid2")->fetchAll(PDO::FETCH_COLUMN)); } catch (Throwable $e) {}
+                // quitar del revendedor viejo (su espejo) + bot desasignar
+                if ($oldRev > 0 && $cuentaId > 0 && function_exists('st_rev_quitar_por_origen')) { try { st_rev_quitar_por_origen($pdo, $oldRev, $cuentaId, $perfIds); } catch (Throwable $e) {} }
+                // dar al revendedor nuevo (crear su espejo). Solo si hay perfiles del admin que mover.
+                if ($nuevoRev > 0 && $cuentaId > 0 && $perfIds && function_exists('st_rev_entregar')) {
+                  $pfRows = [];
+                  try { $in2 = implode(',', $perfIds); $pfRows = $pdo->query("SELECT id, etiqueta, pin FROM streaming_perfiles WHERE id IN ($in2)")->fetchAll(PDO::FETCH_ASSOC); } catch (Throwable $e) {}
+                  if ($pfRows) { try { st_rev_entregar($pdo, $nuevoRev, $cuentaId, $pfRows, 0.0, false, ((string) ($r['fecha_vencimiento'] ?? '') ?: null)); } catch (Throwable $e) {} $revsFlush[$nuevoRev] = true; }
+                }
+                // actualizar la venta del admin: nuevo revendedor (o directa si es 0)
+                try { $pdo->prepare("UPDATE streaming_ventas SET revendedor_id=? WHERE id=?")->execute([($nuevoRev > 0 ? $nuevoRev : null), $vid2]); } catch (Throwable $e) {}
+                $nRev++;
+              }
+            }
+          }
+          $msg = '✓ Cambios aplicados' . ($nCli > 0 ? " · $nCli cliente(s)" : '') . ($nRev > 0 ? " · $nRev con nuevo vendedor" : '') . '.';
+        }
         else throw new Exception('Operación de lote no válida.');
 
         $pdo->commit();
+        // BOT de códigos (tras el commit): asigna a los revendedores nuevos las cuentas que recibieron.
+        if (!empty($revsFlush) && function_exists('bot_codigos_flush')) { foreach (array_keys($revsFlush) as $rf) { try { bot_codigos_flush($pdo, (int) $rf); } catch (Throwable $e) {} } }
         if ($saltadas > 0) $msg .= " $saltadas omitida(s): " . ($esRevCtx ? 'no eran tuyas o ya no existen.' : 'son de revendedores y no tienes acceso.');
       } catch (Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
     }
@@ -714,6 +756,7 @@ stream_head('Ventas', 'ventas');
     <span id="bulk-rev" style="display:none;font-size:11.5px;color:var(--warn)">⚠ <b id="bulk-rev-n">0</b> son de revendedores</span>
     <button type="button" onclick="bulkRenovar()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="refresh-cw" style="width:14px;height:14px"></i> Renovar varias</button>
     <button type="button" onclick="bulkPrecios()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="dollar-sign" style="width:14px;height:14px"></i> Cambiar precios</button>
+    <button type="button" onclick="bulkReasignar()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="user-cog" style="width:14px;height:14px"></i> Cambiar cliente/vendedor</button>
     <button type="button" onclick="bulkEliminar()" class="btn ghost" style="padding:5px 12px;font-size:12.5px;color:var(--err);border-color:rgba(239,68,68,.4)"><i data-lucide="trash-2" style="width:14px;height:14px"></i> Eliminar varias</button>
     <button type="button" onclick="document.querySelectorAll('.ck-row').forEach(c=>c.checked=false);ckSync()" class="btn ghost" style="padding:5px 12px;font-size:12.5px;margin-left:auto">Quitar selección</button>
   </div>
@@ -891,6 +934,26 @@ stream_head('Ventas', 'ventas');
       <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Nuevo <b>precio de venta</b> para <b id="lp-n" style="color:var(--acc)">0</b> venta(s). Es lo que le cobras a tu cliente (no el costo).</p>
       <div class="field" style="margin-bottom:12px"><label class="flbl">Precio de venta</label><div style="display:flex"><span style="padding:0 10px;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--border);border-right:0;border-radius:9px 0 0 9px;color:var(--muted)">$</span><input name="precio" type="number" step="0.01" min="0" class="input" style="border-radius:0 9px 9px 0" placeholder="Ej: 3.50" required></div></div>
       <button class="btn primary" style="width:100%">Aplicar a todas</button>
+    </form>
+  </div>
+
+  <div id="m-lote-reasignar" class="hidden modal" style="max-width:27rem">
+    <div class="modal-hd"><h3><i data-lucide="user-cog"></i> Cambiar cliente / vendedor</h3><button onclick="cerrar()" class="modal-x"><i data-lucide="x"></i></button></div>
+    <form method="post" class="modal-bd"><input type="hidden" name="_csrf" value="<?= h(csrf_token()) ?>"><input type="hidden" name="accion" value="lote_ventas"><input type="hidden" name="op" value="reasignar"><input type="hidden" name="ids" id="lra-ids"><input type="hidden" name="f" value="<?= h($f) ?>">
+      <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Cambiar <b id="lra-n" style="color:var(--acc)">0</b> venta(s). <b>Deja en blanco lo que NO quieras cambiar.</b></p>
+      <div class="field" style="margin-bottom:10px"><label class="flbl">Nuevo cliente (nombre)</label><input name="cliente_nombre" class="input" placeholder="Dejar vacío = no cambiar"></div>
+      <div class="field" style="margin-bottom:10px"><label class="flbl">WhatsApp del cliente</label><input name="cliente_wa" class="input" placeholder="Ej: 584121234567 (opcional)"></div>
+      <?php if (!$esRevCtx && $revList): ?>
+      <div class="field" style="margin-bottom:12px"><label class="flbl">Nuevo vendedor (revendedor)</label>
+        <select name="revendedor_id" class="input">
+          <option value="">— No cambiar —</option>
+          <option value="0">Quitar vendedor (venta directa)</option>
+          <?php foreach ($revList as $rv): ?><option value="<?= (int) $rv['id'] ?>"><?= h($rv['nombre']) ?></option><?php endforeach; ?>
+        </select>
+        <div style="font-size:11px;color:var(--faint);margin-top:5px">Al cambiar de vendedor, la cuenta se mueve del inventario del revendedor viejo al nuevo, y el bot se actualiza.</div>
+      </div>
+      <?php endif; ?>
+      <button class="btn primary" style="width:100%">Aplicar</button>
     </form>
   </div>
 
@@ -1160,6 +1223,7 @@ stream_head('Ventas', 'ventas');
   function bulkRenovar(){ const i=ckIds(); if(!i.length) return; document.getElementById('lr-ids').value=i.join(','); document.getElementById('lr-n').textContent=i.length; const nr=ckMarcados().filter(c=>c.dataset.rev==='1').length; document.getElementById('lr-rev').style.display=nr>0?'':'none'; document.getElementById('lr-rev-n').textContent=nr; abrir('m-lote-renovar'); }
   function bulkEliminar(){ const i=ckIds(); if(!i.length) return; document.getElementById('le-ids').value=i.join(','); document.getElementById('le-n').textContent=i.length; document.getElementById('le-conf').value=''; abrir('m-lote-eliminar'); }
   function bulkPrecios(){ const i=ckIds(); if(!i.length) return; document.getElementById('lp-ids').value=i.join(','); document.getElementById('lp-n').textContent=i.length; abrir('m-lote-precios'); }
+  function bulkReasignar(){ const i=ckIds(); if(!i.length) return; document.getElementById('lra-ids').value=i.join(','); document.getElementById('lra-n').textContent=i.length; abrir('m-lote-reasignar'); }
   function limitar(n){ LIM=parseInt(n)||0; aplicarFiltro(); }
   document.getElementById('buscar')?.addEventListener('input',aplicarFiltro);
   aplicarFiltro();

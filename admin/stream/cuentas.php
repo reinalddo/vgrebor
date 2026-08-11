@@ -474,6 +474,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $insVentaMasiva = $pdo->prepare("INSERT INTO streaming_ventas (owner_id,plataforma,tipo,cuenta_id,correo,clave,perfil,pin,fecha_inicio,fecha_vencimiento,creado_por,revendedor_id,entregada) VALUES ($OWNER,?,'perfil',?,?,?,?,?,CURDATE(),?,?,?,1)");
       $upVendMasivo   = $pdo->prepare("UPDATE streaming_perfiles SET estado='vendido', venta_id=? WHERE id=?");
       $vendMasivo = 0;
+      $revsTocados = [];   // revendedores que recibieron cuentas → flush del bot al final
       // Nota: los valores finales se calculan en PHP (abajo), NO con COALESCE(NULLIF(?,''),col):
       // ese patrón mezcla la collation del parámetro con la de la columna y revienta en servidores
       // cuya conexión es utf8mb4_general_ci mientras las tablas son utf8mb4_unicode_ci (error 1267).
@@ -498,7 +499,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $venc    = $parseFecha($p[5] ?? '');
         $costoRaw = str_replace(',', '.', trim((string) ($p[6] ?? '')));   // costo opcional (7ª columna): acepta coma o punto
         $costo    = ($costoRaw !== '' && is_numeric($costoRaw)) ? (float) $costoRaw : null;
-        $vendedor = mb_strtolower(trim((string) ($p[7] ?? '')));   // vendedor opcional (8ª columna)
+        $vendedor = mb_strtolower(trim((string) ($p[7] ?? '')));   // vendedor: 8ª columna (nombre/usuario/email)
+        // TOLERANTE: si el vendedor no vino en la 8ª columna (o no coincide), buscamos en las OTRAS columnas
+        // un CORREO que sea de un revendedor conocido (revMap). Así funciona aunque el correo del vendedor lo
+        // pongan donde va el costo/fecha, como suele pasar. Solo matchea revendedores reales, NUNCA el correo
+        // de la cuenta (p[1]) ni la clave (p[2]): por eso el barrido arranca en la columna 3 (índice 3).
+        if ((int) $OWNER === 0 && ($vendedor === '' || !isset($revMap[$vendedor]))) {
+          for ($ci = count($p) - 1; $ci >= 3; $ci--) {
+            $cand = mb_strtolower(trim((string) ($p[$ci] ?? '')));
+            if ($cand !== '' && strpos($cand, '@') !== false && isset($revMap[$cand])) { $vendedor = $cand; break; }
+          }
+        }
 
         $k = mb_strtolower($platNom); $pid = $pmap[$k] ?? null;
         if ($pid === null) { $insPlat->execute([$platNom]); $pid = (int) $pdo->lastInsertId(); $pmap[$k] = $pid; }
@@ -521,14 +532,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Si la línea trae un vendedor válido → se sube ya VENDIDA a ese revendedor; si no, queda stock.
         if ($vendedor !== '' && isset($revMap[$vendedor])) {
           $sVenc = $venc ?: ($cuentas[$gkey]['venc'] ?: date('Y-m-d', strtotime('+30 days')));
-          $insVentaMasiva->execute([$platNom, $cuentas[$gkey]['cid'], $correo ?: null, $clave ?: null, $etiqueta, $pin !== '' ? $pin : null, $sVenc, current_user_id(), $revMap[$vendedor]]);
+          $rvId = (int) $revMap[$vendedor];
+          $insVentaMasiva->execute([$platNom, $cuentas[$gkey]['cid'], $correo ?: null, $clave ?: null, $etiqueta, $pin !== '' ? $pin : null, $sVenc, current_user_id(), $rvId]);
           $upVendMasivo->execute([(int) $pdo->lastInsertId(), $newPid]);
+          // CLAVE: además de la venta del admin, ENTREGARLE de verdad al revendedor su cuenta/perfil ESPEJO
+          // (owner=revId) para que le aparezca en SU inventario. Antes esto NO se hacía → se marcaba vendida
+          // del lado del admin pero al revendedor no le salía nada. Igual que "Vender varias → revendedor".
+          if (function_exists('st_rev_entregar')) {
+            try { st_rev_entregar($pdo, $rvId, (int) $cuentas[$gkey]['cid'], [['id' => $newPid, 'etiqueta' => $etiqueta, 'pin' => $pin]], (float) ($costo ?? 0), false, $sVenc); } catch (Throwable $e) {}
+          }
+          $revsTocados[$rvId] = true;
           $vendMasivo++;
         }
         if (++$nPerf >= 3000) break;
       }
       // Ajusta el total de perfiles + clave/vencimiento/costo de cada cuenta según lo importado.
       foreach ($cuentas as $c) $updCuenta->execute([$c['nperf'], ($c['clave'] !== '' ? $c['clave'] : null), $c['venc'], $c['costo'], $c['cid']]);
+      // BOT de códigos: asigna UNA vez el correo de cada cuenta nueva a su revendedor (fuera de transacción).
+      if (function_exists('bot_codigos_flush')) { foreach (array_keys($revsTocados) as $rt) { try { bot_codigos_flush($pdo, (int) $rt); } catch (Throwable $e) {} } }
       $nCta = count($cuentas);
       $msg = "✓ $nPerf perfil(es) importados en $nCta cuenta(s)" . ($vendMasivo > 0 ? " · $vendMasivo ya vendido(s) a su revendedor" : '') . '.';
     }
