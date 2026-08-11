@@ -65,6 +65,26 @@ function recargasamerica_api_response_snippet(?string $body, int $limit = 240): 
     return function_exists('mb_substr') ? mb_substr($body, 0, $limit, 'UTF-8') : substr($body, 0, $limit);
 }
 
+// Se lanza SOLO cuando RecargasAmérica respondió de verdad (con un cuerpo
+// JSON válido y un error estructurado: saldo insuficiente, producto
+// inválido, proveedor externo rechazó la orden, etc. — ver la colección de
+// Postman oficial: código HTTP 4xx/5xx + {"success":false,"error":"...",
+// "code":"..."}). A diferencia de un RuntimeException genérico (que
+// también cubre timeouts y fallos de conexión donde NUNCA hubo respuesta),
+// esta excepción significa que el proveedor sí procesó la solicitud y dio
+// una razón real — no debe tratarse como "reintentar limpio en silencio",
+// sino dejar rastro visible para el admin.
+class RecargasAmericaProviderException extends RuntimeException {
+    public string $providerCode;
+    public array $responseData;
+
+    public function __construct(string $message, string $providerCode = '', array $responseData = []) {
+        parent::__construct($message);
+        $this->providerCode = $providerCode;
+        $this->responseData = $responseData;
+    }
+}
+
 function recargasamerica_api_error_message_from_response(?array $data, int $status): string {
     if (is_array($data)) {
         foreach ([$data['error'] ?? null, $data['message'] ?? null] as $candidate) {
@@ -155,11 +175,19 @@ function recargasamerica_api_request(string $method, string $path, ?array $paylo
     }
 
     if (isset($status) && $status >= 400) {
-        throw new RuntimeException(recargasamerica_api_error_message_from_response($data, $status));
+        throw new RecargasAmericaProviderException(
+            recargasamerica_api_error_message_from_response($data, $status),
+            (string) ($data['code'] ?? ''),
+            $data
+        );
     }
 
     if (array_key_exists('success', $data) && !$data['success']) {
-        throw new RuntimeException(recargasamerica_api_error_message_from_response($data, $status ?? 0));
+        throw new RecargasAmericaProviderException(
+            recargasamerica_api_error_message_from_response($data, $status ?? 0),
+            (string) ($data['code'] ?? ''),
+            $data
+        );
     }
 
     return $data;
@@ -313,7 +341,28 @@ function execute_recargasamerica_purchase(int $productId, string $tipo, string $
         $response = $tipo === 'pin'
             ? recargasamerica_api_buy_pin($productId, $quantity, $clientName)
             : recargasamerica_api_buy_recharge($productId, $userIdentifier, $clientName);
+    } catch (RecargasAmericaProviderException $e) {
+        // El proveedor SÍ respondió, con un error real y estructurado (saldo
+        // insuficiente, producto inválido, rechazo del proveedor externo,
+        // etc.) — no es un fallo de red. Debe dejar rastro visible (a
+        // diferencia del catch de abajo) y marcarse para revisión manual en
+        // vez de reintentarse en silencio sin que nadie se entere de la
+        // razón real. NUNCA se creó una transacción del lado de
+        // RecargasAmérica en este caso, así que reintentar más tarde sigue
+        // siendo seguro (no hay riesgo de compra duplicada).
+        return [
+            'success' => false,
+            'accepted' => false,
+            'needs_manual_review' => true,
+            'message' => $e->getMessage(),
+            'reference' => '',
+            'payload' => array_merge($e->responseData, ['provider_code' => $e->providerCode, 'request_payload' => $requestPayload]),
+        ];
     } catch (Throwable $e) {
+        // Fallo de transporte puro (timeout, DNS, conexión rechazada, JSON
+        // inválido): el proveedor nunca llegó a responder, así que no hay
+        // nada que verificar — se deja "limpio" para permitir un reintento
+        // normal sin demora (ver recargasamerica_dispatch_or_recover).
         return [
             'success' => false,
             'accepted' => false,

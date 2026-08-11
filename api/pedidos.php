@@ -6197,6 +6197,18 @@ function recargasamerica_dispatch_or_recover(array $order): array {
 
     try {
         $statusResponse = recargasamerica_api_fetch_order_status($existingReference);
+    } catch (RecargasAmericaProviderException $e) {
+        // Respuesta real del proveedor (ej. "Orden no encontrada", 404) — se
+        // guarda igual que cualquier otro resultado, a diferencia de un
+        // fallo de transporte puro (catch de abajo).
+        return [
+            'success' => false,
+            'accepted' => false,
+            'needs_manual_review' => true,
+            'message' => $e->getMessage(),
+            'reference' => $existingReference,
+            'payload' => array_merge($e->responseData, ['provider_code' => $e->providerCode, 'recovery_check' => true]),
+        ];
     } catch (Throwable $e) {
         return [
             'success' => false,
