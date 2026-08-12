@@ -49,6 +49,8 @@ function stream_nav_items(): array {
     $items[] = ['key' => 'precios-recargas', 'label' => 'Precios recargas', 'icon' => 'tags', 'href' => 'precios-recargas.php'];
   }
   if ($esRev) {
+    // Lista simple de SUS revendedores (solo el revendedor la ve; el admin tiene su propia gestión aparte).
+    $items[] = ['key' => 'mis-revendedores', 'label' => 'Revendedores', 'icon' => 'store', 'href' => 'misrevendedores.php'];
     $items[] = ['key' => 'recargas', 'label' => 'Recargas', 'icon' => 'zap', 'href' => 'recargas.php'];
     $items[] = ['key' => 'mi-api', 'label' => 'Mi API', 'icon' => 'code', 'href' => 'mi-api.php'];
   }

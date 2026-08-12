@@ -189,6 +189,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $pdo->prepare("UPDATE streaming_ventas SET fecha_vencimiento=?, estado='activa', recordado=0, recordado_at=NULL WHERE id=?")->execute([$nueva, $vid]);
       // Al renovar se reinicia el contador de cambios de nombre/PIN del perfil de esta venta (2 nuevos).
       try { $pdo->prepare("UPDATE streaming_perfiles SET cambios_np=0 WHERE venta_id=?")->execute([$vid]); } catch (Throwable $e) {}
+      // Si esta venta es de un REVENDEDOR, propaga la nueva fecha a SU cuenta espejo (para que a él también
+      // se le renueve y NO se le borre por vencida al pasar el barrido). Antes solo se renovaba la del admin.
+      if (!$esRevCtx) { try {
+        $vinf = $pdo->query("SELECT cuenta_id, revendedor_id FROM streaming_ventas WHERE id=$vid")->fetch(PDO::FETCH_ASSOC);
+        if ($vinf && (int) ($vinf['revendedor_id'] ?? 0) > 0 && (int) ($vinf['cuenta_id'] ?? 0) > 0 && function_exists('st_rev_propagar_vencimiento')) {
+          $pids = array_map('intval', $pdo->query("SELECT id FROM streaming_perfiles WHERE venta_id=$vid")->fetchAll(PDO::FETCH_COLUMN));
+          st_rev_propagar_vencimiento($pdo, (int) $vinf['cuenta_id'], $nueva, $pids);
+        }
+      } catch (Throwable $e) {} }
       // Registrar el pago de la renovación (método/ref/comprobante)
       $comp = null;
       if (!empty($_FILES['comprobante']['tmp_name']) && is_uploaded_file($_FILES['comprobante']['tmp_name']) && (int) $_FILES['comprobante']['error'] === 0 && (int) $_FILES['comprobante']['size'] <= 4 * 1024 * 1024) {
@@ -507,6 +516,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $up->execute([$ini, $nueva, (int) $r['id']]);
             $n += $up->rowCount();
+            // Propaga la nueva fecha al ESPEJO del revendedor (que a él también se le renueve y no se borre).
+            if (!$esRevCtx && (int) ($r['revendedor_id'] ?? 0) > 0 && (int) ($r['cuenta_id'] ?? 0) > 0 && function_exists('st_rev_propagar_vencimiento')) {
+              try { $pids = array_map('intval', $pdo->query("SELECT id FROM streaming_perfiles WHERE venta_id=" . (int) $r['id'])->fetchAll(PDO::FETCH_COLUMN)); st_rev_propagar_vencimiento($pdo, (int) $r['cuenta_id'], $nueva, $pids); } catch (Throwable $e) {}
+            }
             st_log($pdo, (int) $r['id'], 'renovada', 'Renovada en lote hasta ' . $nueva);
           }
           // NO se insertan pagos: el individual registra monto = precio de la venta, y copiarlo aquí

@@ -818,6 +818,61 @@ function st_rev_propagar_a_espejos(PDO $pdo, int $cuentaOrigenId, ?string $corre
   return $n;
 }
 
+/** Propaga una nueva FECHA DE VENCIMIENTO a las cuentas ESPEJO del revendedor (y a sus ventas ligadas).
+ *  Se llama al RENOVAR una venta/cuenta del admin que era de un revendedor: sin esto, el espejo del
+ *  revendedor se quedaba con la fecha vieja → (1) al revendedor NO se le veía renovado y (2) el barrido
+ *  de vencidos (st_rev_sweep_vencidos) lo borraba por estar vencido → "desaparecía de todos lados".
+ *  Si se pasan $adminPerfilIds, solo toca las ventas de esos perfiles espejo; si no, todas las del espejo.
+ *  Nunca lanza. Devuelve cuántas ventas del revendedor actualizó. */
+function st_rev_propagar_vencimiento(PDO $pdo, int $adminCuentaId, ?string $newVenc, array $adminPerfilIds = []): int {
+  if ($adminCuentaId <= 0 || $newVenc === null || trim((string) $newVenc) === '') return 0;
+  $n = 0;
+  try {
+    $esp = $pdo->prepare("SELECT id, owner_id FROM streaming_cuentas WHERE origen_cuenta_id=? AND COALESCE(owner_id,0)>0");
+    $esp->execute([$adminCuentaId]);
+    $pids = array_values(array_filter(array_map('intval', $adminPerfilIds), static fn($x) => $x > 0));
+    foreach ($esp->fetchAll(PDO::FETCH_ASSOC) as $er) {
+      $mid = (int) $er['id']; $rev = (int) $er['owner_id'];
+      // 1) La cuenta ESPEJO: extiende su vencimiento (evita que el barrido la borre por vencida).
+      try { $pdo->prepare("UPDATE streaming_cuentas SET vencimiento=? WHERE id=?")->execute([$newVenc, $mid]); } catch (Throwable $e) {}
+      // 2) Las ventas del REVENDEDOR ligadas a esos perfiles espejo → nueva fecha (así la ve renovada).
+      if ($pids) {
+        $in = implode(',', $pids);
+        foreach ($pdo->query("SELECT DISTINCT COALESCE(venta_id,0) v FROM streaming_perfiles WHERE cuenta_id=$mid AND origen_perfil_id IN ($in)")->fetchAll(PDO::FETCH_COLUMN) as $rvid) {
+          if ((int) $rvid > 0) { try { $pdo->prepare("UPDATE streaming_ventas SET fecha_vencimiento=?, estado='activa', recordado=0 WHERE id=? AND owner_id=?")->execute([$newVenc, (int) $rvid, $rev]); $n++; } catch (Throwable $e) {} }
+        }
+      } else {
+        try { $pdo->prepare("UPDATE streaming_ventas SET fecha_vencimiento=?, estado='activa', recordado=0 WHERE cuenta_id=?")->execute([$newVenc, $mid]); $n++; } catch (Throwable $e) {}
+      }
+    }
+  } catch (Throwable $e) {}
+  return $n;
+}
+
+/** Reasigna UNA venta a otro REVENDEDOR ($nuevoRev; 0 = quitar vendedor). Mueve la cuenta ESPEJO del
+ *  revendedor viejo al nuevo (quitar + entregar) y actualiza la venta del admin. Reutilizable desde
+ *  Ventas/Cuentas/Perfiles. Devuelve el id del revendedor nuevo (>0) para hacerle flush del bot, o 0.
+ *  Nunca lanza. */
+function st_rev_reasignar_venta(PDO $pdo, int $ventaId, int $nuevoRev): int {
+  if ($ventaId <= 0) return 0;
+  try {
+    $v = $pdo->query("SELECT revendedor_id, cuenta_id, fecha_vencimiento FROM streaming_ventas WHERE id=" . (int) $ventaId)->fetch(PDO::FETCH_ASSOC);
+    if (!$v) return 0;
+    $oldRev = (int) ($v['revendedor_id'] ?? 0); $cuentaId = (int) ($v['cuenta_id'] ?? 0);
+    if ($nuevoRev === $oldRev || $cuentaId <= 0) return 0;
+    $perfIds = array_map('intval', $pdo->query("SELECT id FROM streaming_perfiles WHERE venta_id=" . (int) $ventaId)->fetchAll(PDO::FETCH_COLUMN));
+    if ($oldRev > 0 && function_exists('st_rev_quitar_por_origen')) { try { st_rev_quitar_por_origen($pdo, $oldRev, $cuentaId, $perfIds); } catch (Throwable $e) {} }
+    $flush = 0;
+    if ($nuevoRev > 0 && $perfIds && function_exists('st_rev_entregar')) {
+      $in = implode(',', $perfIds);
+      $pf = $pdo->query("SELECT id, etiqueta, pin FROM streaming_perfiles WHERE id IN ($in)")->fetchAll(PDO::FETCH_ASSOC);
+      if ($pf) { try { st_rev_entregar($pdo, $nuevoRev, $cuentaId, $pf, 0.0, false, ((string) ($v['fecha_vencimiento'] ?? '') ?: null)); } catch (Throwable $e) {} $flush = $nuevoRev; }
+    }
+    try { $pdo->prepare("UPDATE streaming_ventas SET revendedor_id=? WHERE id=?")->execute([($nuevoRev > 0 ? $nuevoRev : null), $ventaId]); } catch (Throwable $e) {}
+    return $flush;
+  } catch (Throwable $e) { return 0; }
+}
+
 /** El ADMIN le entrega perfiles a un REVENDEDOR (venta asignada o compra del stock): además de la
  *  venta del admin, el revendedor recibe ESOS perfiles en SU inventario (cuenta/perfiles espejo).
  *  Así los ve en «Perfiles», los vende a su cliente cuando quiera y, si borra esa venta suya, el

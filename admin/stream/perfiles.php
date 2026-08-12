@@ -303,6 +303,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($venta   !== null) { $sets[] = 'precio_venta=?';   $args[] = $venta;   $partes[] = 'venta $' . number_format($venta, 2); }
         if ($reventa !== null) { $sets[] = 'precio_reventa=?'; $args[] = $reventa; $partes[] = 'reventa $' . number_format($reventa, 2); }
         $pdo->prepare("UPDATE streaming_cuentas SET " . implode(',', $sets) . " WHERE id IN ($cin) AND owner_id=$OWNER")->execute($args);
+        // El precio de REVENTA = costo del revendedor → propágalo al costo de su cuenta espejo (total = reventa × perfiles).
+        if ($reventa !== null && (int) $OWNER === 0) {
+          try { foreach ($ctas as $cid3) { foreach ($pdo->query("SELECT id FROM streaming_cuentas WHERE origen_cuenta_id=" . (int) $cid3 . " AND COALESCE(owner_id,0)>0")->fetchAll(PDO::FETCH_COLUMN) as $mid3) { $np = (int) $pdo->query("SELECT COUNT(*) FROM streaming_perfiles WHERE cuenta_id=" . (int) $mid3)->fetchColumn(); try { $pdo->prepare("UPDATE streaming_cuentas SET costo=? WHERE id=?")->execute([round($reventa * max(1, $np), 2), (int) $mid3]); } catch (Throwable $e) {} } } } catch (Throwable $e) {}
+        }
       }
       if ($costo !== null) {
         $wc = "id IN ($cin) AND owner_id=$OWNER" . ($esRevCtx ? " AND COALESCE(origen_cuenta_id,0)=0" : "");
@@ -310,6 +314,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $partes[] = 'costo $' . number_format($costo, 2) . ($esRevCtx ? ' (solo propias)' : '');
       }
       $msg = '✓ ' . implode(' · ', $partes) . ' en las cuentas de ' . count($pids) . ' perfil(es).';
+    }
+    // ── LOTE desde Perfiles: CAMBIAR / REASIGNAR VENDEDOR (sin borrar) ──
+    // Mueve los perfiles seleccionados (su venta) a otro revendedor: quita del viejo, entrega al nuevo y
+    // actualiza la venta. Sirve para corregir una asignación equivocada sin tener que eliminar y revender.
+    elseif (($_POST['accion'] ?? '') === 'reasignar_vendedor_p') {
+      if ($esRevCtx) throw new Exception('Solo el dueño puede reasignar el vendedor.');
+      $pids = array_values(array_unique(array_filter(array_map('intval', explode(',', (string) ($_POST['ids'] ?? ''))))));
+      if (!$pids) throw new Exception('No seleccionaste perfiles.');
+      $revRaw = (string) ($_POST['revendedor_id'] ?? '');
+      if ($revRaw === '') throw new Exception('Elige el nuevo vendedor.');
+      $nuevoRev = (int) $revRaw;   // 0 = quitar vendedor
+      $in = implode(',', $pids);
+      $vids = array_map('intval', $pdo->query("SELECT DISTINCT venta_id FROM streaming_perfiles WHERE id IN ($in) AND venta_id IS NOT NULL AND venta_id>0")->fetchAll(PDO::FETCH_COLUMN));
+      if (!$vids) throw new Exception('Esos perfiles no están vendidos/asignados; no hay venta que reasignar.');
+      $flush = []; $nOk = 0;
+      $pdo->beginTransaction();
+      try {
+        foreach ($vids as $vid) { if (function_exists('st_rev_reasignar_venta')) { $f = st_rev_reasignar_venta($pdo, (int) $vid, $nuevoRev); if ($f > 0) $flush[$f] = true; $nOk++; } }
+        $pdo->commit();
+      } catch (Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
+      if (!empty($flush) && function_exists('bot_codigos_flush')) { foreach (array_keys($flush) as $rf) { try { bot_codigos_flush($pdo, (int) $rf); } catch (Throwable $e) {} } }
+      $msg = '✓ ' . $nOk . ' venta(s) ' . ($nuevoRev > 0 ? 'reasignada(s) al nuevo vendedor.' : 'sin vendedor (quedaron directas).');
     }
     // ── LOTE desde Perfiles: asignar proveedor (solo dueño) ──
     elseif (($_POST['accion'] ?? '') === 'bulk_proveedor_p') {
@@ -478,6 +504,7 @@ stream_head('Perfiles', 'perfiles');
       <b style="color:var(--acc)"><span id="bulk-n">0</span> seleccionado(s)</b>
       <button type="button" onclick="bulkVender()" class="btn ghost" style="padding:5px 12px;font-size:12.5px;color:var(--good);border-color:rgba(34,197,94,.4)"><i data-lucide="shopping-cart" style="width:14px;height:14px"></i> Vender seleccionados</button>
       <button type="button" onclick="bulkPreciosP()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="dollar-sign" style="width:14px;height:14px"></i> Cambiar precios</button>
+      <?php if ((int) $OWNER === 0 && !empty($revList)): ?><button type="button" onclick="bulkReasignarP()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="user-cog" style="width:14px;height:14px"></i> Cambiar vendedor</button><?php endif; ?>
       <?php if ($verCostos): ?>
       <button type="button" onclick="bulkProveedorP()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="truck" style="width:14px;height:14px"></i> Asignar proveedor</button>
       <?php endif; ?>
@@ -662,6 +689,23 @@ stream_head('Perfiles', 'perfiles');
       <button class="btn primary w-full">Aplicar</button>
     </form>
   </div>
+
+  <?php if ((int) $OWNER === 0 && !empty($revList)): ?>
+  <!-- LOTE desde Perfiles: cambiar / reasignar vendedor -->
+  <div id="m-perf-reasig" class="modal hidden w-full max-w-md my-8">
+    <div class="modal-hd"><h3><i data-lucide="user-cog"></i> Cambiar vendedor</h3><button onclick="cerrarModales()" class="modal-x"><i data-lucide="x"></i></button></div>
+    <form method="post" class="p-5 space-y-4"><input type="hidden" name="_csrf" value="<?= h($csrf) ?>"><input type="hidden" name="accion" value="reasignar_vendedor_p"><input type="hidden" name="ids" id="prz-ids">
+      <p style="color:var(--muted)">Reasignar <strong id="prz-n" style="color:var(--text)">0</strong> perfil(es) (su venta) a otro vendedor. La cuenta se mueve del inventario del vendedor viejo al nuevo.</p>
+      <div class="field"><label class="flbl">Nuevo vendedor</label>
+        <select name="revendedor_id" class="input">
+          <option value="0">Quitar vendedor (dejar directa)</option>
+          <?php foreach ($revList as $rv): ?><option value="<?= (int) $rv['id'] ?>"><?= h($rv['nombre']) ?></option><?php endforeach; ?>
+        </select>
+      </div>
+      <button class="btn primary w-full">Reasignar</button>
+    </form>
+  </div>
+  <?php endif; ?>
   <?php if ($verCostos): ?>
   <!-- LOTE desde Perfiles: asignar proveedor (solo dueño) -->
   <div id="m-perf-prov" class="modal hidden w-full max-w-md my-8">
@@ -770,6 +814,7 @@ stream_head('Perfiles', 'perfiles');
   function vDestino(){ const r=document.querySelector('input[name="destino"]:checked'); const esRev=!!r&&r.value==='revendedor'; const c=document.getElementById('v-cliente'), v=document.getElementById('v-rev'); if(c)c.classList.toggle('hidden',esRev); if(v)v.classList.toggle('hidden',!esRev); }
   // Lote desde Perfiles: cambiar precios / asignar proveedor / eliminar varias.
   function bulkPreciosP(){ const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } document.getElementById('pp-ids').value=i.join(','); document.getElementById('pp-n').textContent=i.length; abrir('m-perf-precios'); }
+  function bulkReasignarP(){ const el=document.getElementById('prz-ids'); if(!el) return; const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } el.value=i.join(','); document.getElementById('prz-n').textContent=i.length; abrir('m-perf-reasig'); }
   function bulkProveedorP(){ const el=document.getElementById('ppv-ids'); if(!el) return; const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } el.value=i.join(','); document.getElementById('ppv-n').textContent=i.length; abrir('m-perf-prov'); }
   function bulkEliminarP(){ const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } document.getElementById('pe-ids').value=i.join(','); document.getElementById('pe-n').textContent=i.length; document.getElementById('pe-conf').value=''; abrir('m-perf-elim'); }
 </script>

@@ -4,7 +4,6 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/slugify.php';
 require_once __DIR__ . '/includes/store_config.php';
 require_once __DIR__ . '/includes/win_points.php';
-require_once __DIR__ . '/includes/recargasamerica_api.php';
 tenant_start_session();
 
 function admin_allowed_roles(): array {
@@ -2692,8 +2691,6 @@ switch ($seccion) {
                 }
 
                 store_config_upsert('recarga_notificaciones_activas', isset($_POST['recarga_notificaciones_activas']) ? '1' : '0');
-                $nextDelaySeconds = max(0, min(300, (int) ($_POST['recarga_notificaciones_delay_seg'] ?? 20)));
-                store_config_upsert('recarga_notificaciones_delay_seg', (string) $nextDelaySeconds);
                 if ($nextLogo === '') {
                     store_config_delete('recarga_notificaciones_logo');
                 } else {
@@ -3846,40 +3843,6 @@ require_once __DIR__ . '/includes/header.php';
             <h1 class="display-4 fw-bold text-info mb-4">Panel de Administración</h1>
             <h2 class="h3 fw-semibold mb-3">Bienvenido al panel de administración</h2>
             <p class="mb-4">Selecciona una sección para comenzar.</p>
-            <?php if (recargasamerica_api_is_configured()):
-                $raWalletBalance = null;
-                $raWalletCurrency = 'USD';
-                $raWalletError = null;
-                try {
-                    $raWallet = recargasamerica_api_fetch_wallet();
-                    $raWalletBalance = (float) ($raWallet['balance'] ?? 0);
-                    $raWalletCurrency = (string) ($raWallet['currency'] ?? 'USD');
-                } catch (Throwable $e) {
-                    // No se pudo consultar: se muestra igual, en rojo, en vez de
-                    // ocultar la tarjeta — un fallo de la API es justo lo que se
-                    // quiere ver de un vistazo, no solo el saldo bajo.
-                    $raWalletError = $e->getMessage();
-                }
-                // Umbral de "saldo bajo" arbitrario (10 USD) — sin dato histórico
-                // de consumo todavía para calcularlo de forma más precisa.
-                $raWalletLow = $raWalletBalance !== null && $raWalletBalance < 10;
-                $raWalletBad = $raWalletError !== null || $raWalletLow;
-                $raWalletColor = $raWalletBad ? '#ff3b3b' : '#22c55e';
-            ?>
-            <div class="d-flex justify-content-center mb-4">
-                <div style="background:#10141a; border:2px solid <?= $raWalletColor ?>; box-shadow:0 0 18px <?= $raWalletColor ?>55; border-radius:14px; padding:0.9rem 1.6rem; display:inline-block;">
-                    <div style="font-size:0.8rem; color:#9fb3c8; text-transform:uppercase; letter-spacing:0.05em;">Saldo RecargasAmérica</div>
-                    <?php if ($raWalletError !== null): ?>
-                    <div style="font-size:1.1rem; font-weight:700; color:<?= $raWalletColor ?>;">⚠ No se pudo consultar</div>
-                    <?php else: ?>
-                    <div style="font-size:1.6rem; font-weight:700; color:<?= $raWalletColor ?>;">
-                        <?= htmlspecialchars($raWalletCurrency, ENT_QUOTES, 'UTF-8') ?> <?= number_format($raWalletBalance, 2) ?>
-                        <?php if ($raWalletLow): ?><span style="font-size:0.85rem; font-weight:600;">⚠ Saldo bajo</span><?php endif; ?>
-                    </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-            <?php endif; ?>
             <div class="d-flex flex-wrap justify-content-center gap-3">
                 <a href="/admin/pedidos" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>📋</span>Pedidos</a>
                 <a href="/admin/movimientos" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>💳</span>Movimientos Bancarios</a>

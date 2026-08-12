@@ -273,6 +273,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $nueva = date('Y-m-d', strtotime($base . " +$meses months"));
       }
       $pdo->prepare("UPDATE streaming_cuentas SET vencimiento=? WHERE id=? AND owner_id=?")->execute([$nueva, $cid, $OWNER]);
+      // Propaga la nueva fecha a las cuentas ESPEJO de los revendedores (que a ellos también se les renueve
+      // y no se les borre por vencidas al pasar el barrido).
+      if ((int) $OWNER === 0 && function_exists('st_rev_propagar_vencimiento')) { try { st_rev_propagar_vencimiento($pdo, $cid, $nueva); } catch (Throwable $e) {} }
       $msg = '✓ Cuenta renovada hasta ' . date('d/m/Y', strtotime($nueva)) . '.';
     }
     elseif ($a === 'eliminar_cuenta') {
@@ -294,9 +297,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $pdo->beginTransaction();
       try {
         if ($hasta !== '' && strtotime($hasta)) {
+          $fFija = date('Y-m-d', strtotime($hasta));
           $st = $pdo->prepare("UPDATE streaming_cuentas SET vencimiento=? WHERE id IN ($in) AND owner_id=$OWNER");
-          $st->execute([date('Y-m-d', strtotime($hasta))]);
+          $st->execute([$fFija]);
           $n = $st->rowCount();
+          // Propaga a los espejos de los revendedores (fecha fija para todas).
+          if ((int) $OWNER === 0 && function_exists('st_rev_propagar_vencimiento')) { foreach ($ids as $cid2) { try { st_rev_propagar_vencimiento($pdo, (int) $cid2, $fFija); } catch (Throwable $e) {} } }
         } else {
           // Con "meses", cada cuenta parte de SU PROPIO vencimiento (vigente → desde su fecha;
           // vencida → desde hoy). Por eso es un loop y no un UPDATE masivo.
@@ -306,8 +312,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           $n = 0;
           foreach ($rows as $r) {
             $base = ($r['vencimiento'] && strtotime($r['vencimiento']) > time()) ? $r['vencimiento'] : date('Y-m-d');
-            $up->execute([date('Y-m-d', strtotime($base . " +$meses months")), (int) $r['id']]);
+            $nva = date('Y-m-d', strtotime($base . " +$meses months"));
+            $up->execute([$nva, (int) $r['id']]);
             $n += $up->rowCount();
+            if ((int) $OWNER === 0 && function_exists('st_rev_propagar_vencimiento')) { try { st_rev_propagar_vencimiento($pdo, (int) $r['id'], $nva); } catch (Throwable $e) {} }
           }
         }
         $pdo->commit();
@@ -366,6 +374,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $st->execute($args); $tot = max($tot, $st->rowCount());
         if ($venta   !== null) $partes[] = 'venta $' . number_format($venta, 2);
         if ($reventa !== null) $partes[] = 'reventa $' . number_format($reventa, 2);
+        // El PRECIO DE REVENTA es lo que le cobras al revendedor por perfil = SU costo. Al cambiarlo, se lo
+        // propagamos al COSTO de su cuenta ESPEJO. Convención del espejo: costo TOTAL = costo_por_perfil ×
+        // nº de perfiles (así el dashboard del revendedor imputa bien su costo/ganancia). Ver st_rev_mirror_perfil.
+        if ($reventa !== null && (int) $OWNER === 0) {
+          try {
+            foreach ($ids as $cid3) {
+              foreach ($pdo->query("SELECT id FROM streaming_cuentas WHERE origen_cuenta_id=" . (int) $cid3 . " AND COALESCE(owner_id,0)>0")->fetchAll(PDO::FETCH_COLUMN) as $mid3) {
+                $np = (int) $pdo->query("SELECT COUNT(*) FROM streaming_perfiles WHERE cuenta_id=" . (int) $mid3)->fetchColumn();
+                try { $pdo->prepare("UPDATE streaming_cuentas SET costo=? WHERE id=?")->execute([round($reventa * max(1, $np), 2), (int) $mid3]); } catch (Throwable $e) {}
+              }
+            }
+          } catch (Throwable $e) {}
+        }
       }
       // costo → admin a todas; revendedor SOLO a las propias (origen_cuenta_id vacío).
       if ($costo !== null) {
@@ -375,6 +396,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $partes[] = 'costo $' . number_format($costo, 2) . ($esRev ? ' (solo cuentas propias)' : '');
       }
       $msg = '✓ ' . implode(' · ', $partes) . ' aplicado.';
+    }
+    // ── LOTE: cambiar / REASIGNAR VENDEDOR de las cuentas seleccionadas (sin borrar) ──
+    // Mueve las ventas de esas cuentas a otro revendedor (corregir asignación equivocada sin eliminar).
+    elseif ($a === 'reasignar_vendedor_c') {
+      if (!$verCostos) throw new Exception('Solo el dueño puede reasignar el vendedor.');
+      $ids = array_values(array_unique(array_filter(array_map('intval', explode(',', (string) ($_POST['ids'] ?? ''))))));
+      if (!$ids) throw new Exception('No seleccionaste ninguna cuenta.');
+      $revRaw = (string) ($_POST['revendedor_id'] ?? '');
+      if ($revRaw === '') throw new Exception('Elige el nuevo vendedor.');
+      $nuevoRev = (int) $revRaw;
+      $in = implode(',', $ids);
+      $vids = array_map('intval', $pdo->query("SELECT DISTINCT p.venta_id FROM streaming_perfiles p JOIN streaming_cuentas c ON c.id=p.cuenta_id WHERE c.id IN ($in) AND c.owner_id=$OWNER AND p.venta_id IS NOT NULL AND p.venta_id>0")->fetchAll(PDO::FETCH_COLUMN));
+      if (!$vids) throw new Exception('Esas cuentas no tienen ventas asignadas para reasignar.');
+      $flush = []; $nOk = 0;
+      $pdo->beginTransaction();
+      try {
+        foreach ($vids as $vid) { if (function_exists('st_rev_reasignar_venta')) { $f = st_rev_reasignar_venta($pdo, (int) $vid, $nuevoRev); if ($f > 0) $flush[$f] = true; $nOk++; } }
+        $pdo->commit();
+      } catch (Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
+      if (!empty($flush) && function_exists('bot_codigos_flush')) { foreach (array_keys($flush) as $rf) { try { bot_codigos_flush($pdo, (int) $rf); } catch (Throwable $e) {} } }
+      $msg = '✓ ' . $nOk . ' venta(s) ' . ($nuevoRev > 0 ? 'reasignada(s) al nuevo vendedor.' : 'sin vendedor.');
     }
     // ── LOTE: VENDER varias (marca vendido: toma 1 perfil libre por cuenta y crea la venta) ──
     elseif ($a === 'vender_cuentas_masivo') {
@@ -786,6 +828,7 @@ stream_head('Cuentas', 'cuentas');
       <button type="button" onclick="bulkProveedor()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="truck" style="width:14px;height:14px"></i> Asignar proveedor</button>
       <?php endif; ?>
       <button type="button" onclick="bulkCosto()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="dollar-sign" style="width:14px;height:14px"></i> Cambiar precios</button>
+      <?php if ((int) $OWNER === 0 && !empty($revList)): ?><button type="button" onclick="bulkReasignar()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="user-cog" style="width:14px;height:14px"></i> Cambiar vendedor</button><?php endif; ?>
       <button type="button" onclick="bulkEliminar()" class="btn ghost" style="padding:5px 12px;font-size:12.5px;color:var(--err);border-color:rgba(239,68,68,.4)"><i data-lucide="trash-2" style="width:14px;height:14px"></i> Eliminar varias</button>
       <button type="button" onclick="document.querySelectorAll('.ck-row').forEach(c=>c.checked=false);ckSync()" class="btn ghost" style="padding:5px 12px;font-size:12.5px;margin-left:auto">Quitar selección</button>
     </div>
@@ -995,6 +1038,23 @@ stream_head('Cuentas', 'cuentas');
     </form>
   </div>
 
+  <?php if ((int) $OWNER === 0 && !empty($revList)): ?>
+  <!-- ── LOTE: Cambiar / reasignar vendedor de las cuentas seleccionadas ── -->
+  <div id="m-bulk-reasig" class="modal hidden w-full max-w-md my-8">
+    <div class="modal-hd"><h3><i data-lucide="user-cog"></i> Cambiar vendedor</h3><button onclick="cerrarModales()" class="modal-x"><i data-lucide="x"></i></button></div>
+    <form method="post" class="p-5 space-y-4"><input type="hidden" name="_csrf" value="<?= h($csrf) ?>"><input type="hidden" name="accion" value="reasignar_vendedor_c"><input type="hidden" name="ids" id="brz-ids">
+      <p style="color:var(--muted)">Reasignar las ventas de <strong id="brz-n" style="color:var(--text)">0</strong> cuenta(s) a otro vendedor. La cuenta se mueve del inventario del vendedor viejo al nuevo.</p>
+      <div class="field"><label class="flbl">Nuevo vendedor</label>
+        <select name="revendedor_id" class="input">
+          <option value="0">Quitar vendedor (dejar directa)</option>
+          <?php foreach ($revList as $rv): ?><option value="<?= (int) $rv['id'] ?>"><?= h($rv['nombre']) ?></option><?php endforeach; ?>
+        </select>
+      </div>
+      <button class="btn primary w-full">Reasignar</button>
+    </form>
+  </div>
+  <?php endif; ?>
+
   <div id="m-renovar" class="modal hidden w-full max-w-md my-8">
     <div class="modal-hd"><h3><i data-lucide="calendar-check"></i> Renovar Plataforma</h3><button onclick="cerrarModales()" class="modal-x"><i data-lucide="x"></i></button></div>
     <form method="post" class="p-5 space-y-4"><input type="hidden" name="_csrf" value="<?= h($csrf) ?>"><input type="hidden" name="accion" value="renovar_cuenta"><input type="hidden" name="id" id="r-id">
@@ -1023,8 +1083,10 @@ stream_head('Cuentas', 'cuentas');
       <p style="font-size:11.5px;color:var(--faint)"><b>Una línea por PERFIL:</b> <code class="softbox" style="padding:1px 6px;border-radius:6px">Plataforma, Correo, Clave, Nombre del perfil, PIN, Vence, Costo, Vendedor</code><br>
         · Los perfiles con el <b>mismo correo</b> se agrupan en una <b>sola cuenta</b> (no una por línea).<br>
         · <b>Nombre del perfil</b> = el que quieras (ej. el nombre del cliente); si lo dejas vacío se numera P1, P2…<br>
-        · <b>PIN</b>, <b>Vence</b> y <b>Costo</b> son opcionales. Fecha: <b>AAAA-MM-DD</b> o <b>DD/MM/AAAA</b>. El costo es lo que tú pagas por la cuenta.<br>
-        · <b>Vendedor</b> (opcional, última columna): nombre/usuario/correo de un revendedor → el perfil se sube ya <b>vendido</b> a ese revendedor. Si lo dejas vacío, queda como <b>stock</b>.</p>
+        · <b>Vence</b> = vencimiento de la <b>CUENTA</b> (cuándo se vence la suscripción). Fecha: <b>AAAA-MM-DD</b> o <b>DD/MM/AAAA</b>.<br>
+        · <b>Costo</b> = <b>TU costo</b> (lo que TÚ pagas por la cuenta), <b>no</b> el precio de venta. Opcional, solo para tu control de ganancia.<br>
+        · El <b>precio de venta</b> al cliente/revendedor <b>no va aquí</b>: se toma de <b>Tipos de cuentas</b> (precio de la plataforma), o lo pones luego en <b>«Cambiar precios»</b> o al vender.<br>
+        · <b>Vendedor</b> (opcional, última columna): nombre/usuario/correo de un revendedor → se sube ya <b>asignado</b> a ese revendedor (le aparece en su inventario). Si lo dejas vacío, queda como <b>stock</b> tuyo.</p>
       <textarea name="datos" rows="8" class="input" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace" placeholder="Netflix, correo@x.com, clave123, Rebeca JR, 9669, 01/08/2026, 3.50, rev1&#10;Netflix, correo@x.com, clave123, Pedro, 1234, 01/08/2026, ,&#10;Disney+, otro@x.com, clave99, , , 2026-09-15"></textarea>
       <div class="flex justify-end gap-2"><button type="button" onclick="cerrarModales()" class="btn ghost">Cancelar</button><button class="btn primary">Importar</button></div>
     </form>
@@ -1116,6 +1178,7 @@ stream_head('Cuentas', 'cuentas');
   function bvDestino(){ const r=document.querySelector('input[name="destino"]:checked'); const esRev=!!r&&r.value==='revendedor'; const c=document.getElementById('bv-cliente'), v=document.getElementById('bv-rev'); if(c)c.classList.toggle('hidden',esRev); if(v)v.classList.toggle('hidden',!esRev); }
   function bulkProveedor(){ const el=document.getElementById('bp-ids'); if(!el) return; const ids=ckIds(); if(!ids.length){ alert('Marca al menos una cuenta.'); return; } el.value=ids.join(','); document.getElementById('bp-n').textContent=ids.length; abrir('m-bulk-proveedor'); }
   function bulkCosto(){ const el=document.getElementById('bc-ids'); if(!el) return; const ids=ckIds(); if(!ids.length){ alert('Marca al menos una cuenta.'); return; } el.value=ids.join(','); document.getElementById('bc-n').textContent=ids.length; abrir('m-bulk-costo'); }
+  function bulkReasignar(){ const el=document.getElementById('brz-ids'); if(!el) return; const ids=ckIds(); if(!ids.length){ alert('Marca al menos una cuenta.'); return; } el.value=ids.join(','); document.getElementById('brz-n').textContent=ids.length; abrir('m-bulk-reasig'); }
   function ordenar(){ const v=document.getElementById('f-orden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1; rows.sort((a,b)=>{ if(key==='dias'){ return ((parseInt(a.dataset.dias||'0',10))-(parseInt(b.dataset.dias||'0',10)))*mul; } return String(a.dataset.plat||'').localeCompare(String(b.dataset.plat||''))*mul; }); rows.forEach(r=>tb.appendChild(r)); }
   function resetFiltros(){ ['f-busqueda','f-plat','f-estado','f-stock','f-prov','f-rev','f-orden','buscar'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';}); filtrar(); }
   document.getElementById('buscar')?.addEventListener('input', filtrar);
