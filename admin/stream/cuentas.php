@@ -528,6 +528,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (preg_match('#^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$#', $s, $m)) return sprintf('%04d-%02d-%02d', (int) $m[3], (int) $m[2], (int) $m[1]);
         $t = strtotime($s); return $t ? date('Y-m-d', $t) : null;
       };
+      // ¿El texto ES una fecha con formato (AAAA-MM-DD o DD/MM/AAAA)? Estricto: un PIN numérico como
+      // "9669" o "1234" NO cuenta como fecha. Sirve para detectar plataformas SIN PIN (ver abajo).
+      $esFecha = static function ($s) {
+        $s = trim((string) $s);
+        return (bool) (preg_match('#^\d{4}-\d{1,2}-\d{1,2}$#', $s) || preg_match('#^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{4}$#', $s));
+      };
       $cuentas = []; // gkey => ['cid'=>int,'nperf'=>int,'clave'=>string,'venc'=>?string]
       $nPerf = 0;
       foreach (preg_split('/\r?\n/', (string) ($_POST['datos'] ?? '')) as $ln) {
@@ -537,9 +543,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $correo  = trim($p[1] ?? '');
         $clave   = trim($p[2] ?? '');
         $nombreP = ltrim(trim($p[3] ?? ''), '#');   // por si escriben "#nombre" (herencia del antiguo "#Perfiles")
-        $pin     = trim($p[4] ?? '');
-        $venc    = $parseFecha($p[5] ?? '');
-        $costoRaw = str_replace(',', '.', trim((string) ($p[6] ?? '')));   // costo opcional (7ª columna): acepta coma o punto
+        // PIN OPCIONAL: muchas plataformas (Paramount, Disney, Spotify…) NO tienen PIN. Si el usuario OMITE
+        // la columna del PIN, la FECHA caería donde va el PIN y TODO se corría (fecha→PIN, costo→fecha…).
+        // Detectamos: si el campo del PIN es en realidad una FECHA con formato, es que NO hay PIN → se lee
+        // corrido una columna (Vence=p[4], Costo=p[5]). Si es un PIN normal (o vacío), lectura normal.
+        $pinRaw = trim((string) ($p[4] ?? ''));
+        if ($esFecha($pinRaw)) {
+          $pin      = '';                               // sin PIN
+          $venc     = $parseFecha($p[4] ?? '');
+          $costoRaw = str_replace(',', '.', trim((string) ($p[5] ?? '')));
+        } else {
+          $pin      = $pinRaw;
+          $venc     = $parseFecha($p[5] ?? '');
+          $costoRaw = str_replace(',', '.', trim((string) ($p[6] ?? '')));   // costo (acepta coma o punto)
+        }
         $costo    = ($costoRaw !== '' && is_numeric($costoRaw)) ? (float) $costoRaw : null;
         $vendedor = mb_strtolower(trim((string) ($p[7] ?? '')));   // vendedor: 8ª columna (nombre/usuario/email)
         // TOLERANTE: si el vendedor no vino en la 8ª columna (o no coincide), buscamos en las OTRAS columnas
@@ -1083,6 +1100,7 @@ stream_head('Cuentas', 'cuentas');
       <p style="font-size:11.5px;color:var(--faint)"><b>Una línea por PERFIL:</b> <code class="softbox" style="padding:1px 6px;border-radius:6px">Plataforma, Correo, Clave, Nombre del perfil, PIN, Vence, Costo, Vendedor</code><br>
         · Los perfiles con el <b>mismo correo</b> se agrupan en una <b>sola cuenta</b> (no una por línea).<br>
         · <b>Nombre del perfil</b> = el que quieras (ej. el nombre del cliente); si lo dejas vacío se numera P1, P2…<br>
+        · <b>PIN</b> = opcional. Si la plataforma <b>no tiene PIN</b> (Paramount, Disney, Spotify…), <b>omite esa columna</b> o déjala vacía — el sistema lo detecta solo y NO corre la fecha ni el precio.<br>
         · <b>Vence</b> = vencimiento de la <b>CUENTA</b> (cuándo se vence la suscripción). Fecha: <b>AAAA-MM-DD</b> o <b>DD/MM/AAAA</b>.<br>
         · <b>Costo</b> = <b>TU costo</b> (lo que TÚ pagas por la cuenta), <b>no</b> el precio de venta. Opcional, solo para tu control de ganancia.<br>
         · El <b>precio de venta</b> al cliente/revendedor <b>no va aquí</b>: se toma de <b>Tipos de cuentas</b> (precio de la plataforma), o lo pones luego en <b>«Cambiar precios»</b> o al vender.<br>

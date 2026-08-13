@@ -615,7 +615,7 @@ $f = in_array($fReq, ['todas', 'vencidas', 'pendientes'], true) ? $fReq : 'todas
 $hoyStr = date('Y-m-d');
 if ($f === 'vencidas')        $where = "(v.estado='vencida' OR (v.estado='activa' AND v.fecha_vencimiento < '$hoyStr'))";
 elseif ($f === 'pendientes')  $where = "v.entregada=0 AND v.estado<>'cancelada'";
-else                          $where = "1=1";
+else                          $where = "v.estado <> 'cancelada'";   // 'todas' oculta las CANCELADAS (ej. de cuentas ya eliminadas), que antes seguían saliendo. El historial sigue en la BD.
 // D3: filtro por REVENDEDOR (solo el dueño). rev>0 → ese revendedor · rev=-1 → ventas directas (sin revendedor).
 $revF = isset($_GET['rev']) ? (int) $_GET['rev'] : 0;
 if (!$esRevCtx && $revF > 0)        $where .= " AND v.revendedor_id = " . $revF;
@@ -757,7 +757,7 @@ stream_head('Ventas', 'ventas');
     <option value="venc-asc">Vence primero</option>
     <option value="venc-desc">Vence último</option>
   </select>
-  <span style="font-size:12px;color:var(--faint)" class="hidden sm:inline">Mostrar <select id="mostrar" onchange="limitar(this.value)" class="input" style="width:auto;display:inline-block;padding:5px 8px"><option>25</option><option>50</option><option>100</option><option value="0">Todas</option></select> registros</span>
+  <span style="font-size:12px;color:var(--faint)" class="hidden sm:inline">Mostrar <select id="mostrar" onchange="limitar(this.value)" class="input" style="width:auto;display:inline-block;padding:5px 8px"><option value="0" selected>Todas</option><option>25</option><option>50</option><option>100</option></select> registros</span>
   <span style="margin-left:auto"></span>
   <input id="buscar" class="input" style="width:16rem;max-width:55%" placeholder="Buscar cliente, plataforma, correo, revendedor…">
 </div>
@@ -1197,7 +1197,7 @@ stream_head('Ventas', 'ventas');
   function e_set(id,val){ document.getElementById(id).value = val==null?'':val; }
   function mEliminar(){ m3.classList.add('hidden'); setId('el-id'); abrir('m-eliminar'); }
   function ordenarVentas(){ const v=document.getElementById('forden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const mul=v==='venc-desc'?-1:1; rows.sort((a,b)=>((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul); rows.forEach(r=>tb.appendChild(r)); aplicarFiltro(); }
-  let LIM=25;
+  let LIM=0;   // 0 = mostrar TODAS por defecto (antes 25: ocultaba las de más abajo y no se veían al renovar/vencer).
   function aplicarFiltro(){
     const q=(document.getElementById('buscar').value||'').toLowerCase().trim();
     const fp=(document.getElementById('fplat')?.value||'');
