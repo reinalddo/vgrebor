@@ -493,6 +493,30 @@ function resolve_order_unit_cost_base(mysqli $mysqli, int $packageId, int $paque
         return [null, null];
     }
 
+    // Mismo mecanismo que GiftVen (arriba), pero para RecargasAmérica: sin
+    // esto, costo_unitario_base quedaba SIEMPRE NULL para estos pedidos (a
+    // menos que el admin registrara un costo manual) — y como las
+    // estadísticas de ganancia filtran WHERE costo_unitario_base IS NOT
+    // NULL, los pedidos de RecargasAmérica desaparecían por completo de esa
+    // pestaña, aunque sí contaran para ventas totales.
+    if ($provider === 'recargasamerica') {
+        if ($catalogProduct === null && $paqueteApiId > 0) {
+            try {
+                $catalogProduct = recargasamerica_api_fetch_product_by_id($paqueteApiId);
+            } catch (Throwable $e) {
+                $catalogProduct = null;
+            }
+        }
+        if ($catalogProduct !== null && isset($catalogProduct['price'])) {
+            return [(float) $catalogProduct['price'], 'recargasamerica_api'];
+        }
+        $manualCostRA = costos_manuales_get_current($mysqli, $packageId);
+        if ($manualCostRA !== null) {
+            return [$manualCostRA, 'manual'];
+        }
+        return [null, null];
+    }
+
     $manualCost = costos_manuales_get_current($mysqli, $packageId);
     if ($manualCost !== null) {
         return [$manualCost, 'manual'];
