@@ -14,6 +14,7 @@ if (!$adminUser || !in_array($adminRole, ['admin', 'root'], true)) {
     header('Location: ' . app_path('/login.php'));
     exit;
 }
+csrf_verify_soft();
 
 daily_missions_ensure_schema();
 

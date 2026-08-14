@@ -1,6 +1,81 @@
 <?php
 require_once __DIR__ . '/tenant.php';
 
+// ── CSRF (panel admin "clásico": admin.php y admin/*.php) ──────────────────
+// Auditoría 2026-08-12: estos formularios no verificaban ningún token,
+// dependían solo de la sesión — vulnerables a que un admin logueado visite
+// una página ajena que dispare una solicitud falsificada a su nombre.
+//
+// FASE DE OBSERVACIÓN (no bloquea todavía): csrf_verify_soft() solo
+// registra en error_log si un POST llega sin token o con uno inválido, para
+// detectar cualquier formulario/AJAX al que se le haya olvidado el token
+// ANTES de activar el bloqueo real con csrf_verify_enforce(). Una vez
+// confirmado unos días sin entradas sospechosas en el log, se cambia cada
+// llamada de csrf_verify_soft() a csrf_verify_enforce() (mismo chequeo,
+// pero corta la solicitud en vez de solo avisar).
+if (!function_exists('csrf_token')) {
+    function csrf_token(): string {
+        if (empty($_SESSION['csrf'])) {
+            $_SESSION['csrf'] = bin2hex(random_bytes(16));
+        }
+        return (string) $_SESSION['csrf'];
+    }
+}
+
+if (!function_exists('csrf_submitted_token')) {
+    function csrf_submitted_token(): string {
+        $fromPost = (string) ($_POST['_csrf'] ?? '');
+        if ($fromPost !== '') {
+            return $fromPost;
+        }
+        return (string) ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+    }
+}
+
+if (!function_exists('csrf_is_valid')) {
+    function csrf_is_valid(): bool {
+        $expected = (string) ($_SESSION['csrf'] ?? '');
+        $submitted = csrf_submitted_token();
+        return $expected !== '' && $submitted !== '' && hash_equals($expected, $submitted);
+    }
+}
+
+if (!function_exists('csrf_verify_soft')) {
+    function csrf_verify_soft(): void {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            return;
+        }
+        if (csrf_is_valid()) {
+            return;
+        }
+        $postKeys = implode(',', array_keys($_POST));
+        error_log(
+            'TVG CSRF [modo observación, NO bloqueado] uri=' . (string) ($_SERVER['REQUEST_URI'] ?? '?')
+            . ' post_keys=' . $postKeys
+            . ' ip=' . (string) ($_SERVER['REMOTE_ADDR'] ?? '?')
+        );
+    }
+}
+
+if (!function_exists('csrf_verify_enforce')) {
+    function csrf_verify_enforce(): void {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            return;
+        }
+        if (csrf_is_valid()) {
+            return;
+        }
+        http_response_code(403);
+        if (stripos((string) ($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json') !== false || !empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'message' => 'Token de seguridad inválido. Recarga la página e intenta de nuevo.'], JSON_UNESCAPED_UNICODE);
+        } else {
+            echo 'Token de seguridad inválido. Recarga la página e intenta de nuevo.';
+        }
+        exit;
+    }
+}
+
 function auth_normalize_email($email) {
   return strtolower(trim((string) $email));
 }

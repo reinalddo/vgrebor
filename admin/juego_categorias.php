@@ -2,6 +2,7 @@
 // admin/juego_categorias.php — AJAX endpoint para CRUD de categorías y asignación a juegos
 require_once '../includes/db_connect.php';
 require_once '../includes/tenant.php';
+require_once '../includes/auth.php';
 require_once '../includes/game_categories.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -26,6 +27,7 @@ function gc_require_admin(): void {
 }
 
 gc_require_admin();
+csrf_verify_soft();
 
 function gc_store_image(array $file): ?string {
     if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {

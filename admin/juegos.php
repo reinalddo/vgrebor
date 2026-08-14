@@ -8,6 +8,8 @@ if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'root'], t
     header('Location: ' . app_path('/login.php'));
     exit();
 }
+require_once '../includes/auth.php';
+csrf_verify_soft();
 require_once '../includes/recargas_api.php';
 require_once '../includes/recargasamerica_api.php';
 require_once '../includes/store_config.php';

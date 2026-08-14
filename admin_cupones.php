@@ -10,6 +10,7 @@ if (!$adminUser || !in_array($adminUserRole, ['admin', 'root', 'influencer'], tr
     header('Location: ' . app_path('/login.php'));
     exit();
 }
+csrf_verify_soft();
 
 // Helper para URLs amigables
 define('ADMIN_CUPONES_BASE', '/admin/cupones');

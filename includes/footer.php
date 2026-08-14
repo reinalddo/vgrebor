@@ -2,6 +2,63 @@
 require_once __DIR__ . '/tenant.php';
 require_once __DIR__ . '/store_config.php';
 require_once __DIR__ . '/recharge_notifications.php';
+require_once __DIR__ . '/auth.php';
+
+// ── CSRF: emisión del token en páginas de admin (ver includes/auth.php) ──
+// Se reutiliza recharge_notifications_is_public_context() (ya cargado
+// arriba) para detectar contexto admin por la misma regla que ya existía
+// (SCRIPT_NAME con /admin/, /admin.php o /admin al final) — así no se
+// duplica esa detección. Nunca se emite en páginas públicas: no hace falta
+// ahí y evita tocar el comportamiento del sitio de cara al cliente.
+$csrfTokenScript = '';
+if (!recharge_notifications_is_public_context() && session_status() === PHP_SESSION_ACTIVE) {
+    $csrfTokenValue = csrf_token();
+    $csrfTokenScript = '<meta name="csrf-token" content="' . htmlspecialchars($csrfTokenValue, ENT_QUOTES, 'UTF-8') . '">' . "\n" . <<<'SCRIPT'
+<script>
+  (function () {
+    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    const csrfToken = csrfMeta ? csrfMeta.content : '';
+    if (!csrfToken) {
+      return;
+    }
+
+    // Retrofit de CSRF sobre el admin clásico (admin.php y admin/*.php):
+    // inyecta el token en cualquier <form method="post"> que no lo tenga ya,
+    // sin tener que editar cada formulario a mano.
+    document.querySelectorAll('form').forEach((form) => {
+      const method = (form.getAttribute('method') || 'GET').toUpperCase();
+      if (method !== 'POST' || form.querySelector('input[name="_csrf"]')) {
+        return;
+      }
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = '_csrf';
+      input.value = csrfToken;
+      form.appendChild(input);
+    });
+
+    // Cubre las solicitudes AJAX (fetch) que no pasan por un <form>: se
+    // agrega el token como header en cualquier POST, sin tocar cada llamada
+    // individual.
+    const originalFetch = window.fetch;
+    if (typeof originalFetch === 'function') {
+      window.fetch = function (input, init) {
+        init = init || {};
+        const method = (init.method || (input && input.method) || 'GET').toUpperCase();
+        if (method === 'POST') {
+          const headers = new Headers(init.headers || (input && input.headers) || {});
+          if (!headers.has('X-CSRF-Token')) {
+            headers.set('X-CSRF-Token', csrfToken);
+          }
+          init.headers = headers;
+        }
+        return originalFetch.call(this, input, init);
+      };
+    }
+  })();
+</script>
+SCRIPT;
+}
 
 $accountApiUrl = app_path('/api/account.php');
 $accountApiUrlJs = json_encode($accountApiUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -2179,6 +2236,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   echo '<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>';
   echo $menuScriptVersioned;
   echo $rechargeNotificationsScript;
+  echo $csrfTokenScript;
   ?>
   <?php
   if (!empty($pageScripts) && is_array($pageScripts)) {

@@ -12,6 +12,8 @@ if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'root'], t
     header('Location: ' . app_path('/login.php'));
     exit();
 }
+require_once '../includes/auth.php';
+csrf_verify_soft();
 require_once '../includes/currency.php';
 
 currency_ensure_schema();

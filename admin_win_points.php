@@ -50,6 +50,7 @@ if (!$adminUser || !in_array($adminUserRole, ['admin', 'root'], true)) {
     header('Location: ' . $loginPath);
     exit;
 }
+csrf_verify_soft();
 
 if (!win_points_enabled()) {
   admin_win_points_set_flash('error', 'El modulo de Win Points esta desactivado.');

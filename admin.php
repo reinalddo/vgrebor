@@ -73,6 +73,11 @@ if (!admin_user_can_access_section($adminUserRole, $seccion)) {
     admin_redirect(admin_default_section_for_role($adminUserRole));
 }
 
+// CSRF, fase de observación (ver includes/auth.php) — un solo chequeo
+// central cubre cualquier POST de cualquier $seccion, en vez de agregarlo
+// en cada uno de los ~20 bloques de POST desperdigados en este archivo.
+csrf_verify_soft();
+
 function normalize_coupon_code(string $value): string {
     return strtoupper(trim($value));
 }
