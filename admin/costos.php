@@ -11,6 +11,7 @@ csrf_verify_soft();
 
 require_once __DIR__ . '/../includes/db_connect.php';
 require_once __DIR__ . '/../includes/recargas_api.php';
+require_once __DIR__ . '/../includes/recargasamerica_api.php';
 require_once __DIR__ . '/../includes/header.php';
 
 // Mismas migraciones que api/pedidos.php: se repiten aquí para que esta
@@ -60,6 +61,7 @@ function costos_package_provider(array $row): string {
 
 $providerLabels = [
     'giftven' => 'TiendaGiftVen (automático)',
+    'recargasamerica' => 'RecargasAmérica (automático)',
     'discord' => 'Discord (manual)',
     'free_fire' => 'Free Fire legado (manual)',
     'manual' => 'Precio manual',
@@ -164,6 +166,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recal
     }
 }
 
+// ── Acción: recalcular históricos de RecargasAmérica ─────────────────────
+// Mismo mecanismo que el bloque de arriba (giftven) — hacía falta este
+// backfill porque resolve_order_unit_cost_base() (api/pedidos.php) recién
+// aprendió a calcular el costo de RecargasAmérica; los pedidos ya
+// existentes se quedaron con costo_unitario_base en NULL para siempre y
+// por eso no aparecían en las estadísticas de ganancia.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recalcular_recargasamerica') {
+    $pendingRaStmt = $mysqli->query(
+        "SELECT DISTINCT paquete_api FROM pedidos
+         WHERE estado IN ('enviado','pagado') AND api_provider = 'recargasamerica'
+           AND paquete_api IS NOT NULL AND paquete_api > 0 AND costo_unitario_base IS NULL"
+    );
+    $totalAppliedRa = 0;
+    $totalFailedRa = 0;
+    if ($pendingRaStmt instanceof mysqli_result) {
+        while ($row = $pendingRaStmt->fetch_assoc()) {
+            $apiId = (int) $row['paquete_api'];
+            try {
+                $product = recargasamerica_api_fetch_product_by_id($apiId);
+            } catch (Throwable $e) {
+                $product = null;
+            }
+            if ($product === null || !isset($product['price'])) {
+                $totalFailedRa++;
+                continue;
+            }
+            $cost = (float) $product['price'];
+            $updStmt = $mysqli->prepare(
+                "UPDATE pedidos p
+                 INNER JOIN monedas m ON m.clave = p.moneda
+                 SET p.costo_unitario_base = ?,
+                     p.precio_venta_unitario_base = ROUND(p.precio / NULLIF(m.tasa, 0) / GREATEST(p.cantidad_compra, 1), 4),
+                     p.costo_fuente = 'recargasamerica_api'
+                 WHERE p.paquete_api = ? AND p.api_provider = 'recargasamerica' AND p.estado IN ('enviado','pagado') AND p.costo_unitario_base IS NULL"
+            );
+            $updStmt->bind_param('di', $cost, $apiId);
+            $updStmt->execute();
+            $totalAppliedRa += $updStmt->affected_rows;
+            $updStmt->close();
+        }
+    }
+    $flashMessage = "Recálculo completado: {$totalAppliedRa} pedido(s) histórico(s) actualizados con su costo.";
+    if ($totalFailedRa > 0) {
+        $flashMessage .= " {$totalFailedRa} producto(s) ya no existen en el catálogo de la API y no se pudieron recalcular.";
+        $flashType = 'warning';
+    }
+}
+
 // ── Catálogo giftven en vivo (una sola llamada, cacheada por request) ────
 $giftvenCostById = [];
 if (recargas_api_is_configured()) {
@@ -175,6 +225,20 @@ if (recargas_api_is_configured()) {
         }
     } catch (Throwable $e) {
         // Sin conexión con la API: los paquetes giftven se mostrarán sin costo disponible.
+    }
+}
+
+// ── Catálogo RecargasAmérica en vivo (misma idea que giftven arriba) ─────
+$recargasamericaCostById = [];
+if (recargasamerica_api_is_configured()) {
+    try {
+        foreach (recargasamerica_api_fetch_products_pins() as $product) {
+            if (is_array($product) && isset($product['id'])) {
+                $recargasamericaCostById[(int) $product['id']] = (float) ($product['price'] ?? 0);
+            }
+        }
+    } catch (Throwable $e) {
+        // Sin conexión con la API: los paquetes recargasamerica se mostrarán sin costo disponible.
     }
 }
 
@@ -215,7 +279,7 @@ $pkgRes = $mysqli->query(
      WHERE COALESCE(jp.activo, 1) = 1
      ORDER BY j.nombre ASC, jp.nombre ASC"
 );
-$automaticProviders = ['giftven'];
+$automaticProviders = ['giftven', 'recargasamerica'];
 if ($pkgRes instanceof mysqli_result) {
     while ($row = $pkgRes->fetch_assoc()) {
         $provider = costos_package_provider($row);
@@ -224,6 +288,9 @@ if ($pkgRes instanceof mysqli_result) {
         if ($provider === 'giftven') {
             $apiId = (int) ($row['paquete_api'] ?? 0);
             $currentCost = $giftvenCostById[$apiId] ?? null;
+        } elseif ($provider === 'recargasamerica') {
+            $apiId = (int) ($row['paquete_api'] ?? 0);
+            $currentCost = $recargasamericaCostById[$apiId] ?? null;
         } else {
             $currentCost = $manualCostByPackage[$packageId]['costo'] ?? null;
         }
@@ -243,6 +310,7 @@ if ($pkgRes instanceof mysqli_result) {
 $providerTabCounts = [
     'all' => count($packages),
     'giftven' => count(array_filter($packages, static fn (array $p): bool => $p['provider'] === 'giftven')),
+    'recargasamerica' => count(array_filter($packages, static fn (array $p): bool => $p['provider'] === 'recargasamerica')),
     'discord' => count(array_filter($packages, static fn (array $p): bool => $p['provider'] === 'discord')),
     'auto' => count(array_filter($packages, static fn (array $p): bool => $p['is_auto'])),
     'manual' => count(array_filter($packages, static fn (array $p): bool => !$p['is_auto'])),
@@ -257,12 +325,23 @@ $pendingRes = $mysqli->query(
 if ($pendingRes instanceof mysqli_result) {
     $pendingGiftvenCount = (int) ($pendingRes->fetch_assoc()['total'] ?? 0);
 }
+
+$pendingRecargasamericaCount = 0;
+$pendingRaCountRes = $mysqli->query(
+    "SELECT COUNT(*) AS total FROM pedidos
+     WHERE estado IN ('enviado','pagado') AND api_provider = 'recargasamerica'
+       AND paquete_api IS NOT NULL AND paquete_api > 0 AND costo_unitario_base IS NULL"
+);
+if ($pendingRaCountRes instanceof mysqli_result) {
+    $pendingRecargasamericaCount = (int) ($pendingRaCountRes->fetch_assoc()['total'] ?? 0);
+}
 ?>
 <main class="container-lg mt-5 mb-5 px-2">
   <style>
     .costos-card { background:#181f2a; border:1px solid #00fff7; border-radius:14px; padding:1.4rem; margin-bottom:1.5rem; }
     .costos-provider-badge { border-radius:999px; padding:0.15rem 0.6rem; font-size:0.72rem; font-weight:700; letter-spacing:0.02em; }
     .costos-provider-giftven { background:rgba(0,255,247,0.12); color:#00fff7; border:1px solid rgba(0,255,247,0.5); }
+    .costos-provider-recargasamerica { background:rgba(250,204,21,0.12); color:#facc15; border:1px solid rgba(250,204,21,0.5); }
     .costos-provider-manual { background:rgba(192,132,252,0.12); color:#c084fc; border:1px solid rgba(192,132,252,0.5); }
     .costos-table { background:#181f2a; color:#e2e8f0; }
     .costos-table thead th { color:#00fff7; border-bottom:2px solid #00fff7; background:#181f2a; }
@@ -301,6 +380,18 @@ if ($pendingRes instanceof mysqli_result) {
   </div>
 
   <div class="costos-card">
+    <h2 class="h5 text-info mb-2">RecargasAmérica: costo automático</h2>
+    <p class="text-secondary small mb-3">El costo de estos paquetes siempre viene de la API en vivo — no se puede editar manualmente. Si hay pedidos históricos sin costo registrado (de antes de activar esta función), puedes recalcularlos usando el costo actual.</p>
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <span class="text-secondary">Pedidos históricos de RecargasAmérica sin costo: <strong style="color:#00ffb3;"><?= $pendingRecargasamericaCount ?></strong></span>
+      <form method="post" class="m-0">
+        <input type="hidden" name="action" value="recalcular_recargasamerica">
+        <button type="submit" class="btn btn-info btn-sm fw-bold" style="background:#00fff7;color:#181f2a;border:none;box-shadow:0 0 8px #00fff7;" <?= $pendingRecargasamericaCount === 0 ? 'disabled' : '' ?>>Recalcular costos históricos</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="costos-card">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
       <h2 class="h5 text-info mb-0">Paquetes</h2>
       <input type="text" id="costos-search-input" class="form-control form-control-sm costos-search" placeholder="Buscar juego o paquete...">
@@ -308,6 +399,7 @@ if ($pendingRes instanceof mysqli_result) {
     <div class="d-flex flex-wrap gap-2 mb-3">
       <button type="button" class="btn btn-info fw-bold btn-sm costos-provider-tab-btn active" data-provider-tab="">Todos <span>(<?= $providerTabCounts['all'] ?>)</span></button>
       <button type="button" class="btn btn-outline-info fw-bold btn-sm costos-provider-tab-btn" data-provider-tab="giftven">TiendaGiftVen <span>(<?= $providerTabCounts['giftven'] ?>)</span></button>
+      <button type="button" class="btn btn-outline-info fw-bold btn-sm costos-provider-tab-btn" data-provider-tab="recargasamerica">RecargasAmérica <span>(<?= $providerTabCounts['recargasamerica'] ?>)</span></button>
       <button type="button" class="btn btn-outline-info fw-bold btn-sm costos-provider-tab-btn" data-provider-tab="discord">Discord <span>(<?= $providerTabCounts['discord'] ?>)</span></button>
       <button type="button" class="btn btn-outline-info fw-bold btn-sm costos-provider-tab-btn" data-provider-tab="auto">Automáticos <span>(<?= $providerTabCounts['auto'] ?>)</span></button>
       <button type="button" class="btn btn-outline-info fw-bold btn-sm costos-provider-tab-btn" data-provider-tab="manual">Manuales <span>(<?= $providerTabCounts['manual'] ?>)</span></button>
@@ -332,7 +424,7 @@ if ($pendingRes instanceof mysqli_result) {
             <td><?= htmlspecialchars($p['juego_nombre'], ENT_QUOTES, 'UTF-8') ?></td>
             <td><?= htmlspecialchars($p['paquete_nombre'], ENT_QUOTES, 'UTF-8') ?></td>
             <td>
-              <span class="costos-provider-badge <?= $p['provider'] === 'giftven' ? 'costos-provider-giftven' : 'costos-provider-manual' ?>">
+              <span class="costos-provider-badge <?= $p['is_auto'] ? 'costos-provider-' . htmlspecialchars($p['provider'], ENT_QUOTES, 'UTF-8') : 'costos-provider-manual' ?>">
                 <?= htmlspecialchars($providerLabels[$p['provider']] ?? $p['provider'], ENT_QUOTES, 'UTF-8') ?>
               </span>
             </td>
@@ -340,7 +432,7 @@ if ($pendingRes instanceof mysqli_result) {
               <?= $p['costo_actual'] !== null ? '$' . costos_format_money($p['costo_actual']) : '<span class="text-secondary fw-normal">Sin dato</span>' ?>
             </td>
             <td>
-              <?php if ($p['provider'] === 'giftven'): ?>
+              <?php if ($p['is_auto']): ?>
                 <span class="text-secondary small">Automático — no editable</span>
               <?php else: ?>
                 <form method="post" class="d-flex align-items-center gap-2 flex-wrap">
