@@ -1,4 +1,14 @@
 <?php
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    require_once __DIR__ . '/includes/tenant.php';
+    tenant_start_session();
+}
+$adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
+if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'root'], true)) {
+    header('Location: ' . app_path('/login.php'));
+    exit();
+}
+
 require_once __DIR__ . '/includes/game_entry_window_per_game.php';
 
 if (!function_exists('render_game_entry_window_html_editor')) {
