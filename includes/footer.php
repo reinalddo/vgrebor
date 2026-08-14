@@ -2785,7 +2785,14 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       return el && !el.classList.contains('is-hidden') && el.getAttribute('aria-hidden') !== 'true';
     }
     function _anyModalOpen() {
-      return !!document.querySelector('.app-overlay-modal.is-visible, .modal.show, #user-menu:not(.d-none), #auth-menu:not(.d-none)');
+      // Selector genérico div[id$="-modal"].position-fixed:not(.d-none): cubre
+      // TODOS los modales de cuenta de usuario (auth-modal, user-rewards-modal,
+      // user-orders-modal, user-profile-modal, y cualquiera nuevo que se
+      // agregue después con el mismo patrón), sin tener que listarlos uno por
+      // uno — antes solo reconocía #user-menu/#auth-menu, así que el modal de
+      // "Mi cuenta > Pedidos realizados" (y los demás de ese mismo grupo)
+      // nunca ocultaba la barra de instalar, quedando la barra encima.
+      return !!document.querySelector('.app-overlay-modal.is-visible, .modal.show, #user-menu:not(.d-none), #auth-menu:not(.d-none), div[id$="-modal"].position-fixed:not(.d-none)');
     }
     function _blocked() {
       return _spVisible(_sp) || _anyModalOpen();
