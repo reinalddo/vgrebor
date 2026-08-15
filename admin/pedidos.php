@@ -277,6 +277,56 @@ function order_provider_history_lines(array $order, int $limit = 3): array {
   return $lines;
 }
 
+// Bloque de depuración para el botón "i" junto a "Respuesta API": reúne en
+// un solo JSON todo lo que hace falta para diagnosticar por qué falló una
+// recarga (o para confirmar por qué SÍ funcionó) sin tener que cruzar
+// columnas a mano en phpMyAdmin. ff_api_payload es la respuesta cruda del
+// proveedor (GiftVen o RecargasAmérica) tal cual quedó guardada por
+// execute_recargasamerica_purchase()/recargas_api de GiftVen — es el dato
+// más valioso para entender el error real (código, mensaje, payload
+// enviado).
+function order_debug_decode_json_field($json) {
+  if (!is_string($json) || trim($json) === '') {
+    return null;
+  }
+
+  $decoded = json_decode($json, true);
+  return is_array($decoded) ? $decoded : $json;
+}
+
+function order_debug_payload(array $order): array {
+  return [
+    'pedido_id' => (int) ($order['id'] ?? 0),
+    'estado_local' => (string) ($order['estado'] ?? ''),
+    'creado_en' => (string) ($order['creado_en'] ?? ''),
+    'api_provider' => (string) ($order['api_provider'] ?? ''),
+    'paquete_api' => (int) ($order['paquete_api'] ?? 0),
+    'recargasamerica_tipo' => (string) ($order['recargasamerica_tipo'] ?? ''),
+    'juego_nombre' => (string) ($order['juego_nombre'] ?? ''),
+    'paquete_nombre' => (string) ($order['paquete_nombre'] ?? ''),
+    'user_identifier' => (string) ($order['user_identifier'] ?? ''),
+    'email' => (string) ($order['email'] ?? ''),
+    'numero_referencia' => (string) ($order['numero_referencia'] ?? ''),
+    'ff_api_referencia' => (string) ($order['ff_api_referencia'] ?? ''),
+    'ff_api_mensaje' => (string) ($order['ff_api_mensaje'] ?? ''),
+    'ff_api_payload' => order_debug_decode_json_field($order['ff_api_payload'] ?? null),
+    'recargas_api_pedido_id' => (string) ($order['recargas_api_pedido_id'] ?? ''),
+    'recargas_api_estado' => $order['recargas_api_estado'] ?? null,
+    'recargas_api_codigo_entregado' => (string) ($order['recargas_api_codigo_entregado'] ?? ''),
+    'recargas_api_reembolso' => (float) ($order['recargas_api_reembolso'] ?? 0),
+    'recargas_api_ultimo_check' => (string) ($order['recargas_api_ultimo_check'] ?? ''),
+    'recargas_api_historial' => order_debug_decode_json_field($order['recargas_api_historial_json'] ?? null),
+    'fullimpulso_service_id' => (int) ($order['fullimpulso_service_id'] ?? 0),
+    'fullimpulso_order_id' => (string) ($order['fullimpulso_order_id'] ?? ''),
+    'fullimpulso_mensaje' => (string) ($order['fullimpulso_mensaje'] ?? ''),
+  ];
+}
+
+function order_debug_payload_json(array $order): string {
+  $json = json_encode(order_debug_payload($order), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+  return $json !== false ? $json : '{}';
+}
+
 function order_has_binance_tracking(array $order): bool {
   return trim((string) ($order['binance_pay_reference'] ?? '')) !== ''
     || trim((string) ($order['binance_pay_order_no'] ?? '')) !== ''
@@ -1203,6 +1253,11 @@ foreach ($statuses as $statusKey) {
                       <?php foreach ($providerDetailLines as $providerDetailLine): ?>
                         <div style="color:#fca5a5; margin-top:0.2rem; font-size:0.85em;"><?= htmlspecialchars($providerDetailLine) ?></div>
                       <?php endforeach; ?>
+                      <?php if (trim((string) ($order['ff_api_mensaje'] ?? '')) !== ''): ?>
+                        <button type="button" class="btn btn-outline-danger btn-sm mt-1 js-copy-debug-json" data-debug-json="<?= htmlspecialchars(order_debug_payload_json($order), ENT_QUOTES, 'UTF-8') ?>" title="Copiar JSON de depuración del error de la API">
+                          <i class="fas fa-circle-info"></i> i
+                        </button>
+                      <?php endif; ?>
                       <?php foreach ($binanceDetailLines as $binanceDetailLine): ?>
                         <div style="color:#93c5fd; margin-top:0.2rem; font-size:0.85em;"><?= htmlspecialchars($binanceDetailLine) ?></div>
                       <?php endforeach; ?>
@@ -1313,6 +1368,11 @@ foreach ($statuses as $statusKey) {
                 <?php foreach ($providerDetailLines as $providerDetailLine): ?>
                   <div style="color:#fca5a5; font-size:0.9em;"><?= htmlspecialchars($providerDetailLine) ?></div>
                 <?php endforeach; ?>
+                <?php if (trim((string) ($order['ff_api_mensaje'] ?? '')) !== ''): ?>
+                  <button type="button" class="btn btn-outline-danger btn-sm mt-1 js-copy-debug-json" data-debug-json="<?= htmlspecialchars(order_debug_payload_json($order), ENT_QUOTES, 'UTF-8') ?>" title="Copiar JSON de depuración del error de la API">
+                    <i class="fas fa-circle-info"></i> i
+                  </button>
+                <?php endif; ?>
                 <?php foreach ($binanceDetailLines as $binanceDetailLine): ?>
                   <div style="color:#93c5fd; font-size:0.9em;"><?= htmlspecialchars($binanceDetailLine) ?></div>
                 <?php endforeach; ?>
@@ -1722,6 +1782,29 @@ foreach ($statuses as $statusKey) {
         } finally {
           relatedButtons.forEach(item => { item.disabled = false; });
           setAdminLoadingVisible(false);
+        }
+      });
+    });
+
+    document.querySelectorAll('.js-copy-debug-json').forEach(button => {
+      button.addEventListener('click', async () => {
+        const json = button.dataset.debugJson || '{}';
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(json);
+          } else {
+            const textarea = document.createElement('textarea');
+            textarea.value = json;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+          }
+          alert('JSON de depuración copiado al portapapeles.');
+        } catch (err) {
+          alert('No se pudo copiar el JSON: ' + (err.message || err));
         }
       });
     });
