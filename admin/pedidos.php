@@ -1254,8 +1254,8 @@ foreach ($statuses as $statusKey) {
                         <div style="color:#fca5a5; margin-top:0.2rem; font-size:0.85em;"><?= htmlspecialchars($providerDetailLine) ?></div>
                       <?php endforeach; ?>
                       <?php if (trim((string) ($order['ff_api_mensaje'] ?? '')) !== ''): ?>
-                        <button type="button" class="btn btn-outline-danger btn-sm mt-1 js-copy-debug-json" data-debug-json="<?= htmlspecialchars(order_debug_payload_json($order), ENT_QUOTES, 'UTF-8') ?>" title="Copiar JSON de depuración del error de la API">
-                          <i class="fas fa-circle-info"></i> i
+                        <button type="button" class="btn btn-outline-light btn-sm js-copy-debug-json" data-debug-json="<?= htmlspecialchars(order_debug_payload_json($order), ENT_QUOTES, 'UTF-8') ?>" title="Copiar respuesta de la API" aria-label="Copiar respuesta de la API" style="width:1.6rem; height:1.6rem; padding:0; line-height:1; margin-top:0.3rem; border-radius:50%;">
+                          <i class="fas fa-circle-info"></i>
                         </button>
                       <?php endif; ?>
                       <?php foreach ($binanceDetailLines as $binanceDetailLine): ?>
@@ -1369,8 +1369,8 @@ foreach ($statuses as $statusKey) {
                   <div style="color:#fca5a5; font-size:0.9em;"><?= htmlspecialchars($providerDetailLine) ?></div>
                 <?php endforeach; ?>
                 <?php if (trim((string) ($order['ff_api_mensaje'] ?? '')) !== ''): ?>
-                  <button type="button" class="btn btn-outline-danger btn-sm mt-1 js-copy-debug-json" data-debug-json="<?= htmlspecialchars(order_debug_payload_json($order), ENT_QUOTES, 'UTF-8') ?>" title="Copiar JSON de depuración del error de la API">
-                    <i class="fas fa-circle-info"></i> i
+                  <button type="button" class="btn btn-outline-light btn-sm js-copy-debug-json" data-debug-json="<?= htmlspecialchars(order_debug_payload_json($order), ENT_QUOTES, 'UTF-8') ?>" title="Copiar respuesta de la API" aria-label="Copiar respuesta de la API" style="width:1.6rem; height:1.6rem; padding:0; line-height:1; margin-top:0.3rem; border-radius:50%;">
+                    <i class="fas fa-circle-info"></i>
                   </button>
                 <?php endif; ?>
                 <?php foreach ($binanceDetailLines as $binanceDetailLine): ?>
@@ -1802,9 +1802,9 @@ foreach ($statuses as $statusKey) {
             document.execCommand('copy');
             document.body.removeChild(textarea);
           }
-          alert('JSON de depuración copiado al portapapeles.');
+          alert('Respuesta de la API copiada al portapapeles.');
         } catch (err) {
-          alert('No se pudo copiar el JSON: ' + (err.message || err));
+          alert('No se pudo copiar la respuesta de la API: ' + (err.message || err));
         }
       });
     });
