@@ -54,6 +54,15 @@ if (($_GET['ajax'] ?? '') === 'cuenta') {
   }
   // C2: para el revendedor, el stock comprado/asignado viene de la tienda → proveedor "REBOR".
   if ($esRev && !empty($cu['origen_cuenta_id'])) { $prov = ['nombre' => 'REBOR', 'contacto' => '']; }
+  // ¿La PLATAFORMA se vende por CUENTA COMPLETA? (unidad_venta='cuenta'). Si sí, el revendedor dueño de
+  // esa cuenta SÍ puede editar su clave, aunque rev_editable no haya quedado marcado (dato viejo). Ver JS.
+  $esCompleta = false;
+  try {
+    $pl = (int) ($cu['plataforma_id'] ?? 0);
+    if ($pl > 0) { $esCompleta = ((string) ($pdo->query("SELECT unidad_venta FROM streaming_plataformas WHERE id=$pl LIMIT 1")->fetchColumn() ?: '') === 'cuenta'); }
+    if (!$esCompleta && !empty($cu['plataforma'])) { $esCompleta = ((string) ($pdo->query("SELECT unidad_venta FROM streaming_plataformas WHERE nombre=" . $pdo->quote((string) $cu['plataforma']) . " LIMIT 1")->fetchColumn() ?: '') === 'cuenta'); }
+  } catch (Throwable $e) {}
+  $cu['es_completa'] = $esCompleta ? 1 : 0;
   echo json_encode(['ok' => true, 'cuenta' => $cu, 'perfiles' => $perfiles, 'prov' => $prov]);
   exit;
 }
@@ -80,7 +89,7 @@ if (($_GET['export'] ?? '') === 'plantilla') {
   }
   header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename="plantilla-cuentas.csv"');
   echo "\xEF\xBB\xBF"; $o = fopen('php://output', 'w');
-  fputcsv($o, ['Plataforma', 'Correo', 'Clave', 'Nombre del perfil', 'PIN (opcional)', 'Vence (AAAA-MM-DD o DD/MM/AAAA)', 'Costo (opcional)', 'Vendedor (opcional)']);
+  fputcsv($o, ['Vendedor (opcional)', 'Plataforma', 'Vence (AAAA-MM-DD o DD/MM/AAAA)', 'Correo', 'Clave', 'Costo (opcional)', 'Nombre del perfil', 'PIN (opcional)']);
   fputcsv($o, ['Netflix', 'correo@x.com', 'clave123', 'Rebeca JR', '9669', '01/08/2026', '3.50']);
   fputcsv($o, ['Netflix', 'correo@x.com', 'clave123', 'Pedro', '1234', '01/08/2026', '']);
   fputcsv($o, ['Disney+', 'otro@x.com', 'clave99', '', '', '2026-09-15', '']);
@@ -503,7 +512,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($a === 'cuentas_masivo') {
       // Carga masiva CENTRADA EN PERFILES: cada línea es UN perfil (con su nombre y PIN).
       // Las líneas con el MISMO correo (y plataforma) se agrupan en UNA sola cuenta (no una por línea).
-      // Formato: Plataforma, Correo, Clave, NombrePerfil, PIN, Vence(AAAA-MM-DD o DD/MM/AAAA), Costo(opcional)
+      // Formato (nuevo orden): Vendedor(opcional), Plataforma, Vencimiento, Correo, Clave, Costo(opcional), NombrePerfil, PIN(opcional al final)
       $pmap = [];
       try { foreach ($pdo->query("SELECT id, nombre FROM streaming_plataformas WHERE owner_id=$OWNER") as $r) $pmap[mb_strtolower(trim($r['nombre']))] = (int) $r['id']; } catch (Throwable $e) {}
       // Vendedor opcional (8ª columna): mapea nombre / usuario / email → id de revendedor. Solo el dueño (owner 0) asigna.
@@ -528,47 +537,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (preg_match('#^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$#', $s, $m)) return sprintf('%04d-%02d-%02d', (int) $m[3], (int) $m[2], (int) $m[1]);
         $t = strtotime($s); return $t ? date('Y-m-d', $t) : null;
       };
-      // ¿El texto ES una fecha con formato (AAAA-MM-DD o DD/MM/AAAA)? Estricto: un PIN numérico como
-      // "9669" o "1234" NO cuenta como fecha. Sirve para detectar plataformas SIN PIN (ver abajo).
-      $esFecha = static function ($s) {
-        $s = trim((string) $s);
-        return (bool) (preg_match('#^\d{4}-\d{1,2}-\d{1,2}$#', $s) || preg_match('#^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{4}$#', $s));
-      };
       $cuentas = []; // gkey => ['cid'=>int,'nperf'=>int,'clave'=>string,'venc'=>?string]
       $nPerf = 0;
       foreach (preg_split('/\r?\n/', (string) ($_POST['datos'] ?? '')) as $ln) {
         $ln = trim($ln); if ($ln === '') continue;
         $p = preg_split('/\s*[,;\t|]\s*/', $ln);
-        $platNom = trim($p[0] ?? ''); if ($platNom === '') continue;
-        $correo  = trim($p[1] ?? '');
-        $clave   = trim($p[2] ?? '');
-        $nombreP = ltrim(trim($p[3] ?? ''), '#');   // por si escriben "#nombre" (herencia del antiguo "#Perfiles")
-        // PIN OPCIONAL: muchas plataformas (Paramount, Disney, Spotify…) NO tienen PIN. Si el usuario OMITE
-        // la columna del PIN, la FECHA caería donde va el PIN y TODO se corría (fecha→PIN, costo→fecha…).
-        // Detectamos: si el campo del PIN es en realidad una FECHA con formato, es que NO hay PIN → se lee
-        // corrido una columna (Vence=p[4], Costo=p[5]). Si es un PIN normal (o vacío), lectura normal.
-        $pinRaw = trim((string) ($p[4] ?? ''));
-        if ($esFecha($pinRaw)) {
-          $pin      = '';                               // sin PIN
-          $venc     = $parseFecha($p[4] ?? '');
-          $costoRaw = str_replace(',', '.', trim((string) ($p[5] ?? '')));
-        } else {
-          $pin      = $pinRaw;
-          $venc     = $parseFecha($p[5] ?? '');
-          $costoRaw = str_replace(',', '.', trim((string) ($p[6] ?? '')));   // costo (acepta coma o punto)
-        }
+        // ORDEN (pedido por el cliente): Vendedor, Plataforma, Vencimiento, Correo, Clave, Costo, Nombre, PIN.
+        // El VENDEDOR (1ª col) y el PIN (última) son OPCIONALES. Con el PIN AL FINAL, si falta no corre nada.
+        // Para el VENDEDOR de primero (que también es opcional), detectamos si de verdad hay vendedor: si el
+        // 1er campo está vacío (coma inicial) o es un correo/nombre de un revendedor conocido → hay vendedor y
+        // todo empieza en la 2ª col; si el 1er campo es texto que NO es revendedor → ES la plataforma (no hay
+        // vendedor). Así funciona lleve o no lleve vendedor, sin que se corra.
+        $first = trim((string) ($p[0] ?? '')); $firstL = mb_strtolower($first);
+        $vendedor = '';
+        if ($first === '') { $b = 1; }                                                                              // coma inicial → sin vendedor
+        elseif ((int) $OWNER === 0 && (strpos($first, '@') !== false || isset($revMap[$firstL]))) { $vendedor = $firstL; $b = 1; }  // hay vendedor
+        else { $b = 0; }                                                                                            // 1er campo = plataforma
+        $platNom = trim((string) ($p[$b] ?? '')); if ($platNom === '') continue;
+        $venc    = $parseFecha($p[$b + 1] ?? '');
+        $correo  = trim((string) ($p[$b + 2] ?? ''));
+        $clave   = trim((string) ($p[$b + 3] ?? ''));
+        $costoRaw = str_replace(',', '.', trim((string) ($p[$b + 4] ?? '')));   // costo (acepta coma o punto)
         $costo    = ($costoRaw !== '' && is_numeric($costoRaw)) ? (float) $costoRaw : null;
-        $vendedor = mb_strtolower(trim((string) ($p[7] ?? '')));   // vendedor: 8ª columna (nombre/usuario/email)
-        // TOLERANTE: si el vendedor no vino en la 8ª columna (o no coincide), buscamos en las OTRAS columnas
-        // un CORREO que sea de un revendedor conocido (revMap). Así funciona aunque el correo del vendedor lo
-        // pongan donde va el costo/fecha, como suele pasar. Solo matchea revendedores reales, NUNCA el correo
-        // de la cuenta (p[1]) ni la clave (p[2]): por eso el barrido arranca en la columna 3 (índice 3).
-        if ((int) $OWNER === 0 && ($vendedor === '' || !isset($revMap[$vendedor]))) {
-          for ($ci = count($p) - 1; $ci >= 3; $ci--) {
-            $cand = mb_strtolower(trim((string) ($p[$ci] ?? '')));
-            if ($cand !== '' && strpos($cand, '@') !== false && isset($revMap[$cand])) { $vendedor = $cand; break; }
-          }
-        }
+        $nombreP = ltrim(trim((string) ($p[$b + 5] ?? '')), '#');   // nombre del perfil (por si escriben "#nombre")
+        $pin     = trim((string) ($p[$b + 6] ?? ''));               // PIN al final: si falta, queda vacío
 
         $k = mb_strtolower($platNom); $pid = $pmap[$k] ?? null;
         if ($pid === null) { $insPlat->execute([$platNom]); $pid = (int) $pdo->lastInsertId(); $pmap[$k] = $pid; }
@@ -1097,15 +1089,15 @@ stream_head('Cuentas', 'cuentas');
   <div id="m-masivo" class="modal hidden w-full max-w-lg my-8">
     <div class="modal-hd"><h3><i data-lucide="upload-cloud"></i> Carga Masiva de Perfiles</h3><button onclick="cerrarModales()" class="modal-x"><i data-lucide="x"></i></button></div>
     <form method="post" class="p-5 space-y-3"><input type="hidden" name="_csrf" value="<?= h($csrf) ?>"><input type="hidden" name="accion" value="cuentas_masivo">
-      <p style="font-size:11.5px;color:var(--faint)"><b>Una línea por PERFIL:</b> <code class="softbox" style="padding:1px 6px;border-radius:6px">Plataforma, Correo, Clave, Nombre del perfil, PIN, Vence, Costo, Vendedor</code><br>
+      <p style="font-size:11.5px;color:var(--faint)"><b>Una línea por PERFIL:</b> <code class="softbox" style="padding:1px 6px;border-radius:6px">Vendedor, Plataforma, Vencimiento, Correo, Clave, Costo, Nombre del perfil, PIN</code><br>
         · Los perfiles con el <b>mismo correo</b> se agrupan en una <b>sola cuenta</b> (no una por línea).<br>
         · <b>Nombre del perfil</b> = el que quieras (ej. el nombre del cliente); si lo dejas vacío se numera P1, P2…<br>
-        · <b>PIN</b> = opcional. Si la plataforma <b>no tiene PIN</b> (Paramount, Disney, Spotify…), <b>omite esa columna</b> o déjala vacía — el sistema lo detecta solo y NO corre la fecha ni el precio.<br>
+        · <b>PIN</b> (opcional, <b>ÚLTIMA</b> columna): si la plataforma <b>no tiene PIN</b> (Paramount, Disney, Spotify…), <b>omítelo</b> o déjalo vacío — como va al final, no corre nada.<br>
         · <b>Vence</b> = vencimiento de la <b>CUENTA</b> (cuándo se vence la suscripción). Fecha: <b>AAAA-MM-DD</b> o <b>DD/MM/AAAA</b>.<br>
         · <b>Costo</b> = <b>TU costo</b> (lo que TÚ pagas por la cuenta), <b>no</b> el precio de venta. Opcional, solo para tu control de ganancia.<br>
         · El <b>precio de venta</b> al cliente/revendedor <b>no va aquí</b>: se toma de <b>Tipos de cuentas</b> (precio de la plataforma), o lo pones luego en <b>«Cambiar precios»</b> o al vender.<br>
-        · <b>Vendedor</b> (opcional, última columna): nombre/usuario/correo de un revendedor → se sube ya <b>asignado</b> a ese revendedor (le aparece en su inventario). Si lo dejas vacío, queda como <b>stock</b> tuyo.</p>
-      <textarea name="datos" rows="8" class="input" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace" placeholder="Netflix, correo@x.com, clave123, Rebeca JR, 9669, 01/08/2026, 3.50, rev1&#10;Netflix, correo@x.com, clave123, Pedro, 1234, 01/08/2026, ,&#10;Disney+, otro@x.com, clave99, , , 2026-09-15"></textarea>
+        · <b>Vendedor</b> (opcional, <b>PRIMERA</b> columna): correo/usuario/nombre de un revendedor → se sube ya <b>asignado</b> a él (le aparece en su inventario). Si la línea NO lleva vendedor, arranca directo por la plataforma — el sistema lo detecta y no se corre.</p>
+      <textarea name="datos" rows="8" class="input" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace" placeholder="rev@x.com, Netflix, 01/08/2026, correo@x.com, clave123, 3.50, Rebeca JR, 9669&#10;Disney+, 2026-09-15, otro@x.com, clave99, , Ana&#10;rev@x.com, Spotify, 2026-09-15, s@x.com, clave, 1.75, Leo"></textarea>
       <div class="flex justify-end gap-2"><button type="button" onclick="cerrarModales()" class="btn ghost">Cancelar</button><button class="btn primary">Importar</button></div>
     </form>
   </div>
@@ -1251,7 +1243,9 @@ stream_head('Cuentas', 'cuentas');
     // se cambia al editar (ff-plat ya va deshabilitado).
     if (ES_REV) {
       var esMirror = !!(c.origen_cuenta_id && Number(c.origen_cuenta_id) > 0);
-      var esCC = Number(c.rev_editable||0) === 1;   // compró la CUENTA COMPLETA → sí edita clave
+      // Es CUENTA COMPLETA (edita clave) si: la marca rev_editable=1, O la plataforma se vende por cuenta
+      // completa (es_completa). Lo segundo cubre cuentas completas viejas donde rev_editable no quedó puesto.
+      var esCC = Number(c.rev_editable||0) === 1 || Number(c.es_completa||0) === 1;
       // Correo y costo: bloqueados en mirror. La FECHA: bloqueada en mirror, EDITABLE en cuentas propias.
       ['f-correo','f-costo'].forEach(function(id){ var el=document.getElementById(id); if(el){ el.readOnly=esMirror; el.style.opacity=esMirror?'.6':'1'; el.title=esMirror?'Automático: lo fija la tienda (comprada a REBOR)':''; } });
       var fv=document.getElementById('f-venc'); if(fv){ fv.readOnly=esMirror; fv.disabled=esMirror; fv.style.opacity=esMirror?'.6':'1'; fv.title=esMirror?'Se fija al comprar; no editable':''; }
