@@ -12,7 +12,7 @@ foreach ($phpMailerCandidates as $candidate) {
 		continue;
 	}
 
-	if (substr($candidate, -12) === '/autoload.php' || substr($candidate, -12) === '\\autoload.php') {
+	if (substr($candidate, -13) === '/autoload.php' || substr($candidate, -13) === '\\autoload.php') {
 		require_once $candidate;
 		return;
 	}

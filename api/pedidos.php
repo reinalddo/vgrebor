@@ -7254,6 +7254,52 @@ function claim_movement_checked_by_reference(mysqli $mysqli, string $reference, 
     }
 }
 
+function release_movement_checked_claim(mysqli $mysqli, string $reference, int $requiredDigits): void {
+    // Contraparte de claim_movement_checked_by_reference(): si el intento de
+    // pago termina en error ANTES de crear/vincular un pedido real (falla la
+    // API bancaria, el monto no coincide, un ítem del carrito no pasa
+    // validación, etc.), el checked=1 que se dejó puesto al inicio del
+    // intento se quedaba así para siempre — la referencia quedaba bloqueada
+    // con "Ya tienes una recarga en proceso con esta referencia" sin que
+    // existiera ningún pedido detrás, y el cliente ya no podía volver a
+    // usarla (bug reportado: pago real recibido, sin pedido en ningún
+    // estado, referencia marcada como "en proceso" para siempre).
+    //
+    // Solo libera movimientos SIN pedido vinculado (pedido_id NULL/0): si ya
+    // hay un pedido real enlazado, esta función nunca lo toca, así que jamás
+    // puede "desproteger" una referencia genuinamente ya usada.
+    $mysqli = ensure_mysqli_connection($mysqli);
+    $reference = trim($reference);
+    if ($reference === '') {
+        return;
+    }
+
+    try {
+        if ($requiredDigits > 0) {
+            $refSuffix = strlen($reference) > $requiredDigits ? substr($reference, -$requiredDigits) : $reference;
+            $stmt = $mysqli->prepare(
+                "UPDATE movimientos SET checked = 0
+                 WHERE CAST(RIGHT(TRIM(referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
+                   AND (pedido_id IS NULL OR pedido_id = 0)"
+            );
+            if ($stmt) {
+                $stmt->bind_param('is', $requiredDigits, $refSuffix);
+                $stmt->execute();
+                $stmt->close();
+            }
+        } else {
+            $stmt = $mysqli->prepare('UPDATE movimientos SET checked = 0 WHERE referencia = ? AND (pedido_id IS NULL OR pedido_id = 0)');
+            if ($stmt) {
+                $stmt->bind_param('s', $reference);
+                $stmt->execute();
+                $stmt->close();
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('TVG no se pudo liberar checked=0 en movimientos para referencia "' . $reference . '": ' . $e->getMessage());
+    }
+}
+
 function link_movement_to_order(mysqli $mysqli, string $reference, int $orderId): void {
     $mysqli = ensure_mysqli_connection($mysqli);
 
@@ -9865,6 +9911,27 @@ if ($action === 'submit_payment') {
     // procesarse primero.
     claim_movement_checked_by_reference($mysqli, $referenceNumber, $referenceMatchDigits);
 
+    // Red de seguridad: si este intento termina en CUALQUIER error antes de
+    // vincular un pedido real a la referencia (ver release_movement_checked_claim
+    // más arriba), se libera automáticamente al terminar la solicitud —
+    // sin importar por cuál salida (json_error/json_response) se termine.
+    // Se desactiva en el único punto donde SÍ queda un pedido real vinculado
+    // (link_movement_to_order) y en el caso de "otra solicitud ya está
+    // procesando esta referencia" (ahí la dueña real del candado es la OTRA
+    // solicitud, no esta).
+    $submitClaimReleasePending = true;
+    register_shutdown_function(static function () use (&$submitClaimReleasePending, $referenceNumber, $referenceMatchDigits): void {
+        if (!$submitClaimReleasePending) {
+            return;
+        }
+        global $mysqli;
+        try {
+            release_movement_checked_claim(ensure_mysqli_connection($mysqli), $referenceNumber, $referenceMatchDigits);
+        } catch (Throwable $e) {
+            error_log('TVG release_movement_checked_claim (submit_payment shutdown) failed: ' . $e->getMessage());
+        }
+    });
+
     $bankFlowRequested = $orderSupportsBankApi || $methodSupportsBankApi;
     $usesBankValidation = $orderSupportsBankApi && $methodSupportsBankApi && $currencyMatchesOrder;
     $usesBinancePagonorteValidation = $binancePagonorteMode && $currencyMatchesOrder && $methodCurrencyCode === 'USDT';
@@ -9933,6 +10000,11 @@ if ($action === 'submit_payment') {
             : $referenceNumber
     ));
     if (!acquire_reference_processing_lock($mysqli, $lockReferenceValue)) {
+        // La solicitud que SÍ tiene el candado es la dueña real del intento
+        // en curso — si esta (la perdedora) liberara el checked=1 mientras
+        // la otra sigue procesando, reabriría la misma ventana de duplicado
+        // que GET_LOCK() existe para cerrar.
+        $submitClaimReleasePending = false;
         json_error('Ya hay otra solicitud procesando esta misma referencia de pago. Espera unos segundos y vuelve a intentar.', 409);
     }
 
@@ -9952,6 +10024,8 @@ if ($action === 'submit_payment') {
     }
 
     if ($referenceConflict !== null) {
+        // Conflicto real: otro pedido ya tiene esta referencia — no liberar.
+        $submitClaimReleasePending = false;
         json_error(reference_reuse_conflict_message($referenceConflict), 409);
     }
 
@@ -10054,6 +10128,9 @@ if ($action === 'submit_payment') {
             $mysqli = ensure_mysqli_connection($mysqli);
             $verifiedReference = (string) ($matchingMovement['referencia'] ?? $referenceNumber);
             link_movement_to_order($mysqli, $verifiedReference, $orderId);
+            // Ya queda un pedido real vinculado a esta referencia — la red de
+            // seguridad de arriba no debe liberarla al terminar la solicitud.
+            $submitClaimReleasePending = false;
 
             if ($paymentDifferenceEnabled) {
                 $totalPaidAmount = sum_linked_movement_amount_for_order($mysqli, $orderId);
@@ -12518,6 +12595,33 @@ if ($action === 'batch_create_and_pay') {
             // en "Realizar Compra" del carrito — ver claim_movement_checked_by_reference().
             claim_movement_checked_by_reference($mysqli, $refNumber, $batchRefDigits);
 
+            // Red de seguridad: si este intento de carrito termina en
+            // CUALQUIER error antes de crear al menos un pedido real (API
+            // bancaria caída, monto que no coincide, un ítem del carrito que
+            // no pasa validación, etc.), se libera automáticamente el
+            // checked=1 al terminar la solicitud (ver
+            // release_movement_checked_claim) — sin importar por cuál salida
+            // se termine. Antes de este fix, cualquiera de esos fallos dejaba
+            // la referencia bloqueada para siempre con "Ya tienes una recarga
+            // en proceso con esta referencia" sin que existiera NINGÚN pedido
+            // (bug reportado: pago real recibido, sin pedido en ningún
+            // estado). Se desactiva en cuanto queda al menos un pedido real
+            // vinculado, y en el caso de "otra solicitud ya está procesando
+            // esta referencia" (ahí la dueña real del candado es la OTRA
+            // solicitud, no esta).
+            $batchClaimReleasePending = true;
+            register_shutdown_function(static function () use (&$batchClaimReleasePending, $refNumber, $batchRefDigits): void {
+                if (!$batchClaimReleasePending) {
+                    return;
+                }
+                global $mysqli;
+                try {
+                    release_movement_checked_claim(ensure_mysqli_connection($mysqli), $refNumber, $batchRefDigits);
+                } catch (Throwable $e) {
+                    error_log('TVG release_movement_checked_claim (batch shutdown) failed: ' . $e->getMessage());
+                }
+            });
+
             // Candado real contra creación duplicada de pedidos con la misma
             // referencia: sin esto, dos solicitudes casi simultáneas (doble
             // clic en "Confirmar compra", reintento tras "Error de red")
@@ -12529,6 +12633,10 @@ if ($action === 'batch_create_and_pay') {
             // pago). GET_LOCK() serializa esto a nivel de MySQL por
             // referencia específica.
             if (!acquire_reference_processing_lock($mysqli, $refNumber)) {
+                // La solicitud que SÍ tiene el candado es la dueña real del
+                // intento en curso — liberar aquí reabriría la ventana de
+                // duplicado que GET_LOCK() existe para cerrar.
+                $batchClaimReleasePending = false;
                 json_error('Ya hay otra solicitud procesando esta misma referencia de pago. Espera unos segundos y vuelve a intentar.', 409);
             }
 
@@ -12593,12 +12701,17 @@ if ($action === 'batch_create_and_pay') {
                     $iStmt2->close();
                 }
                 if (!empty($iExistingOrderIds)) {
+                    // Ya hay pedidos reales de un intento anterior vinculados
+                    // a esta referencia.
+                    $batchClaimReleasePending = false;
                     json_response(['ok' => true, 'message' => 'Pedidos del carrito creados.', 'batch_id' => $iExistingBatchId, 'order_ids' => $iExistingOrderIds, 'batch_size' => count($iExistingOrderIds), 'idempotent' => true]);
                 }
             }
 
             $batchRefConflict = find_reference_reuse_conflict($mysqli, $refNumber, $batchRefDigits, 0, $totalBlindado);
             if ($batchRefConflict !== null) {
+                // Conflicto real: otro pedido ya tiene esta referencia — no liberar.
+                $batchClaimReleasePending = false;
                 json_error(reference_reuse_conflict_message($batchRefConflict), 409);
             }
 
@@ -12857,6 +12970,8 @@ if ($action === 'batch_create_and_pay') {
                         $cancelPriorStmt->close();
                     }
                 }
+                // Conflicto real: otro pedido ya tiene esta referencia — no liberar.
+                $batchClaimReleasePending = false;
                 json_error('Esta referencia de pago ya fue utilizada en otro pedido.', 409);
             }
             $itemErrors[] = $e->getMessage();
@@ -12875,6 +12990,9 @@ if ($action === 'batch_create_and_pay') {
         $firstError = !empty($itemErrors) ? $itemErrors[0] : 'No se pudo crear ningún pedido del carrito.';
         json_error($firstError);
     }
+
+    // Ya hay al menos un pedido real de este intento — no liberar la referencia.
+    $batchClaimReleasePending = false;
 
     if (isset($batchMatch) && is_array($batchMatch) && $batchVerifiedReference !== '') {
         link_movement_to_order($mysqli, $batchVerifiedReference, $orderIds[0]);
