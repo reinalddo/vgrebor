@@ -396,6 +396,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
           } catch (Throwable $e) {}
         }
+        // IMPORTANTE (estadísticas): actualiza el PRECIO de las VENTAS ya hechas de estas cuentas, para que
+        // el dashboard tome el INGRESO nuevo (antes las cuentas subidas/asignadas quedaban con precio 0 →
+        // ventas $0 y ganancia negativa = solo el costo). Reventa → ventas a REVENDEDORES; venta → a CLIENTES.
+        try {
+          if ($reventa !== null && (int) $OWNER === 0) {
+            $pdo->prepare("UPDATE streaming_ventas SET precio=? WHERE cuenta_id IN ($in) AND owner_id=0 AND COALESCE(revendedor_id,0)>0 AND estado<>'cancelada'")->execute([$reventa]);
+          }
+          if ($venta !== null) {
+            $pdo->prepare("UPDATE streaming_ventas SET precio=? WHERE cuenta_id IN ($in) AND owner_id=$OWNER AND COALESCE(revendedor_id,0)=0 AND estado<>'cancelada'")->execute([$venta]);
+          }
+        } catch (Throwable $e) {}
       }
       // costo → admin a todas; revendedor SOLO a las propias (origen_cuenta_id vacío).
       if ($costo !== null) {
