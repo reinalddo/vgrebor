@@ -211,7 +211,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $metodo = trim((string) ($_POST['metodo'] ?? '')) ?: null;
       $ref = trim((string) ($_POST['referencia'] ?? '')) ?: null;
       // Cobrar el PRECIO DE RENOVACIÓN si está definido; si no, cae al precio de venta.
-      $precio = (float) ($pdo->query("SELECT COALESCE(precio_renovacion, precio) FROM streaming_ventas WHERE id=$vid")->fetchColumn() ?: 0);
+      // Precio de renovación: 1º el de ESTA venta, 2º el de la PLATAFORMA (Tipos de cuenta), 3º el precio de venta.
+      $precio = (float) ($pdo->query("SELECT COALESCE(v.precio_renovacion, (SELECT pl.precio_renovacion FROM streaming_plataformas pl WHERE pl.nombre=v.plataforma AND pl.precio_renovacion IS NOT NULL ORDER BY (pl.owner_id=0) DESC LIMIT 1), v.precio) FROM streaming_ventas v WHERE v.id=$vid")->fetchColumn() ?: 0);
       try {
         $pdo->prepare("INSERT INTO streaming_venta_pagos (venta_id,tipo,metodo,referencia,monto,meses,comprobante_url,creado_por) VALUES (?,?,?,?,?,?,?,?)")
             ->execute([$vid, 'renovacion', $metodo, $ref, $precio, $meses, $comp, current_user_id()]);

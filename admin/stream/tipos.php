@@ -31,6 +31,8 @@ try { $pdo->exec("ALTER TABLE streaming_plataformas ADD COLUMN unidad_venta VARC
 try { $pdo->exec("ALTER TABLE streaming_plataformas MODIFY COLUMN modo_entrega VARCHAR(20) NOT NULL DEFAULT 'perfil'"); } catch (Throwable $e) {}
 // E: para plataformas por invitación/activación no hay stock real → un interruptor MANUAL disponible/agotado.
 try { $pdo->exec("ALTER TABLE streaming_plataformas ADD COLUMN disponible TINYINT(1) NOT NULL DEFAULT 1"); } catch (Throwable $e) {}
+// Precio de RENOVACIÓN por perfil (lo que se cobra al renovar; si está vacío, se cobra el precio de venta).
+try { $pdo->exec("ALTER TABLE streaming_plataformas ADD COLUMN precio_renovacion DECIMAL(12,2) NULL"); } catch (Throwable $e) {}
 
 /**
  * Publica/sincroniza una plataforma como PRODUCTO de la tienda (juego + paquete), para venderla en el
@@ -175,6 +177,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
               $pid, $OWNER,
             ]);
       }
+      // Precio de RENOVACIÓN (por perfil). Vacío = al renovar se cobra el precio de venta normal.
+      try { $pdo->prepare("UPDATE streaming_plataformas SET precio_renovacion=? WHERE id=? AND owner_id=?")->execute([($_POST['precio_renovacion'] ?? '') !== '' ? (float) $_POST['precio_renovacion'] : null, $pid, $OWNER]); } catch (Throwable $e) {}
       // Logo: archivo subido (prioridad) o URL.
       if (!empty($_FILES['logo']['tmp_name']) && is_uploaded_file($_FILES['logo']['tmp_name']) && (int) $_FILES['logo']['error'] === 0) {
         $info = @getimagesize($_FILES['logo']['tmp_name']);
@@ -228,7 +232,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 $flash = (string) ($_GET['msg'] ?? '');
 
-$cols = "id, nombre, categoria, etiqueta_comercial, precio_publico, precio_sugerido, condiciones_servicio, renovable_manual, en_tienda, logo_url, color";
+$cols = "id, nombre, categoria, etiqueta_comercial, precio_publico, precio_sugerido, precio_renovacion, condiciones_servicio, renovable_manual, en_tienda, logo_url, color";
 if ($verCostos) $cols .= ", costo, precio_distribuidor";
 $hasModoCol = false;
 try { $hasModoCol = (bool) $pdo->query("SHOW COLUMNS FROM streaming_plataformas LIKE 'modo_entrega'")->fetch(); } catch (Throwable $e) {}
@@ -352,6 +356,7 @@ stream_head('Tipos de Plataforma', 'tipos');
         <div class="field" style="margin-bottom:0"><label>Precio Revendedor / <span class="ul">perfil</span></label><div style="display:flex"><span style="padding:0 10px;display:grid;place-items:center;background:var(--warn);color:#fff;border-radius:9px 0 0 9px;font-weight:700">$</span><input name="precio_distribuidor" id="t-dist" type="number" step="0.01" value="0.00" oninput="calc()" class="input" style="border-radius:0 9px 9px 0"></div><div style="font-size:11px;color:var(--warn);margin-top:3px" id="bs-dist"></div></div>
         <?php endif; ?>
         <div class="field" style="margin-bottom:0"><label>Precio Tienda / <span class="ul">perfil</span></label><div style="display:flex"><span style="padding:0 10px;display:grid;place-items:center;background:var(--good);color:#fff;border-radius:9px 0 0 9px;font-weight:700">$</span><input name="precio_publico" id="t-pub" type="number" step="0.01" value="0.00" oninput="calc()" class="input" style="border-radius:0 9px 9px 0"></div><div style="font-size:11px;color:var(--good);margin-top:3px" id="bs-pub"></div></div>
+        <div class="field" style="margin-bottom:0"><label>Precio Renovación / <span class="ul">perfil</span> <span style="color:var(--faint);font-weight:400">(opcional)</span></label><div style="display:flex"><span style="padding:0 10px;display:grid;place-items:center;background:var(--accent);color:#fff;border-radius:9px 0 0 9px;font-weight:700">$</span><input name="precio_renovacion" id="t-prenov" type="number" step="0.01" class="input" style="border-radius:0 9px 9px 0" placeholder="vacío = igual que venta"></div><div style="font-size:11px;color:var(--muted);margin-top:3px">Lo que se cobra al <b>renovar</b>. Vacío = mismo precio de venta.</div></div>
       </div>
       <?php if ($verCostos): ?>
       <div class="grid grid-cols-2 gap-3" style="margin-top:12px">
@@ -436,6 +441,7 @@ stream_head('Tipos de Plataforma', 'tipos');
     if(document.getElementById('t-disp')) document.getElementById('t-disp').value = (t && (t.disponible==0||t.disponible==='0')) ? '0' : '1';
     if(document.getElementById('t-unidad')) document.getElementById('t-unidad').value = (t&&t.unidad_venta)?t.unidad_venta:'perfil';
     if(document.getElementById('t-costo')){ document.getElementById('t-costo').value = t? (t.costo||'0.00') : '0.00'; document.getElementById('t-dist').value = t? (t.precio_distribuidor||'0.00') : '0.00'; }
+    if(document.getElementById('t-prenov')) document.getElementById('t-prenov').value = (t && t.precio_renovacion!=null) ? t.precio_renovacion : '';
     document.getElementById('t-logourl').value='';
     const prev=document.getElementById('t-logoprev'); if(t&&t.logo_url){prev.src=t.logo_url; prev.classList.remove('hidden');}else{prev.classList.add('hidden');}
     calc(); updateUnidad(); updateModo(); ov.classList.remove('hidden'); ov.classList.add('flex'); lucide.createIcons();
