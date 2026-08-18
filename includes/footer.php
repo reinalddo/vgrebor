@@ -228,6 +228,7 @@ $menuScript = <<<'SCRIPT'
     closeUserModal(userOrdersModal);
     closeUserModal(userRewardsModal);
     closeUserModal(userProfileModal);
+    closeUserModal(document.getElementById("user-referrals-modal"));
   };
 
   const showFeedback = (element, message, variant) => {
@@ -984,6 +985,13 @@ $menuScript = <<<'SCRIPT'
       if (target === "rewards") {
         openUserModal(userRewardsModal);
         await loadUserRewards();
+        return;
+      }
+      if (target === "referrals") {
+        openUserModal(document.getElementById("user-referrals-modal"));
+        if (typeof loadUserReferrals === "function") {
+          await loadUserReferrals();
+        }
         return;
       }
       if (target === "profile") {
@@ -2827,6 +2835,230 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     var mod = document.getElementById('pwa-install-modal');
     if (mod) mod.addEventListener('show.bs.modal', dismiss);
   }());
+  </script>
+
+  <script>
+  // Sistema de Referidos: carga y renderiza el panel "Mis Referidos"
+  // (#user-referrals-modal, ver includes/header.php). Bloque de script
+  // independiente y autocontenido a propósito — no depende de las variables
+  // declaradas dentro del heredoc grande de más arriba (solo lee
+  // window.__TVG_API_ACCOUNT, que includes/header.php ya deja listo antes de
+  // que este script se ejecute), así que no hace falta tocar esa parte más
+  // frágil del archivo salvo por el mínimo necesario (el dispatcher de
+  // data-user-open="referrals" y closeAllUserModals(), ya hecho arriba).
+  (function () {
+    const moneyFmt = new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtMoney = (value) => '$' + moneyFmt.format(Number(value || 0));
+
+    const escapeHtmlReferrals = (value) => String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
+    const fmtDateOnly = (value) => {
+      const raw = String(value || '').trim();
+      if (!raw) return '—';
+      return raw.split(' ')[0];
+    };
+
+    const referralsPaymentStatusLabel = (status) => (status === 'pagado' ? 'Pagado' : 'Pendiente');
+    const referralsPaymentStatusClass = (status) => (status === 'pagado' ? 'text-success' : 'text-warning');
+
+    const renderInvitadoRow = (inv) => `
+      <tr>
+        <td>
+          <div class="fw-semibold text-light">${escapeHtmlReferrals(inv.nombre || 'Usuario')}</div>
+          <div class="small text-secondary">${escapeHtmlReferrals(inv.email || '')}</div>
+        </td>
+        <td class="text-secondary">${fmtDateOnly(inv.referido_en)}</td>
+        <td class="text-secondary">${Number(inv.total_pedidos || 0)}</td>
+        <td class="text-end fw-semibold text-info">${fmtMoney(inv.total_recargado)}</td>
+      </tr>`;
+
+    const renderInvitadoCard = (inv) => `
+      <div class="rounded-4 border border-info-subtle p-3" style="background:rgba(8,15,24,0.82);">
+        <div class="fw-semibold text-light">${escapeHtmlReferrals(inv.nombre || 'Usuario')}</div>
+        <div class="small text-secondary mb-2">${escapeHtmlReferrals(inv.email || '')}</div>
+        <div class="d-flex justify-content-between small text-secondary"><span>Desde</span><span>${fmtDateOnly(inv.referido_en)}</span></div>
+        <div class="d-flex justify-content-between small text-secondary"><span>Pedidos</span><span>${Number(inv.total_pedidos || 0)}</span></div>
+        <div class="d-flex justify-content-between fw-semibold text-info mt-1"><span>Total recargado</span><span>${fmtMoney(inv.total_recargado)}</span></div>
+      </div>`;
+
+    const renderComisionRow = (c) => `
+      <tr>
+        <td class="text-secondary">${fmtDateOnly(c.creado_en)}</td>
+        <td>
+          <div class="fw-semibold text-light">${escapeHtmlReferrals(c.invitado_nombre || 'Usuario')}</div>
+          <div class="small text-secondary">#${Number(c.pedido_id || 0)}</div>
+        </td>
+        <td class="text-secondary">${fmtMoney(c.monto_base)}</td>
+        <td class="text-secondary">${Number(c.porcentaje_aplicado || 0)}%</td>
+        <td class="${referralsPaymentStatusClass(c.estado_pago)} fw-semibold">${referralsPaymentStatusLabel(c.estado_pago)}</td>
+        <td class="text-end fw-bold text-success">${fmtMoney(c.comision)}</td>
+      </tr>`;
+
+    const renderComisionCard = (c) => `
+      <div class="rounded-4 border border-info-subtle p-3" style="background:rgba(8,15,24,0.82);">
+        <div class="d-flex justify-content-between align-items-start mb-1">
+          <div class="fw-semibold text-light">${escapeHtmlReferrals(c.invitado_nombre || 'Usuario')}</div>
+          <div class="small ${referralsPaymentStatusClass(c.estado_pago)} fw-semibold">${referralsPaymentStatusLabel(c.estado_pago)}</div>
+        </div>
+        <div class="small text-secondary mb-2">${fmtDateOnly(c.creado_en)} · Pedido #${Number(c.pedido_id || 0)}</div>
+        <div class="d-flex justify-content-between small text-secondary"><span>Recarga (${Number(c.porcentaje_aplicado || 0)}%)</span><span>${fmtMoney(c.monto_base)}</span></div>
+        <div class="d-flex justify-content-between fw-bold text-success mt-1"><span>Tu comisión</span><span>${fmtMoney(c.comision)}</span></div>
+      </div>`;
+
+    window.loadUserReferrals = async function () {
+      const loading = document.getElementById('user-referrals-loading');
+      const content = document.getElementById('user-referrals-content');
+      const feedback = document.getElementById('user-referrals-feedback');
+      if (!loading || !content) return;
+
+      if (feedback) { feedback.classList.add('d-none'); feedback.textContent = ''; }
+      content.classList.add('d-none');
+      loading.classList.remove('d-none');
+
+      try {
+        const apiUrl = window.__TVG_API_ACCOUNT || '/api/account.php';
+        const response = await fetch(apiUrl + '?action=referrals', {
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' },
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          throw new Error(data.message || 'No se pudo cargar tu panel de referidos.');
+        }
+
+        loading.classList.add('d-none');
+        content.classList.remove('d-none');
+
+        // Link de invitación
+        const linkInput = document.getElementById('user-referrals-link-input');
+        if (linkInput) linkInput.value = data.link || '';
+
+        // Nivel + barra de progreso
+        const nivel = data.nivel || {};
+        const nivelNombreEl = document.getElementById('user-referrals-nivel-nombre');
+        const nivelPorcentajeEl = document.getElementById('user-referrals-nivel-porcentaje');
+        const progressBar = document.getElementById('user-referrals-progress-bar');
+        const progressText = document.getElementById('user-referrals-progress-text');
+        if (nivelNombreEl) nivelNombreEl.textContent = nivel.nombre || 'Básico';
+        if (nivelPorcentajeEl) nivelPorcentajeEl.textContent = Number(nivel.porcentaje || 0) + '%';
+        if (progressBar) progressBar.style.width = Number(nivel.progreso_porcentaje || 0) + '%';
+        if (progressText) {
+          progressText.textContent = nivel.es_nivel_maximo
+            ? `¡Nivel máximo alcanzado! Acumulado de tus invitados: ${fmtMoney(nivel.monto_acumulado)}.`
+            : `${fmtMoney(nivel.monto_acumulado)} de ${fmtMoney(nivel.meta_siguiente)} para subir a Nivel ${nivel.siguiente_nivel} (${nivel.siguiente_nombre}, ${nivel.siguiente_porcentaje}%) — faltan ${fmtMoney(nivel.progreso_restante)}.`;
+        }
+
+        // Tarjetas de ganancias
+        const ganancias = data.ganancias || {};
+        const pendienteEl = document.getElementById('user-referrals-pendiente-value');
+        const pagadoEl = document.getElementById('user-referrals-pagado-value');
+        const totalEl = document.getElementById('user-referrals-total-value');
+        const invitadosCountEl = document.getElementById('user-referrals-invitados-value');
+        if (pendienteEl) pendienteEl.textContent = fmtMoney(ganancias.pendiente);
+        if (pagadoEl) pagadoEl.textContent = fmtMoney(ganancias.pagado);
+        if (totalEl) totalEl.textContent = fmtMoney(ganancias.total);
+
+        const invitados = Array.isArray(data.invitados) ? data.invitados : [];
+        if (invitadosCountEl) invitadosCountEl.textContent = String(invitados.length);
+
+        // Retiro
+        const retiro = data.retiro || {};
+        const retiroText = document.getElementById('user-referrals-retiro-text');
+        const retiroBtn = document.getElementById('user-referrals-retiro-btn');
+        if (retiroText) {
+          retiroText.textContent = retiro.elegible
+            ? '¡Puedes solicitar el retiro de tus ganancias pendientes!'
+            : `Para retirar tus ganancias, recarga al menos ${fmtMoney(retiro.requerido)} en tus últimos 30 días (llevas ${fmtMoney(retiro.recargado)}, te faltan ${fmtMoney(retiro.restante)}).`;
+        }
+        if (retiroBtn) {
+          const puedeRetirar = !!retiro.elegible && Number(ganancias.pendiente || 0) > 0 && !!retiro.whatsapp_link;
+          retiroBtn.disabled = !puedeRetirar;
+          retiroBtn.onclick = puedeRetirar ? () => window.open(retiro.whatsapp_link, '_blank') : null;
+        }
+
+        // Tab: invitados
+        const invitadosEmpty = document.getElementById('user-referrals-invitados-empty');
+        const invitadosList = document.getElementById('user-referrals-invitados-list');
+        const invitadosTableBody = document.getElementById('user-referrals-invitados-table-body');
+        const invitadosCards = document.getElementById('user-referrals-invitados-cards');
+        if (invitados.length > 0) {
+          if (invitadosEmpty) invitadosEmpty.classList.add('d-none');
+          if (invitadosList) invitadosList.classList.remove('d-none');
+          if (invitadosTableBody) invitadosTableBody.innerHTML = invitados.map(renderInvitadoRow).join('');
+          if (invitadosCards) invitadosCards.innerHTML = invitados.map(renderInvitadoCard).join('');
+        } else {
+          if (invitadosEmpty) invitadosEmpty.classList.remove('d-none');
+          if (invitadosList) invitadosList.classList.add('d-none');
+        }
+
+        // Tab: comisiones
+        const comisiones = Array.isArray(data.comisiones) ? data.comisiones : [];
+        const comisionesEmpty = document.getElementById('user-referrals-comisiones-empty');
+        const comisionesList = document.getElementById('user-referrals-comisiones-list');
+        const comisionesTableBody = document.getElementById('user-referrals-comisiones-table-body');
+        const comisionesCards = document.getElementById('user-referrals-comisiones-cards');
+        if (comisiones.length > 0) {
+          if (comisionesEmpty) comisionesEmpty.classList.add('d-none');
+          if (comisionesList) comisionesList.classList.remove('d-none');
+          if (comisionesTableBody) comisionesTableBody.innerHTML = comisiones.map(renderComisionRow).join('');
+          if (comisionesCards) comisionesCards.innerHTML = comisiones.map(renderComisionCard).join('');
+        } else {
+          if (comisionesEmpty) comisionesEmpty.classList.remove('d-none');
+          if (comisionesList) comisionesList.classList.add('d-none');
+        }
+      } catch (err) {
+        loading.classList.add('d-none');
+        if (feedback) {
+          feedback.textContent = (err && err.message) || 'No se pudo cargar tu panel de referidos.';
+          feedback.className = 'alert alert-danger mb-3 py-2';
+        }
+      }
+    };
+
+    // Tabs (Mis Invitados / Historial de Comisiones)
+    document.querySelectorAll('[data-referrals-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const target = btn.dataset.referralsTab;
+        document.querySelectorAll('[data-referrals-tab]').forEach((b) => {
+          b.classList.toggle('active', b === btn);
+          b.classList.toggle('btn-info', b === btn);
+          b.classList.toggle('btn-outline-info', b !== btn);
+        });
+        const panelInvitados = document.getElementById('referrals-tab-panel-invitados');
+        const panelComisiones = document.getElementById('referrals-tab-panel-comisiones');
+        if (panelInvitados) panelInvitados.classList.toggle('d-none', target !== 'invitados');
+        if (panelComisiones) panelComisiones.classList.toggle('d-none', target !== 'comisiones');
+      });
+    });
+
+    // Copiar link de invitación
+    const copyBtn = document.getElementById('user-referrals-copy-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        const input = document.getElementById('user-referrals-link-input');
+        const link = input ? input.value : '';
+        if (!link) return;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(link);
+          } else {
+            input.select();
+            document.execCommand('copy');
+          }
+          const original = copyBtn.textContent;
+          copyBtn.textContent = '¡Copiado!';
+          setTimeout(() => { copyBtn.textContent = original; }, 1800);
+        } catch (e) {
+          if (input) input.select();
+        }
+      });
+    }
+  })();
   </script>
 
   <script>

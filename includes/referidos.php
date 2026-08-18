@@ -544,3 +544,198 @@ if (!function_exists('referidos_ensure_schema')) {
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// FASE 4: funciones de solo lectura para el panel "Mis Referidos" del cliente
+// (api/account.php, action=referrals).
+// ─────────────────────────────────────────────────────────────────────────
+
+// Link completo de invitación a partir del código propio del usuario.
+if (!function_exists('referidos_link_invitacion')) {
+    function referidos_link_invitacion(string $codigo): string {
+        if ($codigo === '') {
+            return '';
+        }
+        return rtrim(app_url('/'), '/') . '/?ref=' . rawurlencode($codigo);
+    }
+}
+
+// Mismo mecanismo de bloqueo que RECoins (win_points_user_monthly_spent:
+// recarga propia en los últimos 30 días corridos), reusado tal cual — no se
+// duplica la consulta, solo se compara contra el umbral propio de referidos.
+if (!function_exists('referidos_estado_retiro')) {
+    function referidos_estado_retiro(mysqli $mysqli, int $usuarioId): array {
+        $minimo = referidos_retiro_minimo_recarga();
+        if ($usuarioId <= 0) {
+            return ['elegible' => false, 'recargado' => 0.0, 'requerido' => $minimo, 'restante' => $minimo];
+        }
+
+        require_once __DIR__ . '/win_points.php';
+        $recargado = round(win_points_user_monthly_spent($mysqli, $usuarioId), 2);
+        $elegible = $minimo <= 0 || $recargado >= $minimo;
+
+        return [
+            'elegible' => $elegible,
+            'recargado' => $recargado,
+            'requerido' => $minimo,
+            'restante' => $elegible ? 0.0 : round($minimo - $recargado, 2),
+        ];
+    }
+}
+
+// Monto acumulado ACTUAL (incluyendo todo lo ya comisionado) — es lo que
+// determina el nivel/barra de progreso que se le muestra al referidor
+// AHORA MISMO. Distinto del "acumulado antes de este pedido" que usa
+// referidos_registrar_comision_si_aplica() para congelar el % de cada
+// comisión individual — aquí sí se incluye todo.
+if (!function_exists('referidos_monto_acumulado_actual')) {
+    function referidos_monto_acumulado_actual(mysqli $mysqli, int $usuarioId): float {
+        if ($usuarioId <= 0) {
+            return 0.0;
+        }
+        referidos_ensure_schema();
+
+        $stmt = $mysqli->prepare('SELECT COALESCE(SUM(monto_base), 0) AS total FROM referidos_comisiones WHERE referidor_user_id = ?');
+        if (!$stmt) {
+            return 0.0;
+        }
+        $stmt->bind_param('i', $usuarioId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result ? $result->fetch_assoc() : null;
+        $stmt->close();
+
+        return round((float) ($row['total'] ?? 0), 2);
+    }
+}
+
+// Totales de ganancias del referidor: pendiente (todavía no pagado por el
+// admin), pagado (ya liquidado) y el total histórico de ambos.
+if (!function_exists('referidos_resumen_ganancias')) {
+    function referidos_resumen_ganancias(mysqli $mysqli, int $usuarioId): array {
+        $resumen = ['pendiente' => 0.0, 'pagado' => 0.0, 'total' => 0.0, 'total_pedidos' => 0];
+        if ($usuarioId <= 0) {
+            return $resumen;
+        }
+        referidos_ensure_schema();
+
+        $stmt = $mysqli->prepare(
+            "SELECT estado_pago, COALESCE(SUM(comision), 0) AS total, COUNT(*) AS cantidad
+             FROM referidos_comisiones WHERE referidor_user_id = ? GROUP BY estado_pago"
+        );
+        if (!$stmt) {
+            return $resumen;
+        }
+        $stmt->bind_param('i', $usuarioId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while ($result && ($row = $result->fetch_assoc())) {
+            $monto = round((float) ($row['total'] ?? 0), 2);
+            $cantidad = (int) ($row['cantidad'] ?? 0);
+            if (($row['estado_pago'] ?? '') === 'pagado') {
+                $resumen['pagado'] = $monto;
+            } else {
+                $resumen['pendiente'] = $monto;
+            }
+            $resumen['total'] += $monto;
+            $resumen['total_pedidos'] += $cantidad;
+        }
+        $stmt->close();
+        $resumen['total'] = round($resumen['total'], 2);
+
+        return $resumen;
+    }
+}
+
+// Personas invitadas por este usuario, con lo que cada una lleva recargado
+// (solo pedidos que realmente generaron comisión — pagado/enviado, sin
+// RECoins) y desde cuándo está afiliada.
+if (!function_exists('referidos_listar_invitados')) {
+    function referidos_listar_invitados(mysqli $mysqli, int $usuarioId, int $limit = 100): array {
+        if ($usuarioId <= 0) {
+            return [];
+        }
+        referidos_ensure_schema();
+
+        $resolvedLimit = max(1, min(300, $limit));
+        $stmt = $mysqli->prepare(
+            "SELECT u.id, u.nombre, u.email, u.referido_en,
+                    COALESCE(c.total_recargado, 0) AS total_recargado,
+                    COALESCE(c.total_pedidos, 0) AS total_pedidos
+             FROM usuarios u
+             LEFT JOIN (
+                 SELECT invitado_user_id, SUM(monto_base) AS total_recargado, COUNT(*) AS total_pedidos
+                 FROM referidos_comisiones
+                 WHERE referidor_user_id = ?
+                 GROUP BY invitado_user_id
+             ) c ON c.invitado_user_id = u.id
+             WHERE u.referido_por_id = ?
+             ORDER BY u.referido_en DESC, u.id DESC
+             LIMIT {$resolvedLimit}"
+        );
+        if (!$stmt) {
+            return [];
+        }
+        $stmt->bind_param('ii', $usuarioId, $usuarioId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($result && ($row = $result->fetch_assoc())) {
+            $rows[] = [
+                'nombre' => trim((string) ($row['nombre'] ?? '')),
+                'email' => trim((string) ($row['email'] ?? '')),
+                'referido_en' => (string) ($row['referido_en'] ?? ''),
+                'total_recargado' => round((float) ($row['total_recargado'] ?? 0), 2),
+                'total_pedidos' => (int) ($row['total_pedidos'] ?? 0),
+            ];
+        }
+        $stmt->close();
+
+        return $rows;
+    }
+}
+
+// Historial de comisiones (una fila por pedido que generó comisión) — para
+// el tab de "movimientos" del panel, igual patrón que win_points.
+if (!function_exists('referidos_listar_comisiones')) {
+    function referidos_listar_comisiones(mysqli $mysqli, int $usuarioId, int $limit = 50): array {
+        if ($usuarioId <= 0) {
+            return [];
+        }
+        referidos_ensure_schema();
+
+        $resolvedLimit = max(1, min(200, $limit));
+        $stmt = $mysqli->prepare(
+            "SELECT rc.pedido_id, rc.monto_base, rc.porcentaje_aplicado, rc.comision, rc.nivel_en_momento,
+                    rc.estado_pago, rc.creado_en, u.nombre AS invitado_nombre, u.email AS invitado_email
+             FROM referidos_comisiones rc
+             LEFT JOIN usuarios u ON u.id = rc.invitado_user_id
+             WHERE rc.referidor_user_id = ?
+             ORDER BY rc.creado_en DESC, rc.id DESC
+             LIMIT {$resolvedLimit}"
+        );
+        if (!$stmt) {
+            return [];
+        }
+        $stmt->bind_param('i', $usuarioId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $rows = [];
+        while ($result && ($row = $result->fetch_assoc())) {
+            $rows[] = [
+                'pedido_id' => (int) ($row['pedido_id'] ?? 0),
+                'monto_base' => round((float) ($row['monto_base'] ?? 0), 2),
+                'porcentaje_aplicado' => round((float) ($row['porcentaje_aplicado'] ?? 0), 2),
+                'comision' => round((float) ($row['comision'] ?? 0), 2),
+                'nivel_en_momento' => (int) ($row['nivel_en_momento'] ?? 0),
+                'estado_pago' => (string) ($row['estado_pago'] ?? 'pendiente'),
+                'creado_en' => (string) ($row['creado_en'] ?? ''),
+                'invitado_nombre' => trim((string) ($row['invitado_nombre'] ?? '')),
+                'invitado_email' => trim((string) ($row['invitado_email'] ?? '')),
+            ];
+        }
+        $stmt->close();
+
+        return $rows;
+    }
+}

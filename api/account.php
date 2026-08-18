@@ -247,6 +247,37 @@ if ($action === 'rewards') {
     ]);
 }
 
+if ($action === 'referrals') {
+    require_once __DIR__ . '/../includes/referidos.php';
+    referidos_ensure_schema();
+
+    $codigo = referidos_asegurar_codigo_usuario($mysqli, $authUserId) ?? '';
+    $acumulado = referidos_monto_acumulado_actual($mysqli, $authUserId);
+    $ganancias = referidos_resumen_ganancias($mysqli, $authUserId);
+    $retiro = referidos_estado_retiro($mysqli, $authUserId);
+
+    // No hay un sistema de pago/wallet automático para retirar (mismo criterio
+    // que el panel de influencers: el admin paga por fuera, ej. transferencia,
+    // y lo marca como pagado). Por ahora "solicitar retiro" es un WhatsApp
+    // pre-armado al admin — la Fase 5 (panel admin) es donde se ve/gestiona.
+    $retiro['whatsapp_link'] = $retiro['elegible'] && $ganancias['pendiente'] > 0
+        ? store_config_whatsapp_link_with_message(
+            (string) store_config_get('whatsapp', ''),
+            'Hola, quiero solicitar el retiro de mis ganancias de referidos ($' . number_format($ganancias['pendiente'], 2) . ' pendientes).'
+        )
+        : '';
+
+    account_json_ok([
+        'codigo' => $codigo,
+        'link' => referidos_link_invitacion($codigo),
+        'nivel' => referidos_nivel_para_monto($acumulado),
+        'ganancias' => $ganancias,
+        'retiro' => $retiro,
+        'invitados' => referidos_listar_invitados($mysqli, $authUserId),
+        'comisiones' => referidos_listar_comisiones($mysqli, $authUserId),
+    ]);
+}
+
 if ($action === 'update_profile') {
     $name = trim((string) ($_POST['name'] ?? ''));
     $email = strtolower(trim((string) ($_POST['email'] ?? '')));

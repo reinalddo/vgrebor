@@ -1449,6 +1449,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                 <?php endif; ?>
               <?php endif; ?>
               <button type="button" class="btn btn-admin w-100 rounded-3 border mb-2 fw-semibold" data-user-open="orders">Ver Pedidos</button>
+              <button type="button" class="btn btn-outline-info w-100 rounded-3 border mb-2 fw-semibold" data-user-open="referrals">🎁 Mis Referidos</button>
               <button type="button" class="btn btn-outline-info w-100 rounded-3 border mb-2 fw-semibold" data-user-open="profile">Datos Usuario</button>
               <?php
                 // Acceso directo al gestor de streaming: revendedor → su panel; admin/root → el del admin.
@@ -2000,6 +2001,143 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
       <?php endif; ?>
 
       <?php if ($authUser): ?>
+      <div id="user-referrals-modal" class="position-fixed top-0 start-0 w-100 h-100 d-none d-flex align-items-start align-items-md-center justify-content-center px-3 py-3 overflow-auto" style="z-index:13100;">
+        <div class="position-absolute top-0 start-0 w-100 h-100" style="background:var(--theme-overlay-soft);backdrop-filter:blur(6px);" data-user-close></div>
+        <div class="position-relative w-100" style="max-width:920px;z-index:1;">
+          <div class="rounded-4 border border-info overflow-hidden" style="background:var(--theme-panel-gradient);box-shadow:0 0 32px var(--theme-primary-glow);">
+            <div class="d-flex align-items-center justify-content-between gap-3 px-4 py-3 border-bottom border-info-subtle">
+              <div>
+                <div class="small text-uppercase text-info" style="letter-spacing:0.3em;">Mi cuenta</div>
+                <h3 class="h5 mb-0 text-white">Mis Referidos</h3>
+              </div>
+              <button type="button" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;" data-user-close aria-label="Cerrar">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div class="px-4 py-4" style="max-height:calc(100vh - 170px);overflow-y:auto;">
+              <div id="user-referrals-feedback" class="d-none alert mb-3 py-2"></div>
+              <div id="user-referrals-loading" class="text-center py-5 text-info">Cargando tu programa de referidos...</div>
+              <div id="user-referrals-content" class="d-none">
+
+                <!-- Nivel actual + barra de progreso -->
+                <div class="rounded-4 border border-info-subtle p-3 mb-3" style="background:rgba(8,15,24,0.82);">
+                  <div class="d-flex align-items-center justify-content-between gap-3 mb-2 flex-wrap">
+                    <div>
+                      <div class="small text-uppercase text-secondary mb-1">Tu nivel</div>
+                      <div id="user-referrals-nivel-nombre" class="h5 fw-bold text-info mb-0">Básico</div>
+                    </div>
+                    <div class="text-end">
+                      <div class="small text-uppercase text-secondary mb-1">Ganas por cada recarga de tus invitados</div>
+                      <div id="user-referrals-nivel-porcentaje" class="h5 fw-bold text-success mb-0">1%</div>
+                    </div>
+                  </div>
+                  <div class="progress rounded-pill" style="height:10px;background:rgba(255,255,255,0.08);">
+                    <div id="user-referrals-progress-bar" class="progress-bar" role="progressbar" style="width:0%;background:linear-gradient(90deg,var(--theme-button-primary) 0%,var(--theme-button-secondary) 100%);"></div>
+                  </div>
+                  <div id="user-referrals-progress-text" class="small text-secondary mt-2"></div>
+                </div>
+
+                <!-- Tarjetas resumen -->
+                <div class="row g-3 mb-4">
+                  <div class="col-sm-6 col-lg-3">
+                    <div class="rounded-4 border border-info-subtle p-3 h-100" style="background:rgba(8,15,24,0.82);">
+                      <div class="small text-uppercase text-secondary mb-1">Ganancia pendiente</div>
+                      <div id="user-referrals-pendiente-value" class="h5 fw-bold text-warning mb-0">$0.00</div>
+                    </div>
+                  </div>
+                  <div class="col-sm-6 col-lg-3">
+                    <div class="rounded-4 border border-info-subtle p-3 h-100" style="background:rgba(8,15,24,0.82);">
+                      <div class="small text-uppercase text-secondary mb-1">Ganancia pagada</div>
+                      <div id="user-referrals-pagado-value" class="h5 fw-bold text-success mb-0">$0.00</div>
+                    </div>
+                  </div>
+                  <div class="col-sm-6 col-lg-3">
+                    <div class="rounded-4 border border-info-subtle p-3 h-100" style="background:rgba(8,15,24,0.82);">
+                      <div class="small text-uppercase text-secondary mb-1">Total ganado</div>
+                      <div id="user-referrals-total-value" class="h5 fw-bold text-light mb-0">$0.00</div>
+                    </div>
+                  </div>
+                  <div class="col-sm-6 col-lg-3">
+                    <div class="rounded-4 border border-info-subtle p-3 h-100" style="background:rgba(8,15,24,0.82);">
+                      <div class="small text-uppercase text-secondary mb-1">Invitados</div>
+                      <div id="user-referrals-invitados-value" class="h5 fw-bold text-light mb-0">0</div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Link de invitación -->
+                <div class="rounded-4 border border-info-subtle p-3 mb-3" style="background:rgba(8,15,24,0.82);">
+                  <div class="small text-uppercase text-secondary mb-2">Tu link de invitación</div>
+                  <div class="d-flex gap-2 flex-wrap">
+                    <input id="user-referrals-link-input" type="text" readonly class="form-control bg-dark text-info border-info flex-grow-1" style="min-width:220px;">
+                    <button type="button" id="user-referrals-copy-btn" class="btn btn-info fw-bold">Copiar link</button>
+                  </div>
+                </div>
+
+                <!-- Retiro de ganancias -->
+                <div class="rounded-4 border border-info-subtle p-3 mb-4" style="background:rgba(8,15,24,0.82);">
+                  <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap">
+                    <div id="user-referrals-retiro-text" class="small text-secondary"></div>
+                    <button type="button" id="user-referrals-retiro-btn" class="btn btn-outline-success fw-bold" disabled>Solicitar retiro</button>
+                  </div>
+                </div>
+
+                <!-- Tabs -->
+                <div class="d-flex gap-1 mb-3 border-bottom border-info-subtle pb-3">
+                  <button class="btn btn-sm btn-info active" data-referrals-tab="invitados">Mis Invitados</button>
+                  <button class="btn btn-sm btn-outline-info" data-referrals-tab="comisiones">Historial de Comisiones</button>
+                </div>
+
+                <!-- Tab: invitados -->
+                <div id="referrals-tab-panel-invitados">
+                  <div id="user-referrals-invitados-empty" class="d-none text-center py-5 text-secondary">Todavía no has invitado a nadie. ¡Comparte tu link!</div>
+                  <div id="user-referrals-invitados-list" class="d-none">
+                    <div class="table-responsive d-none d-md-block rounded-4 border border-info-subtle overflow-hidden mb-3" style="background:var(--theme-bg-elevated);">
+                      <table class="table align-middle mb-0" style="--bs-table-bg:transparent;--bs-table-color:var(--theme-text);">
+                        <thead>
+                          <tr>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Invitado</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Desde</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Pedidos</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent text-end">Total recargado</th>
+                          </tr>
+                        </thead>
+                        <tbody id="user-referrals-invitados-table-body"></tbody>
+                      </table>
+                    </div>
+                    <div id="user-referrals-invitados-cards" class="d-grid d-md-none gap-3"></div>
+                  </div>
+                </div>
+
+                <!-- Tab: comisiones -->
+                <div id="referrals-tab-panel-comisiones" class="d-none">
+                  <div id="user-referrals-comisiones-empty" class="d-none text-center py-5 text-secondary">Todavía no tienes comisiones registradas.</div>
+                  <div id="user-referrals-comisiones-list" class="d-none">
+                    <div class="table-responsive d-none d-md-block rounded-4 border border-info-subtle overflow-hidden mb-3" style="background:var(--theme-bg-elevated);">
+                      <table class="table align-middle mb-0" style="--bs-table-bg:transparent;--bs-table-color:var(--theme-text);">
+                        <thead>
+                          <tr>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Fecha</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Invitado</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Recarga</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">%</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent">Estado</th>
+                            <th class="text-info text-uppercase small fw-bold border-bottom border-info-subtle bg-transparent text-end">Comisión</th>
+                          </tr>
+                        </thead>
+                        <tbody id="user-referrals-comisiones-table-body"></tbody>
+                      </table>
+                    </div>
+                    <div id="user-referrals-comisiones-cards" class="d-grid d-md-none gap-3"></div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="user-orders-modal" class="position-fixed top-0 start-0 w-100 h-100 d-none d-flex align-items-start align-items-md-center justify-content-center px-3 py-3 overflow-auto" style="z-index:13100;">
         <div class="position-absolute top-0 start-0 w-100 h-100" style="background:var(--theme-overlay-soft);backdrop-filter:blur(6px);" data-user-close></div>
         <div class="position-relative w-100" style="max-width:1200px;z-index:1;">
