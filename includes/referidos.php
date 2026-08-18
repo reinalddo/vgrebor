@@ -425,6 +425,18 @@ if (!function_exists('referidos_ensure_schema')) {
         store_config_ensure_defaults();
         $mysqli = referidos_db();
 
+        // El guard "static $initialized" de arriba solo evita repetir esto DENTRO de
+        // la misma request — cada request nueva (ej. cada vez que alguien abre el
+        // modal "Mis Referidos") es un proceso PHP nuevo, así que sin esto se repetían
+        // ~15-20 SHOW COLUMNS/SHOW INDEX en CADA apertura del panel (reportado como
+        // "esa ventana tarda mucho en abrir"). Una sola fila en configuracion_general
+        // (ya cacheada en memoria por store_config_get, barato) reemplaza todo eso una
+        // vez que el esquema ya quedó creado — solo se re-corre de verdad si algún día
+        // se sube una versión nueva de este archivo con más columnas/tablas.
+        if (store_config_get('referidos_schema_version', '') === '1') {
+            return;
+        }
+
         // usuarios: atribución de quién invitó a quién (de por vida, se fija una sola vez
         // en el registro) + el código propio de cada usuario para armar su link.
         $userColumns = [
@@ -542,6 +554,8 @@ if (!function_exists('referidos_ensure_schema')) {
                 $mysqli->query($sql);
             }
         }
+
+        store_config_upsert('referidos_schema_version', '1', 'No tocar: marca que el esquema del Sistema de Referidos ya fue creado, para no repetir SHOW COLUMNS/SHOW INDEX en cada request.');
     }
 }
 

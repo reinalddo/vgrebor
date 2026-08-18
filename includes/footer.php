@@ -2938,6 +2938,43 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
         const linkInput = document.getElementById('user-referrals-link-input');
         if (linkInput) linkInput.value = data.link || '';
 
+        // Botones de compartir: WhatsApp y Facebook tienen URL de compartir directa;
+        // el resto (Instagram, TikTok, genérico) no la tienen — usan Web Share API
+        // nativa si el navegador la soporta (abre el propio selector del sistema,
+        // que en celular SÍ incluye Instagram/TikTok/etc.), y si no, copian el link.
+        const shareLink = data.link || '';
+        const shareMessage = '¡Únete a reborXstore con mi link y aprovecha tu descuento de bienvenida! ' + shareLink;
+        const waBtn = document.getElementById('user-referrals-share-whatsapp');
+        if (waBtn) waBtn.href = 'https://wa.me/?text=' + encodeURIComponent(shareMessage);
+        const fbBtn = document.getElementById('user-referrals-share-facebook');
+        if (fbBtn) fbBtn.href = 'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(shareLink);
+
+        const nativeOrCopyShare = async () => {
+          if (!shareLink) return;
+          if (navigator.share) {
+            try {
+              await navigator.share({ title: 'reborXstore', text: shareMessage, url: shareLink });
+              return;
+            } catch (e) {
+              // Usuario canceló el selector nativo, o el navegador rechazó — no hacer nada más.
+              return;
+            }
+          }
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(shareLink);
+            } else if (linkInput) {
+              linkInput.select();
+              document.execCommand('copy');
+            }
+            alert('Tu link se copió al portapapeles — pégalo donde quieras compartirlo.');
+          } catch (e) {}
+        };
+        ['user-referrals-share-instagram', 'user-referrals-share-tiktok', 'user-referrals-share-generic'].forEach((id) => {
+          const btn = document.getElementById(id);
+          if (btn) btn.onclick = nativeOrCopyShare;
+        });
+
         // Nivel + barra de progreso
         const nivel = data.nivel || {};
         const nivelNombreEl = document.getElementById('user-referrals-nivel-nombre');

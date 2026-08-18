@@ -100,9 +100,41 @@ try {
         $userPhone = '';
         $userProfileImage = '';
 
-        $insertStmt = $pdo->prepare('INSERT INTO usuarios (username, password, nombre, email, telefono, rol, creado_en) VALUES (?, ?, ?, ?, ?, ?, NOW())');
-        $insertStmt->execute([$username, $passwordHash, $fullName, $email, null, $role]);
+        // Sistema de Referidos: mismo mecanismo que register_user.php, pero leyendo
+        // el código desde $_SESSION en vez del body JSON (ver includes/header.php,
+        // que lo guarda ahí porque este flujo de Google no tiene JS/localStorage
+        // disponible en el momento del callback). Solo se atribuye en la creación
+        // de una cuenta NUEVA — nunca a un login posterior de una cuenta existente.
+        require_once __DIR__ . '/includes/referidos.php';
+        require_once __DIR__ . '/includes/db_connect.php';
+        referidos_ensure_schema();
+
+        $refCodigoInput = strtoupper(trim((string) ($_SESSION['tvg_referido_codigo'] ?? '')));
+        $referidorUserId = null;
+        if ($refCodigoInput !== '') {
+            $refStmt = $mysqli->prepare('SELECT id FROM usuarios WHERE referido_codigo = ? LIMIT 1');
+            if ($refStmt) {
+                $refStmt->bind_param('s', $refCodigoInput);
+                $refStmt->execute();
+                $refRow = $refStmt->get_result()->fetch_assoc();
+                $refStmt->close();
+                if ($refRow) {
+                    $referidorUserId = (int) $refRow['id'];
+                }
+            }
+        }
+        $referidoEn = $referidorUserId !== null ? date('Y-m-d H:i:s') : null;
+
+        $insertStmt = $pdo->prepare('INSERT INTO usuarios (username, password, nombre, email, telefono, rol, referido_por_id, referido_en, creado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())');
+        $insertStmt->execute([$username, $passwordHash, $fullName, $email, null, $role, $referidorUserId, $referidoEn]);
         $userId = (int) $pdo->lastInsertId();
+
+        if ($userId > 0) {
+            referidos_asegurar_codigo_usuario($mysqli, $userId);
+            if ($referidorUserId !== null) {
+                referidos_generar_cupon_bienvenida($mysqli, $userId);
+            }
+        }
     }
 
     session_regenerate_id(true);

@@ -4,6 +4,17 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
   tenant_start_session();
 }
 
+// Sistema de Referidos: captura server-side de ?ref=CODIGO en sesión, además de
+// la captura en localStorage (includes/footer.php). Hace falta esta versión en
+// sesión porque el registro con Google (google-callback.php) es un PHP puro sin
+// JS — no puede leer localStorage — pero SÍ conserva la misma sesión/cookie
+// durante todo el ida-y-vuelta a Google (se queda en nuestro dominio antes y
+// después), así que guardarlo aquí es lo único que sobrevive ese flujo.
+$referidosRefParam = strtoupper(trim((string) ($_GET['ref'] ?? '')));
+if ($referidosRefParam !== '') {
+    $_SESSION['tvg_referido_codigo'] = $referidosRefParam;
+}
+
 require_once __DIR__ . '/store_config.php';
 require_once __DIR__ . '/influencer_instructions.php';
 require_once __DIR__ . '/win_points.php';
@@ -2071,6 +2082,13 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                   <div class="d-flex gap-2 flex-wrap">
                     <input id="user-referrals-link-input" type="text" readonly class="form-control bg-dark text-info border-info flex-grow-1" style="min-width:220px;">
                     <button type="button" id="user-referrals-copy-btn" class="btn btn-info fw-bold">Copiar link</button>
+                  </div>
+                  <div class="d-flex gap-2 flex-wrap mt-3">
+                    <a id="user-referrals-share-whatsapp" href="#" target="_blank" rel="noopener" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;" title="Compartir por WhatsApp" aria-label="Compartir por WhatsApp"><i class="fa-brands fa-whatsapp"></i></a>
+                    <a id="user-referrals-share-facebook" href="#" target="_blank" rel="noopener" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;" title="Compartir en Facebook" aria-label="Compartir en Facebook"><i class="fa-brands fa-facebook"></i></a>
+                    <button type="button" id="user-referrals-share-instagram" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;" title="Compartir en Instagram" aria-label="Compartir en Instagram"><i class="fa-brands fa-instagram"></i></button>
+                    <button type="button" id="user-referrals-share-tiktok" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;" title="Compartir en TikTok" aria-label="Compartir en TikTok"><i class="fa-brands fa-tiktok"></i></button>
+                    <button type="button" id="user-referrals-share-generic" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;" title="Compartir" aria-label="Compartir"><i class="fa-solid fa-share-nodes"></i></button>
                   </div>
                 </div>
 
