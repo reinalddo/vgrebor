@@ -39,11 +39,50 @@ if ($stmt->fetch()) {
 
 $hash = password_hash($contrasena, PASSWORD_DEFAULT);
 $rol = 'usuario';
-$sql = 'INSERT INTO usuarios (username, password, nombre, email, telefono, rol, creado_en) VALUES (?, ?, ?, ?, ?, ?, NOW())';
+
+// Sistema de Referidos: si llegó un código de invitación (?ref=CODIGO capturado
+// en includes/footer.php y guardado en localStorage hasta este registro), se
+// busca al referidor por su código. Este archivo usa PDO ($pdo, includes/db.php)
+// para todo lo demás, pero referidos.php trabaja con mysqli (mismo patrón que
+// win_points/influencer_coupons) — se abre una conexión mysqli aparte solo para
+// esta parte, apuntando a la misma base de datos.
+require_once __DIR__ . '/includes/referidos.php';
+require_once __DIR__ . '/includes/db_connect.php';
+referidos_ensure_schema();
+
+$refCodigoInput = isset($data['ref']) ? strtoupper(trim((string) $data['ref'])) : '';
+$referidorUserId = null;
+if ($refCodigoInput !== '') {
+    $refStmt = $mysqli->prepare('SELECT id FROM usuarios WHERE referido_codigo = ? LIMIT 1');
+    if ($refStmt) {
+        $refStmt->bind_param('s', $refCodigoInput);
+        $refStmt->execute();
+        $refRow = $refStmt->get_result()->fetch_assoc();
+        $refStmt->close();
+        if ($refRow) {
+            $referidorUserId = (int) $refRow['id'];
+        }
+    }
+}
+
+$sql = 'INSERT INTO usuarios (username, password, nombre, email, telefono, rol, referido_por_id, referido_en, creado_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())';
 $username = $correo;
+$referidoEn = $referidorUserId !== null ? date('Y-m-d H:i:s') : null;
 $stmt = $pdo->prepare($sql);
-$ok = $stmt->execute([$username, $hash, $nombre, $correo, $telefono, $rol]);
+$ok = $stmt->execute([$username, $hash, $nombre, $correo, $telefono, $rol, $referidorUserId, $referidoEn]);
+
 if ($ok) {
+    $nuevoUsuarioId = (int) $pdo->lastInsertId();
+
+    // Cada usuario (haya sido invitado o no) tiene su propio código para poder
+    // invitar a otros. El cupón de bienvenida solo se genera si SÍ fue invitado.
+    if ($nuevoUsuarioId > 0) {
+        referidos_asegurar_codigo_usuario($mysqli, $nuevoUsuarioId);
+        if ($referidorUserId !== null) {
+            referidos_generar_cupon_bienvenida($mysqli, $nuevoUsuarioId);
+        }
+    }
+
     response(true, 'Usuario registrado correctamente.');
 } else {
     response(false, 'Error al guardar el usuario en la base de datos.');

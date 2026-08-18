@@ -113,6 +113,306 @@ if (!function_exists('referidos_codigo_generar')) {
     }
 }
 
+// Datos del cupón de bienvenida que recibe la persona INVITADA: 3% por
+// defecto, un solo uso (limite_usos=1, se apoya en el mecanismo de
+// usos_actuales/limite_usos que YA existe para cupones normales — no hace
+// falta inventar nada nuevo para el "un solo uso"), y solo aplica a
+// recargas MAYORES a este monto (no "al menos").
+if (!function_exists('referidos_cupon_bienvenida_porcentaje')) {
+    function referidos_cupon_bienvenida_porcentaje(): float {
+        return max(0.0, round((float) str_replace(',', '.', (string) store_config_get('referidos_cupon_bienvenida_porcentaje', '3.00')), 2));
+    }
+}
+
+if (!function_exists('referidos_cupon_bienvenida_monto_minimo')) {
+    function referidos_cupon_bienvenida_monto_minimo(): float {
+        return max(0.0, round((float) str_replace(',', '.', (string) store_config_get('referidos_cupon_bienvenida_monto_minimo', '3.00')), 2));
+    }
+}
+
+// Asegura que un usuario tenga su propio código de invitación — se usa
+// tanto al registrarse (Fase 2) como para "rellenar" el código de cuentas
+// que ya existían antes de este feature, la primera vez que abran su panel
+// de referidos (Fase 4). Idempotente: si ya tiene código, lo devuelve tal
+// cual sin tocar nada.
+if (!function_exists('referidos_asegurar_codigo_usuario')) {
+    function referidos_asegurar_codigo_usuario(mysqli $mysqli, int $usuarioId): ?string {
+        if ($usuarioId <= 0) {
+            return null;
+        }
+        referidos_ensure_schema();
+
+        $stmt = $mysqli->prepare('SELECT referido_codigo FROM usuarios WHERE id = ? LIMIT 1');
+        if (!$stmt) {
+            return null;
+        }
+        $stmt->bind_param('i', $usuarioId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        $codigoActual = trim((string) ($row['referido_codigo'] ?? ''));
+        if ($codigoActual !== '') {
+            return $codigoActual;
+        }
+
+        for ($intento = 0; $intento < 5; $intento++) {
+            $candidato = referidos_codigo_generar();
+            $checkStmt = $mysqli->prepare('SELECT id FROM usuarios WHERE referido_codigo = ? LIMIT 1');
+            if (!$checkStmt) {
+                return null;
+            }
+            $checkStmt->bind_param('s', $candidato);
+            $checkStmt->execute();
+            $exists = $checkStmt->get_result()->fetch_assoc();
+            $checkStmt->close();
+            if ($exists) {
+                continue;
+            }
+
+            $updateStmt = $mysqli->prepare('UPDATE usuarios SET referido_codigo = ? WHERE id = ? AND referido_codigo IS NULL');
+            if (!$updateStmt) {
+                return null;
+            }
+            $updateStmt->bind_param('si', $candidato, $usuarioId);
+            $updateStmt->execute();
+            $affected = $updateStmt->affected_rows;
+            $updateStmt->close();
+            if ($affected > 0) {
+                return $candidato;
+            }
+
+            // affected_rows=0 aquí solo puede ser una solicitud concurrente que ya
+            // asignó un código a este mismo usuario justo ahora — se relee y se usa ese.
+            $rereadStmt = $mysqli->prepare('SELECT referido_codigo FROM usuarios WHERE id = ? LIMIT 1');
+            if ($rereadStmt) {
+                $rereadStmt->bind_param('i', $usuarioId);
+                $rereadStmt->execute();
+                $rereadRow = $rereadStmt->get_result()->fetch_assoc();
+                $rereadStmt->close();
+                $rereadCodigo = trim((string) ($rereadRow['referido_codigo'] ?? ''));
+                if ($rereadCodigo !== '') {
+                    return $rereadCodigo;
+                }
+            }
+        }
+
+        return null;
+    }
+}
+
+// Genera (o devuelve el ya existente, por si se reintenta el registro) el
+// cupón de bienvenida de un usuario recién invitado. SOLO se llama cuando el
+// registro trae un referido_por_id válido — nunca para un registro normal.
+if (!function_exists('referidos_generar_cupon_bienvenida')) {
+    function referidos_generar_cupon_bienvenida(mysqli $mysqli, int $usuarioId): ?string {
+        if ($usuarioId <= 0) {
+            return null;
+        }
+        referidos_ensure_schema();
+
+        $existingStmt = $mysqli->prepare("SELECT codigo FROM cupones WHERE origen = 'referido' AND referido_usuario_id = ? LIMIT 1");
+        if ($existingStmt) {
+            $existingStmt->bind_param('i', $usuarioId);
+            $existingStmt->execute();
+            $existingRow = $existingStmt->get_result()->fetch_assoc();
+            $existingStmt->close();
+            $existingCodigo = trim((string) ($existingRow['codigo'] ?? ''));
+            if ($existingCodigo !== '') {
+                return $existingCodigo;
+            }
+        }
+
+        $codigo = '';
+        for ($intento = 0; $intento < 5; $intento++) {
+            $candidato = 'REF-' . referidos_codigo_generar();
+            $checkStmt = $mysqli->prepare('SELECT id FROM cupones WHERE codigo = ? LIMIT 1');
+            if (!$checkStmt) {
+                break;
+            }
+            $checkStmt->bind_param('s', $candidato);
+            $checkStmt->execute();
+            $exists = $checkStmt->get_result()->fetch_assoc();
+            $checkStmt->close();
+            if (!$exists) {
+                $codigo = $candidato;
+                break;
+            }
+        }
+        if ($codigo === '') {
+            return null;
+        }
+
+        $porcentaje = referidos_cupon_bienvenida_porcentaje();
+        $montoMinimo = referidos_cupon_bienvenida_monto_minimo();
+
+        $insertStmt = $mysqli->prepare(
+            "INSERT INTO cupones (codigo, tipo_descuento, valor_descuento, monto_minimo, limite_usos, usos_actuales, activo, fecha_creacion, origen, referido_usuario_id)
+             VALUES (?, 'porcentaje', ?, ?, 1, 0, 1, NOW(), 'referido', ?)"
+        );
+        if (!$insertStmt) {
+            return null;
+        }
+        $insertStmt->bind_param('sddi', $codigo, $porcentaje, $montoMinimo, $usuarioId);
+        $ok = $insertStmt->execute();
+        $insertStmt->close();
+
+        return $ok ? $codigo : null;
+    }
+}
+
+// Anti-fraude explícito del cliente: "si este ID al que se le va a aplicar
+// dicho cupón de recarga ya ha sido recargado en otra cuenta de la página,
+// el cupón no es aplicable" — se revisa CUALQUIER pedido pagado/enviado de
+// CUALQUIER usuario con ese mismo ID de jugador, sin importar quién lo creó.
+// Evita que alguien invite/cree cuentas nuevas una y otra vez para seguir
+// recargando el MISMO ID de juego con el 3% de descuento cada vez.
+if (!function_exists('referidos_id_jugador_ya_recargado')) {
+    function referidos_id_jugador_ya_recargado(mysqli $mysqli, string $userIdentifier): bool {
+        $userIdentifier = trim($userIdentifier);
+        if ($userIdentifier === '') {
+            return false;
+        }
+
+        $stmt = $mysqli->prepare(
+            "SELECT id FROM pedidos WHERE TRIM(user_identifier) = ? AND estado IN ('pagado', 'enviado') LIMIT 1"
+        );
+        if (!$stmt) {
+            return false;
+        }
+        $stmt->bind_param('s', $userIdentifier);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $exists = $result ? $result->fetch_assoc() : null;
+        $stmt->close();
+
+        return $exists !== null;
+    }
+}
+
+// Registra (si corresponde) la comisión de referido generada por UN pedido
+// específico — se llama desde register_influencer_coupon_sale() (ver
+// comentario ahí sobre por qué se enganchó justo en esa función) cada vez
+// que un pedido queda confirmado como venta real. Idempotente por pedido_id
+// (UNIQUE KEY en referidos_comisiones): si dos transiciones de estado del
+// MISMO pedido llaman a esto (ej. pagado y después enviado), la segunda
+// simplemente no hace nada.
+if (!function_exists('referidos_registrar_comision_si_aplica')) {
+    function referidos_registrar_comision_si_aplica(mysqli $mysqli, int $orderId): void {
+        if ($orderId <= 0) {
+            return;
+        }
+        referidos_ensure_schema();
+
+        $existsStmt = $mysqli->prepare('SELECT id FROM referidos_comisiones WHERE pedido_id = ? LIMIT 1');
+        if (!$existsStmt) {
+            return;
+        }
+        $existsStmt->bind_param('i', $orderId);
+        $existsStmt->execute();
+        $existsResult = $existsStmt->get_result();
+        $alreadyExists = $existsResult ? $existsResult->fetch_assoc() : null;
+        $existsStmt->close();
+        if ($alreadyExists) {
+            return;
+        }
+
+        $orderStmt = $mysqli->prepare(
+            "SELECT precio, cliente_usuario_id, win_points_payment_mode FROM pedidos WHERE id = ? AND estado IN ('pagado', 'enviado') LIMIT 1"
+        );
+        if (!$orderStmt) {
+            return;
+        }
+        $orderStmt->bind_param('i', $orderId);
+        $orderStmt->execute();
+        $orderResult = $orderStmt->get_result();
+        $order = $orderResult ? $orderResult->fetch_assoc() : null;
+        $orderStmt->close();
+        if (!$order) {
+            return;
+        }
+
+        $invitadoUserId = (int) ($order['cliente_usuario_id'] ?? 0);
+        if ($invitadoUserId <= 0) {
+            // Compra sin cuenta logueada (invitado/guest): no hay a quién atribuirle
+            // el referido_por_id, así que no puede generar comisión para nadie.
+            return;
+        }
+
+        // Solo cuentan recargas pagadas de verdad, no canjeadas con RECoins — mismo
+        // criterio que usa win_points_user_monthly_spent() para su propio bloqueo.
+        if ((string) ($order['win_points_payment_mode'] ?? 'money') === 'points') {
+            return;
+        }
+
+        $montoBase = round((float) ($order['precio'] ?? 0), 2);
+        if ($montoBase <= 0) {
+            return;
+        }
+
+        $userStmt = $mysqli->prepare('SELECT referido_por_id FROM usuarios WHERE id = ? LIMIT 1');
+        if (!$userStmt) {
+            return;
+        }
+        $userStmt->bind_param('i', $invitadoUserId);
+        $userStmt->execute();
+        $userResult = $userStmt->get_result();
+        $userRow = $userResult ? $userResult->fetch_assoc() : null;
+        $userStmt->close();
+
+        $referidorUserId = isset($userRow['referido_por_id']) ? (int) $userRow['referido_por_id'] : 0;
+        if ($referidorUserId <= 0) {
+            // Este comprador no fue invitado por nadie — no genera comisión.
+            return;
+        }
+
+        // Nivel/% "congelados" al momento de ESTE pedido: se calculan sobre el
+        // acumulado de comisiones YA registradas ANTES de este pedido — NO incluye
+        // el monto de este mismo pedido. Así, el pedido que hace cruzar una meta de
+        // nivel todavía se paga con el % VIEJO, y el nivel nuevo aplica recién desde
+        // el SIGUIENTE pedido. Confirmado con el ejemplo exacto del cliente: 5
+        // invitados que suman $500 en total generan $5 de comisión (a 1%, no a 2%
+        // — el 2% recién aplica a partir de la siguiente compra), y solo DESPUÉS
+        // de esos $500 el referidor pasa a nivel 2.
+        //
+        // Nota: si dos pedidos del mismo referidor terminan de procesarse casi
+        // simultáneamente, en teoría ambos podrían leer el mismo "acumulado antes"
+        // (mini-race, sin candado explícito). El impacto real es mínimo — como mucho
+        // una comisión puntual queda calculada con el nivel/% inmediato vecino en vez
+        // del exacto — no hay riesgo de pérdida de dinero real ni de duplicar una
+        // comisión (el UNIQUE KEY en pedido_id sigue protegiendo eso). No se agregó
+        // GET_LOCK aquí a propósito: ese mecanismo se reserva para los casos de
+        // dinero real de pagos (ver acquire_reference_processing_lock en este mismo
+        // archivo), no para un cálculo de nivel de bajo impacto como este.
+        $acumuladoStmt = $mysqli->prepare('SELECT COALESCE(SUM(monto_base), 0) AS total FROM referidos_comisiones WHERE referidor_user_id = ?');
+        if (!$acumuladoStmt) {
+            return;
+        }
+        $acumuladoStmt->bind_param('i', $referidorUserId);
+        $acumuladoStmt->execute();
+        $acumuladoResult = $acumuladoStmt->get_result();
+        $acumuladoRow = $acumuladoResult ? $acumuladoResult->fetch_assoc() : null;
+        $acumuladoStmt->close();
+        $acumuladoAntes = (float) ($acumuladoRow['total'] ?? 0);
+
+        $nivelInfo = referidos_nivel_para_monto($acumuladoAntes);
+        $porcentaje = (float) $nivelInfo['porcentaje'];
+        $nivel = (int) $nivelInfo['nivel'];
+        $comision = round($montoBase * ($porcentaje / 100), 2);
+
+        $insertStmt = $mysqli->prepare(
+            "INSERT INTO referidos_comisiones (referidor_user_id, invitado_user_id, pedido_id, monto_base, porcentaje_aplicado, comision, nivel_en_momento, estado_pago)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente')"
+        );
+        if (!$insertStmt) {
+            return;
+        }
+        $insertStmt->bind_param('iiidddi', $referidorUserId, $invitadoUserId, $orderId, $montoBase, $porcentaje, $comision, $nivel);
+        $insertStmt->execute();
+        $insertStmt->close();
+    }
+}
+
 if (!function_exists('referidos_ensure_schema')) {
     function referidos_ensure_schema(): void {
         static $initialized = false;

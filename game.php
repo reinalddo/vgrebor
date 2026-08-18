@@ -13054,10 +13054,12 @@ include __DIR__ . "/includes/header.php";
                   showToast('Ingresa un cupón.', 'error');
                   return;
                 }
+                const cuponUserIdEl = document.getElementById('order-user-id');
+                const cuponUserId = cuponUserIdEl ? cuponUserIdEl.value.trim() : '';
                 fetch(buildAppUrl('/api/validar_cupon.php'), {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                  body: `code=${encodeURIComponent(cupon)}&pack_price=${encodeURIComponent(precioNumerico)}&currency=${encodeURIComponent(effectivePack.moneda || '')}&game_id=${encodeURIComponent("<?= (string) ($game['id'] ?? '') ?>")}`
+                  body: `code=${encodeURIComponent(cupon)}&pack_price=${encodeURIComponent(precioNumerico)}&currency=${encodeURIComponent(effectivePack.moneda || '')}&game_id=${encodeURIComponent("<?= (string) ($game['id'] ?? '') ?>")}&user_identifier=${encodeURIComponent(cuponUserId)}`
                 })
                 .then(res => res.json())
                 .then(data => {

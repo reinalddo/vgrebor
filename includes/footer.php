@@ -2829,5 +2829,23 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   }());
   </script>
 
+  <script>
+  // Sistema de Referidos: si el visitante llega con ?ref=CODIGO, se guarda en
+  // localStorage (sobrevive cierre de pestaña y navegación entre páginas) para
+  // que quede disponible cuando eventualmente se registre, aunque no lo haga
+  // en esta misma visita (registro.js lo lee al enviar el formulario). Solo se
+  // sobrescribe si el nuevo ?ref= trae un código no vacío, para no perder la
+  // atribución de un link compartido antes si luego navegan sin ese parámetro.
+  (function () {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var ref = (params.get('ref') || '').trim().toUpperCase();
+      if (ref !== '') {
+        localStorage.setItem('tvg_referido_codigo', ref);
+      }
+    } catch (e) {}
+  })();
+  </script>
+
 </body>
 </html>

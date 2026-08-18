@@ -152,6 +152,28 @@ if (!coupon_applies_to_game($mysqli, $cupon, $gameId)) {
     exit;
 }
 
+// Reglas propias de cupones de referidos (bienvenida): monto mínimo ESTRICTO
+// ("mayor a", no "al menos") y anti-fraude por ID de jugador ya recargado
+// antes por CUALQUIER cuenta. Ver includes/referidos.php.
+$montoMinimoCupon = isset($cupon['monto_minimo']) ? (float) $cupon['monto_minimo'] : 0.0;
+if ($montoMinimoCupon > 0 && $pack_price <= $montoMinimoCupon) {
+    $errorMsg = date('Y-m-d H:i:s') . " | ERROR: Cupón requiere monto mayor a {$montoMinimoCupon}, recibido {$pack_price}.\n";
+    file_put_contents(__DIR__ . '/log_cupon.txt', $errorMsg, FILE_APPEND);
+    echo json_encode(['success' => false, 'message' => 'Este cupón solo aplica para recargas mayores a $' . number_format($montoMinimoCupon, 2) . '.']);
+    exit;
+}
+
+if ((string) ($cupon['origen'] ?? 'manual') === 'referido') {
+    require_once __DIR__ . '/../includes/referidos.php';
+    $userIdentifierInput = isset($_POST['user_identifier']) ? trim((string) $_POST['user_identifier']) : '';
+    if (referidos_id_jugador_ya_recargado($mysqli, $userIdentifierInput)) {
+        $errorMsg = date('Y-m-d H:i:s') . " | ERROR: Cupón de referido no válido para ID con historial de compras ({$userIdentifierInput}).\n";
+        file_put_contents(__DIR__ . '/log_cupon.txt', $errorMsg, FILE_APPEND);
+        echo json_encode(['success' => false, 'message' => 'Este cupón no es válido para este ID ya que tiene un historial de compras en esta plataforma.']);
+        exit;
+    }
+}
+
 $descuento = 0;
 if ($cupon['tipo_descuento'] === 'porcentaje') {
     $descuento = $pack_price * ($cupon['valor_descuento'] / 100);

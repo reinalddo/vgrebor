@@ -905,7 +905,7 @@ function resolve_admin_email(mysqli $mysqli): ?string {
     return null;
 }
 
-function fetch_valid_coupon(mysqli $mysqli, string $code, int $gameId = 0): ?array {
+function fetch_valid_coupon(mysqli $mysqli, string $code, int $gameId = 0, float $orderAmount = 0.0, string $playerIdentifier = ''): ?array {
     if ($code === '' || !coupon_table_exists($mysqli)) {
         return null;
     }
@@ -923,6 +923,24 @@ function fetch_valid_coupon(mysqli $mysqli, string $code, int $gameId = 0): ?arr
     if (!empty($coupon['fecha_expiracion']) && strtotime($coupon['fecha_expiracion']) < time()) return null;
     if (!empty($coupon['limite_usos']) && isset($coupon['usos_actuales']) && $coupon['usos_actuales'] >= $coupon['limite_usos']) return null;
     if (!coupon_applies_to_game($coupon, $gameId)) return null;
+
+    // Reglas propias de cupones de referidos (ver includes/referidos.php):
+    // monto mínimo ESTRICTO ("mayor a", no "al menos" — instrucción explícita
+    // del cliente) y anti-fraude por ID de jugador ya recargado antes por
+    // CUALQUIER cuenta. Solo aplica a cupones con origen='referido' (el
+    // monto_minimo de un cupón normal creado a mano por el admin, si algún
+    // día se agrega, también respetaría este chequeo — es intencional).
+    $montoMinimo = isset($coupon['monto_minimo']) ? (float) $coupon['monto_minimo'] : 0.0;
+    if ($montoMinimo > 0 && $orderAmount <= $montoMinimo) {
+        return null;
+    }
+    if ((string) ($coupon['origen'] ?? 'manual') === 'referido') {
+        require_once __DIR__ . '/../includes/referidos.php';
+        if (referidos_id_jugador_ya_recargado($mysqli, $playerIdentifier)) {
+            return null;
+        }
+    }
+
     return $coupon;
 }
 
@@ -951,6 +969,20 @@ function fetch_coupon_by_code(mysqli $mysqli, string $code): ?array {
 
 function register_influencer_coupon_sale(mysqli $mysqli, array $order): void {
     $orderId = (int) ($order['id'] ?? 0);
+
+    // Sistema de Referidos (Fase 3): esta función, pese a su nombre, es el
+    // único punto en TODO el archivo que se llama en los ~26 lugares donde un
+    // pedido queda confirmado como venta real (pagado/enviado/verificado) —
+    // se aprovecha ese mismo checkpoint para la comisión de referidos en vez
+    // de tocar cada uno de esos ~26 sitios por separado (mismo riesgo que ya
+    // se evitó con win_points_handle_order_status_change(), que SÍ está
+    // esparcido en cada uno Y además se apaga si RECoins está deshabilitado —
+    // no sirve como gancho único para esto). No depende de que el pedido
+    // tenga cupón: debe registrar comisión en TODAS las recargas del
+    // invitado, no solo en su primera compra con el cupón de bienvenida.
+    require_once __DIR__ . '/../includes/referidos.php';
+    referidos_registrar_comision_si_aplica($mysqli, $orderId);
+
     $couponCode = normalize_coupon_code((string) ($order['cupon'] ?? ''));
     if ($orderId <= 0 || $couponCode === '') {
         return;
@@ -8925,7 +8957,7 @@ if ($action === 'create') {
     // Comparar drop vs cupón: solo el mayor aplica
     $discountWinner = $dropSavings > 0 ? 'drop' : 'none';
     if ($cupon) {
-        $couponData = fetch_valid_coupon($mysqli, $cupon, (int) $game_id);
+        $couponData = fetch_valid_coupon($mysqli, $cupon, (int) $game_id, (float) $priceBeforeDrop, $primaryPlayerIdToCheck);
         if (!$couponData) {
             json_error('Cupón inválido o vencido');
         }

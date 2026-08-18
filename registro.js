@@ -16,6 +16,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const correo = document.getElementById('correo').value.trim();
         const telefono = document.getElementById('telefono').value.trim();
         const contrasena = document.getElementById('contrasena').value;
+        // Sistema de Referidos: código guardado en includes/footer.php cuando el
+        // visitante llegó con ?ref=CODIGO, si nunca llegó con uno queda vacío.
+        let ref = '';
+        try {
+            ref = localStorage.getItem('tvg_referido_codigo') || '';
+        } catch (e) {}
         const btn = document.getElementById('registro-btn');
         btn.disabled = true;
         btn.textContent = 'Registrando...';
@@ -23,7 +29,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const res = await fetch(registerEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nombre, correo, telefono, contrasena })
+                body: JSON.stringify({ nombre, correo, telefono, contrasena, ref })
             });
 
             const raw = await res.text();
