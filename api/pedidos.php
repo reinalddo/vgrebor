@@ -10341,6 +10341,9 @@ if ($action === 'submit_payment') {
 
                 $raTipoSingle = strtolower(trim((string) ($updatedOrder['recargasamerica_tipo'] ?? 'recharge'))) === 'pin' ? 'pin' : 'recharge';
                 $raResSingle = recargasamerica_dispatch_or_recover($updatedOrder);
+                // Ver comentario en admin_retry_recharge sobre por qué hace falta
+                // reconectar aquí (la llamada de arriba puede tardar hasta ~35s).
+                $mysqli = ensure_mysqli_connection($mysqli);
 
                 $raDataSingle = (array) ($raResSingle['payload'] ?? []);
                 $raRefSingle = (string) ($raResSingle['reference'] ?? '');
@@ -11320,6 +11323,9 @@ if ($action === 'sync_provider_status') {
             $raSyncTipo = strtolower(trim((string) ($order['recargasamerica_tipo'] ?? 'recharge'))) === 'pin' ? 'pin' : 'recharge';
             $raSyncPrevStatus = trim((string) ($order['estado'] ?? ''));
             $raSyncRes = recargasamerica_dispatch_or_recover($order);
+            // Ver comentario en admin_retry_recharge sobre por qué hace falta
+            // reconectar aquí (la llamada de arriba puede tardar hasta ~35s).
+            $mysqli = ensure_mysqli_connection($mysqli);
 
             $raSyncData = (array) ($raSyncRes['payload'] ?? []);
             $raSyncRef = (string) ($raSyncRes['reference'] ?? $providerOrderId);
@@ -11819,6 +11825,14 @@ if ($action === 'admin_retry_recharge') {
     if (order_uses_recargasamerica_api_provider($order)) {
         $raTipo = strtolower(trim((string) ($order['recargasamerica_tipo'] ?? 'recharge'))) === 'pin' ? 'pin' : 'recharge';
         $raRes = recargasamerica_dispatch_or_recover($order);
+
+        // recargasamerica_dispatch_or_recover() puede tardar hasta ~35s (timeout de
+        // compra/seguimiento del proveedor) — si la conexión a MySQL queda inactiva
+        // ese tiempo, el siguiente query revienta con "MySQL server has gone away"
+        // (excepción NO capturada, reportada como "sí envía la recarga pero da
+        // error"). Las ramas de GiftVen y Free Fire ya reconectaban justo después de
+        // su propia llamada externa; a esta le faltaba el mismo chequeo.
+        $mysqli = ensure_mysqli_connection($mysqli);
 
         $raData = (array) ($raRes['payload'] ?? []);
         $raRef = (string) ($raRes['reference'] ?? '');
@@ -13451,6 +13465,9 @@ if ($action === 'batch_fulfill_item') {
         // atascado para siempre desde el primer tropiezo.
         $raTipo = strtolower(trim((string) ($order['recargasamerica_tipo'] ?? 'recharge'))) === 'pin' ? 'pin' : 'recharge';
         $raRes = recargasamerica_dispatch_or_recover($order);
+        // Ver comentario en admin_retry_recharge sobre por qué hace falta
+        // reconectar aquí (la llamada de arriba puede tardar hasta ~35s).
+        $mysqli = ensure_mysqli_connection($mysqli);
 
         $raData = (array) ($raRes['payload'] ?? []);
         $raRef     = (string) ($raRes['reference'] ?? '');
