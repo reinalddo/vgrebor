@@ -211,8 +211,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $metodo = trim((string) ($_POST['metodo'] ?? '')) ?: null;
       $ref = trim((string) ($_POST['referencia'] ?? '')) ?: null;
       // Cobrar el PRECIO DE RENOVACIÓN si está definido; si no, cae al precio de venta.
-      // Precio de renovación: 1º el de ESTA venta, 2º el de la PLATAFORMA (Tipos de cuenta), 3º el precio de venta.
-      $precio = (float) ($pdo->query("SELECT COALESCE(v.precio_renovacion, (SELECT pl.precio_renovacion FROM streaming_plataformas pl WHERE pl.nombre=v.plataforma AND pl.precio_renovacion IS NOT NULL ORDER BY (pl.owner_id=0) DESC LIMIT 1), v.precio) FROM streaming_ventas v WHERE v.id=$vid")->fetchColumn() ?: 0);
+      // Precio de renovación: 1º el de ESTA venta. 2º el de la PLATAFORMA (Tipos de cuenta), pero SOLO si es
+      // una venta a un REVENDEDOR (la tienda le renueva al revendedor). En tus ventas DIRECTAS a clientes NO
+      // se aplica el de la plataforma: mantienen su precio manual, para no descuadrar tus estadísticas.
+      // 3º el precio de venta. (Acotado a petición del cliente 17/08.)
+      $ctxAdmin = $esRevCtx ? 0 : 1;
+      $precio = (float) ($pdo->query("SELECT COALESCE(v.precio_renovacion, CASE WHEN COALESCE(v.revendedor_id,0)>0 AND $ctxAdmin=1 THEN (SELECT pl.precio_renovacion FROM streaming_plataformas pl WHERE pl.nombre=v.plataforma AND pl.precio_renovacion IS NOT NULL ORDER BY (pl.owner_id=0) DESC LIMIT 1) ELSE NULL END, v.precio) FROM streaming_ventas v WHERE v.id=$vid")->fetchColumn() ?: 0);
       try {
         $pdo->prepare("INSERT INTO streaming_venta_pagos (venta_id,tipo,metodo,referencia,monto,meses,comprobante_url,creado_por) VALUES (?,?,?,?,?,?,?,?)")
             ->execute([$vid, 'renovacion', $metodo, $ref, $precio, $meses, $comp, current_user_id()]);
@@ -561,8 +565,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           // Cambiar el CLIENTE y/o el VENDEDOR (revendedor) de las ventas seleccionadas. Deja en blanco lo
           // que no quieras cambiar. Cambiar de vendedor MUEVE la cuenta del inventario del revendedor viejo
           // al nuevo (espejo) y actualiza el bot; solo lo hace el dueño (no un revendedor sobre sus ventas).
+          $nuevoCliId = (int) ($_POST['cliente_id'] ?? 0);        // >0 = pasar a un cliente PROPIO existente (enlaza cliente_id)
           $nuevoCli = trim((string) ($_POST['cliente_nombre'] ?? ''));
           $nuevoWa  = preg_replace('/\D+/', '', (string) ($_POST['cliente_wa'] ?? ''));
+          // Si eligió un cliente del desplegable, tomamos su nombre/WhatsApp REALES (y lo enlazamos por id).
+          $cliRow = null;
+          if ($nuevoCliId > 0) {
+            try { $qc = $pdo->prepare("SELECT id, nombre, wa FROM streaming_clientes WHERE id=? AND owner_id=?"); $qc->execute([$nuevoCliId, $OWNER]); $cliRow = $qc->fetch(PDO::FETCH_ASSOC) ?: null; } catch (Throwable $e) {}
+            if ($cliRow) { $nuevoCli = (string) $cliRow['nombre']; if ($nuevoWa === '') $nuevoWa = preg_replace('/\D+/', '', (string) ($cliRow['wa'] ?? '')); }
+          }
           $revRaw   = (string) ($_POST['revendedor_id'] ?? '');   // '' = no cambiar · '0' = quitar · >0 = reasignar
           $cambiaRev = ($revRaw !== '' && !$esRevCtx);
           $nuevoRev = $cambiaRev ? (int) $revRaw : -1;
@@ -570,8 +581,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           $nCli = 0; $nRev = 0;
           foreach ($rows as $r) {
             $vid2 = (int) $r['id'];
-            // 1) Cliente (nombre / WhatsApp)
-            if ($nuevoCli !== '') { try { $pdo->prepare("UPDATE streaming_ventas SET cliente_nombre=?, cliente_wa=? WHERE id=?")->execute([$nuevoCli, ($nuevoWa !== '' ? $nuevoWa : null), $vid2]); $nCli++; } catch (Throwable $e) {} }
+            // 1) Cliente (nombre / WhatsApp). Si vino de un cliente EXISTENTE, además se enlaza cliente_id;
+            //    si es un nombre libre (cliente nuevo), se DESLIGA el cliente_id anterior.
+            if ($cliRow) { try { $pdo->prepare("UPDATE streaming_ventas SET cliente_id=?, cliente_nombre=?, cliente_wa=? WHERE id=?")->execute([(int) $cliRow['id'], $nuevoCli, ($nuevoWa !== '' ? $nuevoWa : null), $vid2]); $nCli++; } catch (Throwable $e) {} }
+            elseif ($nuevoCli !== '') { try { $pdo->prepare("UPDATE streaming_ventas SET cliente_id=NULL, cliente_nombre=?, cliente_wa=? WHERE id=?")->execute([$nuevoCli, ($nuevoWa !== '' ? $nuevoWa : null), $vid2]); $nCli++; } catch (Throwable $e) {} }
             elseif ($nuevoWa !== '') { try { $pdo->prepare("UPDATE streaming_ventas SET cliente_wa=? WHERE id=?")->execute([$nuevoWa, $vid2]); } catch (Throwable $e) {} }
             // 2) Vendedor (mover el espejo del revendedor viejo → nuevo)
             if ($cambiaRev) {
@@ -676,6 +689,10 @@ if (!$esRevCtx) {
                             ORDER BY nombre")->fetchAll(PDO::FETCH_ASSOC);
   } catch (Throwable $e) { $revList = []; }
 }
+
+// Lista de CLIENTES propios (para el desplegable "Cambiar cliente/vendedor" → pasar la venta a un cliente propio).
+$clientesList = [];
+try { $clientesList = $pdo->query("SELECT id, nombre, wa FROM streaming_clientes WHERE owner_id=$OWNER ORDER BY nombre LIMIT 3000")->fetchAll(PDO::FETCH_ASSOC); } catch (Throwable $e) { $clientesList = []; }
 
 stream_head('Ventas', 'ventas');
 ?>
@@ -955,8 +972,15 @@ stream_head('Ventas', 'ventas');
     <div class="modal-hd"><h3><i data-lucide="user-cog"></i> Cambiar cliente / vendedor</h3><button onclick="cerrar()" class="modal-x"><i data-lucide="x"></i></button></div>
     <form method="post" class="modal-bd"><input type="hidden" name="_csrf" value="<?= h(csrf_token()) ?>"><input type="hidden" name="accion" value="lote_ventas"><input type="hidden" name="op" value="reasignar"><input type="hidden" name="ids" id="lra-ids"><input type="hidden" name="f" value="<?= h($f) ?>">
       <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Cambiar <b id="lra-n" style="color:var(--acc)">0</b> venta(s). <b>Deja en blanco lo que NO quieras cambiar.</b></p>
-      <div class="field" style="margin-bottom:10px"><label class="flbl">Nuevo cliente (nombre)</label><input name="cliente_nombre" class="input" placeholder="Dejar vacío = no cambiar"></div>
-      <div class="field" style="margin-bottom:10px"><label class="flbl">WhatsApp del cliente</label><input name="cliente_wa" class="input" placeholder="Ej: 584121234567 (opcional)"></div>
+      <div class="field" style="margin-bottom:10px"><label class="flbl">Cliente existente</label>
+        <select name="cliente_id" id="lra-cli" class="input" onchange="lraCliSel(this)">
+          <option value="">— No cambiar —</option>
+          <?php foreach ($clientesList as $cl): ?><option value="<?= (int) $cl['id'] ?>" data-wa="<?= h((string) ($cl['wa'] ?? '')) ?>"><?= h($cl['nombre']) ?><?= !empty($cl['wa']) ? ' · ' . h($cl['wa']) : '' ?></option><?php endforeach; ?>
+        </select>
+        <div style="font-size:11px;color:var(--faint);margin-top:5px">Pasa la(s) venta(s) a uno de tus clientes ya guardados. Para uno nuevo, deja esto en «No cambiar» y escribe el nombre abajo.</div>
+      </div>
+      <div class="field" style="margin-bottom:10px"><label class="flbl">…o cliente nuevo (nombre)</label><input name="cliente_nombre" id="lra-clinom" class="input" placeholder="Dejar vacío = no cambiar"></div>
+      <div class="field" style="margin-bottom:10px"><label class="flbl">WhatsApp del cliente</label><input name="cliente_wa" id="lra-cliwa" class="input" placeholder="Ej: 584121234567 (opcional)"></div>
       <?php if (!$esRevCtx && $revList): ?>
       <div class="field" style="margin-bottom:12px"><label class="flbl">Nuevo vendedor (revendedor)</label>
         <select name="revendedor_id" class="input">
@@ -1237,7 +1261,15 @@ stream_head('Ventas', 'ventas');
   function bulkRenovar(){ const i=ckIds(); if(!i.length) return; document.getElementById('lr-ids').value=i.join(','); document.getElementById('lr-n').textContent=i.length; const nr=ckMarcados().filter(c=>c.dataset.rev==='1').length; document.getElementById('lr-rev').style.display=nr>0?'':'none'; document.getElementById('lr-rev-n').textContent=nr; abrir('m-lote-renovar'); }
   function bulkEliminar(){ const i=ckIds(); if(!i.length) return; document.getElementById('le-ids').value=i.join(','); document.getElementById('le-n').textContent=i.length; document.getElementById('le-conf').value=''; abrir('m-lote-eliminar'); }
   function bulkPrecios(){ const i=ckIds(); if(!i.length) return; document.getElementById('lp-ids').value=i.join(','); document.getElementById('lp-n').textContent=i.length; abrir('m-lote-precios'); }
-  function bulkReasignar(){ const i=ckIds(); if(!i.length) return; document.getElementById('lra-ids').value=i.join(','); document.getElementById('lra-n').textContent=i.length; abrir('m-lote-reasignar'); }
+  function bulkReasignar(){ const i=ckIds(); if(!i.length) return; document.getElementById('lra-ids').value=i.join(','); document.getElementById('lra-n').textContent=i.length; const s=document.getElementById('lra-cli'); if(s){ s.value=''; lraCliSel(s); } const nn=document.getElementById('lra-clinom'), ww=document.getElementById('lra-cliwa'); if(nn) nn.value=''; if(ww) ww.value=''; abrir('m-lote-reasignar'); }
+  // Al elegir un cliente existente del desplegable: se bloquea el nombre libre (se usará el del cliente) y se
+  // prellena su WhatsApp. Al volver a «No cambiar», se reactiva el nombre libre.
+  function lraCliSel(sel){
+    const nom=document.getElementById('lra-clinom'), wa=document.getElementById('lra-cliwa');
+    const op=sel.options[sel.selectedIndex];
+    if(sel.value){ if(nom){ nom.value=''; nom.disabled=true; nom.placeholder='(usando el cliente elegido arriba)'; } if(wa && !wa.value){ wa.value=(op&&op.dataset.wa)||''; } }
+    else { if(nom){ nom.disabled=false; nom.placeholder='Dejar vacío = no cambiar'; } }
+  }
   function limitar(n){ LIM=parseInt(n)||0; aplicarFiltro(); }
   document.getElementById('buscar')?.addEventListener('input',aplicarFiltro);
   aplicarFiltro();

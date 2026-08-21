@@ -326,14 +326,20 @@ stream_head('Revendedores', 'revendedores');
 <?php endif; ?>
 
 <div class="card">
-  <div class="card-hd"><i data-lucide="users"></i><h2>Revendedores</h2><span class="pill-count"><?= count($revs) ?></span></div>
+  <div class="card-hd"><i data-lucide="users"></i><h2>Revendedores</h2><span class="pill-count"><?= count($revs) ?></span>
+    <div style="margin-left:auto;position:relative">
+      <i data-lucide="search" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--faint)"></i>
+      <input id="revBuscar" type="search" placeholder="Buscar por nombre o correo…" oninput="filtrarRevs(this.value)" autocomplete="off"
+             style="padding:7px 10px 7px 30px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:13px;width:240px;max-width:52vw">
+    </div>
+  </div>
   <div class="overflow-x-auto thin"><table class="dtable">
     <thead><tr><th>Revendedor</th><th>Correo</th><th>WhatsApp</th><th>Estado</th><th>Cuentas / Ventas</th><th>Ingresos / Invertido</th><th>Saldo</th><th style="text-align:center">Acciones</th></tr></thead>
     <tbody>
     <?php if (!$revs): ?>
       <tr><td colspan="8" class="muted" style="text-align:center;padding:26px">Aún no hay usuarios con rol «Revendedor». Asigna el rol desde Usuarios en el admin.</td></tr>
     <?php else: foreach ($revs as $r): $act = (int) ($r['rev_activo'] ?? 1) === 1; $exp = (int) ($r['rev_export'] ?? 1) === 1; ?>
-      <tr style="<?= $act ? '' : 'opacity:.6' ?>">
+      <tr class="rev-row" data-search="<?= h(mb_strtolower(trim(($r['nombre'] ?? '') . ' ' . ($r['email'] ?? '') . ' ' . ($r['telefono'] ?? '')))) ?>" style="<?= $act ? '' : 'opacity:.6' ?>">
         <td style="font-weight:700;color:var(--accent)"><?= h($r['nombre']) ?></td>
         <td class="muted"><?= h($r['email']) ?></td>
         <td class="muted" style="white-space:nowrap"><?= !empty($r['telefono']) ? h($r['telefono']) : '<span style="color:var(--bad);font-size:12px">falta</span>' ?>
@@ -359,9 +365,23 @@ stream_head('Revendedores', 'revendedores');
         </td>
       </tr>
     <?php endforeach; endif; ?>
+      <tr id="revSinRes" style="display:none"><td colspan="8" class="muted" style="text-align:center;padding:22px">Ningún revendedor coincide con la búsqueda.</td></tr>
     </tbody>
   </table></div>
 </div>
+<script>
+  function filtrarRevs(q){
+    q = (q || '').trim().toLowerCase();
+    var rows = document.querySelectorAll('tr.rev-row'), vis = 0;
+    rows.forEach(function(tr){
+      var ok = q === '' || (tr.getAttribute('data-search') || '').indexOf(q) !== -1;
+      tr.style.display = ok ? '' : 'none';
+      if (ok) vis++;
+    });
+    var sr = document.getElementById('revSinRes');
+    if (sr) sr.style.display = (rows.length && vis === 0) ? '' : 'none';
+  }
+</script>
 
 <div id="mSaldo" class="modal-bg" style="display:none;position:fixed;inset:0;background:#0008;align-items:flex-start;justify-content:center;padding:28px 14px;z-index:60;overflow:auto">
   <div class="card" style="max-width:420px;width:100%;padding:22px">

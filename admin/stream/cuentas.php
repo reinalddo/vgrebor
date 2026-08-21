@@ -420,23 +420,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ── LOTE: cambiar / REASIGNAR VENDEDOR de las cuentas seleccionadas (sin borrar) ──
     // Mueve las ventas de esas cuentas a otro revendedor (corregir asignación equivocada sin eliminar).
     elseif ($a === 'reasignar_vendedor_c') {
-      if (!$verCostos) throw new Exception('Solo el dueño puede reasignar el vendedor.');
+      if (!$verCostos) throw new Exception('Solo el dueño puede cambiar el cliente/vendedor.');
       $ids = array_values(array_unique(array_filter(array_map('intval', explode(',', (string) ($_POST['ids'] ?? ''))))));
       if (!$ids) throw new Exception('No seleccionaste ninguna cuenta.');
-      $revRaw = (string) ($_POST['revendedor_id'] ?? '');
-      if ($revRaw === '') throw new Exception('Elige el nuevo vendedor.');
-      $nuevoRev = (int) $revRaw;
+      $revRaw = (string) ($_POST['revendedor_id'] ?? '');       // '' = no cambiar vendedor · '0' = quitar · >0 = reasignar
+      $cambiaRev = ($revRaw !== '');
+      $nuevoRev  = $cambiaRev ? (int) $revRaw : -1;
+      // Cliente (opcional): id de un cliente PROPIO existente, o un nombre nuevo + WhatsApp.
+      $nuevoCliId = (int) ($_POST['cliente_id'] ?? 0);
+      $nuevoCli   = trim((string) ($_POST['cliente_nombre'] ?? ''));
+      $nuevoWa    = preg_replace('/\D+/', '', (string) ($_POST['cliente_wa'] ?? ''));
+      $cliRow = null;
+      if ($nuevoCliId > 0) {
+        try { $qc = $pdo->prepare("SELECT id, nombre, wa FROM streaming_clientes WHERE id=? AND owner_id=?"); $qc->execute([$nuevoCliId, $OWNER]); $cliRow = $qc->fetch(PDO::FETCH_ASSOC) ?: null; } catch (Throwable $e) {}
+        if ($cliRow) { $nuevoCli = (string) $cliRow['nombre']; if ($nuevoWa === '') $nuevoWa = preg_replace('/\D+/', '', (string) ($cliRow['wa'] ?? '')); }
+      }
+      $cambiaCli = ($cliRow || $nuevoCli !== '' || $nuevoWa !== '');
+      if (!$cambiaRev && !$cambiaCli) throw new Exception('No indicaste ningún cambio (cliente o vendedor).');
       $in = implode(',', $ids);
       $vids = array_map('intval', $pdo->query("SELECT DISTINCT p.venta_id FROM streaming_perfiles p JOIN streaming_cuentas c ON c.id=p.cuenta_id WHERE c.id IN ($in) AND c.owner_id=$OWNER AND p.venta_id IS NOT NULL AND p.venta_id>0")->fetchAll(PDO::FETCH_COLUMN));
-      if (!$vids) throw new Exception('Esas cuentas no tienen ventas asignadas para reasignar.');
-      $flush = []; $nOk = 0;
+      if (!$vids) throw new Exception('Esas cuentas no tienen ventas asignadas para cambiar.');
+      $flush = []; $nOk = 0; $nCli = 0;
       $pdo->beginTransaction();
       try {
-        foreach ($vids as $vid) { if (function_exists('st_rev_reasignar_venta')) { $f = st_rev_reasignar_venta($pdo, (int) $vid, $nuevoRev); if ($f > 0) $flush[$f] = true; $nOk++; } }
+        foreach ($vids as $vid) {
+          $vid = (int) $vid;
+          if ($cambiaRev && function_exists('st_rev_reasignar_venta')) { $f = st_rev_reasignar_venta($pdo, $vid, $nuevoRev); if ($f > 0) $flush[$f] = true; $nOk++; }
+          if ($cambiaCli) {
+            if ($cliRow) { $pdo->prepare("UPDATE streaming_ventas SET cliente_id=?, cliente_nombre=?, cliente_wa=? WHERE id=? AND owner_id=$OWNER")->execute([(int) $cliRow['id'], $nuevoCli, ($nuevoWa !== '' ? $nuevoWa : null), $vid]); $nCli++; }
+            elseif ($nuevoCli !== '') { $pdo->prepare("UPDATE streaming_ventas SET cliente_id=NULL, cliente_nombre=?, cliente_wa=? WHERE id=? AND owner_id=$OWNER")->execute([$nuevoCli, ($nuevoWa !== '' ? $nuevoWa : null), $vid]); $nCli++; }
+            elseif ($nuevoWa !== '') { $pdo->prepare("UPDATE streaming_ventas SET cliente_wa=? WHERE id=? AND owner_id=$OWNER")->execute([$nuevoWa, $vid]); }
+          }
+        }
         $pdo->commit();
       } catch (Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
       if (!empty($flush) && function_exists('bot_codigos_flush')) { foreach (array_keys($flush) as $rf) { try { bot_codigos_flush($pdo, (int) $rf); } catch (Throwable $e) {} } }
-      $msg = '✓ ' . $nOk . ' venta(s) ' . ($nuevoRev > 0 ? 'reasignada(s) al nuevo vendedor.' : 'sin vendedor.');
+      $msg = '✓ Cambios aplicados' . ($cambiaRev ? ' · ' . $nOk . ' venta(s) ' . ($nuevoRev > 0 ? 'al nuevo vendedor' : 'sin vendedor') : '') . ($nCli > 0 ? " · $nCli con nuevo cliente" : '') . '.';
     }
     // ── LOTE: VENDER varias (marca vendido: toma 1 perfil libre por cuenta y crea la venta) ──
     elseif ($a === 'vender_cuentas_masivo') {
@@ -524,8 +543,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       // Carga masiva CENTRADA EN PERFILES: cada línea es UN perfil (con su nombre y PIN).
       // Las líneas con el MISMO correo (y plataforma) se agrupan en UNA sola cuenta (no una por línea).
       // Formato (nuevo orden): Vendedor(opcional), Plataforma, Vencimiento, Correo, Clave, Costo(opcional), NombrePerfil, PIN(opcional al final)
-      $pmap = [];
-      try { foreach ($pdo->query("SELECT id, nombre FROM streaming_plataformas WHERE owner_id=$OWNER") as $r) $pmap[mb_strtolower(trim($r['nombre']))] = (int) $r['id']; } catch (Throwable $e) {}
+      $pmap = []; $platPub = [];   // nombre→id  y  id→precio de venta (público) para las ventas a cliente
+      try { foreach ($pdo->query("SELECT id, nombre, precio_publico FROM streaming_plataformas WHERE owner_id=$OWNER") as $r) { $pmap[mb_strtolower(trim($r['nombre']))] = (int) $r['id']; $platPub[(int) $r['id']] = ($r['precio_publico'] !== null && $r['precio_publico'] !== '') ? (float) $r['precio_publico'] : null; } } catch (Throwable $e) {}
       // Vendedor opcional (8ª columna): mapea nombre / usuario / email → id de revendedor. Solo el dueño (owner 0) asigna.
       $revMap = [];
       if ((int) $OWNER === 0) { try { foreach ($pdo->query("SELECT id, nombre, username, email FROM usuarios WHERE rol='revendedor'") as $r) { foreach ([$r['nombre'], $r['username'], $r['email']] as $kk) { $kk = mb_strtolower(trim((string) $kk)); if ($kk !== '') $revMap[$kk] = (int) $r['id']; } } } catch (Throwable $e) {} }
@@ -534,6 +553,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $insPerf   = $pdo->prepare("INSERT INTO streaming_perfiles (cuenta_id,etiqueta,pin) VALUES (?,?,?)");
       // Si la línea trae vendedor → se crea la venta a ese revendedor y el perfil queda VENDIDO (no stock).
       $insVentaMasiva = $pdo->prepare("INSERT INTO streaming_ventas (owner_id,plataforma,tipo,cuenta_id,correo,clave,perfil,pin,fecha_inicio,fecha_vencimiento,creado_por,revendedor_id,entregada) VALUES ($OWNER,?,'perfil',?,?,?,?,?,CURDATE(),?,?,?,1)");
+      // Venta a CLIENTE directo (1ª columna = nombre): perfil VENDIDO a ese cliente, sin revendedor.
+      $insVentaCliente = $pdo->prepare("INSERT INTO streaming_ventas (owner_id,plataforma,tipo,cuenta_id,cliente_nombre,correo,clave,perfil,pin,precio,fecha_inicio,fecha_vencimiento,creado_por,entregada) VALUES ($OWNER,?,'perfil',?,?,?,?,?,?,?,CURDATE(),?,?,1)");
       $upVendMasivo   = $pdo->prepare("UPDATE streaming_perfiles SET estado='vendido', venta_id=? WHERE id=?");
       $vendMasivo = 0;
       $revsTocados = [];   // revendedores que recibieron cuentas → flush del bot al final
@@ -559,11 +580,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // 1er campo está vacío (coma inicial) o es un correo/nombre de un revendedor conocido → hay vendedor y
         // todo empieza en la 2ª col; si el 1er campo es texto que NO es revendedor → ES la plataforma (no hay
         // vendedor). Así funciona lleve o no lleve vendedor, sin que se corra.
+        // 1ª columna = comprador: CORREO (o revendedor conocido) → venta a REVENDEDOR; un NOMBRE que no es
+        // revendedor ni una plataforma existente → venta a CLIENTE directo; VACÍO → queda en stock. Si el 1er
+        // campo coincide con una plataforma ya creada, es el formato viejo (sin comprador) y se toma como plataforma.
         $first = trim((string) ($p[0] ?? '')); $firstL = mb_strtolower($first);
-        $vendedor = '';
-        if ($first === '') { $b = 1; }                                                                              // coma inicial → sin vendedor
-        elseif ((int) $OWNER === 0 && (strpos($first, '@') !== false || isset($revMap[$firstL]))) { $vendedor = $firstL; $b = 1; }  // hay vendedor
-        else { $b = 0; }                                                                                            // 1er campo = plataforma
+        $vendedor = ''; $clienteNom = '';
+        if ($first === '') { $b = 1; }                                                                              // vacío → stock
+        elseif ((int) $OWNER === 0 && (strpos($first, '@') !== false || isset($revMap[$firstL]))) { $vendedor = $firstL; $b = 1; }  // correo/revendedor → venta a REVENDEDOR
+        elseif (isset($pmap[$firstL])) { $b = 0; }                                                                  // el 1er campo ES una plataforma existente → formato viejo (sin comprador)
+        else { $clienteNom = $first; $b = 1; }                                                                      // nombre (no revendedor ni plataforma) → venta a CLIENTE directo
         $platNom = trim((string) ($p[$b] ?? '')); if ($platNom === '') continue;
         $venc    = $parseFecha($p[$b + 1] ?? '');
         $correo  = trim((string) ($p[$b + 2] ?? ''));
@@ -604,6 +629,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try { st_rev_entregar($pdo, $rvId, (int) $cuentas[$gkey]['cid'], [['id' => $newPid, 'etiqueta' => $etiqueta, 'pin' => $pin]], (float) ($costo ?? 0), false, $sVenc); } catch (Throwable $e) {}
           }
           $revsTocados[$rvId] = true;
+          $vendMasivo++;
+        } elseif ($clienteNom !== '') {
+          // 1ª columna = NOMBRE → venta a CLIENTE directo: el perfil queda VENDIDO a ese cliente (sin
+          // revendedor). El precio = el de venta de la plataforma (para que cuente en estadísticas); se
+          // puede ajustar luego en «Cambiar precios».
+          $sVenc = $venc ?: ($cuentas[$gkey]['venc'] ?: date('Y-m-d', strtotime('+30 days')));
+          $insVentaCliente->execute([$platNom, $cuentas[$gkey]['cid'], mb_substr($clienteNom, 0, 120), $correo ?: null, $clave ?: null, $etiqueta, $pin !== '' ? $pin : null, ($platPub[$pid] ?? null), $sVenc, current_user_id()]);
+          $upVendMasivo->execute([(int) $pdo->lastInsertId(), $newPid]);
           $vendMasivo++;
         }
         if (++$nPerf >= 3000) break;
@@ -657,6 +690,9 @@ try { if (function_exists('st_rev_sweep_vencidos')) st_rev_sweep_vencidos($pdo);
 // Revendedores (para "Vender varias" → asignar la venta a un revendedor). Solo tiene sentido para el dueño.
 $revList = [];
 if ((int) $OWNER === 0) { try { $revList = $pdo->query("SELECT id, nombre FROM usuarios WHERE rol='revendedor' ORDER BY nombre")->fetchAll(PDO::FETCH_ASSOC); } catch (Throwable $e) { $revList = []; } }
+// Clientes propios (para el desplegable «Cambiar cliente/vendedor» → pasar la venta a un cliente propio).
+$clientesList = [];
+if ((int) $OWNER === 0) { try { $clientesList = $pdo->query("SELECT id, nombre, wa FROM streaming_clientes WHERE owner_id=$OWNER ORDER BY nombre LIMIT 3000")->fetchAll(PDO::FETCH_ASSOC); } catch (Throwable $e) { $clientesList = []; } }
 
 // Perfiles LIBRES por cuenta → "Vender varias" con SELECCIÓN por perfil (marcar cuáles, nombre/PIN).
 // Regla: si marcas TODOS los perfiles libres de una cuenta = 1 línea (cuenta completa); si marcas
@@ -848,7 +884,7 @@ stream_head('Cuentas', 'cuentas');
       <button type="button" onclick="bulkProveedor()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="truck" style="width:14px;height:14px"></i> Asignar proveedor</button>
       <?php endif; ?>
       <button type="button" onclick="bulkCosto()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="dollar-sign" style="width:14px;height:14px"></i> Cambiar precios</button>
-      <?php if ((int) $OWNER === 0 && !empty($revList)): ?><button type="button" onclick="bulkReasignar()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="user-cog" style="width:14px;height:14px"></i> Cambiar vendedor</button><?php endif; ?>
+      <?php if ((int) $OWNER === 0): ?><button type="button" onclick="bulkReasignar()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="user-cog" style="width:14px;height:14px"></i> Cambiar cliente/vendedor</button><?php endif; ?>
       <button type="button" onclick="bulkEliminar()" class="btn ghost" style="padding:5px 12px;font-size:12.5px;color:var(--err);border-color:rgba(239,68,68,.4)"><i data-lucide="trash-2" style="width:14px;height:14px"></i> Eliminar varias</button>
       <button type="button" onclick="document.querySelectorAll('.ck-row').forEach(c=>c.checked=false);ckSync()" class="btn ghost" style="padding:5px 12px;font-size:12.5px;margin-left:auto">Quitar selección</button>
     </div>
@@ -1058,19 +1094,30 @@ stream_head('Cuentas', 'cuentas');
     </form>
   </div>
 
-  <?php if ((int) $OWNER === 0 && !empty($revList)): ?>
-  <!-- ── LOTE: Cambiar / reasignar vendedor de las cuentas seleccionadas ── -->
+  <?php if ((int) $OWNER === 0): ?>
+  <!-- ── LOTE: Cambiar cliente y/o vendedor de las ventas de las cuentas seleccionadas ── -->
   <div id="m-bulk-reasig" class="modal hidden w-full max-w-md my-8">
-    <div class="modal-hd"><h3><i data-lucide="user-cog"></i> Cambiar vendedor</h3><button onclick="cerrarModales()" class="modal-x"><i data-lucide="x"></i></button></div>
+    <div class="modal-hd"><h3><i data-lucide="user-cog"></i> Cambiar cliente/vendedor</h3><button onclick="cerrarModales()" class="modal-x"><i data-lucide="x"></i></button></div>
     <form method="post" class="p-5 space-y-4"><input type="hidden" name="_csrf" value="<?= h($csrf) ?>"><input type="hidden" name="accion" value="reasignar_vendedor_c"><input type="hidden" name="ids" id="brz-ids">
-      <p style="color:var(--muted)">Reasignar las ventas de <strong id="brz-n" style="color:var(--text)">0</strong> cuenta(s) a otro vendedor. La cuenta se mueve del inventario del vendedor viejo al nuevo.</p>
-      <div class="field"><label class="flbl">Nuevo vendedor</label>
+      <p style="color:var(--muted)">Cambiar las ventas de <strong id="brz-n" style="color:var(--text)">0</strong> cuenta(s). <b>Deja en «No cambiar» lo que no quieras tocar.</b></p>
+      <div class="field"><label class="flbl">Cliente existente</label>
+        <select name="cliente_id" id="brz-cli" class="input" onchange="brzCliSel(this)">
+          <option value="">— No cambiar —</option>
+          <?php foreach ($clientesList as $cl): ?><option value="<?= (int) $cl['id'] ?>" data-wa="<?= h((string) ($cl['wa'] ?? '')) ?>"><?= h($cl['nombre']) ?><?= !empty($cl['wa']) ? ' · ' . h($cl['wa']) : '' ?></option><?php endforeach; ?>
+        </select>
+        <div style="font-size:11px;color:var(--faint);margin-top:5px">Pasa la venta a uno de tus clientes propios. Para uno nuevo, deja «No cambiar» y escribe el nombre abajo.</div>
+      </div>
+      <div class="field"><label class="flbl">…o cliente nuevo (nombre)</label><input name="cliente_nombre" id="brz-clinom" class="input" placeholder="Dejar vacío = no cambiar"></div>
+      <div class="field"><label class="flbl">WhatsApp del cliente</label><input name="cliente_wa" id="brz-cliwa" class="input" placeholder="Ej: 584121234567 (opcional)"></div>
+      <div class="field"><label class="flbl">Nuevo vendedor (revendedor)</label>
         <select name="revendedor_id" class="input">
+          <option value="">— No cambiar —</option>
           <option value="0">Quitar vendedor (dejar directa)</option>
           <?php foreach ($revList as $rv): ?><option value="<?= (int) $rv['id'] ?>"><?= h($rv['nombre']) ?></option><?php endforeach; ?>
         </select>
+        <div style="font-size:11px;color:var(--faint);margin-top:5px">Al cambiar de vendedor, la cuenta se mueve del inventario del vendedor viejo al nuevo y el bot se actualiza.</div>
       </div>
-      <button class="btn primary w-full">Reasignar</button>
+      <button class="btn primary w-full">Aplicar</button>
     </form>
   </div>
   <?php endif; ?>
@@ -1107,7 +1154,10 @@ stream_head('Cuentas', 'cuentas');
         · <b>Vence</b> = vencimiento de la <b>CUENTA</b> (cuándo se vence la suscripción). Fecha: <b>AAAA-MM-DD</b> o <b>DD/MM/AAAA</b>.<br>
         · <b>Costo</b> = <b>TU costo</b> (lo que TÚ pagas por la cuenta), <b>no</b> el precio de venta. Opcional, solo para tu control de ganancia.<br>
         · El <b>precio de venta</b> al cliente/revendedor <b>no va aquí</b>: se toma de <b>Tipos de cuentas</b> (precio de la plataforma), o lo pones luego en <b>«Cambiar precios»</b> o al vender.<br>
-        · <b>Vendedor</b> (opcional, <b>PRIMERA</b> columna): correo/usuario/nombre de un revendedor → se sube ya <b>asignado</b> a él (le aparece en su inventario). Si la línea NO lleva vendedor, arranca directo por la plataforma — el sistema lo detecta y no se corre.</p>
+        · <b>PRIMERA</b> columna (opcional) — el sistema la lee sola:<br>
+        &nbsp;&nbsp;— <b>correo o nombre de un REVENDEDOR</b> tuyo → se sube ya <b>vendido/asignado a ese revendedor</b> (le aparece en su inventario).<br>
+        &nbsp;&nbsp;— <b>un NOMBRE cualquiera</b> (no es revendedor ni plataforma) → se sube ya <b>vendido a ese CLIENTE directo</b> (queda como venta tuya al precio de la plataforma; lo ajustas luego si quieres).<br>
+        &nbsp;&nbsp;— <b>vacía</b> (arranca directo por la plataforma) → se sube a <b>STOCK</b> (perfil libre). El sistema lo detecta y no se corre.</p>
       <textarea name="datos" rows="8" class="input" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace" placeholder="rev@x.com, Netflix, 01/08/2026, correo@x.com, clave123, 3.50, Rebeca JR, 9669&#10;Disney+, 2026-09-15, otro@x.com, clave99, , Ana&#10;rev@x.com, Spotify, 2026-09-15, s@x.com, clave, 1.75, Leo"></textarea>
       <div class="flex justify-end gap-2"><button type="button" onclick="cerrarModales()" class="btn ghost">Cancelar</button><button class="btn primary">Importar</button></div>
     </form>
@@ -1199,7 +1249,14 @@ stream_head('Cuentas', 'cuentas');
   function bvDestino(){ const r=document.querySelector('input[name="destino"]:checked'); const esRev=!!r&&r.value==='revendedor'; const c=document.getElementById('bv-cliente'), v=document.getElementById('bv-rev'); if(c)c.classList.toggle('hidden',esRev); if(v)v.classList.toggle('hidden',!esRev); }
   function bulkProveedor(){ const el=document.getElementById('bp-ids'); if(!el) return; const ids=ckIds(); if(!ids.length){ alert('Marca al menos una cuenta.'); return; } el.value=ids.join(','); document.getElementById('bp-n').textContent=ids.length; abrir('m-bulk-proveedor'); }
   function bulkCosto(){ const el=document.getElementById('bc-ids'); if(!el) return; const ids=ckIds(); if(!ids.length){ alert('Marca al menos una cuenta.'); return; } el.value=ids.join(','); document.getElementById('bc-n').textContent=ids.length; abrir('m-bulk-costo'); }
-  function bulkReasignar(){ const el=document.getElementById('brz-ids'); if(!el) return; const ids=ckIds(); if(!ids.length){ alert('Marca al menos una cuenta.'); return; } el.value=ids.join(','); document.getElementById('brz-n').textContent=ids.length; abrir('m-bulk-reasig'); }
+  function bulkReasignar(){ const el=document.getElementById('brz-ids'); if(!el) return; const ids=ckIds(); if(!ids.length){ alert('Marca al menos una cuenta.'); return; } el.value=ids.join(','); document.getElementById('brz-n').textContent=ids.length; const s=document.getElementById('brz-cli'); if(s){ s.value=''; brzCliSel(s); } const nn=document.getElementById('brz-clinom'), ww=document.getElementById('brz-cliwa'); if(nn) nn.value=''; if(ww) ww.value=''; abrir('m-bulk-reasig'); }
+  // Al elegir un cliente existente: se bloquea el nombre libre (se usa el del cliente) y se prellena su WhatsApp.
+  function brzCliSel(sel){
+    const nom=document.getElementById('brz-clinom'), wa=document.getElementById('brz-cliwa');
+    const op=sel.options[sel.selectedIndex];
+    if(sel.value){ if(nom){ nom.value=''; nom.disabled=true; nom.placeholder='(usando el cliente elegido arriba)'; } if(wa && !wa.value){ wa.value=(op&&op.dataset.wa)||''; } }
+    else { if(nom){ nom.disabled=false; nom.placeholder='Dejar vacío = no cambiar'; } }
+  }
   function ordenar(){ const v=document.getElementById('f-orden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1; rows.sort((a,b)=>{ if(key==='dias'){ return ((parseInt(a.dataset.dias||'0',10))-(parseInt(b.dataset.dias||'0',10)))*mul; } return String(a.dataset.plat||'').localeCompare(String(b.dataset.plat||''))*mul; }); rows.forEach(r=>tb.appendChild(r)); }
   function resetFiltros(){ ['f-busqueda','f-plat','f-estado','f-stock','f-prov','f-rev','f-orden','buscar'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';}); filtrar(); }
   document.getElementById('buscar')?.addEventListener('input', filtrar);

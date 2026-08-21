@@ -319,23 +319,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Mueve los perfiles seleccionados (su venta) a otro revendedor: quita del viejo, entrega al nuevo y
     // actualiza la venta. Sirve para corregir una asignación equivocada sin tener que eliminar y revender.
     elseif (($_POST['accion'] ?? '') === 'reasignar_vendedor_p') {
-      if ($esRevCtx) throw new Exception('Solo el dueño puede reasignar el vendedor.');
+      if ($esRevCtx) throw new Exception('Solo el dueño puede cambiar el cliente/vendedor.');
       $pids = array_values(array_unique(array_filter(array_map('intval', explode(',', (string) ($_POST['ids'] ?? ''))))));
       if (!$pids) throw new Exception('No seleccionaste perfiles.');
-      $revRaw = (string) ($_POST['revendedor_id'] ?? '');
-      if ($revRaw === '') throw new Exception('Elige el nuevo vendedor.');
-      $nuevoRev = (int) $revRaw;   // 0 = quitar vendedor
+      $revRaw = (string) ($_POST['revendedor_id'] ?? '');       // '' = no cambiar vendedor · '0' = quitar · >0 = reasignar
+      $cambiaRev = ($revRaw !== '');
+      $nuevoRev  = $cambiaRev ? (int) $revRaw : -1;
+      // Cliente (opcional): id de un cliente PROPIO existente, o un nombre nuevo + WhatsApp.
+      $nuevoCliId = (int) ($_POST['cliente_id'] ?? 0);
+      $nuevoCli   = trim((string) ($_POST['cliente_nombre'] ?? ''));
+      $nuevoWa    = preg_replace('/\D+/', '', (string) ($_POST['cliente_wa'] ?? ''));
+      $cliRow = null;
+      if ($nuevoCliId > 0) {
+        try { $qc = $pdo->prepare("SELECT id, nombre, wa FROM streaming_clientes WHERE id=? AND owner_id=?"); $qc->execute([$nuevoCliId, $OWNER]); $cliRow = $qc->fetch(PDO::FETCH_ASSOC) ?: null; } catch (Throwable $e) {}
+        if ($cliRow) { $nuevoCli = (string) $cliRow['nombre']; if ($nuevoWa === '') $nuevoWa = preg_replace('/\D+/', '', (string) ($cliRow['wa'] ?? '')); }
+      }
+      $cambiaCli = ($cliRow || $nuevoCli !== '' || $nuevoWa !== '');
+      if (!$cambiaRev && !$cambiaCli) throw new Exception('No indicaste ningún cambio (cliente o vendedor).');
       $in = implode(',', $pids);
       $vids = array_map('intval', $pdo->query("SELECT DISTINCT venta_id FROM streaming_perfiles WHERE id IN ($in) AND venta_id IS NOT NULL AND venta_id>0")->fetchAll(PDO::FETCH_COLUMN));
-      if (!$vids) throw new Exception('Esos perfiles no están vendidos/asignados; no hay venta que reasignar.');
-      $flush = []; $nOk = 0;
+      if (!$vids) throw new Exception('Esos perfiles no están vendidos/asignados; no hay venta que cambiar.');
+      $flush = []; $nOk = 0; $nCli = 0;
       $pdo->beginTransaction();
       try {
-        foreach ($vids as $vid) { if (function_exists('st_rev_reasignar_venta')) { $f = st_rev_reasignar_venta($pdo, (int) $vid, $nuevoRev); if ($f > 0) $flush[$f] = true; $nOk++; } }
+        foreach ($vids as $vid) {
+          $vid = (int) $vid;
+          if ($cambiaRev && function_exists('st_rev_reasignar_venta')) { $f = st_rev_reasignar_venta($pdo, $vid, $nuevoRev); if ($f > 0) $flush[$f] = true; $nOk++; }
+          if ($cambiaCli) {
+            if ($cliRow) { $pdo->prepare("UPDATE streaming_ventas SET cliente_id=?, cliente_nombre=?, cliente_wa=? WHERE id=? AND owner_id=$OWNER")->execute([(int) $cliRow['id'], $nuevoCli, ($nuevoWa !== '' ? $nuevoWa : null), $vid]); $nCli++; }
+            elseif ($nuevoCli !== '') { $pdo->prepare("UPDATE streaming_ventas SET cliente_id=NULL, cliente_nombre=?, cliente_wa=? WHERE id=? AND owner_id=$OWNER")->execute([$nuevoCli, ($nuevoWa !== '' ? $nuevoWa : null), $vid]); $nCli++; }
+            elseif ($nuevoWa !== '') { $pdo->prepare("UPDATE streaming_ventas SET cliente_wa=? WHERE id=? AND owner_id=$OWNER")->execute([$nuevoWa, $vid]); }
+          }
+        }
         $pdo->commit();
       } catch (Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
       if (!empty($flush) && function_exists('bot_codigos_flush')) { foreach (array_keys($flush) as $rf) { try { bot_codigos_flush($pdo, (int) $rf); } catch (Throwable $e) {} } }
-      $msg = '✓ ' . $nOk . ' venta(s) ' . ($nuevoRev > 0 ? 'reasignada(s) al nuevo vendedor.' : 'sin vendedor (quedaron directas).');
+      $msg = '✓ Cambios aplicados' . ($cambiaRev ? ' · ' . $nOk . ' venta(s) ' . ($nuevoRev > 0 ? 'al nuevo vendedor' : 'sin vendedor') : '') . ($nCli > 0 ? " · $nCli con nuevo cliente" : '') . '.';
     }
     // ── LOTE desde Perfiles: asignar proveedor (solo dueño) ──
     elseif (($_POST['accion'] ?? '') === 'bulk_proveedor_p') {
@@ -382,6 +401,9 @@ $flash = (string) ($_GET['msg'] ?? '');
 // Revendedores para el dropdown (solo el dueño asigna a revendedores).
 $revList = [];
 if ((int) $OWNER === 0) { try { $revList = $pdo->query("SELECT id, nombre FROM usuarios WHERE rol='revendedor' ORDER BY nombre")->fetchAll(PDO::FETCH_ASSOC); } catch (Throwable $e) { $revList = []; } }
+// Clientes propios (para el desplegable «Cambiar cliente/vendedor»).
+$clientesList = [];
+if ((int) $OWNER === 0) { try { $clientesList = $pdo->query("SELECT id, nombre, wa FROM streaming_clientes WHERE owner_id=$OWNER ORDER BY nombre LIMIT 3000")->fetchAll(PDO::FETCH_ASSOC); } catch (Throwable $e) { $clientesList = []; } }
 // Proveedores para el lote "Asignar proveedor" (solo el dueño).
 $proveedores = $verCostos ? (function () use ($pdo, $OWNER) { try { return $pdo->query("SELECT id, nombre FROM streaming_proveedores WHERE owner_id=$OWNER AND activo=1 ORDER BY nombre")->fetchAll(PDO::FETCH_ASSOC); } catch (Throwable $e) { return []; } })() : [];
 
@@ -504,7 +526,7 @@ stream_head('Perfiles', 'perfiles');
       <b style="color:var(--acc)"><span id="bulk-n">0</span> seleccionado(s)</b>
       <button type="button" onclick="bulkVender()" class="btn ghost" style="padding:5px 12px;font-size:12.5px;color:var(--good);border-color:rgba(34,197,94,.4)"><i data-lucide="shopping-cart" style="width:14px;height:14px"></i> Vender seleccionados</button>
       <button type="button" onclick="bulkPreciosP()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="dollar-sign" style="width:14px;height:14px"></i> Cambiar precios</button>
-      <?php if ((int) $OWNER === 0 && !empty($revList)): ?><button type="button" onclick="bulkReasignarP()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="user-cog" style="width:14px;height:14px"></i> Cambiar vendedor</button><?php endif; ?>
+      <?php if ((int) $OWNER === 0): ?><button type="button" onclick="bulkReasignarP()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="user-cog" style="width:14px;height:14px"></i> Cambiar cliente/vendedor</button><?php endif; ?>
       <?php if ($verCostos): ?>
       <button type="button" onclick="bulkProveedorP()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="truck" style="width:14px;height:14px"></i> Asignar proveedor</button>
       <?php endif; ?>
@@ -540,7 +562,7 @@ stream_head('Perfiles', 'perfiles');
           <td><span class="<?= $pill ?>"><?= h($txt) ?></span></td>
           <td style="text-align:center;white-space:nowrap">
             <?php if (!($esRevCtx && $it['rev_editable'] !== 1)): ?>
-              <button type="button" class="iconbtn" style="width:30px;height:30px" title="Editar cuenta (clave, cliente, fecha, precios)" onclick='editarPerfil(<?= json_encode(["id"=>(int)$it["first_id"],"etiqueta"=>"","pin"=>"","costo"=>$it["costo"],"venta"=>$it["precio_venta"],"reventa"=>$it["precio_reventa"],"cliente"=>(string)($it["cliente_nombre"]??""),"wa"=>(string)($it["cliente_wa"]??""),"vencCli"=>substr((string)($it["venta_venc"]??""),0,10),"puedeNombre"=>(!$esRevCtx || (int)$it["rev_editable"]===1),"puedeClave"=>(!$esRevCtx || (int)$it["rev_editable"]===1),"clave"=>(string)($it["clave"]??""),"vendido"=>($it["vendidos"]>0),"origenCuenta"=>(int)($it["origen_cuenta_id"]??0)], JSON_UNESCAPED_UNICODE | JSON_HEX_APOS | JSON_HEX_QUOT) ?>)'><i data-lucide="pencil" style="width:14px;height:14px"></i></button>
+              <button type="button" class="iconbtn" style="width:30px;height:30px" title="Editar cuenta (clave, cliente, fecha, precios)" onclick='editarPerfil(<?= json_encode(["id"=>(int)$it["first_id"],"etiqueta"=>"","pin"=>"","costo"=>$it["costo"],"venta"=>$it["precio_venta"],"reventa"=>$it["precio_reventa"],"cliente"=>(string)($it["cliente_nombre"]??""),"wa"=>(string)($it["cliente_wa"]??""),"vencCli"=>substr((string)($it["venta_venc"]??""),0,10),"puedeNombre"=>(!$esRevCtx || (int)$it["rev_editable"]===1),"puedeClave"=>(!$esRevCtx || (int)$it["rev_editable"]===1),"clave"=>(string)($it["clave"]??""),"vendido"=>($it["vendidos"]>0),"origenCuenta"=>(int)($it["origen_cuenta_id"]??0)], JSON_UNESCAPED_UNICODE | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE) ?: 'null' ?>)'><i data-lucide="pencil" style="width:14px;height:14px"></i></button>
             <?php endif; ?>
             <button type="button" class="iconbtn" style="width:30px;height:30px" title="Renovar (elegir meses)" onclick="renovarPerfil(<?= (int) $it['first_id'] ?>)"><i data-lucide="calendar-check" style="width:14px;height:14px"></i></button>
           </td>
@@ -572,7 +594,7 @@ stream_head('Perfiles', 'perfiles');
           </td>
           <td style="text-align:center;white-space:nowrap">
             <?php $esCompl = (int) ($p['rev_editable'] ?? 0) === 1; $limitado = $esRevCtx && !$esCompl; ?>
-            <button type="button" class="iconbtn" style="width:30px;height:30px" title="Editar (nombre, PIN, cliente, fecha, precios)" onclick='editarPerfil(<?= json_encode(["id"=>(int)$p["id"],"etiqueta"=>(string)($p["etiqueta"]??""),"pin"=>(string)($p["pin"]??""),"costo"=>$p["costo"],"venta"=>$p["precio_venta"],"reventa"=>$p["precio_reventa"],"cliente"=>(string)($p["cliente_nombre"]??""),"wa"=>(string)($p["cliente_wa"]??""),"vencCli"=>substr((string)($p["venta_venc"]??""),0,10),"puedeNombre"=>true,"puedeClave"=>(!$esRevCtx || $esCompl),"clave"=>(!$esRevCtx || $esCompl)?(string)($p["clave"]??""):"","vendido"=>($p["estado"]==="vendido"),"cambiosNp"=>(int)($p["cambios_np"]??0),"limitado"=>$limitado,"origenCuenta"=>(int)($p["origen_cuenta_id"]??0)], JSON_UNESCAPED_UNICODE | JSON_HEX_APOS | JSON_HEX_QUOT) ?>)'><i data-lucide="pencil" style="width:14px;height:14px"></i></button>
+            <button type="button" class="iconbtn" style="width:30px;height:30px" title="Editar (nombre, PIN, cliente, fecha, precios)" onclick='editarPerfil(<?= json_encode(["id"=>(int)$p["id"],"etiqueta"=>(string)($p["etiqueta"]??""),"pin"=>(string)($p["pin"]??""),"costo"=>$p["costo"],"venta"=>$p["precio_venta"],"reventa"=>$p["precio_reventa"],"cliente"=>(string)($p["cliente_nombre"]??""),"wa"=>(string)($p["cliente_wa"]??""),"vencCli"=>substr((string)($p["venta_venc"]??""),0,10),"puedeNombre"=>true,"puedeClave"=>(!$esRevCtx || $esCompl),"clave"=>(!$esRevCtx || $esCompl)?(string)($p["clave"]??""):"","vendido"=>($p["estado"]==="vendido"),"cambiosNp"=>(int)($p["cambios_np"]??0),"limitado"=>$limitado,"origenCuenta"=>(int)($p["origen_cuenta_id"]??0)], JSON_UNESCAPED_UNICODE | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE) ?: 'null' ?>)'><i data-lucide="pencil" style="width:14px;height:14px"></i></button>
             <?php if ($esRevCtx && (int) ($p['rev_editable'] ?? 0) !== 1): ?>
               <button type="button" class="iconbtn" style="width:30px;height:30px" title="Solicitar cambio de perfil/PIN a la tienda" onclick="solicitarCambio(<?= (int) $p['id'] ?>)"><i data-lucide="message-square-warning" style="width:14px;height:14px"></i></button>
             <?php endif; ?>
@@ -690,19 +712,30 @@ stream_head('Perfiles', 'perfiles');
     </form>
   </div>
 
-  <?php if ((int) $OWNER === 0 && !empty($revList)): ?>
-  <!-- LOTE desde Perfiles: cambiar / reasignar vendedor -->
+  <?php if ((int) $OWNER === 0): ?>
+  <!-- LOTE desde Perfiles: cambiar cliente y/o vendedor de la venta del perfil -->
   <div id="m-perf-reasig" class="modal hidden w-full max-w-md my-8">
-    <div class="modal-hd"><h3><i data-lucide="user-cog"></i> Cambiar vendedor</h3><button onclick="cerrarModales()" class="modal-x"><i data-lucide="x"></i></button></div>
+    <div class="modal-hd"><h3><i data-lucide="user-cog"></i> Cambiar cliente/vendedor</h3><button onclick="cerrarModales()" class="modal-x"><i data-lucide="x"></i></button></div>
     <form method="post" class="p-5 space-y-4"><input type="hidden" name="_csrf" value="<?= h($csrf) ?>"><input type="hidden" name="accion" value="reasignar_vendedor_p"><input type="hidden" name="ids" id="prz-ids">
-      <p style="color:var(--muted)">Reasignar <strong id="prz-n" style="color:var(--text)">0</strong> perfil(es) (su venta) a otro vendedor. La cuenta se mueve del inventario del vendedor viejo al nuevo.</p>
-      <div class="field"><label class="flbl">Nuevo vendedor</label>
+      <p style="color:var(--muted)">Cambiar <strong id="prz-n" style="color:var(--text)">0</strong> perfil(es) (su venta). <b>Deja en «No cambiar» lo que no quieras tocar.</b></p>
+      <div class="field"><label class="flbl">Cliente existente</label>
+        <select name="cliente_id" id="prz-cli" class="input" onchange="przCliSel(this)">
+          <option value="">— No cambiar —</option>
+          <?php foreach ($clientesList as $cl): ?><option value="<?= (int) $cl['id'] ?>" data-wa="<?= h((string) ($cl['wa'] ?? '')) ?>"><?= h($cl['nombre']) ?><?= !empty($cl['wa']) ? ' · ' . h($cl['wa']) : '' ?></option><?php endforeach; ?>
+        </select>
+        <div style="font-size:11px;color:var(--faint);margin-top:5px">Pasa la venta a uno de tus clientes propios. Para uno nuevo, deja «No cambiar» y escribe el nombre abajo.</div>
+      </div>
+      <div class="field"><label class="flbl">…o cliente nuevo (nombre)</label><input name="cliente_nombre" id="prz-clinom" class="input" placeholder="Dejar vacío = no cambiar"></div>
+      <div class="field"><label class="flbl">WhatsApp del cliente</label><input name="cliente_wa" id="prz-cliwa" class="input" placeholder="Ej: 584121234567 (opcional)"></div>
+      <div class="field"><label class="flbl">Nuevo vendedor (revendedor)</label>
         <select name="revendedor_id" class="input">
+          <option value="">— No cambiar —</option>
           <option value="0">Quitar vendedor (dejar directa)</option>
           <?php foreach ($revList as $rv): ?><option value="<?= (int) $rv['id'] ?>"><?= h($rv['nombre']) ?></option><?php endforeach; ?>
         </select>
+        <div style="font-size:11px;color:var(--faint);margin-top:5px">Al cambiar de vendedor, la cuenta se mueve del inventario del vendedor viejo al nuevo y el bot se actualiza.</div>
       </div>
-      <button class="btn primary w-full">Reasignar</button>
+      <button class="btn primary w-full">Aplicar</button>
     </form>
   </div>
   <?php endif; ?>
@@ -785,7 +818,10 @@ stream_head('Perfiles', 'perfiles');
   function selTodos(){ ckTodo({checked:true}); }
   function ckIds(){ return Array.from(document.querySelectorAll('#tbody tr')).filter(tr=>tr.style.display!=='none').map(tr=>tr.querySelector('.ck-row')).filter(c=>c&&c.checked).map(c=>c.value); }
   function ckSync(){ const ids=ckIds(), n=ids.length, bar=document.getElementById('bulkbar'); if(bar){ bar.style.display=n>0?'flex':'none'; const t=document.getElementById('bulk-n'); if(t) t.textContent=n; } const master=document.getElementById('ck-all'); const vis=filasVisibles().filter(tr=>tr.querySelector('.ck-row')).length; if(master){ master.checked=n>0&&n===vis; master.indeterminate=n>0&&n<vis; } }
-  const PERF_MAP = <?= json_encode($perfMap, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+  <?php /* JSON_INVALID_UTF8_SUBSTITUTE + fallback: si UN perfil tiene bytes no-UTF8 (pegado de Excel/latin1),
+           json_encode devolvía false → "const PERF_MAP = ;" → SyntaxError → se caía TODO el JS y no se podía
+           seleccionar ni nada. Ahora nunca falla: sustituye el byte malo y, ante cualquier duda, emite {}. */ ?>
+  const PERF_MAP = <?= json_encode($perfMap, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE) ?: '{}' ?>;
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function bulkVender(){
     // Expande la selección: los checkbox de "cuenta completa" traen varios ids ("12,13,14").
@@ -814,7 +850,13 @@ stream_head('Perfiles', 'perfiles');
   function vDestino(){ const r=document.querySelector('input[name="destino"]:checked'); const esRev=!!r&&r.value==='revendedor'; const c=document.getElementById('v-cliente'), v=document.getElementById('v-rev'); if(c)c.classList.toggle('hidden',esRev); if(v)v.classList.toggle('hidden',!esRev); }
   // Lote desde Perfiles: cambiar precios / asignar proveedor / eliminar varias.
   function bulkPreciosP(){ const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } document.getElementById('pp-ids').value=i.join(','); document.getElementById('pp-n').textContent=i.length; abrir('m-perf-precios'); }
-  function bulkReasignarP(){ const el=document.getElementById('prz-ids'); if(!el) return; const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } el.value=i.join(','); document.getElementById('prz-n').textContent=i.length; abrir('m-perf-reasig'); }
+  function bulkReasignarP(){ const el=document.getElementById('prz-ids'); if(!el) return; const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } el.value=i.join(','); document.getElementById('prz-n').textContent=i.length; const s=document.getElementById('prz-cli'); if(s){ s.value=''; przCliSel(s); } const nn=document.getElementById('prz-clinom'), ww=document.getElementById('prz-cliwa'); if(nn) nn.value=''; if(ww) ww.value=''; abrir('m-perf-reasig'); }
+  function przCliSel(sel){
+    const nom=document.getElementById('prz-clinom'), wa=document.getElementById('prz-cliwa');
+    const op=sel.options[sel.selectedIndex];
+    if(sel.value){ if(nom){ nom.value=''; nom.disabled=true; nom.placeholder='(usando el cliente elegido arriba)'; } if(wa && !wa.value){ wa.value=(op&&op.dataset.wa)||''; } }
+    else { if(nom){ nom.disabled=false; nom.placeholder='Dejar vacío = no cambiar'; } }
+  }
   function bulkProveedorP(){ const el=document.getElementById('ppv-ids'); if(!el) return; const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } el.value=i.join(','); document.getElementById('ppv-n').textContent=i.length; abrir('m-perf-prov'); }
   function bulkEliminarP(){ const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } document.getElementById('pe-ids').value=i.join(','); document.getElementById('pe-n').textContent=i.length; document.getElementById('pe-conf').value=''; abrir('m-perf-elim'); }
 </script>
