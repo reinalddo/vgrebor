@@ -13287,7 +13287,8 @@ if ($action === 'batch_fulfill_item') {
                 'estado' => 'pendiente',
                 'order_id' => $orderId,
                 'manual' => true,
-                'message' => 'Tu pago quedó registrado y será verificado por el equipo administrativo antes de procesar la recarga.',
+                'message' => 'Tu pago debe ser verificado por el administrador antes de procesar la recarga.',
+                'whatsapp_url' => store_config_whatsapp_link((string) store_config_get('whatsapp', '')),
             ]);
         }
 

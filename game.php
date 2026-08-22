@@ -14481,6 +14481,7 @@ include __DIR__ . "/includes/header.php";
 
                 let doneCount = 0;
                 let allSuccess = true;
+                let manualReviewWhatsappUrl = '';
                 const deliveredAccounts = [];
                 const deliveredCodes = [];
 
@@ -14526,6 +14527,10 @@ include __DIR__ . "/includes/header.php";
                   const isPartial  = result && result.estado === 'pagado' && result.processing;
                   const isManual   = result && result.manual;
                   const isError    = !result || (!isDone && !isPartial && !isManual);
+
+                  if (isManual && result.whatsapp_url && !manualReviewWhatsappUrl) {
+                    manualReviewWhatsappUrl = String(result.whatsapp_url);
+                  }
 
                   if (isError) console.error('[VG] error en batch_fulfill_item order_id=' + orderId + ':', result);
 
@@ -14654,9 +14659,11 @@ include __DIR__ . "/includes/header.php";
 
                 // Done
                 if (batchProgressLabel) {
-                  batchProgressLabel.textContent = allSuccess
-                    ? `¡Listo! ${doneCount} recarga${doneCount !== 1 ? 's' : ''} procesada${doneCount !== 1 ? 's' : ''} correctamente.`
-                    : `Proceso completado. Revisa el estado de cada paquete.`;
+                  batchProgressLabel.textContent = manualReviewWhatsappUrl
+                    ? 'Tu pago debe ser verificado por el administrador antes de procesar la recarga.'
+                    : (allSuccess
+                      ? `¡Listo! ${doneCount} recarga${doneCount !== 1 ? 's' : ''} procesada${doneCount !== 1 ? 's' : ''} correctamente.`
+                      : `Proceso completado. Revisa el estado de cada paquete.`);
                 }
 
                 // Show delivered accounts summary in footer if any
@@ -14729,6 +14736,26 @@ include __DIR__ . "/includes/header.php";
                           });
                         }
                       });
+                    }
+                  }
+
+                  // Pago con un método sin verificación automática (ej. Zinli): no se
+                  // recargó nada, el pedido queda para que el admin lo verifique. Se le
+                  // avisa al cliente y se le da el botón de WhatsApp para que envíe su
+                  // comprobante — mismo criterio que "Enviar Comprobante al Admin" del
+                  // checkout de un solo paquete.
+                  if (manualReviewWhatsappUrl && !batchProgressFooter.querySelector('.batch-manual-review-notice')) {
+                    const noticeBlock = document.createElement('div');
+                    noticeBlock.className = 'batch-manual-review-notice batch-accounts-footer-list';
+                    noticeBlock.innerHTML = `<div class="batch-accounts-footer-title">Verificación pendiente</div>
+                      <p style="margin:0 0 0.75rem;color:#e2e8f0;">Tu pago todavía no ha sido verificado. Comunícate con el administrador por WhatsApp para agilizar la revisión.</p>
+                      <button type="button" id="batch-manual-review-whatsapp-btn" class="btn fw-bold w-100" style="background:#25d366;color:#000;">
+                        <i class="fa-brands fa-whatsapp me-2" aria-hidden="true"></i>Contactar al administrador
+                      </button>`;
+                    batchProgressFooter.insertBefore(noticeBlock, batchProgressFooter.firstChild);
+                    const waBtn = document.getElementById('batch-manual-review-whatsapp-btn');
+                    if (waBtn) {
+                      waBtn.addEventListener('click', () => window.open(manualReviewWhatsappUrl, '_blank', 'noopener'));
                     }
                   }
 
