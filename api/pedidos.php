@@ -13267,6 +13267,30 @@ if ($action === 'batch_fulfill_item') {
 
     // Ensure it's in pagado state before processing
     if ($currentState === 'pendiente') {
+        // "pendiente" aquí tiene DOS significados distintos según cómo se pagó, y
+        // hay que distinguirlos SIEMPRE antes de tocar nada:
+        //   - RECoins (win_points_payment_mode='points'): ya se descontaron los
+        //     puntos al crear el pedido, "pendiente" solo significa "todavía no se
+        //     despachó la recarga" — es seguro promoverlo a 'pagado' y continuar.
+        //   - Método de pago SIN verificación automática (Zinli, etc.,
+        //     win_points_payment_mode='money'): "pendiente" significa que el PAGO
+        //     EN SÍ no ha sido verificado por nadie todavía — instrucción explícita
+        //     del cliente: estos métodos NUNCA deben recargarse automáticamente, el
+        //     admin tiene que verificar el pago primero y despachar él mismo (ver
+        //     admin/pedidos.php, botón "Enviar recarga"). Promoverlo aquí y seguir
+        //     de largo sería exactamente el bug reportado: la recarga se despachaba
+        //     sola con un pago de Zinli sin que nadie lo verificara.
+        $isPointsOrder = (string) ($order['win_points_payment_mode'] ?? 'money') === 'points';
+        if (!$isPointsOrder) {
+            json_response([
+                'ok' => true,
+                'estado' => 'pendiente',
+                'order_id' => $orderId,
+                'manual' => true,
+                'message' => 'Tu pago quedó registrado y será verificado por el equipo administrativo antes de procesar la recarga.',
+            ]);
+        }
+
         $clm = $mysqli->prepare("UPDATE pedidos SET estado = 'pagado' WHERE id = ? AND estado = 'pendiente' LIMIT 1");
         if ($clm) {
             $clm->bind_param('i', $orderId);
