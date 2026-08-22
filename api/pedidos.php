@@ -12570,6 +12570,9 @@ if ($action === 'batch_create_and_pay') {
     $batchSize       = count($cartItems);
     $orderIds        = [];
     $itemErrors      = [];
+    // Nombres reales de los paquetes creados (para el resumen del correo de
+    // revisión manual — $cartItems no trae el nombre, solo package_id/price).
+    $batchPackageNamesForSummary = [];
 
     // Handle points payment
     if ($payMode === 'points') {
@@ -12615,8 +12618,50 @@ if ($action === 'batch_create_and_pay') {
         $batchUsesBankApi    = !$isBatchBinancePagonorte && order_currency_uses_bank_api($batchCurrencyNorm);
         $batchUsesBinanceApi = $isBatchBinancePagonorte && $batchCurrencyNorm === 'USDT';
 
-        if (!$batchUsesBankApi && !$batchUsesBinanceApi) {
-            json_error('El método de pago seleccionado no admite verificación bancaria para la moneda del carrito. No se puede procesar el pago.');
+        // Método de pago SIN verificación automática (ej. Zinli, Zelle u otro medio
+        // manual en USD): antes se rechazaba aquí sin más — instrucción explícita
+        // del cliente: estos métodos NUNCA deben intentar recargar automáticamente
+        // ni exigir verificación bancaria/Binance, solo registrar el pedido como
+        // "pendiente" para que el admin lo verifique y despache la recarga él mismo
+        // — igual que ya hace submit_payment (checkout de un solo paquete) para
+        // este mismo caso.
+        $batchRequiresManualReview = !$batchUsesBankApi && !$batchUsesBinanceApi;
+
+        if ($batchRequiresManualReview) {
+            $batchManualRefDigits = max(0, (int) ($meth['referencia_digitos'] ?? 0));
+            if ($batchManualRefDigits > 0 && strlen($refNumber) < $batchManualRefDigits) {
+                json_error('Debes ingresar al menos ' . $batchManualRefDigits . ' dígitos en el número de referencia.');
+            }
+
+            // Mismo candado anti-duplicado que usa submit_payment para métodos
+            // manuales: no hay movimiento bancario que reclamar/verificar, pero SÍ
+            // se sigue protegiendo contra que la misma referencia se reutilice en
+            // otro pedido (find_reference_reuse_conflict) y contra dos envíos
+            // simultáneos con la misma referencia (acquire_reference_processing_lock).
+            claim_movement_checked_by_reference($mysqli, $refNumber, $batchManualRefDigits);
+            $batchClaimReleasePending = true;
+            register_shutdown_function(static function () use (&$batchClaimReleasePending, $refNumber, $batchManualRefDigits): void {
+                if (!$batchClaimReleasePending) {
+                    return;
+                }
+                global $mysqli;
+                try {
+                    release_movement_checked_claim(ensure_mysqli_connection($mysqli), $refNumber, $batchManualRefDigits);
+                } catch (Throwable $e) {
+                    error_log('TVG release_movement_checked_claim (batch manual shutdown) failed: ' . $e->getMessage());
+                }
+            });
+
+            if (!acquire_reference_processing_lock($mysqli, $refNumber)) {
+                $batchClaimReleasePending = false;
+                json_error('Ya hay otra solicitud procesando esta misma referencia de pago. Espera unos segundos y vuelve a intentar.', 409);
+            }
+
+            $batchManualRefConflict = find_reference_reuse_conflict($mysqli, $refNumber, $batchManualRefDigits, 0, $totalBlindado);
+            if ($batchManualRefConflict !== null) {
+                $batchClaimReleasePending = false;
+                json_error(reference_reuse_conflict_message($batchManualRefConflict), 409);
+            }
         }
         if ($batchUsesBankApi || $batchUsesBinanceApi) {
             if ($totalBlindado <= 0) {
@@ -12889,6 +12934,7 @@ if ($action === 'batch_create_and_pay') {
         }
 
         $packName       = (string) ($pkg['nombre'] ?? '');
+        $batchPackageNamesForSummary[] = $packName !== '' ? $packName : 'Paquete';
         $packAmountText = (string) ($pkg['cantidad'] ?? '');
         $montoFF        = (string) ($pkg['monto_ff'] ?? '');
         $paqueteApi     = isset($pkg['paquete_api']) ? (int) $pkg['paquete_api'] : null;
@@ -12936,7 +12982,7 @@ if ($action === 'batch_create_and_pay') {
         }
 
         $pkgAmountNum = is_numeric($packAmountText) ? intval($packAmountText) : 1;
-        $batchItemEstado = $payMode === 'points' ? 'pendiente' : 'pagado';
+        $batchItemEstado = ($payMode === 'points' || !empty($batchRequiresManualReview)) ? 'pendiente' : 'pagado';
 
         $oid = 0;
         try {
@@ -13045,10 +13091,64 @@ if ($action === 'batch_create_and_pay') {
     }
 
     /* Pago del carrito verificado: marca la misión diaria de compra. El pago
-       con RECoins ya la marca por pedido vía win_points_assign_pending_order_redemption. */
-    if ($payMode !== 'points' && $clienteUsuarioId !== null && $clienteUsuarioId > 0
+       con RECoins ya la marca por pedido vía win_points_assign_pending_order_redemption.
+       Un pedido de método manual (sin verificar todavía) NO cuenta como compra
+       confirmada para la misión — se marcará cuando el admin lo apruebe. */
+    if ($payMode !== 'points' && empty($batchRequiresManualReview) && $clienteUsuarioId !== null && $clienteUsuarioId > 0
         && function_exists('daily_missions_mark_purchase_for_order')) {
         daily_missions_mark_purchase_for_order($mysqli, $orderIds[0], $clienteUsuarioId);
+    }
+
+    // Método de pago manual (ej. Zinli): el pedido queda "pendiente" para que el
+    // admin lo revise y despache la recarga él mismo — mismas 2 notificaciones que
+    // ya usa submit_payment para este mismo caso (checkout de un solo paquete).
+    if (!empty($batchRequiresManualReview)) {
+        $batchFirstOrder = fetch_order_by_id($mysqli, $orderIds[0]);
+        $batchAdminEmail = resolve_admin_email($mysqli);
+        $batchBrandingImages = email_branding_embedded_images();
+        $batchItemsSummary = implode(', ', $batchPackageNamesForSummary);
+
+        json_response([
+            'ok'         => true,
+            'message'    => 'Datos de pago enviados correctamente. Tu pedido sigue no verificado.',
+            'batch_id'   => $batchId,
+            'order_ids'  => $orderIds,
+            'batch_size' => count($orderIds),
+            'estado'     => 'pendiente',
+        ], 200, static function () use ($mysqli, $batchFirstOrder, $batchAdminEmail, $batchBrandingImages, $batchId, $batchItemsSummary, $totalBlindado, $currency, $refNumber, $phone, $orderIds): void {
+            if (!$batchFirstOrder) {
+                return;
+            }
+            $customerMessage = '<p style="margin:0 0 10px;">Recibimos tu pago reportado y ya quedó enviado al equipo administrativo para validación.</p>'
+                . '<p style="margin:0;">Cuando el administrador lo revise y apruebe, te notificaremos el siguiente cambio de estado.</p>';
+            $adminMessage = '<p style="margin:0 0 10px;">El cliente reportó el pago de un carrito con ' . count($orderIds) . ' pedido(s) y quedó no verificado hasta la aprobación administrativa.</p>'
+                . '<p style="margin:0;">Valida la referencia y el teléfono de contacto antes de aprobar la(s) orden(es).</p>';
+
+            $emailData = [
+                'order_id' => $orderIds[0],
+                'game_name' => $batchFirstOrder['juego_nombre'] ?? '',
+                'pack_name' => $batchItemsSummary,
+                'pack_amount' => '',
+                'currency' => $currency,
+                'price' => number_format((float) $totalBlindado, 2, '.', ','),
+                'user_identifier' => $batchFirstOrder['user_identifier'] ?? '',
+                'email' => $batchFirstOrder['email'] ?? '',
+                'coupon' => $batchFirstOrder['cupon'] ?? null,
+                'payment_method' => (string) ($batchFirstOrder['metodo_pago'] ?? ''),
+                'reference_number' => $refNumber,
+                'phone' => $phone,
+            ];
+
+            $customerHtml = render_order_email('Pago reportado', 'Cliente', $customerMessage, $emailData + ['status' => 'Pago enviado para revisión'], '#f59e0b');
+            $adminHtml = render_order_email('Pago recibido para revisión', 'Administrador', $adminMessage, $emailData + ['status' => 'No Verificado'], '#f59e0b');
+
+            if (!empty($batchFirstOrder['email']) && filter_var($batchFirstOrder['email'], FILTER_VALIDATE_EMAIL)) {
+                send_app_mail((string) $batchFirstOrder['email'], "Pago reportado (carrito #{$batchId})", $customerHtml, null, $batchBrandingImages);
+            }
+            if ($batchAdminEmail !== null) {
+                send_app_mail($batchAdminEmail, "Pago reportado (carrito #{$batchId})", $adminHtml, null, $batchBrandingImages);
+            }
+        });
     }
 
     json_response([
