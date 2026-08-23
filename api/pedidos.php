@@ -12633,33 +12633,27 @@ if ($action === 'batch_create_and_pay') {
                 json_error('Debes ingresar al menos ' . $batchManualRefDigits . ' dígitos en el número de referencia.');
             }
 
-            // Mismo candado anti-duplicado que usa submit_payment para métodos
-            // manuales: no hay movimiento bancario que reclamar/verificar, pero SÍ
-            // se sigue protegiendo contra que la misma referencia se reutilice en
-            // otro pedido (find_reference_reuse_conflict) y contra dos envíos
-            // simultáneos con la misma referencia (acquire_reference_processing_lock).
-            claim_movement_checked_by_reference($mysqli, $refNumber, $batchManualRefDigits);
-            $batchClaimReleasePending = true;
-            register_shutdown_function(static function () use (&$batchClaimReleasePending, $refNumber, $batchManualRefDigits): void {
-                if (!$batchClaimReleasePending) {
-                    return;
-                }
-                global $mysqli;
-                try {
-                    release_movement_checked_claim(ensure_mysqli_connection($mysqli), $refNumber, $batchManualRefDigits);
-                } catch (Throwable $e) {
-                    error_log('TVG release_movement_checked_claim (batch manual shutdown) failed: ' . $e->getMessage());
-                }
-            });
-
+            // IMPORTANTE — NO se llama a claim_movement_checked_by_reference() aquí
+            // (a diferencia de la rama bancaria de abajo): esa función marca
+            // checked=1 en la tabla `movimientos`, que es la MISMA tabla que lee la
+            // verificación bancaria REAL (movement_is_available_for_order()). Un
+            // método manual (Zinli, etc.) nunca consulta `movimientos` — nada la
+            // necesita aquí —, pero si alguien reporta esa MISMA referencia después
+            // en un pago bancario real (Pago Móvil, etc.), esa marca haría que el
+            // movimiento bancario genuino se viera como "ya en uso" y la
+            // verificación real fallara con "referencia no encontrada en el banco"
+            // aunque el banco sí la tenga. Esto REALMENTE pasó (reportado por el
+            // cliente el 2026-08-23) y quedó corregido quitando este candado — la
+            // protección contra duplicados/concurrencia sigue intacta abajo, solo
+            // que actúa sobre `pedidos` (find_reference_reuse_conflict) y el
+            // candado de MySQL (acquire_reference_processing_lock), nunca sobre
+            // `movimientos`.
             if (!acquire_reference_processing_lock($mysqli, $refNumber)) {
-                $batchClaimReleasePending = false;
                 json_error('Ya hay otra solicitud procesando esta misma referencia de pago. Espera unos segundos y vuelve a intentar.', 409);
             }
 
             $batchManualRefConflict = find_reference_reuse_conflict($mysqli, $refNumber, $batchManualRefDigits, 0, $totalBlindado);
             if ($batchManualRefConflict !== null) {
-                $batchClaimReleasePending = false;
                 json_error(reference_reuse_conflict_message($batchManualRefConflict), 409);
             }
         }
