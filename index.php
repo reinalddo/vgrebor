@@ -3194,22 +3194,6 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             box-shadow: 0 0 18px rgba(34,211,238,0.2);
             transform: translateY(-2px);
           }
-          /* En celular, 320px de ancho fijo ocupa casi toda la pantalla y se
-             ve desproporcionadamente grande (en desktop, contra un contenedor
-             mucho más ancho, el mismo tamaño se ve normal). Se reduce la
-             tarjeta completa a escala en pantallas angostas — no solo el
-             ancho, también las fuentes internas, para que todo baje de
-             tamaño junto y no quede desproporcionado. */
-          @media (max-width: 576px) {
-            .gg-drops-card { width: 230px; }
-            .gg-drops-badge { font-size: 0.29rem; padding: 0.13rem 0.24rem; }
-            .gg-drops-image-fallback { font-size: 1.35rem; }
-            .gg-drops-game-label { font-size: 0.32rem; letter-spacing: 0.01em; }
-            .gg-drops-price-original { font-size: 0.29rem; }
-            .gg-drops-price-actual { font-size: 0.38rem; }
-            .gg-drops-info-row { padding: 0.21rem 0.3rem; gap: 0.19rem; }
-            .gg-drops-price-stack { gap: 0.15rem; }
-          }
           .gg-drops-top {
             display: flex;
             align-items: stretch;
@@ -3289,6 +3273,21 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             font-weight: 800;
             color: #22d3ee;
             white-space: nowrap;
+          }
+          /* En celular, 320px de ancho fijo ocupa casi toda la pantalla y se
+             ve desproporcionadamente grande (en desktop, contra un contenedor
+             mucho más ancho, el mismo tamaño se ve normal). Se reduce la
+             tarjeta completa a escala en pantallas angostas — no solo el
+             ancho, también las fuentes internas, para que todo baje de
+             tamaño junto y no quede desproporcionado. Este bloque va AL FINAL
+             del <style>, después de las reglas base: con la misma
+             especificidad, la regla que aparece después en la hoja de estilos
+             gana aunque la de antes esté dentro de un @media que sí aplica. */
+          @media (max-width: 576px) {
+            .gg-drops-card { width: 230px; }
+            .gg-drops-image-fallback { font-size: 1.35rem; }
+            .gg-drops-info-row { padding: 0.21rem 0.3rem; gap: 0.19rem; }
+            .gg-drops-price-stack { flex-direction: column; align-items: flex-end; gap: 0.05rem; }
           }
         </style>
         <div class="d-flex align-items-center mb-3">
