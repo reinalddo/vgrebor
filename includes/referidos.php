@@ -130,6 +130,104 @@ if (!function_exists('referidos_cupon_bienvenida_monto_minimo')) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Banner promocional de "Invita a un amigo" en la página de cada juego
+// (game.php). El título es texto libre editable; el ícono puede ser un
+// emoji (por defecto) o una imagen subida por el admin — nunca ambos a la
+// vez, `referidos_banner_icono_tipo()` dice cuál está activo.
+// ─────────────────────────────────────────────────────────────────────────
+
+if (!function_exists('referidos_banner_titulo')) {
+    function referidos_banner_titulo(): string {
+        $titulo = trim((string) store_config_get('referidos_banner_titulo', '¡Invita amigos y gana!'));
+        return $titulo !== '' ? $titulo : '¡Invita amigos y gana!';
+    }
+}
+
+if (!function_exists('referidos_banner_icono_tipo')) {
+    function referidos_banner_icono_tipo(): string {
+        $tipo = trim((string) store_config_get('referidos_banner_icono_tipo', 'emoji'));
+        return $tipo === 'imagen' ? 'imagen' : 'emoji';
+    }
+}
+
+if (!function_exists('referidos_banner_icono_emoji')) {
+    function referidos_banner_icono_emoji(): string {
+        $emoji = trim((string) store_config_get('referidos_banner_icono_emoji', '🎁'));
+        return $emoji !== '' ? $emoji : '🎁';
+    }
+}
+
+if (!function_exists('referidos_banner_icono_imagen')) {
+    function referidos_banner_icono_imagen(): string {
+        return trim((string) store_config_get('referidos_banner_icono_imagen', ''));
+    }
+}
+
+// Mismo patrón exacto que home_gallery_store_image_upload() (includes/home_gallery.php)
+// — mismas validaciones, mismo bucket de subida por tenant, distinto nombre de carpeta.
+if (!function_exists('referidos_banner_store_image_upload')) {
+    function referidos_banner_store_image_upload(array $file): array {
+        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+            return ['success' => true, 'path' => ''];
+        }
+
+        if (($file['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
+            return ['success' => false, 'message' => 'No se pudo cargar la imagen del banner.'];
+        }
+
+        $tmpName = (string) ($file['tmp_name'] ?? '');
+        if ($tmpName === '' || !is_uploaded_file($tmpName)) {
+            return ['success' => false, 'message' => 'El archivo del banner no es válido.'];
+        }
+
+        if (($file['size'] ?? 0) > 4 * 1024 * 1024) {
+            return ['success' => false, 'message' => 'La imagen del banner no puede superar 4 MB.'];
+        }
+
+        $imageInfo = @getimagesize($tmpName);
+        if ($imageInfo === false) {
+            return ['success' => false, 'message' => 'La imagen del banner debe ser una imagen válida.'];
+        }
+
+        $mime = (string) ($imageInfo['mime'] ?? '');
+        $extensions = [
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            'image/gif' => 'gif',
+        ];
+        if (!isset($extensions[$mime])) {
+            return ['success' => false, 'message' => 'Formato no permitido. Usa JPG, PNG, WEBP o GIF.'];
+        }
+
+        $targetDir = tenant_upload_absolute_dir('referidos');
+        if (!is_dir($targetDir) && !mkdir($targetDir, 0775, true) && !is_dir($targetDir)) {
+            return ['success' => false, 'message' => 'No se pudo crear la carpeta del banner de referidos.'];
+        }
+
+        $fileName = 'banner-' . date('YmdHis') . '-' . bin2hex(random_bytes(4)) . '.' . $extensions[$mime];
+        $targetPath = $targetDir . DIRECTORY_SEPARATOR . $fileName;
+        if (!move_uploaded_file($tmpName, $targetPath)) {
+            return ['success' => false, 'message' => 'No se pudo guardar la imagen del banner en el servidor.'];
+        }
+
+        return ['success' => true, 'path' => tenant_upload_public_path('referidos', $fileName, true)];
+    }
+}
+
+if (!function_exists('referidos_banner_delete_image_file')) {
+    function referidos_banner_delete_image_file(string $relativePath): void {
+        if ($relativePath === '' || !tenant_is_managed_path($relativePath, 'referidos')) {
+            return;
+        }
+        $absolutePath = tenant_resolve_public_path($relativePath);
+        if ($absolutePath !== null && is_file($absolutePath)) {
+            @unlink($absolutePath);
+        }
+    }
+}
+
 // Asegura que un usuario tenga su propio código de invitación — se usa
 // tanto al registrarse (Fase 2) como para "rellenar" el código de cuentas
 // que ya existían antes de este feature, la primera vez que abran su panel

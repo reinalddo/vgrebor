@@ -1460,7 +1460,7 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                 <?php endif; ?>
               <?php endif; ?>
               <button type="button" class="btn btn-admin w-100 rounded-3 border mb-2 fw-semibold" data-user-open="orders">Ver Pedidos</button>
-              <button type="button" class="btn btn-outline-info w-100 rounded-3 border mb-2 fw-semibold" data-user-open="referrals">🎁 Mis Referidos</button>
+              <button type="button" class="btn btn-outline-info w-100 rounded-3 border mb-2 fw-semibold" data-user-open="referrals">🤝 Mis Referidos</button>
               <button type="button" class="btn btn-outline-info w-100 rounded-3 border mb-2 fw-semibold" data-user-open="profile">Datos Usuario</button>
               <?php
                 // Acceso directo al gestor de streaming: revendedor → su panel; admin/root → el del admin.

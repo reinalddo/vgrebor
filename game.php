@@ -21,6 +21,7 @@ require_once __DIR__ . "/includes/bs_pass_stock.php";
 require_once __DIR__ . "/includes/levelpass_api.php";
 require_once __DIR__ . "/includes/fullimpulso_api.php";
 require_once __DIR__ . "/includes/package_categories.php";
+require_once __DIR__ . "/includes/referidos.php";
 currency_ensure_schema();
 if (trim((string) store_config_get('binance_pagonorte_activo', '0')) === '1') {
   currency_ensure_code('USDT', 'Tether USD', 1.0, true, true);
@@ -373,6 +374,59 @@ include __DIR__ . "/includes/header.php";
     </div>
   </div>
 </section>
+
+<?php
+  $referidosNivelesList = referidos_niveles();
+  $referidosPorcentajeMin = !empty($referidosNivelesList) ? (float) reset($referidosNivelesList)['porcentaje'] : 0.0;
+  $referidosPorcentajeMax = !empty($referidosNivelesList) ? (float) end($referidosNivelesList)['porcentaje'] : 0.0;
+  $referidosCuponPorcentaje = referidos_cupon_bienvenida_porcentaje();
+  $referidosBannerTitulo = referidos_banner_titulo();
+  $referidosBannerTipoIcono = referidos_banner_icono_tipo();
+  $referidosBannerImagen = referidos_banner_icono_imagen();
+?>
+<?php if ($referidosPorcentajeMax > 0): ?>
+<section class="container mt-4 mb-0" data-aos="fade-up">
+  <div class="referidos-banner-card d-flex align-items-center justify-content-between gap-3 flex-wrap">
+    <div class="d-flex align-items-center gap-3">
+      <?php if ($referidosBannerTipoIcono === 'imagen' && $referidosBannerImagen !== ''): ?>
+        <img src="<?= htmlspecialchars(app_path('/' . ltrim($referidosBannerImagen, '/')), ENT_QUOTES, 'UTF-8') ?>" alt="" class="referidos-banner-image" aria-hidden="true">
+      <?php else: ?>
+        <span class="referidos-banner-icon" aria-hidden="true"><?= htmlspecialchars(referidos_banner_icono_emoji(), ENT_QUOTES, 'UTF-8') ?></span>
+      <?php endif; ?>
+      <div>
+        <div class="referidos-banner-title"><?= htmlspecialchars($referidosBannerTitulo, ENT_QUOTES, 'UTF-8') ?></div>
+        <div class="referidos-banner-subtitle">Reciben <strong><?= (int) $referidosCuponPorcentaje ?>%</strong> de descuento + Tú obtienes <strong><?= (int) $referidosPorcentajeMin ?>% a <?= (int) $referidosPorcentajeMax ?>%</strong> de ganancias</div>
+      </div>
+    </div>
+    <?php if ($authUser): ?>
+      <button type="button" class="btn referidos-banner-btn fw-bold" data-user-open="referrals">Invitar y ganar</button>
+    <?php else: ?>
+      <button type="button" class="btn referidos-banner-btn fw-bold" data-auth-open="register">Invitar y ganar</button>
+    <?php endif; ?>
+  </div>
+</section>
+<style>
+  .referidos-banner-card {
+    background: linear-gradient(90deg, rgba(0,255,247,0.12) 0%, rgba(168,85,247,0.14) 100%);
+    border: 1px solid rgba(0,255,247,0.5);
+    border-radius: 14px;
+    padding: 1rem 1.25rem;
+    box-shadow: 0 0 16px rgba(0,255,247,0.12);
+  }
+  .referidos-banner-icon { font-size: 1.8rem; line-height: 1; }
+  .referidos-banner-image { width: 44px; height: 44px; object-fit: cover; border-radius: 10px; flex-shrink: 0; }
+  .referidos-banner-title { color: #00fff7; font-weight: 700; font-size: 1.05rem; }
+  .referidos-banner-subtitle { color: #b2f6ff; font-size: 0.85rem; }
+  .referidos-banner-btn {
+    background: linear-gradient(90deg, #00fff7 0%, #a855f7 100%);
+    color: #0b0f1a;
+    border: none;
+    white-space: nowrap;
+    box-shadow: 0 0 10px rgba(0,255,247,0.4);
+  }
+  .referidos-banner-btn:hover { color: #0b0f1a; filter: brightness(1.08); }
+</style>
+<?php endif; ?>
 
 <section id="player-step-section" class="container mt-4 mb-3" data-aos="fade-up">
   <h2 class="page-step-title text-info mb-0">PASO 1: Ingrese su información de jugador</h2>
