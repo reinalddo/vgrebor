@@ -54,10 +54,20 @@ function stream_nav_items(): array {
     $items[] = ['key' => 'recargas', 'label' => 'Recargas', 'icon' => 'zap', 'href' => 'recargas.php'];
     $items[] = ['key' => 'mi-api', 'label' => 'Mi API', 'icon' => 'code', 'href' => 'mi-api.php'];
   }
+  // Soporte / Tickets (nuevo): el revendedor abre tickets; el admin los ve/resuelve. Badge = pendientes
+  // que le tocan al viewer (admin = todos los pendientes; revendedor = los suyos pendientes).
+  require_once __DIR__ . '/../../api/_rev_avisos.php';
+  if (function_exists('st_tickets_schema')) { try { st_tickets_schema(db()); } catch (Throwable $e) {} }
+  $tk = 0;
+  try {
+    $sqlTk = $esRev ? "SELECT COUNT(*) FROM streaming_tickets WHERE owner_id=$ownPa AND estado='pendiente'"
+                    : "SELECT COUNT(*) FROM streaming_tickets WHERE estado='pendiente'";
+    $tk = (int) db()->query($sqlTk)->fetchColumn();
+  } catch (Throwable $e) { $tk = 0; }
+  $items[] = ['key' => 'tickets', 'label' => 'Soporte' . ($tk ? " ($tk)" : ''), 'icon' => 'life-buoy', 'href' => 'tickets.php'];
   // Historial de notificaciones/cambios (Fase 3), con badge de no leídas. Va al final para todos.
   $nn = 0;
   try {
-    require_once __DIR__ . '/../../api/_rev_avisos.php';
     if (function_exists('stream_notif_no_leidas')) $nn = (int) stream_notif_no_leidas(db(), (int) stream_owner_id());
   } catch (Throwable $e) { $nn = 0; }
   $items[] = ['key' => 'notificaciones', 'label' => 'Notificaciones' . ($nn ? " ($nn)" : ''), 'icon' => 'bell', 'href' => 'notificaciones.php'];
@@ -441,6 +451,37 @@ function stream_foot(): void {
     }
     if(document.readyState==='complete') setTimeout(autoTour,700);
     else window.addEventListener('load', function(){ setTimeout(autoTour,700); });
+  })();
+
+  // ─── Notificaciones EN TIEMPO REAL con TONO (tickets + cambios/compras) ───────────
+  // El cliente notó que las notificaciones no eran en vivo (había que refrescar). Esto sondea cada 25s
+  // el contador de no leídas y, cuando SUBE, suena un tono y muestra un aviso flotante. Dos tonos:
+  // doble-agudo para TICKETS de soporte, simple para el resto (cambios/compras/etc.). Sin dependencias.
+  (function(){
+    var last=null, lastTk=0, primed=false, ac=null;
+    function ctx(){ try{ if(!ac) ac=new (window.AudioContext||window.webkitAudioContext)(); if(ac.state==='suspended') ac.resume(); }catch(e){} return ac; }
+    // El navegador exige un gesto del usuario para permitir audio: lo habilitamos en el primer clic.
+    document.addEventListener('click', function(){ ctx(); }, {once:true});
+    function beep(freqs){ var a=ctx(); if(!a) return; try{ var t=a.currentTime; freqs.forEach(function(f,i){ var o=a.createOscillator(), g=a.createGain(); o.type='sine'; o.frequency.value=f; o.connect(g); g.connect(a.destination); var s=t+i*0.17; g.gain.setValueAtTime(0.0001,s); g.gain.exponentialRampToValueAtTime(0.2,s+0.02); g.gain.exponentialRampToValueAtTime(0.0001,s+0.15); o.start(s); o.stop(s+0.16); }); }catch(e){} }
+    function toast(txt,url,tk){ var d=document.createElement('div'); d.textContent=(tk?'🎫 ':'🔔 ')+txt; d.style.cssText='position:fixed;right:18px;bottom:18px;z-index:9999;max-width:330px;background:var(--surface,#fff);color:var(--text,#111);border:1px solid var(--border,#ddd);border-left:4px solid var(--accent,#3f4fb5);border-radius:11px;padding:12px 15px;box-shadow:0 14px 38px rgba(0,0,0,.3);font-size:13px;font-weight:600;cursor:pointer;animation:tkin .25s ease'; if(url) d.onclick=function(){ location.href=url; }; document.body.appendChild(d); setTimeout(function(){ d.style.transition='opacity .4s'; d.style.opacity='0'; setTimeout(function(){ d.remove(); },420); }, 7000); }
+    function updBadge(n){ document.querySelectorAll('.sb-nav a.lnk span').forEach(function(s){ if(/^Notificaciones/.test(s.textContent)) s.textContent='Notificaciones'+(n>0?' ('+n+')':''); }); }
+    function poll(){
+      fetch('notificaciones.php?ajax=count',{headers:{'X-Requested-With':'fetch'},cache:'no-store'})
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){
+          if(!d) return; var tot=d.total||0, tk=d.ticket||0; updBadge(tot);
+          if(!primed){ primed=true; last=tot; lastTk=tk; return; }
+          if(tot>last){
+            var isTk = tk>lastTk;
+            beep(isTk?[900,1200]:[680]);
+            var t=(d.last&&d.last.titulo)?d.last.titulo:(isTk?'Nuevo ticket de soporte':'Tienes una notificación nueva');
+            toast(t,(d.last&&d.last.url)?d.last.url:'notificaciones.php',isTk);
+          }
+          last=tot; lastTk=tk;
+        }).catch(function(){});
+    }
+    var st=document.createElement('style'); st.textContent='@keyframes tkin{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}'; document.head.appendChild(st);
+    setTimeout(poll, 2500); setInterval(poll, 25000);
   })();
 </script>
 </body></html>

@@ -135,9 +135,9 @@ if (($_GET['export'] ?? '') === 'csv') {
   echo "\xEF\xBB\xBF";
   $out = fopen('php://output', 'w');
   // 'Revendedor' va AL FINAL a propósito: así no rompe ninguna plantilla tuya que lea por posición.
-  fputcsv($out, ['Cliente', 'Producto', 'Correo', 'Perfil', 'PIN', 'Precio', 'Renovación', 'Vence', 'Estado', 'Revendedor']);
-  try { foreach ($pdo->query("SELECT COALESCE(cl.nombre,v.cliente_nombre) cliente, v.plataforma, v.correo, v.perfil, v.pin, v.precio, v.precio_renovacion, v.fecha_vencimiento, v.estado, ru.nombre AS rev_nombre FROM streaming_ventas v LEFT JOIN streaming_clientes cl ON cl.id=v.cliente_id LEFT JOIN usuarios ru ON ru.id=v.revendedor_id WHERE $scopeRev ORDER BY v.id DESC") as $r)
-    fputcsv($out, [$r['cliente'], $r['plataforma'], $r['correo'], $r['perfil'], "\t" . $r['pin'], $r['precio'], $r['precio_renovacion'], $r['fecha_vencimiento'], $r['estado'], $r['rev_nombre'] ?: '']); } catch (Throwable $e) {}
+  fputcsv($out, ['N° Pedido', 'Cliente', 'Producto', 'Correo', 'Perfil', 'PIN', 'Precio', 'Renovación', 'Vence', 'Estado', 'Revendedor']);
+  try { foreach ($pdo->query("SELECT v.id, COALESCE(cl.nombre,v.cliente_nombre) cliente, v.plataforma, v.correo, v.perfil, v.pin, v.precio, v.precio_renovacion, v.fecha_vencimiento, v.estado, ru.nombre AS rev_nombre FROM streaming_ventas v LEFT JOIN streaming_clientes cl ON cl.id=v.cliente_id LEFT JOIN usuarios ru ON ru.id=v.revendedor_id WHERE $scopeRev ORDER BY v.id DESC") as $r)
+    fputcsv($out, [stream_cod_pedido((int) $r['id']), $r['cliente'], $r['plataforma'], $r['correo'], $r['perfil'], "\t" . $r['pin'], $r['precio'], $r['precio_renovacion'], $r['fecha_vencimiento'], $r['estado'], $r['rev_nombre'] ?: '']); } catch (Throwable $e) {}
   fclose($out); exit;
 }
 
@@ -794,10 +794,11 @@ stream_head('Ventas', 'ventas');
   <table class="dtable">
     <thead><tr>
       <th style="width:34px;position:sticky;left:0;background:var(--surface);z-index:2"><input type="checkbox" id="ck-all" onclick="ckTodo(this)" title="Seleccionar los visibles" style="width:15px;height:15px;accent-color:var(--acc)"></th>
-      <th>Cliente</th><th>Producto</th><th>Correo</th><th>Perfil</th><th>PIN</th><th>Precio</th><th>Vence</th><th>Días Restantes</th><th style="text-align:center">Acciones</th>
+      <th>N° Pedido</th><th>Cliente</th><th>Producto</th><th>Correo</th><th>Perfil</th><th>PIN</th><th>Precio</th><th>Vence</th><th>Días Restantes</th><th style="text-align:center">Acciones</th>
     </tr></thead>
     <tbody id="tbody">
     <?php foreach ($ventas as $v):
+      $codigo = stream_cod_pedido((int) $v['id']);   // N° de pedido legible (derivado del id único)
       $d = v_dias($v['fecha_vencimiento'] ?? null, $hoy);
       if ($d === null) { $badge = 'tag'; $txt = '—'; }
       elseif ($d < 0)  { $badge = 'pill err'; $txt = 'Vencido'; }
@@ -806,12 +807,13 @@ stream_head('Ventas', 'ventas');
       [$pcolor] = streamPlatFallback((string) $v['plataforma']);
       $esRev  = !empty($v['revendedor_id']);
       $revNom = $esRev ? (trim((string) ($v['rev_nombre'] ?? '')) ?: ('#' . (int) $v['revendedor_id'])) : '';
-      $busca = mb_strtolower(($v['cliente'] ?? '') . ' ' . ($v['plataforma'] ?? '') . ' ' . ($v['correo'] ?? '') . ' ' . $revNom);
+      $busca = mb_strtolower(($v['cliente'] ?? '') . ' ' . ($v['plataforma'] ?? '') . ' ' . ($v['correo'] ?? '') . ' ' . $revNom . ' ' . $codigo);
       $estKey = $d === null ? 'sin' : ($d < 0 ? 'venc' : ($d <= 5 ? 'pronto' : 'activo'));
       $esManualV = in_array($v['modo'] ?? 'perfil', ['email_manual', 'invitacion', 'activacion'], true);
     ?>
       <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower((string) $v['plataforma'])) ?>" data-est="<?= h($estKey) ?>" data-src="<?= $esRev ? 'rev' : 'propia' ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>" data-rev="<?= h(mb_strtolower($revNom)) ?>">
         <td style="position:sticky;left:0;background:var(--surface);z-index:1"><input type="checkbox" class="ck-row" value="<?= (int) $v['id'] ?>" data-rev="<?= ($esRev && !$esRevCtx) ? '1' : '0' ?>" onclick="event.stopPropagation();ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"></td>
+        <td style="white-space:nowrap"><span onclick="event.stopPropagation();copiarCod('<?= h($codigo) ?>',this)" title="N° de pedido · clic para copiar" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);border:1px solid var(--border);border-radius:6px;padding:2px 7px;cursor:pointer"><?= h($codigo) ?></span></td>
         <td style="font-weight:600">
           <?php if ($esRev): ?>
             <span class="pill acc" style="font-size:9px">REVENDEDOR</span>
@@ -1271,6 +1273,13 @@ stream_head('Ventas', 'ventas');
     else { if(nom){ nom.disabled=false; nom.placeholder='Dejar vacío = no cambiar'; } }
   }
   function limitar(n){ LIM=parseInt(n)||0; aplicarFiltro(); }
+  // Copia el N° de pedido al portapapeles (para pegarlo, p.ej., en un ticket de soporte).
+  function copiarCod(cod, el){
+    function done(){ if(el){ var o=el.textContent; el.textContent='¡Copiado!'; setTimeout(function(){ el.textContent=o; }, 1100); } }
+    try{ if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(cod).then(done, function(){ done(); }); return; } }catch(e){}
+    try{ var t=document.createElement('textarea'); t.value=cod; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); }catch(e){}
+    done();
+  }
   document.getElementById('buscar')?.addEventListener('input',aplicarFiltro);
   aplicarFiltro();
 </script>

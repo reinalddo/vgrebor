@@ -450,14 +450,14 @@ foreach ($perfiles as $p) {
       $renderItems[] = ['cc' => true, 'cuenta_id' => $cid, 'plataforma' => $p['plataforma'], 'correo' => $p['correo'], 'clave' => $p['clave'],
         'vencimiento' => $p['vencimiento'], 'rev_editable' => (int) $p['rev_editable'], 'costo' => $p['costo'], 'origen_cuenta_id' => (int) ($p['origen_cuenta_id'] ?? 0),
         'precio_venta' => $p['precio_venta'], 'precio_reventa' => $p['precio_reventa'],
-        'libres_ids' => [], 'total' => 0, 'libres' => 0, 'vendidos' => 0,
+        'libres_ids' => [], 'vendidos_ids' => [], 'total' => 0, 'libres' => 0, 'vendidos' => 0,
         'venta_venc' => null, 'cliente_nombre' => null, 'cliente_wa' => null, 'rev_nombre' => null, 'first_id' => (int) $p['id']];
     }
     $i = $ccIdx[$cid];
     $renderItems[$i]['total']++;
     if ($p['estado'] === 'libre') { $renderItems[$i]['libres']++; $renderItems[$i]['libres_ids'][] = (int) $p['id']; }
     elseif ($p['estado'] === 'vendido') {
-      $renderItems[$i]['vendidos']++;
+      $renderItems[$i]['vendidos']++; $renderItems[$i]['vendidos_ids'][] = (int) $p['id'];
       if ($renderItems[$i]['venta_venc'] === null) { $renderItems[$i]['venta_venc'] = $p['venta_venc']; $renderItems[$i]['cliente_nombre'] = $p['cliente_nombre']; $renderItems[$i]['cliente_wa'] = $p['cliente_wa']; $renderItems[$i]['rev_nombre'] = $p['rev_nombre']; }
     }
   } else {
@@ -553,7 +553,7 @@ stream_head('Perfiles', 'perfiles');
         $busca = mb_strtolower(($it['plataforma'] ?? '') . ' ' . ($it['correo'] ?? '') . ' cuenta completa ' . $asignado);
       ?>
         <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($it['plataforma'] ?? '')) ?>" data-estado="<?= h($estadoData) ?>" data-correo="<?= h(mb_strtolower($it['correo'] ?? '')) ?>" data-rev="<?= h(mb_strtolower((string) ($it['rev_nombre'] ?? ''))) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
-          <td><?php if ($it['libres'] > 0): ?><input type="checkbox" class="ck-row" value="<?= h(implode(',', $it['libres_ids'])) ?>" onclick="ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"><?php endif; ?></td>
+          <td><?php $ccVal = $it['libres'] > 0 ? $it['libres_ids'] : $it['vendidos_ids']; if ($ccVal): ?><input type="checkbox" class="ck-row" value="<?= h(implode(',', $ccVal)) ?>" onclick="ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"><?php endif; ?></td>
           <td><b style="color:var(--text)"><?= h($it['plataforma']) ?></b> <span class="tag" style="font-size:10px;color:var(--accent)">Cuenta completa</span></td>
           <td style="color:var(--muted)"><?= h($it['correo'] ?: '—') ?><?php if (!empty($it['clave'])): ?><br><span style="font-size:10px;color:var(--faint)">🔑 <?= h($it['clave']) ?></span><?php endif; ?></td>
           <td style="font-weight:650" colspan="2">Cuenta completa · <?= (int) $it['total'] ?> perfil(es)<?php if ($it['libres'] > 0 && $it['vendidos'] > 0): ?> · <?= (int) $it['libres'] ?> libre(s)<?php endif; ?></td>
@@ -580,7 +580,7 @@ stream_head('Perfiles', 'perfiles');
         $busca = mb_strtolower(($p['plataforma'] ?? '') . ' ' . ($p['correo'] ?? '') . ' ' . ($p['etiqueta'] ?? '') . ' ' . $asignado);
       ?>
         <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($p['plataforma'] ?? '')) ?>" data-estado="<?= h($p['estado']) ?>" data-correo="<?= h(mb_strtolower($p['correo'] ?? '')) ?>" data-rev="<?= h(mb_strtolower((string) ($p['rev_nombre'] ?? ''))) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
-          <td><?php if (!$vend): ?><input type="checkbox" class="ck-row" value="<?= (int) $p['id'] ?>" onclick="ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"><?php endif; ?></td>
+          <td><input type="checkbox" class="ck-row" value="<?= (int) $p['id'] ?>" onclick="ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"></td>
           <td><b style="color:var(--text)"><?= h($p['plataforma']) ?></b></td>
           <td style="color:var(--muted)"><?= h($p['correo'] ?: '—') ?><?php if (!empty($p['clave'])): ?><br><span style="font-size:10px;color:var(--faint)">🔑 <?= h($p['clave']) ?></span><?php endif; ?></td>
           <td style="font-weight:650"><?= h($p['etiqueta'] ?: '—') ?></td>
@@ -817,6 +817,9 @@ stream_head('Perfiles', 'perfiles');
   function ckTodo(m){ filasVisibles().forEach(tr=>{ const c=tr.querySelector('.ck-row'); if(c) c.checked=m.checked; }); ckSync(); }
   function selTodos(){ ckTodo({checked:true}); }
   function ckIds(){ return Array.from(document.querySelectorAll('#tbody tr')).filter(tr=>tr.style.display!=='none').map(tr=>tr.querySelector('.ck-row')).filter(c=>c&&c.checked).map(c=>c.value); }
+  // Ids de los seleccionados SEGÚN estado de su fila ('libre' | 'vendido'). Vender usa solo 'libre';
+  // Cambiar cliente/vendedor opera sobre los 'vendido' (el handler ya ignora los que no tienen venta).
+  function ckIdsEstado(est){ return Array.from(document.querySelectorAll('#tbody tr')).filter(tr=>tr.style.display!=='none' && tr.dataset.estado===est).map(tr=>tr.querySelector('.ck-row')).filter(c=>c&&c.checked).map(c=>c.value); }
   function ckSync(){ const ids=ckIds(), n=ids.length, bar=document.getElementById('bulkbar'); if(bar){ bar.style.display=n>0?'flex':'none'; const t=document.getElementById('bulk-n'); if(t) t.textContent=n; } const master=document.getElementById('ck-all'); const vis=filasVisibles().filter(tr=>tr.querySelector('.ck-row')).length; if(master){ master.checked=n>0&&n===vis; master.indeterminate=n>0&&n<vis; } }
   <?php /* JSON_INVALID_UTF8_SUBSTITUTE + fallback: si UN perfil tiene bytes no-UTF8 (pegado de Excel/latin1),
            json_encode devolvía false → "const PERF_MAP = ;" → SyntaxError → se caía TODO el JS y no se podía
@@ -825,9 +828,10 @@ stream_head('Perfiles', 'perfiles');
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function bulkVender(){
     // Expande la selección: los checkbox de "cuenta completa" traen varios ids ("12,13,14").
-    let ids=[]; ckIds().forEach(v=>String(v).split(',').forEach(x=>{ x=x.trim(); if(x) ids.push(x); }));
+    // Solo LIBRES: si marcó vendidos (para «Cambiar cliente/vendedor»), aquí se ignoran — no se re-venden.
+    let ids=[]; ckIdsEstado('libre').forEach(v=>String(v).split(',').forEach(x=>{ x=x.trim(); if(x) ids.push(x); }));
     ids=Array.from(new Set(ids));
-    if(!ids.length){ alert('Marca al menos un perfil/cuenta libre.'); return; }
+    if(!ids.length){ alert('Marca al menos un perfil/cuenta LIBRE (los vendidos no se pueden vender de nuevo).'); return; }
     document.getElementById('v-ids').value=ids.join(',');
     document.getElementById('v-n').textContent=ids.length;
     // Construye una fila editable (nombre / PIN / precio) por cada perfil.
@@ -850,7 +854,7 @@ stream_head('Perfiles', 'perfiles');
   function vDestino(){ const r=document.querySelector('input[name="destino"]:checked'); const esRev=!!r&&r.value==='revendedor'; const c=document.getElementById('v-cliente'), v=document.getElementById('v-rev'); if(c)c.classList.toggle('hidden',esRev); if(v)v.classList.toggle('hidden',!esRev); }
   // Lote desde Perfiles: cambiar precios / asignar proveedor / eliminar varias.
   function bulkPreciosP(){ const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } document.getElementById('pp-ids').value=i.join(','); document.getElementById('pp-n').textContent=i.length; abrir('m-perf-precios'); }
-  function bulkReasignarP(){ const el=document.getElementById('prz-ids'); if(!el) return; const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } el.value=i.join(','); document.getElementById('prz-n').textContent=i.length; const s=document.getElementById('prz-cli'); if(s){ s.value=''; przCliSel(s); } const nn=document.getElementById('prz-clinom'), ww=document.getElementById('prz-cliwa'); if(nn) nn.value=''; if(ww) ww.value=''; abrir('m-perf-reasig'); }
+  function bulkReasignarP(){ const el=document.getElementById('prz-ids'); if(!el) return; const i=ckIdsEstado('vendido'); if(!i.length){ alert('Marca al menos un perfil VENDIDO (esto cambia el cliente/vendedor de una venta; los libres no tienen venta).'); return; } el.value=i.join(','); document.getElementById('prz-n').textContent=i.length; const s=document.getElementById('prz-cli'); if(s){ s.value=''; przCliSel(s); } const nn=document.getElementById('prz-clinom'), ww=document.getElementById('prz-cliwa'); if(nn) nn.value=''; if(ww) ww.value=''; abrir('m-perf-reasig'); }
   function przCliSel(sel){
     const nom=document.getElementById('prz-clinom'), wa=document.getElementById('prz-cliwa');
     const op=sel.options[sel.selectedIndex];

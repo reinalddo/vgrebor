@@ -42,6 +42,49 @@ if (!function_exists('stream_notif_schema')) {
     }
 }
 
+if (!function_exists('st_tickets_schema')) {
+    /** Tablas del sistema de TICKETS / SOPORTE (idempotente, cacheada por request).
+     *  streaming_tickets = el ticket; streaming_ticket_eventos = su historial (apertura, mensajes,
+     *  resuelto). El historial es un log liviano append-only, indexado por ticket → NO ralentiza la
+     *  página (solo se lee al abrir un ticket concreto). */
+    function st_tickets_schema(PDO $pdo): bool {
+        static $ok = null;
+        if ($ok !== null) return $ok;
+        try {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS streaming_tickets (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                owner_id INT NOT NULL,
+                asunto VARCHAR(180) NOT NULL,
+                pedido_ref VARCHAR(80) NULL,
+                datos TEXT NULL,
+                descripcion TEXT NULL,
+                imagen_url VARCHAR(300) NULL,
+                estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+                resuelto_en DATETIME NULL,
+                resuelto_por INT NULL,
+                creado_por INT NULL,
+                creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_owner_estado (owner_id, estado),
+                INDEX idx_estado (estado, creado_en)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            $pdo->exec("CREATE TABLE IF NOT EXISTS streaming_ticket_eventos (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                ticket_id INT NOT NULL,
+                autor_id INT NULL,
+                autor_nombre VARCHAR(120) NULL,
+                es_admin TINYINT(1) NOT NULL DEFAULT 0,
+                tipo VARCHAR(20) NOT NULL DEFAULT 'mensaje',
+                mensaje TEXT NULL,
+                imagen_url VARCHAR(300) NULL,
+                creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_ticket (ticket_id, id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            $ok = true;
+        } catch (Throwable $e) { $ok = false; }
+        return $ok;
+    }
+}
+
 if (!function_exists('stream_notif_crear')) {
     /** Deja una notificación para $ownerDest (0=admin, >0=revendedor). Nunca lanza. */
     function stream_notif_crear(PDO $pdo, int $ownerDest, string $tipo, string $titulo, string $mensaje = '', string $url = '', ?int $actorId = null, ?int $refId = null): bool {

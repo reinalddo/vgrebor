@@ -40,7 +40,7 @@ $k = st_kpis($pdo);
 $totalClientes = (int) ($pdo->query("SELECT COUNT(*) FROM streaming_clientes WHERE owner_id=$OWNER")->fetchColumn() ?: 0);
 $perfVendidos = max(0, (int) $k['perfiles'] - (int) $k['libres']);
 $proyeccion = (float) ($pdo->query("SELECT COALESCE(SUM(precio),0) FROM streaming_ventas WHERE owner_id=$OWNER AND estado='activa'")->fetchColumn() ?: 0);
-$masVendido = $pdo->query("SELECT plataforma, COUNT(*) n FROM streaming_ventas WHERE owner_id=$OWNER AND MONTH(creado_en)=MONTH(NOW()) AND YEAR(creado_en)=YEAR(NOW()) GROUP BY plataforma ORDER BY n DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC) ?: ['plataforma' => '—', 'n' => 0];
+$masVendido = $pdo->query("SELECT plataforma, COUNT(*) n FROM streaming_ventas WHERE owner_id=$OWNER AND estado<>'cancelada' AND MONTH(creado_en)=MONTH(NOW()) AND YEAR(creado_en)=YEAR(NOW()) GROUP BY plataforma ORDER BY n DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC) ?: ['plataforma' => '—', 'n' => 0];
 $tasaAband = ($k['activas'] + $k['vencidas']) > 0 ? round($k['vencidas'] / ($k['activas'] + $k['vencidas']) * 100, 1) : 0;
 $nuevosMes = (int) ($pdo->query("SELECT COUNT(*) FROM streaming_clientes WHERE owner_id=$OWNER AND MONTH(creado_en)=MONTH(NOW()) AND YEAR(creado_en)=YEAR(NOW())")->fetchColumn() ?: 0);
 $nuevosPrev = (int) ($pdo->query("SELECT COUNT(*) FROM streaming_clientes WHERE owner_id=$OWNER AND creado_en >= DATE_FORMAT(DATE_SUB(NOW(),INTERVAL 1 MONTH),'%Y-%m-01') AND creado_en < DATE_FORMAT(NOW(),'%Y-%m-01')")->fetchColumn() ?: 0);
@@ -49,13 +49,13 @@ $nuevosPrev = (int) ($pdo->query("SELECT COUNT(*) FROM streaming_clientes WHERE 
 $ing12 = array_fill(0, 12, 0.0); $ing12lbl = [];
 for ($i = 11; $i >= 0; $i--) $ing12lbl[] = date('M', strtotime("first day of -$i month"));
 try {
-  foreach ($pdo->query("SELECT DATE_FORMAT(creado_en,'%Y-%m') ym, COALESCE(SUM(precio),0) s FROM streaming_ventas WHERE owner_id=$OWNER AND creado_en >= DATE_SUB(DATE_FORMAT(NOW(),'%Y-%m-01'), INTERVAL 11 MONTH) GROUP BY ym ORDER BY ym") as $r) {
+  foreach ($pdo->query("SELECT DATE_FORMAT(creado_en,'%Y-%m') ym, COALESCE(SUM(precio),0) s FROM streaming_ventas WHERE owner_id=$OWNER AND estado<>'cancelada' AND creado_en >= DATE_SUB(DATE_FORMAT(NOW(),'%Y-%m-01'), INTERVAL 11 MONTH) GROUP BY ym ORDER BY ym") as $r) {
     $idx = 11 - ((((int) date('Y')) * 12 + (int) date('n')) - (((int) substr($r['ym'], 0, 4)) * 12 + (int) substr($r['ym'], 5, 2)));
     if ($idx >= 0 && $idx < 12) $ing12[$idx] = (float) $r['s'];
   }
 } catch (Throwable $e) {}
-$top = $pdo->query("SELECT plataforma, COUNT(*) n FROM streaming_ventas WHERE owner_id=$OWNER GROUP BY plataforma ORDER BY n DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
-$ultimas = $pdo->query("SELECT COALESCE(cl.nombre,v.cliente_nombre) cliente, v.plataforma, v.precio FROM streaming_ventas v LEFT JOIN streaming_clientes cl ON cl.id=v.cliente_id WHERE v.owner_id=$OWNER ORDER BY v.id DESC LIMIT 6")->fetchAll(PDO::FETCH_ASSOC);
+$top = $pdo->query("SELECT plataforma, COUNT(*) n FROM streaming_ventas WHERE owner_id=$OWNER AND estado<>'cancelada' GROUP BY plataforma ORDER BY n DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
+$ultimas = $pdo->query("SELECT v.id, COALESCE(cl.nombre,v.cliente_nombre) cliente, v.plataforma, v.precio FROM streaming_ventas v LEFT JOIN streaming_clientes cl ON cl.id=v.cliente_id WHERE v.owner_id=$OWNER AND v.estado<>'cancelada' ORDER BY v.id DESC LIMIT 6")->fetchAll(PDO::FETCH_ASSOC);
 $stockBajo = $pdo->query("SELECT c.plataforma, SUM(CASE WHEN p.estado='libre' THEN 1 ELSE 0 END) libres FROM streaming_cuentas c LEFT JOIN streaming_perfiles p ON p.cuenta_id=c.id WHERE c.owner_id=$OWNER GROUP BY c.plataforma HAVING libres <= 1 ORDER BY libres ASC LIMIT 6")->fetchAll(PDO::FETCH_ASSOC);
 $tareas = $pdo->prepare("SELECT id, texto, hecho FROM streaming_tareas WHERE usuario_id=? ORDER BY hecho, id DESC LIMIT 20");
 $tareas->execute([$uid]); $tareas = $tareas->fetchAll(PDO::FETCH_ASSOC);
@@ -123,7 +123,7 @@ stream_head('Dashboard', 'dashboard');
     <div class="card-hd"><i data-lucide="receipt"></i><h2>Últimas ventas</h2></div>
     <?php if ($ultimas): foreach ($ultimas as $v): ?>
       <div class="lrow">
-        <div class="l-main"><b><?= h($v['cliente'] ?: '—') ?></b><span><?= h($v['plataforma']) ?></span></div>
+        <div class="l-main"><b><?= h($v['cliente'] ?: '—') ?></b><span><?= h($v['plataforma']) ?> · <span style="font-family:ui-monospace,monospace;color:var(--accent)"><?= h(stream_cod_pedido((int) $v['id'])) ?></span></span></div>
         <span class="amt">$<?= number_format((float) $v['precio'], 2) ?></span>
       </div>
     <?php endforeach; else: ?><div class="empty">Sin ventas todavía.</div><?php endif; ?>

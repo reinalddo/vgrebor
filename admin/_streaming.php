@@ -247,6 +247,14 @@ function stream_msg_recordatorio(array $v): string {
   return $m;
 }
 
+/** Código de pedido LEGIBLE de una venta, derivado de su id único (que ya existe y nunca se repite).
+ *  No toca la BD ni las rutas de cobro: es solo presentación (formato RBX-000123). El mismo id que ya
+ *  usa el sistema internamente sale ahora como número de pedido para ubicar la compra en el reporte. */
+function stream_cod_pedido($id): string {
+  $n = (int) $id;
+  return $n > 0 ? 'RBX-' . str_pad((string) $n, 6, '0', STR_PAD_LEFT) : '—';
+}
+
 function st_kpis(PDO $pdo): array {
   $o = (int) stream_owner_id();
   $hoy = date('Y-m-d');
@@ -259,7 +267,7 @@ function st_kpis(PDO $pdo): array {
     $k['semana']   = (int)$pdo->query("SELECT COUNT(*) FROM streaming_ventas WHERE $scope AND estado='activa' AND fecha_vencimiento BETWEEN '$hoy' AND DATE_ADD('$hoy', INTERVAL 7 DAY)")->fetchColumn();
     $k['vencidas'] = (int)$pdo->query("SELECT COUNT(*) FROM streaming_ventas WHERE $scope AND (estado='vencida' OR (estado='activa' AND fecha_vencimiento < '$hoy'))")->fetchColumn();
     $k['activas']  = (int)$pdo->query("SELECT COUNT(*) FROM streaming_ventas WHERE $scope AND estado='activa' AND fecha_vencimiento >= '$hoy'")->fetchColumn();
-    $k['mes']      = (float)$pdo->query("SELECT COALESCE(SUM(precio),0) FROM streaming_ventas WHERE $scope AND MONTH(creado_en)=MONTH(NOW()) AND YEAR(creado_en)=YEAR(NOW())")->fetchColumn();
+    $k['mes']      = (float)$pdo->query("SELECT COALESCE(SUM(precio),0) FROM streaming_ventas WHERE $scope AND estado<>'cancelada' AND MONTH(creado_en)=MONTH(NOW()) AND YEAR(creado_en)=YEAR(NOW())")->fetchColumn();
     // Ganancia = INGRESOS por ventas − COSTO TOTAL del stock (lo invertido). Así el stock comprado y NO
     // vendido RESTA (inversión en rojo) y cada venta SUMA. Para el REVENDEDOR (o>0) el ingreso es solo lo
     // que vendió a un CLIENTE (las entregas del admin sin cliente aún no son ingreso); para el ADMIN (o=0)
@@ -289,7 +297,7 @@ function st_asesores(PDO $pdo): array {
   try {
     return $pdo->query("SELECT COALESCE(u.nombre, CONCAT('Usuario #', v.creado_por)) AS nombre, COUNT(*) n, COALESCE(SUM(v.precio),0) total
         FROM streaming_ventas v LEFT JOIN usuarios u ON u.id = v.creado_por
-        WHERE v.owner_id=$o AND v.creado_por IS NOT NULL AND MONTH(v.creado_en)=MONTH(NOW()) AND YEAR(v.creado_en)=YEAR(NOW())
+        WHERE v.owner_id=$o AND v.estado<>'cancelada' AND v.creado_por IS NOT NULL AND MONTH(v.creado_en)=MONTH(NOW()) AND YEAR(v.creado_en)=YEAR(NOW())
         GROUP BY v.creado_por ORDER BY total DESC")->fetchAll(PDO::FETCH_ASSOC);
   } catch (Throwable $e) { return []; }
 }

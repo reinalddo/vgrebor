@@ -22,6 +22,17 @@ $OWNER = (int) stream_owner_id();
 $csrf = csrf_token();
 $msg = '';
 
+// AJAX (sondeo en tiempo real del layout): no leídas totales + de tickets + la última, para el tono/aviso.
+if (($_GET['ajax'] ?? '') === 'count') {
+  header('Content-Type: application/json; charset=utf-8');
+  $tot = 0; $tk = 0; $last = null;
+  try { $tot = (int) stream_notif_no_leidas($pdo, $OWNER); } catch (Throwable $e) {}
+  try { $st = $pdo->prepare("SELECT COUNT(*) FROM stream_notificaciones WHERE owner_id=? AND leido=0 AND tipo='ticket'"); $st->execute([$OWNER]); $tk = (int) $st->fetchColumn(); } catch (Throwable $e) {}
+  try { $st = $pdo->prepare("SELECT titulo, url, tipo FROM stream_notificaciones WHERE owner_id=? AND leido=0 ORDER BY id DESC LIMIT 1"); $st->execute([$OWNER]); $last = $st->fetch(PDO::FETCH_ASSOC) ?: null; } catch (Throwable $e) {}
+  echo json_encode(['total' => $tot, 'ticket' => $tk, 'last' => $last]);
+  exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   csrf_check();
   $a = (string) ($_POST['accion'] ?? '');
@@ -59,6 +70,7 @@ function ntf_estilo(string $t): array {
     case 'cuenta':     return ['🔧', '#db2777', 'Cambio en cuenta'];
     case 'credenciales': return ['🔑', '#dc2626', 'Cambio de credenciales'];
     case 'asignacion': return ['📦', '#059669', 'Asignación'];
+    case 'ticket':     return ['🎫', '#0891b2', 'Soporte'];
     default:           return ['🔔', '#64748b', 'Aviso'];
   }
 }
