@@ -3202,12 +3202,13 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
              tamaño junto y no quede desproporcionado. */
           @media (max-width: 576px) {
             .gg-drops-card { width: 230px; }
-            .gg-drops-badge { font-size: 0.62rem; padding: 0.26rem 0.45rem; }
-            .gg-drops-image-fallback { font-size: 1.8rem; }
-            .gg-drops-game-label { font-size: 0.78rem; }
-            .gg-drops-price-original { font-size: 0.68rem; }
-            .gg-drops-price-actual { font-size: 0.94rem; }
-            .gg-drops-info-row { padding: 0.35rem 0.55rem; }
+            .gg-drops-badge { font-size: 0.29rem; padding: 0.13rem 0.24rem; }
+            .gg-drops-image-fallback { font-size: 1.35rem; }
+            .gg-drops-game-label { font-size: 0.32rem; letter-spacing: 0.01em; }
+            .gg-drops-price-original { font-size: 0.29rem; }
+            .gg-drops-price-actual { font-size: 0.38rem; }
+            .gg-drops-info-row { padding: 0.21rem 0.3rem; gap: 0.19rem; }
+            .gg-drops-price-stack { gap: 0.15rem; }
           }
           .gg-drops-top {
             display: flex;
