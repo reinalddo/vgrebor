@@ -3194,6 +3194,21 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             box-shadow: 0 0 18px rgba(34,211,238,0.2);
             transform: translateY(-2px);
           }
+          /* En celular, 320px de ancho fijo ocupa casi toda la pantalla y se
+             ve desproporcionadamente grande (en desktop, contra un contenedor
+             mucho más ancho, el mismo tamaño se ve normal). Se reduce la
+             tarjeta completa a escala en pantallas angostas — no solo el
+             ancho, también las fuentes internas, para que todo baje de
+             tamaño junto y no quede desproporcionado. */
+          @media (max-width: 576px) {
+            .gg-drops-card { width: 230px; }
+            .gg-drops-badge { font-size: 0.62rem; padding: 0.26rem 0.45rem; }
+            .gg-drops-image-fallback { font-size: 1.8rem; }
+            .gg-drops-game-label { font-size: 0.78rem; }
+            .gg-drops-price-original { font-size: 0.68rem; }
+            .gg-drops-price-actual { font-size: 0.94rem; }
+            .gg-drops-info-row { padding: 0.35rem 0.55rem; }
+          }
           .gg-drops-top {
             display: flex;
             align-items: stretch;
