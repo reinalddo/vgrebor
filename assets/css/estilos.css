@@ -727,6 +727,49 @@ body.modal-open .floating-social-stack {
   box-shadow: 0 0 24px rgba(var(--theme-float-whatsapp-bg-rgb), 0.44), 0 0 54px rgba(var(--theme-float-whatsapp-bg-rgb), 0.22);
 }
 
+/* ── Módulo Ayuda: botón único que despliega Soporte / Canal / Tutoriales ── */
+.ayuda-fab-submenu {
+  display: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.ayuda-fab-submenu.open {
+  display: flex;
+}
+
+.ayuda-fab-item {
+  opacity: 0;
+  transform: translateY(10px) scale(0.94);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.ayuda-fab-submenu.show .ayuda-fab-item {
+  opacity: 1;
+  transform: none;
+}
+
+.ayuda-fab-submenu.show .ayuda-fab-item:nth-child(1) { transition-delay: 0.06s; }
+.ayuda-fab-submenu.show .ayuda-fab-item:nth-child(2) { transition-delay: 0.03s; }
+.ayuda-fab-submenu.show .ayuda-fab-item:nth-child(3) { transition-delay: 0s; }
+
+.ayuda-fab-toggle .floating-social-icon {
+  transition: transform 0.2s ease;
+}
+
+.ayuda-fab-toggle[aria-expanded="true"] .floating-social-icon {
+  transform: rotate(15deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ayuda-fab-item,
+  .ayuda-fab-toggle .floating-social-icon {
+    transition: none !important;
+  }
+}
+
 @media (max-width: 576px) {
   .social-footer-card {
     padding: 0.9rem 0.95rem;

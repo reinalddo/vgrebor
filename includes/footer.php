@@ -3,6 +3,7 @@ require_once __DIR__ . '/tenant.php';
 require_once __DIR__ . '/store_config.php';
 require_once __DIR__ . '/recharge_notifications.php';
 require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/ayuda.php';
 
 // ── CSRF: emisión del token en páginas de admin (ver includes/auth.php) ──
 // Se reutiliza recharge_notifications_is_public_context() (ya cargado
@@ -99,6 +100,14 @@ $hasInstagram = store_config_is_valid_social_url($instagramUrl);
 $hasTiktok = store_config_is_valid_social_url($tiktokUrl);
 $hasWhatsapp = $whatsappFloatingEnabled && $whatsappUrl !== '';
 $hasWhatsappChannel = $whatsappChannelFloatingEnabled && store_config_is_valid_social_url($whatsappChannelUrl);
+
+// ── Módulo Ayuda: un solo botón flotante que despliega Soporte / Canal de
+// difusión / Tutoriales. $hasWhatsapp y $hasWhatsappChannel (arriba) siguen
+// siendo la única fuente de verdad de si esas 2 opciones están activas y
+// cuál es su URL — este bloque solo agrega la config visual y Tutoriales.
+$ayudaTutoriales = ayuda_tutoriales_listar();
+$hasAyudaTutoriales = count($ayudaTutoriales) > 0;
+$hasAyuda = $hasWhatsapp || $hasWhatsappChannel || $hasAyudaTutoriales;
 
 $menuScript = <<<'SCRIPT'
 <script>
@@ -1984,25 +1993,111 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     </div>
   <?php endif; ?>
   <?php endif; // footerNewEnabled ?>
-  <?php if ($hasWhatsapp || $hasWhatsappChannel): ?>
+  <?php if ($hasAyuda):
+    // Ícono/estilo de cada botón del módulo Ayuda. Presentación pura (arma
+    // HTML), la lógica de configuración vive en includes/ayuda.php — mismo
+    // criterio que tvg_youtube_id() más abajo en este archivo.
+    if (!function_exists('ayuda_fab_style_attr')) {
+        function ayuda_fab_style_attr(string $boton): string {
+            $bg = ayuda_boton_color_fondo($boton);
+            $fg = ayuda_boton_color_texto($boton);
+            if ($bg === '' && $fg === '') {
+                return '';
+            }
+            $css = '';
+            if ($bg !== '') {
+                $css .= 'background:' . htmlspecialchars($bg, ENT_QUOTES, 'UTF-8') . ';border-color:' . htmlspecialchars($bg, ENT_QUOTES, 'UTF-8') . ';';
+            }
+            if ($fg !== '') {
+                $css .= 'color:' . htmlspecialchars($fg, ENT_QUOTES, 'UTF-8') . ';';
+            }
+            return ' style="' . $css . '"';
+        }
+    }
+    if (!function_exists('ayuda_fab_icon_html')) {
+        function ayuda_fab_icon_html(string $boton, string $defaultSvg = ''): string {
+            $tipo = ayuda_boton_icono_tipo($boton);
+            if ($tipo === 'defecto' && $defaultSvg !== '') {
+                return $defaultSvg;
+            }
+            if ($tipo === 'imagen' && ayuda_boton_icono_imagen($boton) !== '') {
+                $src = htmlspecialchars(app_path('/' . ltrim(ayuda_boton_icono_imagen($boton), '/')), ENT_QUOTES, 'UTF-8');
+                return '<img src="' . $src . '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:6px;">';
+            }
+            $emoji = htmlspecialchars(ayuda_boton_icono_emoji($boton), ENT_QUOTES, 'UTF-8');
+            return '<span style="font-size:1.2rem;line-height:1;">' . $emoji . '</span>';
+        }
+    }
+    $ayudaCanalSvg = '<svg viewBox="0 0 24 24" fill="currentColor" role="img"><path d="M12 2a10 10 0 0 0-8.7 14.95L2 22l5.22-1.3A10 10 0 1 0 12 2Zm4.74 13.34c-.2.56-1.16 1.04-1.62 1.11-.42.06-.95.09-1.53-.1-.35-.11-.81-.26-1.39-.51-2.45-1.06-4.05-3.67-4.17-3.84-.12-.16-1-1.34-1-2.55s.63-1.79.86-2.03c.22-.24.48-.3.64-.3h.46c.14 0 .33-.05.52.39.2.47.67 1.62.73 1.74.06.12.1.27.02.43-.07.16-.11.26-.22.4-.11.13-.22.29-.31.39-.1.11-.2.22-.08.43.12.2.53.88 1.14 1.42.78.69 1.44.9 1.64 1 .2.1.31.08.43-.05.12-.13.49-.57.62-.76.13-.2.27-.16.45-.1.19.07 1.17.55 1.38.65.2.1.34.15.39.24.05.09.05.53-.15 1.09Z"/></svg>';
+    $ayudaSoporteSvg = '<svg viewBox="0 0 24 24" fill="currentColor" role="img"><path d="M20.52 3.48A11.8 11.8 0 0 0 12.08 0C5.54 0 .22 5.32.22 11.86c0 2.09.55 4.13 1.58 5.93L0 24l6.39-1.67a11.8 11.8 0 0 0 5.69 1.45h.01c6.54 0 11.86-5.32 11.86-11.86 0-3.17-1.23-6.16-3.43-8.44ZM12.09 21.76h-.01a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.79.99 1.01-3.69-.23-.38A9.87 9.87 0 0 1 2.2 11.86C2.2 6.4 6.63 1.98 12.08 1.98c2.64 0 5.12 1.03 6.98 2.91a9.8 9.8 0 0 1 2.88 6.98c0 5.45-4.43 9.89-9.85 9.89Zm5.42-7.41c-.3-.15-1.76-.87-2.03-.97-.27-.1-.46-.15-.66.15-.2.3-.76.97-.93 1.17-.17.2-.34.22-.64.07-.3-.15-1.27-.47-2.41-1.49-.89-.8-1.49-1.79-1.67-2.09-.17-.3-.02-.47.13-.62.13-.13.3-.34.44-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.66-1.59-.9-2.17-.24-.58-.48-.5-.66-.5h-.56c-.2 0-.52.08-.79.37-.27.3-1.05 1.03-1.05 2.52 0 1.49 1.08 2.92 1.23 3.12.15.2 2.11 3.23 5.12 4.52.72.31 1.29.49 1.73.63.73.23 1.39.2 1.91.12.58-.09 1.76-.72 2.01-1.42.25-.69.25-1.29.17-1.42-.07-.12-.27-.2-.57-.35Z"/></svg>';
+  ?>
     <div class="floating-social-stack" aria-label="Accesos rápidos de contacto">
-      <?php if ($hasWhatsappChannel): ?>
-        <a href="<?php echo htmlspecialchars($whatsappChannelUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer" class="floating-social-button floating-social-button-channel" aria-label="Canal de difusión">
-          <span class="floating-social-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="currentColor" role="img"><path d="M12 2a10 10 0 0 0-8.7 14.95L2 22l5.22-1.3A10 10 0 1 0 12 2Zm4.74 13.34c-.2.56-1.16 1.04-1.62 1.11-.42.06-.95.09-1.53-.1-.35-.11-.81-.26-1.39-.51-2.45-1.06-4.05-3.67-4.17-3.84-.12-.16-1-1.34-1-2.55s.63-1.79.86-2.03c.22-.24.48-.3.64-.3h.46c.14 0 .33-.05.52.39.2.47.67 1.62.73 1.74.06.12.1.27.02.43-.07.16-.11.26-.22.4-.11.13-.22.29-.31.39-.1.11-.2.22-.08.43.12.2.53.88 1.14 1.42.78.69 1.44.9 1.64 1 .2.1.31.08.43-.05.12-.13.49-.57.62-.76.13-.2.27-.16.45-.1.19.07 1.17.55 1.38.65.2.1.34.15.39.24.05.09.05.53-.15 1.09Z"/></svg>
-          </span>
-          <span class="floating-social-label" style="display:inline-block;white-space:nowrap;line-height:1.2;">Canal de difusión</span>
-        </a>
-      <?php endif; ?>
-      <?php if ($hasWhatsapp): ?>
-        <a href="<?php echo htmlspecialchars($whatsappUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer" class="floating-social-button floating-social-button-whatsapp" aria-label="WhatsApp">
-          <span class="floating-social-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="currentColor" role="img"><path d="M20.52 3.48A11.8 11.8 0 0 0 12.08 0C5.54 0 .22 5.32.22 11.86c0 2.09.55 4.13 1.58 5.93L0 24l6.39-1.67a11.8 11.8 0 0 0 5.69 1.45h.01c6.54 0 11.86-5.32 11.86-11.86 0-3.17-1.23-6.16-3.43-8.44ZM12.09 21.76h-.01a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.79.99 1.01-3.69-.23-.38A9.87 9.87 0 0 1 2.2 11.86C2.2 6.4 6.63 1.98 12.08 1.98c2.64 0 5.12 1.03 6.98 2.91a9.8 9.8 0 0 1 2.88 6.98c0 5.45-4.43 9.89-9.85 9.89Zm5.42-7.41c-.3-.15-1.76-.87-2.03-.97-.27-.1-.46-.15-.66.15-.2.3-.76.97-.93 1.17-.17.2-.34.22-.64.07-.3-.15-1.27-.47-2.41-1.49-.89-.8-1.49-1.79-1.67-2.09-.17-.3-.02-.47.13-.62.13-.13.3-.34.44-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.66-1.59-.9-2.17-.24-.58-.48-.5-.66-.5h-.56c-.2 0-.52.08-.79.37-.27.3-1.05 1.03-1.05 2.52 0 1.49 1.08 2.92 1.23 3.12.15.2 2.11 3.23 5.12 4.52.72.31 1.29.49 1.73.63.73.23 1.39.2 1.91.12.58-.09 1.76-.72 2.01-1.42.25-.69.25-1.29.17-1.42-.07-.12-.27-.2-.57-.35Z"/></svg>
-          </span>
-          <span class="floating-social-label" style="display:inline-block;white-space:nowrap;line-height:1.2;">Soporte</span>
-        </a>
-      <?php endif; ?>
+      <div id="ayuda-fab-submenu" class="ayuda-fab-submenu" role="menu">
+        <?php if ($hasAyudaTutoriales): ?>
+          <button type="button" id="ayuda-fab-tutoriales-btn" class="floating-social-button ayuda-fab-item" role="menuitem" aria-label="Tutoriales"<?php echo ayuda_fab_style_attr('tutoriales'); ?>>
+            <span class="floating-social-icon" aria-hidden="true"><?php echo ayuda_fab_icon_html('tutoriales'); ?></span>
+            <span class="floating-social-label" style="display:inline-block;white-space:nowrap;line-height:1.2;"><?php echo htmlspecialchars(ayuda_boton_texto('tutoriales'), ENT_QUOTES, 'UTF-8'); ?></span>
+          </button>
+        <?php endif; ?>
+        <?php if ($hasWhatsappChannel): ?>
+          <a href="<?php echo htmlspecialchars($whatsappChannelUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer" class="floating-social-button floating-social-button-channel ayuda-fab-item" role="menuitem" aria-label="Canal de difusión"<?php echo ayuda_fab_style_attr('canal'); ?>>
+            <span class="floating-social-icon" aria-hidden="true"><?php echo ayuda_fab_icon_html('canal', $ayudaCanalSvg); ?></span>
+            <span class="floating-social-label" style="display:inline-block;white-space:nowrap;line-height:1.2;"><?php echo htmlspecialchars(ayuda_boton_texto('canal'), ENT_QUOTES, 'UTF-8'); ?></span>
+          </a>
+        <?php endif; ?>
+        <?php if ($hasWhatsapp): ?>
+          <a href="<?php echo htmlspecialchars($whatsappUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer" class="floating-social-button floating-social-button-whatsapp ayuda-fab-item" role="menuitem" aria-label="Soporte"<?php echo ayuda_fab_style_attr('soporte'); ?>>
+            <span class="floating-social-icon" aria-hidden="true"><?php echo ayuda_fab_icon_html('soporte', $ayudaSoporteSvg); ?></span>
+            <span class="floating-social-label" style="display:inline-block;white-space:nowrap;line-height:1.2;"><?php echo htmlspecialchars(ayuda_boton_texto('soporte'), ENT_QUOTES, 'UTF-8'); ?></span>
+          </a>
+        <?php endif; ?>
+      </div>
+      <button type="button" id="ayuda-fab-toggle" class="floating-social-button ayuda-fab-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="ayuda-fab-submenu" aria-label="<?php echo htmlspecialchars(ayuda_boton_texto('principal'), ENT_QUOTES, 'UTF-8'); ?>"<?php echo ayuda_fab_style_attr('principal'); ?>>
+        <span class="floating-social-icon" aria-hidden="true"><?php echo ayuda_fab_icon_html('principal'); ?></span>
+        <span class="floating-social-label" style="display:inline-block;white-space:nowrap;line-height:1.2;"><?php echo htmlspecialchars(ayuda_boton_texto('principal'), ENT_QUOTES, 'UTF-8'); ?></span>
+      </button>
     </div>
+    <script>
+    (function () {
+      var toggle = document.getElementById('ayuda-fab-toggle');
+      var submenu = document.getElementById('ayuda-fab-submenu');
+      if (!toggle || !submenu) return;
+      var closeTimer = null;
+
+      function openMenu() {
+        clearTimeout(closeTimer);
+        submenu.classList.add('open');
+        requestAnimationFrame(function () { submenu.classList.add('show'); });
+        toggle.setAttribute('aria-expanded', 'true');
+      }
+      function closeMenu() {
+        submenu.classList.remove('show');
+        toggle.setAttribute('aria-expanded', 'false');
+        clearTimeout(closeTimer);
+        closeTimer = setTimeout(function () { submenu.classList.remove('open'); }, 220);
+      }
+      function isOpen() { return submenu.classList.contains('open'); }
+
+      toggle.addEventListener('click', function (e) {
+        e.stopPropagation();
+        isOpen() ? closeMenu() : openMenu();
+      });
+      document.addEventListener('click', function (e) {
+        if (isOpen() && !submenu.contains(e.target) && e.target !== toggle) closeMenu();
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && isOpen()) closeMenu();
+      });
+      submenu.querySelectorAll('.ayuda-fab-item').forEach(function (item) {
+        item.addEventListener('click', function () {
+          if (item.id === 'ayuda-fab-tutoriales-btn' && typeof window.openAyudaTutorialesModal === 'function') {
+            window.openAyudaTutorialesModal();
+          }
+          closeMenu();
+        });
+      });
+    })();
+    </script>
   <?php endif; ?>
   <div id="live-recharge-notifications" class="live-recharge-stack" data-position="<?php echo htmlspecialchars($rechargeNotificationPosition, ENT_QUOTES, 'UTF-8'); ?>" aria-live="polite" aria-atomic="false"></div>
   <style>
