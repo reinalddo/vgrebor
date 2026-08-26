@@ -113,6 +113,46 @@ if (!function_exists('ayuda_boton_color_texto')) {
     }
 }
 
+// ── Degradado de fondo (opcional, sobre el color de fondo de arriba) ──────
+if (!function_exists('ayuda_boton_fondo_modo')) {
+    function ayuda_boton_fondo_modo(string $boton): string {
+        $modo = trim((string) store_config_get('ayuda_' . $boton . '_fondo_modo', 'solido'));
+        return $modo === 'degradado' ? 'degradado' : 'solido';
+    }
+}
+
+if (!function_exists('ayuda_boton_color_fondo2')) {
+    function ayuda_boton_color_fondo2(string $boton): string {
+        $color = trim((string) store_config_get('ayuda_' . $boton . '_color_fondo2', ''));
+        if ($color === '') {
+            return '';
+        }
+        $defaults = ayuda_boton_defaults($boton);
+        $fallback = $defaults['color_fondo'] !== '' ? $defaults['color_fondo'] : '#000000';
+        return store_config_normalize_hex_color($color, $fallback);
+    }
+}
+
+// Valor final para el CSS `background`: un solo color, o el degradado de 2
+// colores si el admin activó ese modo. ayuda_boton_color_fondo() (arriba)
+// sigue siendo el getter "crudo" que precarga el selector de color del
+// admin — este es el que se usa para pintar el botón de verdad.
+if (!function_exists('ayuda_boton_fondo_css')) {
+    function ayuda_boton_fondo_css(string $boton): string {
+        $fondo = ayuda_boton_color_fondo($boton);
+        if ($fondo === '') {
+            return '';
+        }
+        if (ayuda_boton_fondo_modo($boton) === 'degradado') {
+            $fondo2 = ayuda_boton_color_fondo2($boton);
+            if ($fondo2 !== '') {
+                return 'linear-gradient(135deg, ' . $fondo . ', ' . $fondo2 . ')';
+            }
+        }
+        return $fondo;
+    }
+}
+
 // Mismo patrón exacto que referidos_banner_store_image_upload() /
 // home_gallery_store_image_upload(): misma validación, mismo bucket de
 // subida por tenant, carpeta propia ('ayuda').
@@ -237,6 +277,36 @@ if (!function_exists('ayuda_tiktok_embed_url')) {
     }
 }
 
+// TikTok no expone una URL de miniatura predecible como YouTube — hay que
+// pedirla a su endpoint público de oEmbed (no requiere autenticación). Es
+// "mejor esfuerzo": si TikTok no responde o bloquea la IP del servidor, se
+// guarda con thumbnail_url vacío y el frontend cae a un ícono genérico.
+if (!function_exists('ayuda_tiktok_oembed_thumbnail')) {
+    function ayuda_tiktok_oembed_thumbnail(string $tiktokId): string {
+        if (!function_exists('curl_init') || !preg_match('/^\d+$/', $tiktokId)) {
+            return '';
+        }
+
+        $watchUrl = 'https://www.tiktok.com/@tiktok/video/' . $tiktokId;
+        $ch = curl_init('https://www.tiktok.com/oembed?url=' . urlencode($watchUrl));
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 6,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; AyudaBot/1.0)',
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode !== 200 || $response === false) {
+            return '';
+        }
+        $data = json_decode((string) $response, true);
+        return is_array($data) ? trim((string) ($data['thumbnail_url'] ?? '')) : '';
+    }
+}
+
 if (!function_exists('ayuda_tutoriales_resolver_enlace')) {
     function ayuda_tutoriales_resolver_enlace(string $url): array {
         $url = trim($url);
@@ -246,12 +316,17 @@ if (!function_exists('ayuda_tutoriales_resolver_enlace')) {
 
         $youtubeId = store_config_extract_youtube_video_id($url);
         if ($youtubeId !== '') {
+            // /shorts/ es formato vertical (9:16), el resto es horizontal (16:9).
+            $path = (string) parse_url($url, PHP_URL_PATH);
+            $esVertical = strpos($path, '/shorts/') !== false;
             return [
                 'ok' => true,
                 'tipo' => 'youtube',
                 'video_id' => $youtubeId,
                 'enlace' => store_config_normalize_youtube_url($url),
                 'embed_url' => store_config_youtube_embed_url($url),
+                'orientacion' => $esVertical ? 'portrait' : 'landscape',
+                'thumbnail_url' => 'https://img.youtube.com/vi/' . $youtubeId . '/hqdefault.jpg',
             ];
         }
 
@@ -263,6 +338,8 @@ if (!function_exists('ayuda_tutoriales_resolver_enlace')) {
                 'video_id' => $tiktokId,
                 'enlace' => 'https://www.tiktok.com/embed/v2/' . $tiktokId,
                 'embed_url' => ayuda_tiktok_embed_url($tiktokId),
+                'orientacion' => 'portrait',
+                'thumbnail_url' => ayuda_tiktok_oembed_thumbnail($tiktokId),
             ];
         }
 
@@ -295,12 +372,26 @@ if (!function_exists('ayuda_tutoriales_listar')) {
             if ($titulo === '' || $embedUrl === '') {
                 continue;
             }
+            // orientacion/thumbnail_url no existían antes de agregar las
+            // miniaturas — si un video se guardó antes de eso, se recalculan
+            // acá con un valor razonable por defecto (sin pedirle nada a
+            // TikTok de nuevo en cada carga de página, solo al guardar).
+            $orientacion = (string) ($item['orientacion'] ?? '');
+            if ($orientacion !== 'portrait' && $orientacion !== 'landscape') {
+                $orientacion = $tipo === 'tiktok' ? 'portrait' : 'landscape';
+            }
+            $thumbnailUrl = trim((string) ($item['thumbnail_url'] ?? ''));
+            if ($thumbnailUrl === '' && $tipo === 'youtube' && $videoId !== '') {
+                $thumbnailUrl = 'https://img.youtube.com/vi/' . $videoId . '/hqdefault.jpg';
+            }
             $out[] = [
                 'titulo' => $titulo,
                 'tipo' => $tipo,
                 'video_id' => $videoId,
                 'enlace' => (string) ($item['enlace'] ?? ''),
                 'embed_url' => $embedUrl,
+                'orientacion' => $orientacion,
+                'thumbnail_url' => $thumbnailUrl,
             ];
         }
 
@@ -308,9 +399,18 @@ if (!function_exists('ayuda_tutoriales_listar')) {
     }
 }
 
-// $items: array de ['titulo' => string, 'enlace' => string] (crudo, tal
-// cual viene del formulario). Valida y resuelve cada enlace; si alguno no
-// es válido, devuelve el error puntual sin guardar nada (todo o nada).
+// $items: array de ['titulo' => string, 'enlace' => string, 'orientacion' =>
+// string opcional] (crudo, tal cual viene del formulario). Valida y resuelve
+// cada enlace; si alguno no es válido, devuelve el error puntual sin guardar
+// nada (todo o nada).
+//
+// La "orientacion" (landscape/portrait) NO se puede detectar de forma
+// confiable solo con la URL: un YouTube Short se puede compartir con un
+// link normal de /watch?v=... indistinguible de un video horizontal (el
+// hint de /shorts/ en la URL solo funciona si el admin pegó ESE formato de
+// link puntual). Por eso el admin puede elegirla a mano por cada video — si
+// no manda un valor válido, se usa la sugerencia automática de
+// ayuda_tutoriales_resolver_enlace() como respaldo.
 if (!function_exists('ayuda_tutoriales_guardar')) {
     function ayuda_tutoriales_guardar(array $items): array {
         $out = [];
@@ -329,11 +429,18 @@ if (!function_exists('ayuda_tutoriales_guardar')) {
                 return ['success' => false, 'message' => 'Video "' . $titulo . '": ' . $resuelto['message']];
             }
 
+            $orientacionForm = strtolower(trim((string) ($item['orientacion'] ?? '')));
+            $orientacion = in_array($orientacionForm, ['landscape', 'portrait'], true)
+                ? $orientacionForm
+                : $resuelto['orientacion'];
+
             $out[] = [
                 'titulo' => $titulo,
                 'tipo' => $resuelto['tipo'],
                 'video_id' => $resuelto['video_id'],
                 'enlace' => $resuelto['enlace'],
+                'orientacion' => $orientacion,
+                'thumbnail_url' => $resuelto['thumbnail_url'],
             ];
         }
 

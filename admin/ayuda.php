@@ -82,6 +82,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'guard
             if ($subidaOk) {
                 $nuevoColorFondo = '';
                 $nuevoColorTexto = '';
+                $nuevoFondoModo = 'solido';
+                $nuevoColorFondo2 = '';
                 if ($personalizarColores) {
                     $colorFondoPost = trim((string) ($_POST['color_fondo'] ?? ''));
                     $colorTextoPost = trim((string) ($_POST['color_texto'] ?? ''));
@@ -89,6 +91,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'guard
                     $fallbackTexto = $defaults['color_texto'] !== '' ? $defaults['color_texto'] : '#ffffff';
                     $nuevoColorFondo = store_config_normalize_hex_color($colorFondoPost, $fallbackFondo);
                     $nuevoColorTexto = store_config_normalize_hex_color($colorTextoPost, $fallbackTexto);
+
+                    $nuevoFondoModo = ($_POST['fondo_modo'] ?? 'solido') === 'degradado' ? 'degradado' : 'solido';
+                    if ($nuevoFondoModo === 'degradado') {
+                        $colorFondo2Post = trim((string) ($_POST['color_fondo2'] ?? ''));
+                        $nuevoColorFondo2 = store_config_normalize_hex_color($colorFondo2Post, $fallbackFondo);
+                    }
                 }
 
                 store_config_upsert('ayuda_' . $boton . '_texto', $nuevoTexto, 'Módulo Ayuda: texto del botón "' . $boton . '".');
@@ -97,6 +105,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'guard
                 store_config_upsert('ayuda_' . $boton . '_icono_imagen', $imagenActual, 'Módulo Ayuda: ruta de imagen del ícono del botón "' . $boton . '".');
                 store_config_upsert('ayuda_' . $boton . '_color_fondo', $nuevoColorFondo, 'Módulo Ayuda: color de fondo del botón "' . $boton . '" (vacío = usar el estilo original).');
                 store_config_upsert('ayuda_' . $boton . '_color_texto', $nuevoColorTexto, 'Módulo Ayuda: color de letra del botón "' . $boton . '" (vacío = usar el estilo original).');
+                store_config_upsert('ayuda_' . $boton . '_fondo_modo', $nuevoFondoModo, 'Módulo Ayuda: si el fondo del botón "' . $boton . '" es sólido o degradado.');
+                store_config_upsert('ayuda_' . $boton . '_color_fondo2', $nuevoColorFondo2, 'Módulo Ayuda: segundo color del degradado de fondo del botón "' . $boton . '" (vacío si es sólido).');
                 $flashMessage = 'Botón actualizado correctamente.';
                 $flashType = 'success';
             }
@@ -108,12 +118,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'guard
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'guardar_tutoriales_videos') {
     $titulos = $_POST['tutorial_titulo'] ?? [];
     $enlaces = $_POST['tutorial_enlace'] ?? [];
+    $orientaciones = $_POST['tutorial_orientacion'] ?? [];
     $items = [];
     if (is_array($titulos)) {
         foreach ($titulos as $i => $titulo) {
             $items[] = [
                 'titulo' => (string) $titulo,
                 'enlace' => (string) ($enlaces[$i] ?? ''),
+                'orientacion' => (string) ($orientaciones[$i] ?? ''),
             ];
         }
     }
@@ -133,6 +145,9 @@ foreach (ayuda_botones_validos() as $boton) {
         'icono_imagen' => ayuda_boton_icono_imagen($boton),
         'color_fondo' => ayuda_boton_color_fondo($boton),
         'color_texto' => ayuda_boton_color_texto($boton),
+        'fondo_modo' => ayuda_boton_fondo_modo($boton),
+        'color_fondo2' => ayuda_boton_color_fondo2($boton),
+        'fondo_css' => ayuda_boton_fondo_css($boton),
     ];
 }
 
@@ -174,10 +189,11 @@ $etiquetasBotones = [
     $actual = $botonesActuales[$boton];
     $tieneDefecto = in_array($boton, $botonesConDefecto, true);
     $personalizaColoresActual = $actual['color_fondo'] !== '' || $actual['color_texto'] !== '';
-    $previewFondo = $actual['color_fondo'] !== '' ? $actual['color_fondo'] : '#181f2a';
+    $previewFondo = $actual['fondo_css'] !== '' ? $actual['fondo_css'] : '#181f2a';
     $previewTexto = $actual['color_texto'] !== '' ? $actual['color_texto'] : '#e2e8f0';
     $colorFondoValor = $actual['color_fondo'] !== '' ? $actual['color_fondo'] : ($tieneDefecto ? '#181f2a' : $actual['color_fondo']);
     $colorTextoValor = $actual['color_texto'] !== '' ? $actual['color_texto'] : ($tieneDefecto ? '#e2e8f0' : $actual['color_texto']);
+    $colorFondo2Valor = $actual['color_fondo2'] !== '' ? $actual['color_fondo2'] : '#22d3ee';
   ?>
   <div class="ayuda-card">
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
@@ -249,14 +265,30 @@ $etiquetasBotones = [
           <label class="form-check-label text-light" for="personalizar_colores_<?= $boton ?>">Personalizar colores (si no marcas esto, se usan los colores originales)</label>
         </div>
         <?php endif; ?>
-        <div id="ayuda-colores-fields-<?= $boton ?>" class="d-flex gap-4 flex-wrap" style="<?= $tieneDefecto && !$personalizaColoresActual ? 'display:none;' : '' ?>">
-          <div>
-            <label class="form-label text-secondary small mb-1 d-block">Color de fondo</label>
-            <input type="color" name="color_fondo" class="ayuda-color-input" data-ayuda-preview-fondo="<?= $boton ?>" value="<?= htmlspecialchars($colorFondoValor !== '' ? $colorFondoValor : '#181f2a', ENT_QUOTES, 'UTF-8') ?>">
+        <div id="ayuda-colores-fields-<?= $boton ?>" style="<?= $tieneDefecto && !$personalizaColoresActual ? 'display:none;' : '' ?>">
+          <div class="d-flex gap-4 flex-wrap mb-2">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="fondo_modo" id="fondo_modo_solido_<?= $boton ?>" value="solido" data-ayuda-fondo-modo-radio="<?= $boton ?>" <?= $actual['fondo_modo'] === 'degradado' ? '' : 'checked' ?>>
+              <label class="form-check-label text-light" for="fondo_modo_solido_<?= $boton ?>">Fondo sólido</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="fondo_modo" id="fondo_modo_degradado_<?= $boton ?>" value="degradado" data-ayuda-fondo-modo-radio="<?= $boton ?>" <?= $actual['fondo_modo'] === 'degradado' ? 'checked' : '' ?>>
+              <label class="form-check-label text-light" for="fondo_modo_degradado_<?= $boton ?>">Degradado</label>
+            </div>
           </div>
-          <div>
-            <label class="form-label text-secondary small mb-1 d-block">Color de letra</label>
-            <input type="color" name="color_texto" class="ayuda-color-input" data-ayuda-preview-color="<?= $boton ?>" value="<?= htmlspecialchars($colorTextoValor !== '' ? $colorTextoValor : '#e2e8f0', ENT_QUOTES, 'UTF-8') ?>">
+          <div class="d-flex gap-4 flex-wrap">
+            <div>
+              <label class="form-label text-secondary small mb-1 d-block"><span data-ayuda-label-fondo1="<?= $boton ?>"><?= $actual['fondo_modo'] === 'degradado' ? 'Color 1' : 'Color de fondo' ?></span></label>
+              <input type="color" name="color_fondo" class="ayuda-color-input" data-ayuda-preview-fondo="<?= $boton ?>" value="<?= htmlspecialchars($colorFondoValor !== '' ? $colorFondoValor : '#181f2a', ENT_QUOTES, 'UTF-8') ?>">
+            </div>
+            <div id="ayuda-fondo2-field-<?= $boton ?>" style="<?= $actual['fondo_modo'] === 'degradado' ? '' : 'display:none;' ?>">
+              <label class="form-label text-secondary small mb-1 d-block">Color 2</label>
+              <input type="color" name="color_fondo2" class="ayuda-color-input" data-ayuda-preview-fondo2="<?= $boton ?>" value="<?= htmlspecialchars($colorFondo2Valor, ENT_QUOTES, 'UTF-8') ?>">
+            </div>
+            <div>
+              <label class="form-label text-secondary small mb-1 d-block">Color de letra</label>
+              <input type="color" name="color_texto" class="ayuda-color-input" data-ayuda-preview-color="<?= $boton ?>" value="<?= htmlspecialchars($colorTextoValor !== '' ? $colorTextoValor : '#e2e8f0', ENT_QUOTES, 'UTF-8') ?>">
+            </div>
           </div>
         </div>
       </div>
@@ -270,18 +302,24 @@ $etiquetasBotones = [
 
   <div class="ayuda-card">
     <h2 class="h5 text-info mb-2">Videos de Tutoriales</h2>
-    <p class="text-secondary small mb-3">Pega el enlace de YouTube o TikTok de cada video. Se detecta automáticamente cuál es cuál — no hace falta indicarlo.</p>
+    <p class="text-secondary small mb-3">Pega el enlace de YouTube o TikTok de cada video (se detecta automáticamente cuál es cuál) y elige si se muestra en formato Horizontal o Vertical — un link normal de YouTube no siempre revela si el video es un Short, así que esto lo decides tú.</p>
     <form method="post" class="row g-3">
       <input type="hidden" name="action" value="guardar_tutoriales_videos">
       <div id="ayuda-tutoriales-lista">
-        <?php if (empty($tutorialesActuales)): $tutorialesActuales = [['titulo' => '', 'enlace' => '']]; endif; ?>
+        <?php if (empty($tutorialesActuales)): $tutorialesActuales = [['titulo' => '', 'enlace' => '', 'orientacion' => 'landscape']]; endif; ?>
         <?php foreach ($tutorialesActuales as $video): ?>
         <div class="ayuda-tutorial-row row g-2 align-items-center">
-          <div class="col-12 col-md-4">
+          <div class="col-12 col-md-3">
             <input type="text" name="tutorial_titulo[]" class="form-control ayuda-input" placeholder="Título del video" maxlength="120" value="<?= htmlspecialchars($video['titulo'], ENT_QUOTES, 'UTF-8') ?>">
           </div>
-          <div class="col-12 col-md-6">
+          <div class="col-12 col-md-4">
             <input type="text" name="tutorial_enlace[]" class="form-control ayuda-input" placeholder="Enlace de YouTube o TikTok" value="<?= htmlspecialchars($video['enlace'], ENT_QUOTES, 'UTF-8') ?>">
+          </div>
+          <div class="col-12 col-md-3">
+            <select name="tutorial_orientacion[]" class="form-select ayuda-input">
+              <option value="landscape" <?= ($video['orientacion'] ?? 'landscape') !== 'portrait' ? 'selected' : '' ?>>Horizontal (16:9)</option>
+              <option value="portrait" <?= ($video['orientacion'] ?? '') === 'portrait' ? 'selected' : '' ?>>Vertical (9:16)</option>
+            </select>
           </div>
           <div class="col-12 col-md-2">
             <button type="button" class="btn btn-outline-danger btn-sm w-100" data-ayuda-quitar-fila>Quitar</button>
@@ -301,11 +339,17 @@ $etiquetasBotones = [
 
 <template id="ayuda-tutorial-row-template">
   <div class="ayuda-tutorial-row row g-2 align-items-center">
-    <div class="col-12 col-md-4">
+    <div class="col-12 col-md-3">
       <input type="text" name="tutorial_titulo[]" class="form-control ayuda-input" placeholder="Título del video" maxlength="120">
     </div>
-    <div class="col-12 col-md-6">
+    <div class="col-12 col-md-4">
       <input type="text" name="tutorial_enlace[]" class="form-control ayuda-input" placeholder="Enlace de YouTube o TikTok">
+    </div>
+    <div class="col-12 col-md-3">
+      <select name="tutorial_orientacion[]" class="form-select ayuda-input">
+        <option value="landscape" selected>Horizontal (16:9)</option>
+        <option value="portrait">Vertical (9:16)</option>
+      </select>
     </div>
     <div class="col-12 col-md-2">
       <button type="button" class="btn btn-outline-danger btn-sm w-100" data-ayuda-quitar-fila>Quitar</button>
@@ -350,14 +394,41 @@ $etiquetasBotones = [
     var span = document.getElementById('ayuda-preview-icono-' + el.dataset.ayudaPreviewEmoji);
     if (span) span.textContent = el.value;
   });
-  bindPreview('[data-ayuda-preview-fondo]', function (el) {
-    var pill = document.getElementById('ayuda-preview-' + el.dataset.ayudaPreviewFondo);
-    if (pill) pill.style.background = el.value;
-  });
   bindPreview('[data-ayuda-preview-color]', function (el) {
     var pill = document.getElementById('ayuda-preview-' + el.dataset.ayudaPreviewColor);
     if (pill) pill.style.color = el.value;
   });
+
+  // ── Fondo (sólido o degradado) ──
+  function fondoModoActual(boton) {
+    var radio = document.querySelector('input[data-ayuda-fondo-modo-radio="' + boton + '"]:checked');
+    return radio ? radio.value : 'solido';
+  }
+  function actualizarFondoPreview(boton) {
+    var pill = document.getElementById('ayuda-preview-' + boton);
+    var fondo1 = document.querySelector('[data-ayuda-preview-fondo="' + boton + '"]');
+    var fondo2 = document.querySelector('[data-ayuda-preview-fondo2="' + boton + '"]');
+    if (!pill || !fondo1) return;
+    if (fondoModoActual(boton) === 'degradado' && fondo2) {
+      pill.style.background = 'linear-gradient(135deg, ' + fondo1.value + ', ' + fondo2.value + ')';
+    } else {
+      pill.style.background = fondo1.value;
+    }
+  }
+  document.querySelectorAll('[data-ayuda-fondo-modo-radio]').forEach(function (radio) {
+    radio.addEventListener('change', function () {
+      if (!radio.checked) return;
+      var boton = radio.dataset.ayudaFondoModoRadio;
+      var fondo2Field = document.getElementById('ayuda-fondo2-field-' + boton);
+      var label1 = document.querySelector('[data-ayuda-label-fondo1="' + boton + '"]');
+      var esDegradado = radio.value === 'degradado';
+      if (fondo2Field) fondo2Field.style.display = esDegradado ? '' : 'none';
+      if (label1) label1.textContent = esDegradado ? 'Color 1' : 'Color de fondo';
+      actualizarFondoPreview(boton);
+    });
+  });
+  bindPreview('[data-ayuda-preview-fondo]', function (el) { actualizarFondoPreview(el.dataset.ayudaPreviewFondo); });
+  bindPreview('[data-ayuda-preview-fondo2]', function (el) { actualizarFondoPreview(el.dataset.ayudaPreviewFondo2); });
 
   // ── Repetidor de videos de Tutoriales ──
   var lista = document.getElementById('ayuda-tutoriales-lista');

@@ -2003,6 +2003,10 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     // criterio que tvg_youtube_id() más abajo en este archivo.
     if (!function_exists('ayuda_fab_style_attr')) {
         function ayuda_fab_style_attr(string $boton): string {
+            // $bg (color plano) decide si hay algo personalizado; el fondo
+            // real que se pinta puede ser ese mismo color o su degradado
+            // (ayuda_boton_fondo_css) — el border-color usa siempre el
+            // color plano porque un borde no puede ser un degradado.
             $bg = ayuda_boton_color_fondo($boton);
             $fg = ayuda_boton_color_texto($boton);
             if ($bg === '' && $fg === '') {
@@ -2010,7 +2014,8 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
             }
             $css = '';
             if ($bg !== '') {
-                $css .= 'background:' . htmlspecialchars($bg, ENT_QUOTES, 'UTF-8') . ';border-color:' . htmlspecialchars($bg, ENT_QUOTES, 'UTF-8') . ';';
+                $fondoCss = ayuda_boton_fondo_css($boton);
+                $css .= 'background:' . htmlspecialchars($fondoCss, ENT_QUOTES, 'UTF-8') . ';border-color:' . htmlspecialchars($bg, ENT_QUOTES, 'UTF-8') . ';';
             }
             if ($fg !== '') {
                 $css .= 'color:' . htmlspecialchars($fg, ENT_QUOTES, 'UTF-8') . ';';
@@ -2106,11 +2111,22 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
 
   <?php if ($hasAyudaTutoriales): ?>
   <style>
+    #ayuda-tutoriales-lista-videos {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.85rem;
+    }
+    @media (max-width: 460px) {
+      #ayuda-tutoriales-lista-videos { grid-template-columns: 1fr; }
+    }
     .ayuda-tutorial-list-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
       background: rgba(8,15,24,0.82);
       border: 1px solid rgba(34,211,238,0.35);
       border-radius: 12px;
-      padding: 0.75rem 1rem;
+      padding: 0.6rem;
       color: #e2e8f0;
       text-align: left;
       width: 100%;
@@ -2119,16 +2135,66 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     .ayuda-tutorial-list-item:hover,
     .ayuda-tutorial-list-item:focus-visible {
       border-color: #22d3ee;
-      transform: translateX(2px);
+      transform: translateY(-2px);
       color: #e2e8f0;
     }
-    .ayuda-tutorial-list-icon { font-size: 1.3rem; line-height: 1; }
-    .ayuda-tutorial-list-title { font-weight: 600; }
+    .ayuda-tutorial-thumb {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #0b1420;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ayuda-tutorial-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .ayuda-tutorial-thumb-fallback { font-size: 1.8rem; }
+    .ayuda-tutorial-thumb-play {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(8,15,24,0.28);
+      color: #fff;
+      font-size: 1.4rem;
+    }
+    .ayuda-tutorial-list-title {
+      font-weight: 600;
+      font-size: 0.88rem;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .ayuda-player-dialog { width: 100%; max-width: 420px; }
+    .ayuda-player-dialog.is-landscape { max-width: 760px; }
+    .ayuda-player-card { display: flex; flex-direction: column; max-height: 90vh; }
+    .ayuda-player-header { flex-shrink: 0; }
+    .ayuda-player-frame { width: 100%; background: #000; }
+    .ayuda-player-frame iframe { display: block; width: 100%; height: 100%; border: 0; }
+    .ayuda-player-dialog.is-landscape .ayuda-player-frame { aspect-ratio: 16 / 9; }
+    .ayuda-player-dialog.is-portrait .ayuda-player-frame { aspect-ratio: 9 / 16; max-height: 72vh; }
+
+    @media (max-width: 576px) {
+      .ayuda-player-dialog,
+      .ayuda-player-dialog.is-landscape { max-width: none; width: 96vw; }
+      .ayuda-player-card { max-height: 94vh; }
+      .ayuda-player-dialog.is-portrait .ayuda-player-frame { max-height: 78vh; }
+    }
   </style>
 
   <div id="ayuda-tutoriales-modal" class="position-fixed top-0 start-0 w-100 h-100 d-none align-items-start align-items-md-center justify-content-center px-3 py-3 overflow-auto" style="z-index:13200;">
     <div class="position-absolute top-0 start-0 w-100 h-100" style="background:var(--theme-overlay-soft);backdrop-filter:blur(6px);" data-ayuda-tutoriales-close></div>
-    <div class="position-relative w-100" style="max-width:640px;z-index:1;">
+    <div class="position-relative w-100" style="max-width:720px;z-index:1;">
       <div class="rounded-4 border border-info overflow-hidden" style="background:var(--theme-panel-gradient);box-shadow:0 0 32px var(--theme-primary-glow);">
         <div class="d-flex align-items-center justify-content-between gap-3 px-4 py-3 border-bottom border-info-subtle">
           <div>
@@ -2140,10 +2206,17 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
           </button>
         </div>
         <div class="px-4 py-4" style="max-height:calc(100vh - 170px);overflow-y:auto;">
-          <div id="ayuda-tutoriales-lista-videos" class="d-flex flex-column gap-2">
+          <div id="ayuda-tutoriales-lista-videos">
             <?php foreach ($ayudaTutoriales as $ayudaVideoIndex => $ayudaVideo): ?>
-              <button type="button" class="ayuda-tutorial-list-item d-flex align-items-center gap-3" data-ayuda-tutorial-index="<?php echo (int) $ayudaVideoIndex; ?>">
-                <span class="ayuda-tutorial-list-icon" aria-hidden="true"><?php echo $ayudaVideo['tipo'] === 'tiktok' ? '🎵' : '▶️'; ?></span>
+              <button type="button" class="ayuda-tutorial-list-item" data-ayuda-tutorial-index="<?php echo (int) $ayudaVideoIndex; ?>">
+                <span class="ayuda-tutorial-thumb">
+                  <?php if ($ayudaVideo['thumbnail_url'] !== ''): ?>
+                    <img src="<?php echo htmlspecialchars($ayudaVideo['thumbnail_url'], ENT_QUOTES, 'UTF-8'); ?>" alt="" loading="lazy">
+                  <?php else: ?>
+                    <span class="ayuda-tutorial-thumb-fallback" aria-hidden="true"><?php echo $ayudaVideo['tipo'] === 'tiktok' ? '🎵' : '▶️'; ?></span>
+                  <?php endif; ?>
+                  <span class="ayuda-tutorial-thumb-play" aria-hidden="true">▶</span>
+                </span>
                 <span class="ayuda-tutorial-list-title"><?php echo htmlspecialchars($ayudaVideo['titulo'], ENT_QUOTES, 'UTF-8'); ?></span>
               </button>
             <?php endforeach; ?>
@@ -2153,17 +2226,17 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     </div>
   </div>
 
-  <div id="ayuda-tutoriales-player-modal" class="position-fixed top-0 start-0 w-100 h-100 d-none align-items-start align-items-md-center justify-content-center px-3 py-3 overflow-auto" style="z-index:13200;">
+  <div id="ayuda-tutoriales-player-modal" class="position-fixed top-0 start-0 w-100 h-100 d-none align-items-start align-items-md-center justify-content-center px-2 px-md-3 py-2 py-md-3 overflow-auto" style="z-index:13200;">
     <div class="position-absolute top-0 start-0 w-100 h-100" style="background:var(--theme-overlay-soft);backdrop-filter:blur(6px);" data-ayuda-player-close></div>
-    <div class="position-relative w-100" style="max-width:420px;z-index:1;">
-      <div class="rounded-4 border border-info overflow-hidden" style="background:var(--theme-panel-gradient);box-shadow:0 0 32px var(--theme-primary-glow);">
-        <div class="d-flex align-items-center justify-content-between gap-3 px-4 py-3 border-bottom border-info-subtle">
+    <div id="ayuda-player-dialog" class="position-relative ayuda-player-dialog" style="z-index:1;">
+      <div class="ayuda-player-card rounded-4 border border-info overflow-hidden" style="background:var(--theme-panel-gradient);box-shadow:0 0 32px var(--theme-primary-glow);">
+        <div class="ayuda-player-header d-flex align-items-center justify-content-between gap-3 px-3 px-md-4 py-2 py-md-3 border-bottom border-info-subtle">
           <h3 id="ayuda-tutoriales-player-titulo" class="h6 mb-0 text-white text-truncate pe-2">Video</h3>
           <button type="button" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center flex-shrink-0" style="width:36px;height:36px;" data-ayuda-player-close aria-label="Cerrar">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
-        <div id="ayuda-tutoriales-player-container" style="background:#000;"></div>
+        <div id="ayuda-tutoriales-player-container" class="ayuda-player-frame"></div>
       </div>
     </div>
   </div>
@@ -2172,9 +2245,10 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   (function () {
     var listModal = document.getElementById('ayuda-tutoriales-modal');
     var playerModal = document.getElementById('ayuda-tutoriales-player-modal');
+    var playerDialog = document.getElementById('ayuda-player-dialog');
     var playerContainer = document.getElementById('ayuda-tutoriales-player-container');
     var playerTitulo = document.getElementById('ayuda-tutoriales-player-titulo');
-    if (!listModal || !playerModal || !playerContainer) return;
+    if (!listModal || !playerModal || !playerDialog || !playerContainer) return;
 
     var videos = <?php echo $ayudaTutorialesJson; ?>;
 
@@ -2199,18 +2273,19 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       closeList();
       playerTitulo.textContent = video.titulo || 'Video';
 
+      // El tamaño/relación de aspecto del modal lo define el CSS según
+      // is-landscape/is-portrait (ver <style> arriba) — así el mismo modal
+      // se adapta a video horizontal (YouTube normal) o vertical (Shorts/
+      // TikTok), y en móvil esas mismas clases pasan a ocupar casi toda
+      // la pantalla dejando siempre el encabezado con el botón de cerrar
+      // visible (no se scrollea junto con el video).
+      playerDialog.classList.remove('is-landscape', 'is-portrait');
+      playerDialog.classList.add(video.orientacion === 'portrait' ? 'is-portrait' : 'is-landscape');
+
       var iframe = document.createElement('iframe');
       iframe.src = video.embed_url;
       iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
       iframe.allowFullscreen = true;
-      iframe.style.display = 'block';
-      iframe.style.width = '100%';
-      iframe.style.border = '0';
-      if (video.tipo === 'tiktok') {
-        iframe.style.height = 'min(730px, 80vh)';
-      } else {
-        iframe.style.aspectRatio = '16 / 9';
-      }
       playerContainer.innerHTML = '';
       playerContainer.appendChild(iframe);
       showModal(playerModal);
