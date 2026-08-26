@@ -2099,6 +2099,143 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     })();
     </script>
   <?php endif; ?>
+
+  <?php if ($hasAyudaTutoriales): ?>
+  <style>
+    .ayuda-tutorial-list-item {
+      background: rgba(8,15,24,0.82);
+      border: 1px solid rgba(34,211,238,0.35);
+      border-radius: 12px;
+      padding: 0.75rem 1rem;
+      color: #e2e8f0;
+      text-align: left;
+      width: 100%;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+    .ayuda-tutorial-list-item:hover,
+    .ayuda-tutorial-list-item:focus-visible {
+      border-color: #22d3ee;
+      transform: translateX(2px);
+      color: #e2e8f0;
+    }
+    .ayuda-tutorial-list-icon { font-size: 1.3rem; line-height: 1; }
+    .ayuda-tutorial-list-title { font-weight: 600; }
+  </style>
+
+  <div id="ayuda-tutoriales-modal" class="position-fixed top-0 start-0 w-100 h-100 d-none align-items-start align-items-md-center justify-content-center px-3 py-3 overflow-auto" style="z-index:13200;">
+    <div class="position-absolute top-0 start-0 w-100 h-100" style="background:var(--theme-overlay-soft);backdrop-filter:blur(6px);" data-ayuda-tutoriales-close></div>
+    <div class="position-relative w-100" style="max-width:640px;z-index:1;">
+      <div class="rounded-4 border border-info overflow-hidden" style="background:var(--theme-panel-gradient);box-shadow:0 0 32px var(--theme-primary-glow);">
+        <div class="d-flex align-items-center justify-content-between gap-3 px-4 py-3 border-bottom border-info-subtle">
+          <div>
+            <div class="small text-uppercase text-info" style="letter-spacing:0.3em;">Ayuda</div>
+            <h3 class="h5 mb-0 text-white"><?php echo htmlspecialchars(ayuda_boton_texto('tutoriales'), ENT_QUOTES, 'UTF-8'); ?></h3>
+          </div>
+          <button type="button" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center" style="width:42px;height:42px;" data-ayuda-tutoriales-close aria-label="Cerrar">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div class="px-4 py-4" style="max-height:calc(100vh - 170px);overflow-y:auto;">
+          <div id="ayuda-tutoriales-lista-videos" class="d-flex flex-column gap-2">
+            <?php foreach ($ayudaTutoriales as $ayudaVideoIndex => $ayudaVideo): ?>
+              <button type="button" class="ayuda-tutorial-list-item d-flex align-items-center gap-3" data-ayuda-tutorial-index="<?php echo (int) $ayudaVideoIndex; ?>">
+                <span class="ayuda-tutorial-list-icon" aria-hidden="true"><?php echo $ayudaVideo['tipo'] === 'tiktok' ? '🎵' : '▶️'; ?></span>
+                <span class="ayuda-tutorial-list-title"><?php echo htmlspecialchars($ayudaVideo['titulo'], ENT_QUOTES, 'UTF-8'); ?></span>
+              </button>
+            <?php endforeach; ?>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="ayuda-tutoriales-player-modal" class="position-fixed top-0 start-0 w-100 h-100 d-none align-items-start align-items-md-center justify-content-center px-3 py-3 overflow-auto" style="z-index:13200;">
+    <div class="position-absolute top-0 start-0 w-100 h-100" style="background:var(--theme-overlay-soft);backdrop-filter:blur(6px);" data-ayuda-player-close></div>
+    <div class="position-relative w-100" style="max-width:420px;z-index:1;">
+      <div class="rounded-4 border border-info overflow-hidden" style="background:var(--theme-panel-gradient);box-shadow:0 0 32px var(--theme-primary-glow);">
+        <div class="d-flex align-items-center justify-content-between gap-3 px-4 py-3 border-bottom border-info-subtle">
+          <h3 id="ayuda-tutoriales-player-titulo" class="h6 mb-0 text-white text-truncate pe-2">Video</h3>
+          <button type="button" class="btn btn-outline-info rounded-circle d-flex align-items-center justify-content-center flex-shrink-0" style="width:36px;height:36px;" data-ayuda-player-close aria-label="Cerrar">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div id="ayuda-tutoriales-player-container" style="background:#000;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    var listModal = document.getElementById('ayuda-tutoriales-modal');
+    var playerModal = document.getElementById('ayuda-tutoriales-player-modal');
+    var playerContainer = document.getElementById('ayuda-tutoriales-player-container');
+    var playerTitulo = document.getElementById('ayuda-tutoriales-player-titulo');
+    if (!listModal || !playerModal || !playerContainer) return;
+
+    var videos = <?php echo json_encode(array_values($ayudaTutoriales), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+
+    function showModal(modal) {
+      modal.classList.remove('d-none');
+      modal.classList.add('d-flex');
+    }
+    function hideModal(modal) {
+      modal.classList.add('d-none');
+      modal.classList.remove('d-flex');
+    }
+
+    function closeList() { hideModal(listModal); }
+    function closePlayer() {
+      hideModal(playerModal);
+      playerContainer.innerHTML = '';
+    }
+
+    function playVideo(index) {
+      var video = videos[index];
+      if (!video || !video.embed_url) return;
+      closeList();
+      playerTitulo.textContent = video.titulo || 'Video';
+
+      var iframe = document.createElement('iframe');
+      iframe.src = video.embed_url;
+      iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+      iframe.allowFullscreen = true;
+      iframe.style.display = 'block';
+      iframe.style.width = '100%';
+      iframe.style.border = '0';
+      if (video.tipo === 'tiktok') {
+        iframe.style.height = 'min(730px, 80vh)';
+      } else {
+        iframe.style.aspectRatio = '16 / 9';
+      }
+      playerContainer.innerHTML = '';
+      playerContainer.appendChild(iframe);
+      showModal(playerModal);
+    }
+
+    window.openAyudaTutorialesModal = function () {
+      showModal(listModal);
+    };
+
+    listModal.querySelectorAll('[data-ayuda-tutorial-index]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        playVideo(parseInt(btn.dataset.ayudaTutorialIndex, 10));
+      });
+    });
+    document.querySelectorAll('[data-ayuda-tutoriales-close]').forEach(function (el) {
+      el.addEventListener('click', closeList);
+    });
+    document.querySelectorAll('[data-ayuda-player-close]').forEach(function (el) {
+      el.addEventListener('click', closePlayer);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (!playerModal.classList.contains('d-none')) closePlayer();
+      else if (!listModal.classList.contains('d-none')) closeList();
+    });
+  })();
+  </script>
+  <?php endif; ?>
+
   <div id="live-recharge-notifications" class="live-recharge-stack" data-position="<?php echo htmlspecialchars($rechargeNotificationPosition, ENT_QUOTES, 'UTF-8'); ?>" aria-live="polite" aria-atomic="false"></div>
   <style>
     .live-recharge-stack {
