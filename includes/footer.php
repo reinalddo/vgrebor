@@ -108,6 +108,10 @@ $hasWhatsappChannel = $whatsappChannelFloatingEnabled && store_config_is_valid_s
 $ayudaTutoriales = ayuda_tutoriales_listar();
 $hasAyudaTutoriales = count($ayudaTutoriales) > 0;
 $hasAyuda = $hasWhatsapp || $hasWhatsappChannel || $hasAyudaTutoriales;
+// Sin JSON_UNESCAPED_SLASHES a propósito: si el título de un video (texto
+// libre cargado por el admin) llegara a contener "</script>", con las
+// barras escapadas ("<\/script>") no corta el <script> que lo envuelve.
+$ayudaTutorialesJson = str_replace('</script', '<\/script', json_encode(array_values($ayudaTutoriales), JSON_UNESCAPED_UNICODE));
 
 $menuScript = <<<'SCRIPT'
 <script>
@@ -2172,7 +2176,7 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
     var playerTitulo = document.getElementById('ayuda-tutoriales-player-titulo');
     if (!listModal || !playerModal || !playerContainer) return;
 
-    var videos = <?php echo json_encode(array_values($ayudaTutoriales), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+    var videos = <?php echo $ayudaTutorialesJson; ?>;
 
     function showModal(modal) {
       modal.classList.remove('d-none');
