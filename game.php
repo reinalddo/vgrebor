@@ -9,6 +9,7 @@ require_once __DIR__ . "/includes/recargasamerica_api.php";
 require_once __DIR__ . "/includes/api_discord.php";
 require_once __DIR__ . "/includes/slugify.php";
 require_once __DIR__ . "/includes/player_verification.php";
+require_once __DIR__ . "/includes/paso_estilos.php";
 require_once __DIR__ . "/includes/package_features.php";
 require_once __DIR__ . "/includes/payment_difference.php";
 require_once __DIR__ . "/includes/blocked_players.php";
@@ -22,6 +23,76 @@ require_once __DIR__ . "/includes/levelpass_api.php";
 require_once __DIR__ . "/includes/fullimpulso_api.php";
 require_once __DIR__ . "/includes/package_categories.php";
 require_once __DIR__ . "/includes/referidos.php";
+
+// Presentación del rediseño configurable de "PASO 1/2/3" y del verificador
+// de jugador (includes/paso_estilos.php solo tiene los getters de config —
+// armar el HTML/CSS es cosa de esta página, mismo criterio que
+// ayuda_fab_style_attr()/ayuda_fab_icon_html() en includes/footer.php).
+if (!function_exists('paso_estilo_css_inline')) {
+    function paso_estilo_css_inline(string $zona): string {
+        if (!paso_estilo_esta_personalizado($zona)) {
+            return '';
+        }
+        $css = 'background:' . paso_estilo_fondo_css($zona) . ';'
+             . 'color:' . paso_estilo_color_texto($zona) . ';'
+             . 'font-size:' . paso_estilo_fuente_tamano($zona) . ';';
+        $fuenteCss = paso_estilo_fuente_familia_css($zona);
+        if ($fuenteCss !== '') {
+            $css .= 'font-family:' . $fuenteCss . ';';
+        }
+        if (paso_estilo_borde_neon_activo($zona)) {
+            $colorBorde = paso_estilo_color_borde($zona);
+            $grosor = paso_estilo_borde_grosor($zona);
+            $brillo = paso_estilo_borde_brillo($zona);
+            $css .= 'border:' . $grosor . 'px solid ' . $colorBorde . ';box-shadow:0 0 ' . $brillo . 'px ' . $colorBorde . ', inset 0 0 ' . (int) round($brillo / 2) . 'px ' . $colorBorde . ';';
+        } else {
+            $css .= 'border:1px solid transparent;';
+        }
+        return ' style="' . htmlspecialchars($css, ENT_QUOTES, 'UTF-8') . '"';
+    }
+}
+
+if (!function_exists('paso_linea_class')) {
+    function paso_linea_class(string $zona): string {
+        return paso_estilo_esta_personalizado($zona) ? 'paso-linea paso-linea-custom' : 'paso-linea';
+    }
+}
+
+// Texto real del título "PASO N: ..." — el editado por el admin si la zona
+// está en modo personalizado, o el de siempre si sigue en modo original
+// (el texto también se puede "perder" al volver a original, igual que el
+// resto de los valores de esta zona).
+if (!function_exists('paso_linea_texto')) {
+    function paso_linea_texto(string $zona): string {
+        if (paso_estilo_esta_personalizado($zona)) {
+            return paso_estilo_texto($zona);
+        }
+        $defaults = paso_estilo_defaults($zona);
+        return $defaults['texto'] ?? '';
+    }
+}
+
+// Mismos datos que paso_estilo_css_inline() pero en array, para las 2 zonas
+// que el JS necesita armar dinámicamente (éxito/fallo del verificador,
+// según la respuesta real de la API) en vez de imprimirlas ya resueltas en
+// el HTML — ver setPlayerVerificationFeedback() más abajo en este archivo.
+if (!function_exists('paso_estilo_js_config')) {
+    function paso_estilo_js_config(string $zona): array {
+        return [
+            'personalizado' => paso_estilo_esta_personalizado($zona),
+            'fondo' => paso_estilo_fondo_css($zona),
+            'colorTexto' => paso_estilo_color_texto($zona),
+            'fuenteFamilia' => paso_estilo_fuente_familia_css($zona),
+            'fuenteTamano' => paso_estilo_fuente_tamano($zona),
+            'bordeActivo' => paso_estilo_borde_neon_activo($zona),
+            'colorBorde' => paso_estilo_color_borde($zona),
+            'bordeGrosor' => paso_estilo_borde_grosor($zona),
+            'bordeBrillo' => paso_estilo_borde_brillo($zona),
+            'icono' => paso_estilo_icono_emoji($zona),
+        ];
+    }
+}
+
 currency_ensure_schema();
 if (trim((string) store_config_get('binance_pagonorte_activo', '0')) === '1') {
   currency_ensure_code('USDT', 'Tether USD', 1.0, true, true);
@@ -429,7 +500,7 @@ include __DIR__ . "/includes/header.php";
 <?php endif; ?>
 
 <section id="player-step-section" class="container mt-4 mb-3" data-aos="fade-up">
-  <h2 class="page-step-title text-info mb-0">PASO 1: Ingrese su información de jugador</h2>
+  <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso1') ?>" data-paso-linea<?= paso_estilo_css_inline('paso1') ?>><?= htmlspecialchars(paso_linea_texto('paso1'), ENT_QUOTES, 'UTF-8') ?></span></h2>
 </section>
 
 
@@ -440,8 +511,8 @@ include __DIR__ . "/includes/header.php";
         <div class="col-md-6 col-12" id="player-primary-field">
           <label class="form-label text-info" id="player-primary-label">ID de usuario</label>
           <div class="d-flex flex-column flex-sm-row gap-2 align-items-stretch">
-            <input type="text" id="order-user-id" name="user_id" placeholder="Ej: 12345678" value="<?= htmlspecialchars($loggedUserLastPurchaseIdentifier, ENT_QUOTES, 'UTF-8') ?>" class="form-control bg-dark text-info border-info" required />
-            <button type="button" id="verify-player-button" class="btn btn-outline-info fw-bold text-nowrap d-none"><?= htmlspecialchars((string) ($playerVerificationConfig['buttonLabel'] ?? 'Verificar nombre del jugador'), ENT_QUOTES, 'UTF-8') ?></button>
+            <input type="text" id="order-user-id" name="user_id" placeholder="Ej: 12345678" value="<?= htmlspecialchars($loggedUserLastPurchaseIdentifier, ENT_QUOTES, 'UTF-8') ?>" class="form-control bg-dark text-info border-info"<?= paso_estilo_css_inline('campo') ?> required />
+            <button type="button" id="verify-player-button" class="btn btn-outline-info fw-bold text-nowrap d-none"<?= paso_estilo_css_inline('boton') ?>><?= htmlspecialchars((string) ($playerVerificationConfig['buttonLabel'] ?? 'Verificar nombre del jugador'), ENT_QUOTES, 'UTF-8') ?></button>
           </div>
           <div id="player-verification-feedback" class="d-none mt-2"></div>
         </div>
@@ -462,7 +533,7 @@ include __DIR__ . "/includes/header.php";
 <section id="game-packages-section" class="container mt-2 mt-md-4" data-aos="fade-up">
   <div class="row mb-2 align-items-center">
     <div class="col">
-      <h2 class="page-step-title text-info mb-0">PASO 2: Seleccione su producto</h2>
+      <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso2') ?>" data-paso-linea<?= paso_estilo_css_inline('paso2') ?>><?= htmlspecialchars(paso_linea_texto('paso2'), ENT_QUOTES, 'UTF-8') ?></span></h2>
       <br>
     </div>
     <div class="col-auto">
@@ -982,7 +1053,7 @@ include __DIR__ . "/includes/header.php";
 </section>
 
 <section id="payment-step-section" class="container mt-3 mb-5" data-aos="fade-up">
-  <h2 class="page-step-title text-info mb-0">PASO 3: Configure su pago y continúe con la compra</h2>
+  <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso3') ?>" data-paso-linea<?= paso_estilo_css_inline('paso3') ?>><?= htmlspecialchars(paso_linea_texto('paso3'), ENT_QUOTES, 'UTF-8') ?></span></h2>
   <div class="payment-coupon-shell mt-4">
     <div class="payment-coupon-panel">
       <label class="form-label text-info mb-2">Cupón</label>
@@ -3862,6 +3933,47 @@ include __DIR__ . "/includes/header.php";
     text-shadow: 0 0 18px rgba(var(--theme-button-primary-rgb), 0.16);
   }
 
+  /* Título "PASO N: ..." completo — configurable desde /admin/diseno-pasos
+     (paso1/paso2/paso3, cada uno independiente, con texto editable). En
+     modo original no lleva clase extra (hereda el look de siempre de
+     .page-step-title); en modo personalizado, includes/paso_estilos.php
+     arma el style inline (fondo, letra, borde neón) sobre TODO el texto, y
+     esta clase solo pone la forma de bloque redondeado que ese estilo va a
+     rellenar. */
+  .paso-linea-custom {
+    display: inline-block;
+    padding: 0.5rem 1.2rem;
+    border-radius: 14px;
+    line-height: 1.3;
+  }
+
+  /* Resultado del verificador de jugador (éxito/fallo), modo personalizado.
+     En modo original sigue siendo el `alert alert-success/alert-danger`
+     normal de Bootstrap — esta clase solo existe cuando hay diseño propio. */
+  .paso-verif-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    border-radius: 12px;
+    padding: 0.65rem 0.9rem;
+  }
+  .paso-verif-banner .paso-verif-icon {
+    font-size: 1.4rem;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .paso-verif-banner .paso-verif-text {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .paso-verif-banner .paso-verif-badge {
+    flex-shrink: 0;
+    font-weight: 900;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+
   .purchase-summary-layout-single {
     grid-template-columns: 32rem;
   }
@@ -5734,10 +5846,16 @@ include __DIR__ . "/includes/header.php";
       sec2.style.display = 'none';
       sec2.querySelectorAll('[required]').forEach(function(el) { el.removeAttribute('required'); });
     }
-    const paso2Title = document.querySelector('#game-packages-section .page-step-title');
-    const paso3Title = document.querySelector('#payment-step-section .page-step-title');
-    if (paso2Title) paso2Title.textContent = paso2Title.textContent.replace('PASO 2:', 'PASO 1:');
-    if (paso3Title) paso3Title.textContent = paso3Title.textContent.replace('PASO 3:', 'PASO 2:');
+    // Cada título "PASO N: ..." vive en su propio <span data-paso-linea>
+    // (paso1/paso2/paso3 son 3 zonas rediseñables independientes, ver
+    // includes/paso_estilos.php) con texto editable desde el admin — acá
+    // solo se renumera el prefijo "PASO N" de lo que esté mostrando ese
+    // span en este momento (sea el texto de siempre o uno editado), igual
+    // de simple que el `.replace()` que ya hacía esto antes del rediseño.
+    const paso2Linea = document.querySelector('#game-packages-section .page-step-title [data-paso-linea]');
+    const paso3Linea = document.querySelector('#payment-step-section .page-step-title [data-paso-linea]');
+    if (paso2Linea) paso2Linea.textContent = paso2Linea.textContent.replace(/^PASO\s*2/, 'PASO 1');
+    if (paso3Linea) paso3Linea.textContent = paso3Linea.textContent.replace(/^PASO\s*3/, 'PASO 2');
   })();
   const selectedPack = document.getElementById("selected-pack");
   const purchaseSummaryLayout = document.getElementById('purchase-summary-layout');
@@ -5777,6 +5895,10 @@ include __DIR__ . "/includes/header.php";
   const verifyPlayerButton = document.getElementById('verify-player-button');
   const playerVerificationFeedback = document.getElementById('player-verification-feedback');
   const playerVerificationConfig = <?= json_encode($playerVerificationConfig, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+  const pasoEstiloVerificacion = <?= json_encode([
+    'exito' => paso_estilo_js_config('exito'),
+    'fallo' => paso_estilo_js_config('fallo'),
+  ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const bsPassStockConfig = <?= json_encode([
     'enabled' => bs_pass_stock_is_configured() && !empty($bsPassStockPackageIds) && $playerVerificationConfig !== null,
     'packageIds' => array_map('strval', $bsPassStockPackageIds ?? []),
@@ -9047,7 +9169,26 @@ include __DIR__ . "/includes/header.php";
     }
 
     playerVerificationFeedback.className = 'd-none mt-2';
+    playerVerificationFeedback.removeAttribute('style');
     playerVerificationFeedback.textContent = '';
+  }
+
+  // Arma el `style` inline de una insignia de éxito/fallo del verificador a
+  // partir de la config guardada en /admin/diseno-pasos (ver
+  // paso_estilo_js_config() en el PHP de esta página). Si esa zona está en
+  // modo "original" no se llama a esto — se sigue usando el alert simple de
+  // Bootstrap de siempre.
+  function pasoEstiloBuildCss(cfg) {
+    var css = 'background:' + cfg.fondo + ';color:' + cfg.colorTexto + ';font-size:' + cfg.fuenteTamano + ';';
+    if (cfg.fuenteFamilia) css += 'font-family:' + cfg.fuenteFamilia + ';';
+    if (cfg.bordeActivo) {
+      var brillo = cfg.bordeBrillo || 14;
+      css += 'border:' + (cfg.bordeGrosor || 1) + 'px solid ' + cfg.colorBorde
+        + ';box-shadow:0 0 ' + brillo + 'px ' + cfg.colorBorde + ', inset 0 0 ' + Math.round(brillo / 2) + 'px ' + cfg.colorBorde + ';';
+    } else {
+      css += 'border:1px solid transparent;';
+    }
+    return css;
   }
 
   function setPlayerVerificationFeedback(type, message) {
@@ -9060,7 +9201,33 @@ include __DIR__ . "/includes/header.php";
       return;
     }
 
+    // Éxito y fallo tienen su propio diseño configurable (insignia con
+    // ícono, degradado y "VERIFICADO"/"INVALIDO") cuando esa zona está en
+    // modo personalizado — si sigue en modo original, se comporta EXACTO
+    // igual que antes (alerta simple de Bootstrap con solo el mensaje).
+    if (type === 'success' && pasoEstiloVerificacion.exito.personalizado) {
+      const nombre = (playerVerificationState.playerName || '').trim();
+      playerVerificationFeedback.className = 'paso-verif-banner mt-2';
+      playerVerificationFeedback.setAttribute('style', pasoEstiloBuildCss(pasoEstiloVerificacion.exito));
+      playerVerificationFeedback.innerHTML =
+        '<span class="paso-verif-icon" aria-hidden="true">' + escapePaymentHtml(pasoEstiloVerificacion.exito.icono) + '</span>'
+        + '<span class="paso-verif-text"><strong>' + escapePaymentHtml(nombre || message) + '</strong></span>'
+        + '<span class="paso-verif-badge">VERIFICADO</span>';
+      return;
+    }
+
+    if (type === 'danger' && pasoEstiloVerificacion.fallo.personalizado) {
+      playerVerificationFeedback.className = 'paso-verif-banner mt-2';
+      playerVerificationFeedback.setAttribute('style', pasoEstiloBuildCss(pasoEstiloVerificacion.fallo));
+      playerVerificationFeedback.innerHTML =
+        '<span class="paso-verif-icon" aria-hidden="true">' + escapePaymentHtml(pasoEstiloVerificacion.fallo.icono) + '</span>'
+        + '<span class="paso-verif-text">' + escapePaymentHtml(message) + '</span>'
+        + '<span class="paso-verif-badge">INVALIDO</span>';
+      return;
+    }
+
     const alertType = type === 'success' ? 'success' : (type === 'info' ? 'info' : 'danger');
+    playerVerificationFeedback.removeAttribute('style');
     playerVerificationFeedback.className = `alert alert-${alertType} py-2 px-3 mt-2 mb-0 small fw-semibold`;
     playerVerificationFeedback.textContent = message;
   }
