@@ -470,9 +470,9 @@ include __DIR__ . "/includes/header.php";
       </div>
     </div>
     <?php if ($authUser): ?>
-      <button type="button" class="btn referidos-banner-btn fw-bold" data-user-open="referrals">Invitar y ganar</button>
+      <button type="button" class="btn referidos-banner-btn fw-bold" data-user-open="referrals">Invita y gana</button>
     <?php else: ?>
-      <button type="button" class="btn referidos-banner-btn fw-bold" data-auth-open="register">Invitar y ganar</button>
+      <button type="button" class="btn referidos-banner-btn fw-bold" data-auth-open="register">Invita y gana</button>
     <?php endif; ?>
   </div>
 </section>
