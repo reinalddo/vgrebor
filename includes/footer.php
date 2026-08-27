@@ -2111,13 +2111,50 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
 
   <?php if ($hasAyudaTutoriales): ?>
   <style>
-    #ayuda-tutoriales-lista-videos {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 0.85rem;
+    .ayuda-tutoriales-slider {
+      position: relative;
+      padding: 0 0.25rem;
     }
+    .ayuda-tutoriales-viewport {
+      overflow: hidden;
+    }
+    #ayuda-tutoriales-lista-videos {
+      display: flex;
+      gap: 0.85rem;
+      transition: transform 0.3s ease;
+    }
+    #ayuda-tutoriales-lista-videos .ayuda-tutorial-list-item {
+      flex: 0 0 calc((100% - 1.7rem) / 3);
+      min-width: 0;
+    }
+    .ayuda-tutoriales-arrow {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 2;
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      border: 1px solid rgba(34,211,238,0.5);
+      background: rgba(8,15,24,0.92);
+      color: #22d3ee;
+      font-size: 1.3rem;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: opacity 0.15s ease;
+    }
+    .ayuda-tutoriales-arrow:hover:not(:disabled) { border-color: #22d3ee; }
+    .ayuda-tutoriales-arrow:disabled { opacity: 0.3; cursor: default; }
+    .ayuda-tutoriales-arrow-prev { left: -6px; }
+    .ayuda-tutoriales-arrow-next { right: -6px; }
     @media (max-width: 460px) {
-      #ayuda-tutoriales-lista-videos { grid-template-columns: 1fr; }
+      #ayuda-tutoriales-lista-videos { gap: 0.5rem; }
+      #ayuda-tutoriales-lista-videos .ayuda-tutorial-list-item { flex-basis: calc((100% - 1rem) / 3); }
+      .ayuda-tutorial-list-title { font-size: 0.72rem; }
+      .ayuda-tutorial-thumb-play { font-size: 1rem; }
     }
     .ayuda-tutorial-list-item {
       display: flex;
@@ -2206,20 +2243,27 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
           </button>
         </div>
         <div class="px-4 py-4" style="max-height:calc(100vh - 170px);overflow-y:auto;">
-          <div id="ayuda-tutoriales-lista-videos">
-            <?php foreach ($ayudaTutoriales as $ayudaVideoIndex => $ayudaVideo): ?>
-              <button type="button" class="ayuda-tutorial-list-item" data-ayuda-tutorial-index="<?php echo (int) $ayudaVideoIndex; ?>">
-                <span class="ayuda-tutorial-thumb">
-                  <?php if ($ayudaVideo['thumbnail_url'] !== ''): ?>
-                    <img src="<?php echo htmlspecialchars($ayudaVideo['thumbnail_url'], ENT_QUOTES, 'UTF-8'); ?>" alt="" loading="lazy">
-                  <?php else: ?>
-                    <span class="ayuda-tutorial-thumb-fallback" aria-hidden="true"><?php echo $ayudaVideo['tipo'] === 'tiktok' ? '🎵' : '▶️'; ?></span>
-                  <?php endif; ?>
-                  <span class="ayuda-tutorial-thumb-play" aria-hidden="true">▶</span>
-                </span>
-                <span class="ayuda-tutorial-list-title"><?php echo htmlspecialchars($ayudaVideo['titulo'], ENT_QUOTES, 'UTF-8'); ?></span>
-              </button>
-            <?php endforeach; ?>
+          <?php $ayudaTutorialesNecesitaFlechas = count($ayudaTutoriales) > 3; ?>
+          <div class="ayuda-tutoriales-slider">
+            <button type="button" class="ayuda-tutoriales-arrow ayuda-tutoriales-arrow-prev" data-ayuda-slider-prev aria-label="Videos anteriores" style="<?php echo $ayudaTutorialesNecesitaFlechas ? '' : 'display:none;'; ?>">‹</button>
+            <div class="ayuda-tutoriales-viewport">
+              <div id="ayuda-tutoriales-lista-videos">
+                <?php foreach ($ayudaTutoriales as $ayudaVideoIndex => $ayudaVideo): ?>
+                  <button type="button" class="ayuda-tutorial-list-item" data-ayuda-tutorial-index="<?php echo (int) $ayudaVideoIndex; ?>">
+                    <span class="ayuda-tutorial-thumb">
+                      <?php if ($ayudaVideo['thumbnail_url'] !== ''): ?>
+                        <img src="<?php echo htmlspecialchars($ayudaVideo['thumbnail_url'], ENT_QUOTES, 'UTF-8'); ?>" alt="" loading="lazy">
+                      <?php else: ?>
+                        <span class="ayuda-tutorial-thumb-fallback" aria-hidden="true"><?php echo $ayudaVideo['tipo'] === 'tiktok' ? '🎵' : '▶️'; ?></span>
+                      <?php endif; ?>
+                      <span class="ayuda-tutorial-thumb-play" aria-hidden="true">▶</span>
+                    </span>
+                    <span class="ayuda-tutorial-list-title"><?php echo htmlspecialchars($ayudaVideo['titulo'], ENT_QUOTES, 'UTF-8'); ?></span>
+                  </button>
+                <?php endforeach; ?>
+              </div>
+            </div>
+            <button type="button" class="ayuda-tutoriales-arrow ayuda-tutoriales-arrow-next" data-ayuda-slider-next aria-label="Siguientes videos" style="<?php echo $ayudaTutorialesNecesitaFlechas ? '' : 'display:none;'; ?>">›</button>
           </div>
         </div>
       </div>
@@ -2291,8 +2335,45 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       showModal(playerModal);
     }
 
+    // Slider de 3 videos a la vez con flechas — se recalcula cada vez que
+    // se abre el modal (mientras estuvo cerrado, display:none hace que
+    // getBoundingClientRect() de los items devuelva 0, así que medir solo
+    // al abrir evita quedarse con un ancho de item incorrecto) y también en
+    // cada resize mientras está abierto.
+    var sliderTrack = document.getElementById('ayuda-tutoriales-lista-videos');
+    var sliderPrev = listModal.querySelector('[data-ayuda-slider-prev]');
+    var sliderNext = listModal.querySelector('[data-ayuda-slider-next]');
+    var sliderIndex = 0;
+
+    function actualizarSliderTutoriales() {
+      if (!sliderTrack || !sliderPrev || !sliderNext) return;
+      var items = Array.prototype.slice.call(sliderTrack.children);
+      if (items.length <= 3) return;
+      var maxIndex = items.length - 3;
+      if (sliderIndex > maxIndex) sliderIndex = maxIndex;
+      var itemWidth = items[0].getBoundingClientRect().width;
+      var gap = parseFloat(getComputedStyle(sliderTrack).gap) || 0;
+      sliderTrack.style.transform = 'translateX(-' + (sliderIndex * (itemWidth + gap)) + 'px)';
+      sliderPrev.disabled = sliderIndex <= 0;
+      sliderNext.disabled = sliderIndex >= maxIndex;
+    }
+
+    if (sliderPrev && sliderNext && sliderTrack) {
+      sliderPrev.addEventListener('click', function () {
+        sliderIndex = Math.max(0, sliderIndex - 1);
+        actualizarSliderTutoriales();
+      });
+      sliderNext.addEventListener('click', function () {
+        var maxIndex = Math.max(0, sliderTrack.children.length - 3);
+        sliderIndex = Math.min(maxIndex, sliderIndex + 1);
+        actualizarSliderTutoriales();
+      });
+      window.addEventListener('resize', actualizarSliderTutoriales);
+    }
+
     window.openAyudaTutorialesModal = function () {
       showModal(listModal);
+      actualizarSliderTutoriales();
     };
 
     listModal.querySelectorAll('[data-ayuda-tutorial-index]').forEach(function (btn) {
