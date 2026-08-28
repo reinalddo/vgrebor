@@ -294,6 +294,10 @@ $menuScript = <<<'SCRIPT'
       roulette_spend: "Giro de ruleta",
       roulette_earn: "Premio de ruleta",
       purchase: "Compra",
+      comentario_recompensa: "Reseña publicada",
+      comentario_destacado: "Reseña destacada",
+      comentario_edicion: "Edición de reseña",
+      comentario_reverso: "Reseña eliminada",
     };
     return labels[type] || type || "Movimiento";
   };

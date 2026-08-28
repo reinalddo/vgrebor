@@ -150,6 +150,19 @@ try {
     ];
     $_SESSION['auth_flash'] = ['type' => 'success', 'message' => 'Sesión iniciada con Google.'];
 
+    // Sistema de Comentarios: vincular a esta cuenta las compras que el
+    // navegador hizo como invitado antes de entrar con Google, igual que en
+    // login.php, para que pueda comentarlas.
+    //
+    // ⚠️ El require de db_connect.php va acá adentro a propósito: más arriba
+    // solo se carga dentro de la rama de usuario NUEVO (línea ~109), así que
+    // en el login de una cuenta que YA existía $mysqli no estaría definido y
+    // esto reventaría el login con Google. require_once es idempotente, si
+    // ya se cargó no vuelve a ejecutarse.
+    require_once __DIR__ . '/includes/db_connect.php';
+    require_once __DIR__ . '/includes/comentarios.php';
+    comentarios_vincular_pedidos_de_sesion($mysqli, (int) $userId);
+
     if ($role === 'admin') {
         header('Location: ' . google_oauth_admin_dashboard_url());
         exit;

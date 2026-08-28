@@ -821,7 +821,31 @@ function pedidos_insert_order(mysqli $mysqli, array $data): int {
         throw $e;
     }
 
-    return (int) $mysqli->insert_id;
+    $nuevoPedidoId = (int) $mysqli->insert_id;
+
+    // ── Sistema de Comentarios ────────────────────────────────────────────
+    // Se anota el pedido en la sesión del navegador. Es la ÚNICA prueba
+    // confiable de que "este navegador hizo este pedido" cuando la compra
+    // fue como invitado (ahí cliente_usuario_id queda NULL), y es lo que
+    // permite que al registrarse/iniciar sesión pueda comentar esa compra
+    // sin que nadie pueda reclamar el pedido de otro mandando un id a mano.
+    // Bloque a propósito autocontenido (sin require, sin llamar funciones de
+    // otro archivo) para que sea trivial de restaurar si el paquete FTP del
+    // otro desarrollador vuelve a pisar este archivo. Ver
+    // includes/comentarios.php (comentarios_pedidos_de_sesion).
+    if ($nuevoPedidoId > 0 && session_status() === PHP_SESSION_ACTIVE) {
+        if (!isset($_SESSION['comentarios_pedidos_sesion']) || !is_array($_SESSION['comentarios_pedidos_sesion'])) {
+            $_SESSION['comentarios_pedidos_sesion'] = [];
+        }
+        $_SESSION['comentarios_pedidos_sesion'][] = $nuevoPedidoId;
+        // Tope para que la sesión no crezca sin límite: solo interesan los
+        // pedidos recientes de este navegador.
+        if (count($_SESSION['comentarios_pedidos_sesion']) > 20) {
+            $_SESSION['comentarios_pedidos_sesion'] = array_slice($_SESSION['comentarios_pedidos_sesion'], -20);
+        }
+    }
+
+    return $nuevoPedidoId;
 }
 
 function sync_coupon_usage_counts_safe(mysqli $mysqli): void {

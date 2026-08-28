@@ -83,13 +83,58 @@ if ($ok) {
         }
     }
 
-    response(true, 'Usuario registrado correctamente.');
+    // ── Sistema de Comentarios: registro + comentario en un solo paso ──
+    // Caso de uso: alguien recargó como invitado, vio el bloque "Gracias por
+    // su compra" y eligió registrarse; en ese caso el formulario de registro
+    // trae además un comentario. Se vinculan a la cuenta nueva los pedidos
+    // que este navegador hizo como invitado (probados por la sesión del
+    // servidor, no por lo que mande el navegador) y recién ahí se publica el
+    // comentario sobre ese pedido.
+    $comentarioResultado = null;
+    if ($nuevoUsuarioId > 0) {
+        require_once __DIR__ . '/includes/comentarios.php';
+        require_once __DIR__ . '/includes/win_points.php';
+        tenant_start_session();
+
+        comentarios_vincular_pedidos_de_sesion($mysqli, $nuevoUsuarioId);
+
+        $comentarioTexto = trim((string) ($data['comentario_texto'] ?? ''));
+        $comentarioPedidoId = (int) ($data['comentario_pedido_id'] ?? 0);
+        if ($comentarioTexto !== '' && $comentarioPedidoId > 0) {
+            // Doble validación: el pedido tiene que estar entre los que ESTE
+            // navegador hizo. Aunque comentarios_publicar() ya revalida el
+            // dueño contra la BD, sin este chequeo alguien podría mandar un
+            // pedido_id ajeno que justo quedó sin dueño.
+            if (in_array($comentarioPedidoId, comentarios_pedidos_de_sesion(), true)) {
+                $comentarioResultado = comentarios_publicar(
+                    $mysqli,
+                    $nuevoUsuarioId,
+                    $comentarioPedidoId,
+                    $data['comentario_estrellas'] ?? 5,
+                    $comentarioTexto
+                );
+            } else {
+                $comentarioResultado = ['ok' => false, 'message' => 'No pudimos asociar tu comentario a una compra de este navegador.'];
+            }
+        }
+    }
+
+    $mensaje = 'Usuario registrado correctamente.';
+    if (is_array($comentarioResultado)) {
+        $mensaje .= $comentarioResultado['ok']
+            ? ' ' . $comentarioResultado['message']
+            : ' Tu cuenta quedó creada, pero no se pudo publicar el comentario: ' . $comentarioResultado['message'];
+    }
+
+    response(true, $mensaje, [
+        'comentario_publicado' => is_array($comentarioResultado) ? (bool) $comentarioResultado['ok'] : false,
+    ]);
 } else {
     response(false, 'Error al guardar el usuario en la base de datos.');
 }
 
-function response($success, $message) {
-    echo json_encode(['success' => $success, 'message' => $message]);
+function response($success, $message, array $extra = []) {
+    echo json_encode(array_merge(['success' => $success, 'message' => $message], $extra));
     exit;
 }
 function defaultResponse() {

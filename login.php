@@ -58,6 +58,13 @@ $_SESSION["auth_user"] = [
 ];
 $_SESSION["auth_flash"] = ["type" => "success", "message" => "Inicio de sesión exitoso."];
 
+// Sistema de Comentarios: si este navegador hizo compras como invitado antes
+// de iniciar sesión, ahora se vinculan a su cuenta para que aparezcan en
+// "Mis Pedidos" y pueda comentarlas. session_regenerate_id() de arriba
+// conserva los datos de la sesión, así que la lista sigue disponible aquí.
+require_once __DIR__ . "/includes/comentarios.php";
+comentarios_vincular_pedidos_de_sesion($mysqli, (int) $user["id"]);
+
 if (in_array(($user["rol"] ?? ""), ["admin", "root"], true)) {
   header("Location: " . app_path('/admin/dashboard'));
   exit;
