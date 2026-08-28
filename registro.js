@@ -22,6 +22,16 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             ref = localStorage.getItem('tvg_referido_codigo') || '';
         } catch (e) {}
+        // Sistema de Comentarios: si el usuario venía del bloque post-compra
+        // ("recargaste, regístrate y comenta"), el formulario trae además una
+        // reseña que se publica en el mismo paso que el registro. En un
+        // registro normal este bloque está oculto y estos campos van vacíos.
+        const comentarioBloque = document.getElementById('registro-comentario-bloque');
+        const comentarioActivo = comentarioBloque && !comentarioBloque.classList.contains('d-none');
+        const comentarioTexto = comentarioActivo ? (document.getElementById('registro-comentario-texto')?.value || '').trim() : '';
+        const comentarioPedidoId = comentarioActivo ? (document.getElementById('registro-comentario-pedido')?.value || '') : '';
+        const comentarioEstrellas = comentarioActivo ? (document.getElementById('registro-comentario-estrellas-valor')?.value || '5') : '';
+
         const btn = document.getElementById('registro-btn');
         btn.disabled = true;
         btn.textContent = 'Registrando...';
@@ -29,7 +39,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const res = await fetch(registerEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nombre, correo, telefono, contrasena, ref })
+                body: JSON.stringify({
+                    nombre, correo, telefono, contrasena, ref,
+                    comentario_texto: comentarioTexto,
+                    comentario_pedido_id: comentarioPedidoId,
+                    comentario_estrellas: comentarioEstrellas
+                })
             });
 
             const raw = await res.text();

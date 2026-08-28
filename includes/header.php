@@ -1857,6 +1857,28 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                   </button>
                 </div>
               </div>
+              <?php
+              // Sistema de Comentarios: campo extra que SOLO aparece cuando
+              // alguien acaba de recargar como invitado y eligió "Ven y
+              // regístrate" desde el bloque post-compra. Lo revela el JS de
+              // game.php (window.cmtPrepararRegistroConComentario), nunca se
+              // muestra en un registro normal.
+              ?>
+              <div id="registro-comentario-bloque" class="d-none d-grid gap-3">
+                <div style="height:1px;background:rgba(var(--theme-primary-rgb),0.28);"></div>
+                <div>
+                  <p class="small text-uppercase text-neon mb-1" style="letter-spacing:0.2em;">Tu opinión</p>
+                  <p class="small text-neon mb-0">Cuéntanos cómo te fue con la recarga que acabas de hacer. Se publicará junto con tu cuenta nueva.</p>
+                </div>
+                <div class="d-flex gap-1" id="registro-comentario-estrellas">
+                  <?php for ($i = 1; $i <= 5; $i++): ?>
+                    <button type="button" class="btn p-0 border-0 bg-transparent" data-registro-estrella="<?php echo $i; ?>" style="font-size:1.7rem;line-height:1;color:rgba(var(--theme-text-muted-rgb),0.35);" aria-label="<?php echo $i; ?> estrellas">★</button>
+                  <?php endfor; ?>
+                </div>
+                <input type="hidden" id="registro-comentario-estrellas-valor" value="5">
+                <input type="hidden" id="registro-comentario-pedido" value="">
+                <textarea id="registro-comentario-texto" class="form-control rounded-3 bg-dark text-neon border border-info" rows="3" maxlength="250" placeholder="Ej. La recarga llegó al instante, excelente servicio"></textarea>
+              </div>
               <button type="submit" id="registro-btn" class="btn btn-info neon-btn-info w-100 rounded-3 px-4 py-2 fw-bold text-uppercase shadow">Registrarse ahora</button>
             </form>
             <?php if ($googleAuthEnabled): ?>

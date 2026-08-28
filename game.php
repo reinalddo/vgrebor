@@ -1237,6 +1237,16 @@ include __DIR__ . "/includes/header.php";
         <p id="payment-status-modal-extra-message" class="d-none text-light opacity-75 mb-4 small payment-status-modal-extra-message"></p>
         <div id="payment-status-modal-reasons" class="d-none payment-reasons-card mb-3 text-start"></div>
         <div id="payment-status-modal-actions" class="d-none payment-support-actions mb-4"></div>
+        <?php
+        // Sistema de Comentarios: bloque post-compra. Se revela solo cuando
+        // la compra termina bien (ver showPaymentStatusModal, type success).
+        ?>
+        <div id="cmt-postcompra" class="d-none mb-4">
+          <div style="height:1px;background:rgba(var(--theme-primary-rgb),0.25);margin-bottom:1rem;"></div>
+          <div class="fw-bold mb-1" style="color:var(--theme-primary);font-size:1rem;text-shadow:0 0 10px rgba(var(--theme-primary-rgb),0.45);">¡Gracias por su compra!</div>
+          <div class="small text-light opacity-75 mb-3">Ven, califícanos y cuéntanos la experiencia de tu compra.</div>
+          <button type="button" id="cmt-postcompra-btn" class="btn btn-outline-info fw-bold px-4">Deja tu comentario</button>
+        </div>
         <button type="button" id="payment-status-modal-accept" class="btn btn-info fw-bold px-4 payment-status-modal-accept-btn<?= $paymentWindowConfigEnabled ? ' payment-window-theme-enabled' : '' ?>">Aceptar</button>
       </div>
     </div>
@@ -10267,8 +10277,57 @@ include __DIR__ . "/includes/header.php";
     if (paymentStatusModal && paymentWindowThemeEnabled) {
       paymentStatusModal.setAttribute('data-payment-status-state', normalizedType);
     }
+    // Sistema de Comentarios: bloque post-compra, solo si la compra salió bien.
+    aplicarBloquePostCompra(normalizedType === 'success');
     scrollPaymentModalToTop();
     setOverlayVisible(paymentStatusModal, true);
+  }
+
+  // Muestra "Gracias por su compra / déjanos tu comentario" al terminar bien
+  // una recarga. Según el estado de sesión hace 3 cosas distintas:
+  //   - logueado          -> abre directo el formulario de reseña
+  //   - invitado          -> ofrece registrarse (con el comentario dentro del
+  //                          registro) o iniciar sesión sin salir de aquí
+  // El pedido se toma de activePaymentOrder, que es el que se acaba de pagar.
+  function aplicarBloquePostCompra(esExito) {
+    const bloque = document.getElementById('cmt-postcompra');
+    if (!bloque) return;
+
+    if (!esExito) {
+      bloque.classList.add('d-none');
+      return;
+    }
+
+    const pedidoId = (activePaymentOrder && activePaymentOrder.orderId) ? activePaymentOrder.orderId : 0;
+    bloque.classList.remove('d-none');
+
+    const btn = document.getElementById('cmt-postcompra-btn');
+    if (!btn || btn.dataset.cmtListo === '1') return;
+    btn.dataset.cmtListo = '1';
+
+    btn.addEventListener('click', function () {
+      const logueado = <?= isset($_SESSION['auth_user']['id']) ? 'true' : 'false' ?>;
+      if (logueado) {
+        // Ya tiene cuenta y sesión: se cierra esta ventana y se abre el
+        // formulario normal de reseña.
+        setOverlayVisible(paymentStatusModal, false);
+        const abrir = document.querySelector('[data-cmt-abrir]');
+        if (abrir) {
+          abrir.click();
+        } else {
+          window.location.href = <?= json_encode(app_path('/') . '#resenas', JSON_UNESCAPED_SLASHES) ?>;
+        }
+        return;
+      }
+      // Invitado: registrarse comentando de una vez, o iniciar sesión aquí
+      // mismo (al volver, el pedido queda vinculado a su cuenta).
+      setOverlayVisible(paymentStatusModal, false);
+      if (typeof window.cmtPrepararRegistroConComentario === 'function') {
+        window.cmtPrepararRegistroConComentario(pedidoId);
+      } else if (typeof window.openAuthModal === 'function') {
+        window.openAuthModal('register');
+      }
+    });
   }
 
   function clearPaymentStatusPolling() {

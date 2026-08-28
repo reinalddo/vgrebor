@@ -5291,5 +5291,10 @@ RLTSCRIPT;
 </script>
 
 <?php
+// Sistema de Comentarios: sección "Lo que opinan de nosotros", debajo de
+// todas las secciones de compra y justo antes del footer.
+require_once __DIR__ . "/includes/comentarios_ui.php";
+comentarios_render_seccion($mysqli);
+
 include __DIR__ . "/includes/footer.php";
 ?>
