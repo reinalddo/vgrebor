@@ -14,9 +14,12 @@ require_once __DIR__ . '/../includes/store_config.php';
 require_once __DIR__ . '/../includes/paso_estilos.php';
 
 $etiquetasZonas = [
-    'paso1' => 'Título "PASO 1"',
-    'paso2' => 'Título "PASO 2"',
-    'paso3' => 'Título "PASO 3"',
+    'paso1' => 'PASO 1 — Insignia "PASO 1"',
+    'paso1_resto' => 'PASO 1 — Resto de la frase',
+    'paso2' => 'PASO 2 — Insignia "PASO 2"',
+    'paso2_resto' => 'PASO 2 — Resto de la frase',
+    'paso3' => 'PASO 3 — Insignia "PASO 3"',
+    'paso3_resto' => 'PASO 3 — Resto de la frase',
     'campo' => 'Campo de texto (ID de usuario)',
     'boton' => 'Botón de verificación',
     'exito' => 'Resultado exitoso',
@@ -28,13 +31,14 @@ $flashType = 'success';
 $isAjax = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
 
 // ── Acción: guardar una zona de estilo ──────────────────────────────────
-// Un solo handler genérico para las 7 zonas — todas comparten los mismos
+// Un solo handler genérico para las 10 zonas — todas comparten los mismos
 // campos base. El "modo" (original/personalizado) es independiente de los
 // demás valores: cambiarlo NUNCA borra lo que ya estaba guardado, para que
 // el cliente pueda ir y volver del diseño personalizado sin perder nada.
-// Se guarda por AJAX (fetch desde el JS de abajo) para no recargar toda la
-// página ni perder lo que el admin esté ajustando en las otras tarjetas —
-// el POST normal (sin JS) sigue funcionando como respaldo.
+// Se guarda por AJAX (fetch desde el JS de abajo, incluye archivos vía
+// FormData) para no recargar toda la página ni perder lo que el admin esté
+// ajustando en las otras tarjetas — el POST normal (sin JS) sigue
+// funcionando como respaldo.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'guardar_zona_estilo') {
     $zona = trim((string) ($_POST['zona'] ?? ''));
     if (!paso_estilo_zona_valida($zona)) {
@@ -90,31 +94,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'guard
             if ($nuevoTexto === '') {
                 $nuevoTexto = $defaults['texto'];
             }
-            store_config_upsert('paso_estilo_' . $zona . '_texto', $nuevoTexto, 'Rediseño Paso/Verificador: texto del título de "' . $zona . '".');
+            store_config_upsert('paso_estilo_' . $zona . '_texto', $nuevoTexto, 'Rediseño Paso/Verificador: texto de "' . $zona . '".');
         }
 
-        $iconosDisponibles = paso_estilo_iconos_disponibles($zona);
-        if (!empty($iconosDisponibles)) {
+        $subidaOk = true;
+
+        if (paso_estilo_zona_tiene_icono($zona)) {
+            $clavesValidas = paso_estilo_icono_claves_validas($zona);
+            $iconosDisponiblesZona = paso_estilo_iconos_disponibles($zona);
             $nuevoIcono = trim((string) ($_POST['icono'] ?? ''));
-            if ($nuevoIcono !== 'personalizado' && !array_key_exists($nuevoIcono, $iconosDisponibles)) {
-                $nuevoIcono = $defaults['icono'] ?? array_key_first($iconosDisponibles);
+            if (!in_array($nuevoIcono, $clavesValidas, true)) {
+                $nuevoIcono = $defaults['icono'] ?? 'ninguno';
             }
-            store_config_upsert('paso_estilo_' . $zona . '_icono', $nuevoIcono, 'Rediseño Paso/Verificador: ícono predefinido (o "personalizado") de "' . $zona . '".');
 
-            if ($nuevoIcono === 'personalizado') {
-                $nuevoIconoPersonalizado = trim((string) ($_POST['icono_personalizado'] ?? ''));
-                if ($nuevoIconoPersonalizado === '') {
-                    $nuevoIconoPersonalizado = $iconosDisponibles[array_key_first($iconosDisponibles)];
+            $imagenActual = paso_estilo_icono_imagen($zona);
+            $quitarImagen = isset($_POST['quitar_imagen']);
+            if ($quitarImagen) {
+                paso_estilo_icono_delete_image_file($imagenActual);
+                $imagenActual = '';
+                if ($nuevoIcono === 'imagen') {
+                    $nuevoIcono = empty($iconosDisponiblesZona) ? 'ninguno' : array_key_first($iconosDisponiblesZona);
                 }
-                // mb_substr por si el admin pega más de un emoji/caracter — se
-                // guarda solo lo que entra en el espacio pensado para 1 ícono.
-                $nuevoIconoPersonalizado = mb_substr($nuevoIconoPersonalizado, 0, 8);
-                store_config_upsert('paso_estilo_' . $zona . '_icono_personalizado', $nuevoIconoPersonalizado, 'Rediseño Paso/Verificador: ícono personalizado (emoji libre) de "' . $zona . '".');
+            }
+
+            if ($nuevoIcono === 'imagen' && !empty($_FILES['icono_imagen']['tmp_name'])) {
+                $upload = paso_estilo_icono_store_image_upload($zona, $_FILES['icono_imagen']);
+                if (!$upload['success']) {
+                    $flashMessage = $upload['message'];
+                    $flashType = 'danger';
+                    $subidaOk = false;
+                } else {
+                    paso_estilo_icono_delete_image_file($imagenActual);
+                    $imagenActual = $upload['path'];
+                }
+            }
+
+            if ($subidaOk && $nuevoIcono === 'imagen' && $imagenActual === '') {
+                $flashMessage = 'Debes subir una imagen antes de activar el modo "Imagen".';
+                $flashType = 'danger';
+                $subidaOk = false;
+            }
+
+            if ($subidaOk) {
+                store_config_upsert('paso_estilo_' . $zona . '_icono', $nuevoIcono, 'Rediseño Paso/Verificador: ícono (preset/emoji/imagen/ninguno) de "' . $zona . '".');
+                store_config_upsert('paso_estilo_' . $zona . '_icono_imagen', $imagenActual, 'Rediseño Paso/Verificador: ruta de la imagen del ícono de "' . $zona . '".');
+
+                if ($nuevoIcono === 'personalizado') {
+                    $nuevoIconoPersonalizado = trim((string) ($_POST['icono_personalizado'] ?? ''));
+                    if ($nuevoIconoPersonalizado === '') {
+                        $nuevoIconoPersonalizado = !empty($iconosDisponiblesZona) ? $iconosDisponiblesZona[array_key_first($iconosDisponiblesZona)] : '✏️';
+                    }
+                    // mb_substr por si el admin pega más de un emoji/caracter — se
+                    // guarda solo lo que entra en el espacio pensado para 1 ícono.
+                    $nuevoIconoPersonalizado = mb_substr($nuevoIconoPersonalizado, 0, 8);
+                    store_config_upsert('paso_estilo_' . $zona . '_icono_personalizado', $nuevoIconoPersonalizado, 'Rediseño Paso/Verificador: ícono personalizado (emoji libre) de "' . $zona . '".');
+                }
             }
         }
 
-        $flashMessage = 'Diseño de "' . $etiquetasZonas[$zona] . '" guardado correctamente.';
-        $flashType = 'success';
+        if ($subidaOk && ($zona === 'exito' || $zona === 'fallo')) {
+            $nuevoBadgeTexto = trim((string) ($_POST['badge_texto'] ?? ''));
+            if ($nuevoBadgeTexto === '') {
+                $nuevoBadgeTexto = $defaults['badge_texto'];
+            }
+            $nuevoBadgeTexto = mb_substr($nuevoBadgeTexto, 0, 24);
+            $nuevoBadgeColorFondo = store_config_normalize_hex_color((string) ($_POST['badge_color_fondo'] ?? ''), $defaults['badge_color_fondo']);
+            $nuevoBadgeColorTexto = store_config_normalize_hex_color((string) ($_POST['badge_color_texto'] ?? ''), $defaults['badge_color_texto']);
+            store_config_upsert('paso_estilo_' . $zona . '_badge_texto', $nuevoBadgeTexto, 'Rediseño Paso/Verificador: texto de la insignia de resultado (columna 3) de "' . $zona . '".');
+            store_config_upsert('paso_estilo_' . $zona . '_badge_color_fondo', $nuevoBadgeColorFondo, 'Rediseño Paso/Verificador: color de fondo de la insignia de resultado de "' . $zona . '".');
+            store_config_upsert('paso_estilo_' . $zona . '_badge_color_texto', $nuevoBadgeColorTexto, 'Rediseño Paso/Verificador: color de letra de la insignia de resultado de "' . $zona . '".');
+        }
+
+        if ($subidaOk && $zona === 'fallo') {
+            $nuevoMensajeModo = ($_POST['mensaje_modo'] ?? 'api') === 'personalizado' ? 'personalizado' : 'api';
+            $nuevoMensajePersonalizado = mb_substr(trim((string) ($_POST['mensaje_personalizado'] ?? '')), 0, 160);
+            store_config_upsert('paso_estilo_fallo_mensaje_modo', $nuevoMensajeModo, 'Rediseño Paso/Verificador: si el mensaje de fallo (columna 2) usa la respuesta real de la API o un texto fijo.');
+            store_config_upsert('paso_estilo_fallo_mensaje_personalizado', $nuevoMensajePersonalizado, 'Rediseño Paso/Verificador: mensaje fijo de fallo (solo se usa si el modo es "personalizado").');
+        }
+
+        if ($subidaOk) {
+            $flashMessage = 'Diseño de "' . $etiquetasZonas[$zona] . '" guardado correctamente.';
+            $flashType = 'success';
+        }
     }
 
     if ($isAjax) {
@@ -144,7 +205,21 @@ foreach (paso_estilo_zonas_validas() as $zona) {
         'borde_brillo' => paso_estilo_borde_brillo($zona),
         'icono' => paso_estilo_icono_clave($zona),
         'icono_personalizado' => paso_estilo_icono_personalizado($zona),
+        'icono_imagen' => paso_estilo_icono_imagen($zona),
+        'badge_texto' => paso_estilo_badge_texto($zona),
+        'badge_color_fondo' => paso_estilo_badge_color_fondo($zona),
+        'badge_color_texto' => paso_estilo_badge_color_texto($zona),
+        'mensaje_modo' => paso_estilo_mensaje_modo($zona),
+        'mensaje_personalizado' => paso_estilo_mensaje_personalizado($zona),
     ];
+}
+
+// La insignia ("PASO 1") y el resto de la frase se editan con UN solo campo
+// de texto (el de la tarjeta paso1/2/3) pero se muestran en 2 tarjetas — acá
+// se separan una vez para que ambas tarjetas puedan previsualizar su mitad.
+$pasoBaseTextoPartes = [];
+foreach (['paso1', 'paso2', 'paso3'] as $pasoBase) {
+    $pasoBaseTextoPartes[$pasoBase] = paso_estilo_partir_texto_paso($zonasActuales[$pasoBase]['texto']);
 }
 
 $fuentesDisponibles = paso_estilo_fuentes_disponibles();
@@ -160,7 +235,6 @@ $mensajesEjemplo = [
     'exito' => 'WOWKILL',
     'fallo' => 'ID no encontrado o no válido en este servidor. Asegúrate de que esté correcto antes de comprar.',
 ];
-$badgeEjemplo = ['exito' => 'VERIFICADO', 'fallo' => 'INVALIDO'];
 ?>
 <main class="container-lg mt-5 mb-5 px-2">
   <style>
@@ -189,11 +263,14 @@ $badgeEjemplo = ['exito' => 'VERIFICADO', 'fallo' => 'INVALIDO'];
     .pe-campo-preview-wrap { display:flex; flex-direction:column; gap:0.3rem; width:220px; }
     .pe-campo-preview-wrap label { color:#8aa0b4; font-size:0.85rem; }
     .pe-campo-custom { border-radius:6px; padding:0.5rem 0.7rem; width:100%; }
-    .pe-boton-custom { border-radius:6px; padding:0.5rem 1.1rem; font-weight:700; border-width:1px; border-style:solid; }
-    .pe-banner-custom { display:flex; align-items:center; gap:0.75rem; border-radius:12px; padding:0.85rem 1.1rem; max-width:420px; }
-    .pe-banner-custom .pe-banner-icon { font-size:1.6rem; flex-shrink:0; }
+    .pe-boton-custom { display:inline-flex; align-items:center; gap:0.5rem; border-radius:6px; padding:0.5rem 1.1rem; font-weight:700; border-width:1px; border-style:solid; }
+    .pe-boton-icon:empty { display:none; }
+    .pe-boton-icon-img { width:1.2rem; height:1.2rem; object-fit:contain; display:block; }
+    .pe-banner-custom { display:flex; align-items:center; gap:0.75rem; border-radius:12px; padding:0.85rem 1.1rem; max-width:460px; }
+    .pe-banner-custom .pe-banner-icon { font-size:1.6rem; flex-shrink:0; line-height:1; }
+    .pe-banner-custom .pe-banner-icon-img { width:1.8rem; height:1.8rem; object-fit:contain; display:block; }
     .pe-banner-custom .pe-banner-text { flex:1 1 auto; }
-    .pe-banner-custom .pe-banner-badge { flex-shrink:0; font-weight:900; font-size:0.75rem; letter-spacing:0.05em; white-space:nowrap; }
+    .pe-banner-custom .pe-banner-badge { flex-shrink:0; font-weight:900; font-size:0.75rem; letter-spacing:0.05em; white-space:nowrap; padding:0.3rem 0.65rem; border-radius:999px; }
     .pe-icono-opciones .form-check { background:#222c3a; border:1px solid rgba(0,255,247,0.25); border-radius:10px; padding:0.5rem 0.9rem 0.5rem 2.2rem; }
     .pe-icono-opciones .form-check-input:checked ~ .form-check-label { color:#00fff7; }
     .pe-icono-opciones label { font-size:1.3rem; cursor:pointer; }
@@ -215,16 +292,28 @@ $badgeEjemplo = ['exito' => 'VERIFICADO', 'fallo' => 'INVALIDO'];
   </div>
   <?php endif; ?>
 
-  <?php foreach (paso_estilo_zonas_validas() as $zona): $actual = $zonasActuales[$zona]; $iconosDisponibles = paso_estilo_iconos_disponibles($zona); ?>
+  <?php foreach (paso_estilo_zonas_validas() as $zona):
+    $actual = $zonasActuales[$zona];
+    $iconosDisponibles = paso_estilo_iconos_disponibles($zona);
+    $esResto = substr($zona, -6) === '_resto';
+    $zonaPadre = $esResto ? substr($zona, 0, -6) : $zona;
+  ?>
   <div class="pe-card" data-pe-zona="<?= $zona ?>">
-    <h2 class="h5 text-info mb-3"><?= htmlspecialchars($etiquetasZonas[$zona], ENT_QUOTES, 'UTF-8') ?></h2>
+    <h2 class="h5 text-info mb-1"><?= htmlspecialchars($etiquetasZonas[$zona], ENT_QUOTES, 'UTF-8') ?></h2>
+    <?php if ($esResto): ?>
+      <p class="text-secondary small mb-3">El texto de esta mitad se edita en la tarjeta "<?= htmlspecialchars($etiquetasZonas[$zonaPadre], ENT_QUOTES, 'UTF-8') ?>" — acá solo se le da su propio fondo/color/borde.</p>
+    <?php else: ?>
+      <div class="mb-3"></div>
+    <?php endif; ?>
     <div class="pe-flash" data-pe-flash></div>
 
     <div class="pe-preview-box">
       <!-- Vista "original" (se muestra cuando el modo = original) -->
       <div data-pe-view="original" style="<?= $actual['modo'] === 'original' ? '' : 'display:none;' ?>">
-        <?php if (paso_estilo_zona_tiene_texto($zona)): ?>
-          <span class="pe-orig-paso"><?= htmlspecialchars(paso_estilo_defaults($zona)['texto'], ENT_QUOTES, 'UTF-8') ?></span>
+        <?php if (in_array($zona, ['paso1', 'paso2', 'paso3'], true)): ?>
+          <span class="pe-orig-paso"><?= htmlspecialchars(paso_estilo_defaults($zona)['texto'] ?? '', ENT_QUOTES, 'UTF-8') ?></span>
+        <?php elseif ($esResto): ?>
+          <span class="pe-orig-paso"><?= htmlspecialchars(paso_estilo_defaults($zonaPadre)['texto'] ?? '', ENT_QUOTES, 'UTF-8') ?></span>
         <?php elseif ($zona === 'campo'): ?>
           <div class="pe-orig-campo-wrap">
             <label>ID de usuario</label>
@@ -241,20 +330,38 @@ $badgeEjemplo = ['exito' => 'VERIFICADO', 'fallo' => 'INVALIDO'];
 
       <!-- Vista "personalizado" (se actualiza en vivo, sin recargar, mientras se edita el formulario) -->
       <div data-pe-view="personalizado" style="<?= $actual['modo'] === 'personalizado' ? '' : 'display:none;' ?>">
-        <?php if (paso_estilo_zona_tiene_texto($zona)): ?>
-          <div class="pe-linea-custom" data-pe-target data-pe-target-texto><?= htmlspecialchars($actual['texto'], ENT_QUOTES, 'UTF-8') ?></div>
+        <?php if (in_array($zona, ['paso1', 'paso2', 'paso3'], true)): ?>
+          <div class="pe-linea-custom" data-pe-target data-pe-target-texto><?= htmlspecialchars($pasoBaseTextoPartes[$zona]['badge'] !== '' ? $pasoBaseTextoPartes[$zona]['badge'] : $actual['texto'], ENT_QUOTES, 'UTF-8') ?></div>
+        <?php elseif ($esResto): ?>
+          <div class="pe-linea-custom" data-pe-target><?= htmlspecialchars($pasoBaseTextoPartes[$zonaPadre]['resto'], ENT_QUOTES, 'UTF-8') ?></div>
         <?php elseif ($zona === 'campo'): ?>
           <div class="pe-campo-preview-wrap">
             <label>ID de usuario</label>
             <input type="text" class="pe-campo-custom" data-pe-target placeholder="Ej: 12345678" disabled>
           </div>
         <?php elseif ($zona === 'boton'): ?>
-          <button type="button" class="pe-boton-custom" data-pe-target disabled>Verificar nombre del jugador</button>
+          <button type="button" class="pe-boton-custom" data-pe-target disabled>
+            <span class="pe-boton-icon" data-pe-target-icono><?php
+              if ($actual['icono'] === 'imagen' && $actual['icono_imagen'] !== '') {
+                  echo '<img src="' . htmlspecialchars(app_path('/' . ltrim($actual['icono_imagen'], '/')), ENT_QUOTES, 'UTF-8') . '" class="pe-boton-icon-img" alt="">';
+              } elseif ($actual['icono'] === 'personalizado') {
+                  echo htmlspecialchars(paso_estilo_icono_emoji($zona), ENT_QUOTES, 'UTF-8');
+              }
+            ?></span>
+            <span data-pe-target-texto><?= htmlspecialchars($actual['texto'], ENT_QUOTES, 'UTF-8') ?></span>
+          </button>
         <?php else: ?>
+          <?php $mensajeMostrado = $zona === 'exito' ? $mensajesEjemplo['exito'] : ($actual['mensaje_modo'] === 'personalizado' && $actual['mensaje_personalizado'] !== '' ? $actual['mensaje_personalizado'] : $mensajesEjemplo['fallo']); ?>
           <div class="pe-banner-custom" data-pe-target>
-            <span class="pe-banner-icon" data-pe-target-icono><?= htmlspecialchars($actual['icono'] !== '' ? $iconosDisponibles[$actual['icono']] : '', ENT_QUOTES, 'UTF-8') ?></span>
-            <span class="pe-banner-text" data-pe-target-mensaje><?= $zona === 'exito' ? '<strong>' . htmlspecialchars($mensajesEjemplo[$zona], ENT_QUOTES, 'UTF-8') . '</strong>' : htmlspecialchars($mensajesEjemplo[$zona], ENT_QUOTES, 'UTF-8') ?></span>
-            <span class="pe-banner-badge"><?= htmlspecialchars($badgeEjemplo[$zona], ENT_QUOTES, 'UTF-8') ?></span>
+            <span class="pe-banner-icon" data-pe-target-icono><?php
+              if ($actual['icono'] === 'imagen' && $actual['icono_imagen'] !== '') {
+                  echo '<img src="' . htmlspecialchars(app_path('/' . ltrim($actual['icono_imagen'], '/')), ENT_QUOTES, 'UTF-8') . '" class="pe-banner-icon-img" alt="">';
+              } elseif ($actual['icono'] !== 'ninguno') {
+                  echo htmlspecialchars(paso_estilo_icono_emoji($zona), ENT_QUOTES, 'UTF-8');
+              }
+            ?></span>
+            <span class="pe-banner-text" data-pe-target-mensaje data-pe-mensaje-ejemplo="<?= htmlspecialchars($mensajesEjemplo[$zona], ENT_QUOTES, 'UTF-8') ?>"><?= $zona === 'exito' ? '<strong>' . htmlspecialchars($mensajeMostrado, ENT_QUOTES, 'UTF-8') . '</strong>' : htmlspecialchars($mensajeMostrado, ENT_QUOTES, 'UTF-8') ?></span>
+            <span class="pe-banner-badge" data-pe-target-badge style="background:<?= htmlspecialchars($actual['badge_color_fondo'], ENT_QUOTES, 'UTF-8') ?>;color:<?= htmlspecialchars($actual['badge_color_texto'], ENT_QUOTES, 'UTF-8') ?>;"><?= htmlspecialchars($actual['badge_texto'], ENT_QUOTES, 'UTF-8') ?></span>
           </div>
         <?php endif; ?>
       </div>
@@ -281,15 +388,24 @@ $badgeEjemplo = ['exito' => 'VERIFICADO', 'fallo' => 'INVALIDO'];
 
         <?php if (paso_estilo_zona_tiene_texto($zona)): ?>
         <div class="col-12">
-          <label class="form-label text-secondary small mb-1">Texto del título</label>
+          <label class="form-label text-secondary small mb-1"><?= $zona === 'boton' ? 'Texto del botón' : 'Texto del título' ?></label>
           <input type="text" name="texto" class="form-control pe-input" data-pe-campo="texto" maxlength="160" value="<?= htmlspecialchars($actual['texto'], ENT_QUOTES, 'UTF-8') ?>">
+          <?php if ($zona !== 'boton'): ?>
+          <div class="form-text text-secondary">Debe empezar con "PASO <?= htmlspecialchars(substr($zona, -1), ENT_QUOTES, 'UTF-8') ?>" para que la insignia y el resto de la frase se repartan bien entre esta tarjeta y "<?= htmlspecialchars($etiquetasZonas[$zona . '_resto'], ENT_QUOTES, 'UTF-8') ?>".</div>
+          <?php endif; ?>
         </div>
         <?php endif; ?>
 
-        <?php if (!empty($iconosDisponibles)): ?>
+        <?php if (paso_estilo_zona_tiene_icono($zona)): $clavesIcono = paso_estilo_icono_claves_validas($zona); ?>
         <div class="col-12">
-          <label class="form-label text-secondary small mb-1 d-block">Ícono</label>
+          <label class="form-label text-secondary small mb-1 d-block">Ícono<?= $zona === 'boton' ? ' (aparece a la izquierda del texto del botón)' : '' ?></label>
           <div class="d-flex gap-3 flex-wrap pe-icono-opciones">
+            <?php if (in_array('ninguno', $clavesIcono, true)): ?>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="icono" id="icono_<?= $zona ?>_ninguno" value="ninguno" data-pe-icono-radio <?= $actual['icono'] === 'ninguno' ? 'checked' : '' ?>>
+                <label class="form-check-label" for="icono_<?= $zona ?>_ninguno" style="font-size:0.95rem;">Sin ícono</label>
+              </div>
+            <?php endif; ?>
             <?php foreach ($iconosDisponibles as $clave => $emoji): ?>
               <div class="form-check">
                 <input class="form-check-input" type="radio" name="icono" id="icono_<?= $zona . '_' . $clave ?>" value="<?= $clave ?>" data-pe-icono-radio <?= $actual['icono'] === $clave ? 'checked' : '' ?>>
@@ -297,13 +413,74 @@ $badgeEjemplo = ['exito' => 'VERIFICADO', 'fallo' => 'INVALIDO'];
               </div>
             <?php endforeach; ?>
             <div class="form-check">
-              <input class="form-check-input" type="radio" name="icono" id="icono_<?= $zona ?>_personalizado" value="personalizado" data-pe-icono-radio data-pe-icono-personalizado-radio <?= $actual['icono'] === 'personalizado' ? 'checked' : '' ?>>
-              <label class="form-check-label" for="icono_<?= $zona ?>_personalizado">✏️ Personalizado</label>
+              <input class="form-check-input" type="radio" name="icono" id="icono_<?= $zona ?>_personalizado" value="personalizado" data-pe-icono-radio <?= $actual['icono'] === 'personalizado' ? 'checked' : '' ?>>
+              <label class="form-check-label" for="icono_<?= $zona ?>_personalizado" style="font-size:0.95rem;">✏️ Emoji</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="icono" id="icono_<?= $zona ?>_imagen" value="imagen" data-pe-icono-radio data-pe-icono-imagen-radio <?= $actual['icono'] === 'imagen' ? 'checked' : '' ?>>
+              <label class="form-check-label" for="icono_<?= $zona ?>_imagen" style="font-size:0.95rem;">🖼️ Imagen</label>
             </div>
           </div>
+
           <div class="mt-2" data-pe-icono-personalizado-field style="<?= $actual['icono'] === 'personalizado' ? '' : 'display:none;' ?>">
             <input type="text" name="icono_personalizado" class="form-control pe-input" data-pe-campo="icono_personalizado" maxlength="8" style="width:120px;font-size:1.4rem;text-align:center;" value="<?= htmlspecialchars($actual['icono_personalizado'], ENT_QUOTES, 'UTF-8') ?>">
             <div class="form-text text-secondary">Pega o escribe cualquier emoji.</div>
+          </div>
+
+          <div class="mt-2" data-pe-icono-imagen-field style="<?= $actual['icono'] === 'imagen' ? '' : 'display:none;' ?>">
+            <?php if ($actual['icono_imagen'] !== ''): ?>
+              <div class="d-flex align-items-center gap-2 mb-2">
+                <img data-pe-icono-imagen-actual src="<?= htmlspecialchars(app_path('/' . ltrim($actual['icono_imagen'], '/')), ENT_QUOTES, 'UTF-8') ?>" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid #00fff7;">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="quitar_imagen" id="quitar_imagen_<?= $zona ?>" value="1">
+                  <label class="form-check-label text-warning small" for="quitar_imagen_<?= $zona ?>">Quitar esta imagen</label>
+                </div>
+              </div>
+            <?php endif; ?>
+            <input type="file" name="icono_imagen" class="form-control pe-input" data-pe-icono-imagen-input accept="image/jpeg,image/png,image/webp,image/gif">
+            <div class="form-text text-secondary">JPG, PNG, WEBP o GIF, máximo 4 MB.<?= $actual['icono_imagen'] !== '' ? ' Deja vacío para conservar la imagen actual.' : '' ?> Usa una imagen si quieres un color que ningún emoji tiene.</div>
+          </div>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($zona === 'exito' || $zona === 'fallo'): ?>
+        <div class="col-12">
+          <hr style="border-color:rgba(0,255,247,0.15);">
+          <label class="form-label text-secondary small mb-1 d-block">Columna 3 — Insignia fija de resultado</label>
+          <div class="d-flex gap-3 flex-wrap align-items-end">
+            <div>
+              <label class="form-label text-secondary small mb-1 d-block">Texto de la insignia</label>
+              <input type="text" name="badge_texto" class="form-control pe-input" data-pe-campo="badge_texto" maxlength="24" style="width:180px;" value="<?= htmlspecialchars($actual['badge_texto'], ENT_QUOTES, 'UTF-8') ?>">
+            </div>
+            <div>
+              <label class="form-label text-secondary small mb-1 d-block">Fondo de la insignia</label>
+              <input type="color" name="badge_color_fondo" class="pe-color-input" data-pe-campo="badge_color_fondo" value="<?= htmlspecialchars($actual['badge_color_fondo'], ENT_QUOTES, 'UTF-8') ?>">
+            </div>
+            <div>
+              <label class="form-label text-secondary small mb-1 d-block">Letra de la insignia</label>
+              <input type="color" name="badge_color_texto" class="pe-color-input" data-pe-campo="badge_color_texto" value="<?= htmlspecialchars($actual['badge_color_texto'], ENT_QUOTES, 'UTF-8') ?>">
+            </div>
+          </div>
+          <p class="text-secondary small mb-0 mt-1">Estos 2 colores son independientes del "Color de letra" de más abajo — ese es solo para la columna del mensaje (columna 2).</p>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($zona === 'fallo'): ?>
+        <div class="col-12">
+          <label class="form-label text-secondary small mb-1 d-block">Columna 2 — Mensaje de fallo</label>
+          <div class="d-flex gap-4 flex-wrap">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="mensaje_modo" id="mensaje_modo_api_<?= $zona ?>" value="api" data-pe-mensaje-modo <?= $actual['mensaje_modo'] === 'personalizado' ? '' : 'checked' ?>>
+              <label class="form-check-label text-light" for="mensaje_modo_api_<?= $zona ?>">Usar el mensaje real de la API (por defecto)</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="mensaje_modo" id="mensaje_modo_custom_<?= $zona ?>" value="personalizado" data-pe-mensaje-modo <?= $actual['mensaje_modo'] === 'personalizado' ? 'checked' : '' ?>>
+              <label class="form-check-label text-light" for="mensaje_modo_custom_<?= $zona ?>">Mensaje personalizado</label>
+            </div>
+          </div>
+          <div class="mt-2" data-pe-mensaje-personalizado-field style="<?= $actual['mensaje_modo'] === 'personalizado' ? '' : 'display:none;' ?>">
+            <input type="text" name="mensaje_personalizado" class="form-control pe-input" data-pe-campo="mensaje_personalizado" maxlength="160" value="<?= htmlspecialchars($actual['mensaje_personalizado'], ENT_QUOTES, 'UTF-8') ?>" placeholder="Ej: Ese ID no existe en este servidor.">
+            <div class="form-text text-secondary">El formato (color, fuente, tamaño) de abajo aplica igual en los 2 modos.</div>
           </div>
         </div>
         <?php endif; ?>
@@ -393,24 +570,72 @@ $badgeEjemplo = ['exito' => 'VERIFICADO', 'fallo' => 'INVALIDO'];
     var target = card.querySelector('[data-pe-target]');
     if (!target) return;
 
-    // Texto del título (solo paso1/paso2/paso3)
+    // Texto (paso1/2/3 -> solo la insignia "PASO N"; botón -> el texto completo).
     var textoInput = card.querySelector('[data-pe-campo="texto"]');
-    if (textoInput && target.hasAttribute('data-pe-target-texto')) {
-      target.textContent = textoInput.value !== '' ? textoInput.value : target.textContent;
+    if (textoInput) {
+      var textoTarget = target.hasAttribute('data-pe-target-texto') ? target : target.querySelector('[data-pe-target-texto]');
+      if (textoTarget) {
+        var valorTexto = textoInput.value !== '' ? textoInput.value : textoTarget.textContent;
+        if (zona === 'paso1' || zona === 'paso2' || zona === 'paso3') {
+          var m = valorTexto.match(/^\s*(PASO\s*\d+)/i);
+          valorTexto = m ? m[1] : valorTexto;
+        }
+        textoTarget.textContent = valorTexto;
+      }
     }
 
-    // Ícono elegido (solo éxito/fallo) — "personalizado" toma el emoji que
-    // el admin haya escrito en su propio campo de texto, no el de la label.
+    // Ícono elegido (botón/éxito/fallo): preset, emoji propio, imagen subida o ninguno.
     var iconoRadio = card.querySelector('[data-pe-icono-radio]:checked');
     if (iconoRadio) {
       var iconoTarget = card.querySelector('[data-pe-target-icono]');
       if (iconoTarget) {
-        if (iconoRadio.value === 'personalizado') {
+        if (iconoRadio.value === 'ninguno') {
+          iconoTarget.innerHTML = '';
+        } else if (iconoRadio.value === 'personalizado') {
           var iconoPersonalizadoInput = card.querySelector('[data-pe-campo="icono_personalizado"]');
           iconoTarget.textContent = (iconoPersonalizadoInput && iconoPersonalizadoInput.value) || iconoTarget.textContent;
+        } else if (iconoRadio.value === 'imagen') {
+          var fileInput = card.querySelector('[data-pe-icono-imagen-input]');
+          var existingImg = card.querySelector('[data-pe-icono-imagen-actual]');
+          var imgClass = iconoTarget.classList.contains('pe-boton-icon') ? 'pe-boton-icon-img' : 'pe-banner-icon-img';
+          if (fileInput && fileInput.files && fileInput.files[0]) {
+            var reader = new FileReader();
+            reader.onload = function (ev) { iconoTarget.innerHTML = '<img src="' + ev.target.result + '" class="' + imgClass + '">'; };
+            reader.readAsDataURL(fileInput.files[0]);
+          } else if (existingImg) {
+            iconoTarget.innerHTML = '<img src="' + existingImg.getAttribute('src') + '" class="' + imgClass + '">';
+          }
         } else {
           var labelEl = card.querySelector('label[for="' + iconoRadio.id + '"]');
           if (labelEl) iconoTarget.textContent = labelEl.textContent;
+        }
+      }
+    }
+
+    // Columna 3 (insignia VERIFICADO/INVALIDO) — colores propios, independientes
+    // del resto del banner.
+    var badgeTarget = card.querySelector('[data-pe-target-badge]');
+    if (badgeTarget) {
+      var badgeTextoInput = card.querySelector('[data-pe-campo="badge_texto"]');
+      var badgeFondoInput = card.querySelector('[data-pe-campo="badge_color_fondo"]');
+      var badgeTextoColorInput = card.querySelector('[data-pe-campo="badge_color_texto"]');
+      if (badgeTextoInput) badgeTarget.textContent = badgeTextoInput.value || badgeTarget.textContent;
+      if (badgeFondoInput && badgeTextoColorInput) {
+        badgeTarget.setAttribute('style', 'background:' + badgeFondoInput.value + ';color:' + badgeTextoColorInput.value + ';');
+      }
+    }
+
+    // Columna 2 del fallo: mensaje real de la API (ejemplo) o el texto fijo.
+    var mensajeModoRadio = card.querySelector('[data-pe-mensaje-modo]:checked');
+    if (mensajeModoRadio) {
+      var mensajeTarget = card.querySelector('[data-pe-target-mensaje]');
+      if (mensajeTarget) {
+        if (mensajeModoRadio.value === 'personalizado') {
+          var mensajePersonalizadoInput = card.querySelector('[data-pe-campo="mensaje_personalizado"]');
+          mensajeTarget.textContent = (mensajePersonalizadoInput && mensajePersonalizadoInput.value)
+            || mensajeTarget.dataset.peMensajeEjemplo || mensajeTarget.textContent;
+        } else {
+          mensajeTarget.textContent = mensajeTarget.dataset.peMensajeEjemplo || mensajeTarget.textContent;
         }
       }
     }
@@ -436,10 +661,8 @@ $badgeEjemplo = ['exito' => 'VERIFICADO', 'fallo' => 'INVALIDO'];
     } else {
       estilo += 'border:1px solid transparent;box-shadow:none;';
     }
-    // El texto de color de letra de un banner (éxito/fallo) no debe pintar
-    // el ícono emoji del mismo color de fondo — target ya es el contenedor
-    // completo, "color" se hereda a los <span> internos, lo cual está bien
-    // porque el ícono es un emoji (su color real no cambia con `color` CSS).
+    // El "color" de acá pinta el contenedor completo (mensaje incluido); la
+    // insignia de la columna 3 ya se fijó explícito arriba y no se ve afectada.
     target.setAttribute('style', estilo);
   }
 
@@ -460,13 +683,20 @@ $badgeEjemplo = ['exito' => 'VERIFICADO', 'fallo' => 'INVALIDO'];
       if (e.target.matches('[data-pe-icono-radio]')) {
         var campoPersonalizado = card.querySelector('[data-pe-icono-personalizado-field]');
         if (campoPersonalizado) campoPersonalizado.style.display = e.target.value === 'personalizado' ? '' : 'none';
+        var campoImagen = card.querySelector('[data-pe-icono-imagen-field]');
+        if (campoImagen) campoImagen.style.display = e.target.value === 'imagen' ? '' : 'none';
+      }
+      if (e.target.matches('[data-pe-mensaje-modo]')) {
+        var campoMensaje = card.querySelector('[data-pe-mensaje-personalizado-field]');
+        if (campoMensaje) campoMensaje.style.display = e.target.value === 'personalizado' ? '' : 'none';
       }
       actualizarVista(card);
     });
     actualizarVista(card);
 
     // Guardado por AJAX: NO recarga la página, así ninguna otra tarjeta
-    // pierde lo que el admin tenga a medio ajustar.
+    // pierde lo que el admin tenga a medio ajustar. FormData ya incluye los
+    // archivos del <input type="file"> sin configuración extra.
     var form = card.querySelector('[data-pe-form]');
     var flash = card.querySelector('[data-pe-flash]');
     var submitBtn = card.querySelector('[data-pe-submit]');

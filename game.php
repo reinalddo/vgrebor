@@ -72,13 +72,79 @@ if (!function_exists('paso_linea_texto')) {
     }
 }
 
+// La insignia ("PASO 1") y el resto de la frase van en 2 <span> separados,
+// cada uno con su propia zona de estilo (paso1/paso1_resto, etc.) — pedido
+// explícito del cliente ("tienen que tener dos recuadros"). Se listan las 2
+// mitades ya calculadas para no repetir el parseo en cada título.
+if (!function_exists('paso_linea_partes')) {
+    function paso_linea_partes(string $zonaBase): array {
+        return paso_estilo_partir_texto_paso(paso_linea_texto($zonaBase));
+    }
+}
+
+// Ícono de una zona (botón/éxito/fallo) ya resuelto a HTML — un emoji plano
+// o un <img> si el admin subió una imagen. '' si la zona está en "ninguno"
+// o sigue en modo original (el original nunca lleva ícono).
+if (!function_exists('paso_estilo_icono_render')) {
+    function paso_estilo_icono_render(string $zona, string $claseImg = ''): string {
+        if (!paso_estilo_esta_personalizado($zona)) {
+            return '';
+        }
+        $clave = paso_estilo_icono_clave($zona);
+        if ($clave === 'ninguno') {
+            return '';
+        }
+        if ($clave === 'imagen') {
+            $ruta = paso_estilo_icono_imagen($zona);
+            if ($ruta === '') {
+                return '';
+            }
+            $src = htmlspecialchars(app_path('/' . ltrim($ruta, '/')), ENT_QUOTES, 'UTF-8');
+            $clase = $claseImg !== '' ? ' class="' . htmlspecialchars($claseImg, ENT_QUOTES, 'UTF-8') . '"' : '';
+            return '<img src="' . $src . '" alt=""' . $clase . '>';
+        }
+        $emoji = paso_estilo_icono_emoji($zona);
+        return $emoji !== '' ? htmlspecialchars($emoji, ENT_QUOTES, 'UTF-8') : '';
+    }
+}
+
+// Texto efectivo del botón de verificación: el que escribió el admin (modo
+// personalizado) o el label dinámico por juego de siempre (modo original —
+// cada juego puede pedir un ID distinto, por eso ese texto no es fijo).
+if (!function_exists('paso_estilo_boton_texto_efectivo')) {
+    function paso_estilo_boton_texto_efectivo(?array $playerVerificationConfig): string {
+        $textoDefecto = (string) ($playerVerificationConfig['buttonLabel'] ?? 'Verificar nombre del jugador');
+        if (!paso_estilo_esta_personalizado('boton')) {
+            return $textoDefecto;
+        }
+        $texto = paso_estilo_texto('boton');
+        return $texto !== '' ? $texto : $textoDefecto;
+    }
+}
+
 // Mismos datos que paso_estilo_css_inline() pero en array, para las 2 zonas
 // que el JS necesita armar dinámicamente (éxito/fallo del verificador,
 // según la respuesta real de la API) en vez de imprimirlas ya resueltas en
 // el HTML — ver setPlayerVerificationFeedback() más abajo en este archivo.
+// El ícono viaja como {tipo, valor} porque puede ser un emoji o la URL de
+// una imagen subida — el JS decide si imprime texto o un <img>.
 if (!function_exists('paso_estilo_js_config')) {
     function paso_estilo_js_config(string $zona): array {
-        return [
+        $iconoClave = paso_estilo_icono_clave($zona);
+        $icono = ['tipo' => 'ninguno', 'valor' => ''];
+        if ($iconoClave === 'imagen') {
+            $ruta = paso_estilo_icono_imagen($zona);
+            if ($ruta !== '') {
+                $icono = ['tipo' => 'imagen', 'valor' => app_path('/' . ltrim($ruta, '/'))];
+            }
+        } elseif ($iconoClave !== 'ninguno') {
+            $emoji = paso_estilo_icono_emoji($zona);
+            if ($emoji !== '') {
+                $icono = ['tipo' => 'emoji', 'valor' => $emoji];
+            }
+        }
+
+        $config = [
             'personalizado' => paso_estilo_esta_personalizado($zona),
             'fondo' => paso_estilo_fondo_css($zona),
             'colorTexto' => paso_estilo_color_texto($zona),
@@ -88,8 +154,18 @@ if (!function_exists('paso_estilo_js_config')) {
             'colorBorde' => paso_estilo_color_borde($zona),
             'bordeGrosor' => paso_estilo_borde_grosor($zona),
             'bordeBrillo' => paso_estilo_borde_brillo($zona),
-            'icono' => paso_estilo_icono_emoji($zona),
+            'icono' => $icono,
+            'badgeTexto' => paso_estilo_badge_texto($zona),
+            'badgeColorFondo' => paso_estilo_badge_color_fondo($zona),
+            'badgeColorTexto' => paso_estilo_badge_color_texto($zona),
         ];
+
+        if ($zona === 'fallo') {
+            $config['mensajeModo'] = paso_estilo_mensaje_modo($zona);
+            $config['mensajePersonalizado'] = paso_estilo_mensaje_personalizado($zona);
+        }
+
+        return $config;
     }
 }
 
@@ -500,7 +576,7 @@ include __DIR__ . "/includes/header.php";
 <?php endif; ?>
 
 <section id="player-step-section" class="container mt-4 mb-3" data-aos="fade-up">
-  <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso1') ?>" data-paso-linea<?= paso_estilo_css_inline('paso1') ?>><?= htmlspecialchars(paso_linea_texto('paso1'), ENT_QUOTES, 'UTF-8') ?></span></h2>
+  <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso1') ?>" data-paso-linea<?= paso_estilo_css_inline('paso1') ?>><?= htmlspecialchars(paso_linea_partes('paso1')['badge'], ENT_QUOTES, 'UTF-8') ?></span><?php $paso1Resto = paso_linea_partes('paso1')['resto']; if ($paso1Resto !== ''): ?> <span class="<?= paso_linea_class('paso1_resto') ?>"<?= paso_estilo_css_inline('paso1_resto') ?>><?= htmlspecialchars($paso1Resto, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></h2>
 </section>
 
 
@@ -512,7 +588,8 @@ include __DIR__ . "/includes/header.php";
           <label class="form-label text-info" id="player-primary-label">ID de usuario</label>
           <div class="d-flex flex-column flex-sm-row gap-2 align-items-stretch">
             <input type="text" id="order-user-id" name="user_id" placeholder="Ej: 12345678" value="<?= htmlspecialchars($loggedUserLastPurchaseIdentifier, ENT_QUOTES, 'UTF-8') ?>" class="form-control bg-dark text-info border-info"<?= paso_estilo_css_inline('campo') ?> required />
-            <button type="button" id="verify-player-button" class="btn btn-outline-info fw-bold text-nowrap d-none"<?= paso_estilo_css_inline('boton') ?>><?= htmlspecialchars((string) ($playerVerificationConfig['buttonLabel'] ?? 'Verificar nombre del jugador'), ENT_QUOTES, 'UTF-8') ?></button>
+            <?php $botonIconoHtml = paso_estilo_icono_render('boton', 'paso-boton-icon-img'); ?>
+            <button type="button" id="verify-player-button" class="btn btn-outline-info fw-bold text-nowrap d-none paso-boton-verif"<?= paso_estilo_css_inline('boton') ?>><?php if ($botonIconoHtml !== ''): ?><span class="paso-boton-icon" aria-hidden="true"><?= $botonIconoHtml ?></span><?php endif; ?><span id="verify-player-button-text"><?= htmlspecialchars(paso_estilo_boton_texto_efectivo($playerVerificationConfig), ENT_QUOTES, 'UTF-8') ?></span></button>
           </div>
           <div id="player-verification-feedback" class="d-none mt-2"></div>
         </div>
@@ -533,7 +610,7 @@ include __DIR__ . "/includes/header.php";
 <section id="game-packages-section" class="container mt-2 mt-md-4" data-aos="fade-up">
   <div class="row mb-2 align-items-center">
     <div class="col">
-      <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso2') ?>" data-paso-linea<?= paso_estilo_css_inline('paso2') ?>><?= htmlspecialchars(paso_linea_texto('paso2'), ENT_QUOTES, 'UTF-8') ?></span></h2>
+      <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso2') ?>" data-paso-linea<?= paso_estilo_css_inline('paso2') ?>><?= htmlspecialchars(paso_linea_partes('paso2')['badge'], ENT_QUOTES, 'UTF-8') ?></span><?php $paso2Resto = paso_linea_partes('paso2')['resto']; if ($paso2Resto !== ''): ?> <span class="<?= paso_linea_class('paso2_resto') ?>"<?= paso_estilo_css_inline('paso2_resto') ?>><?= htmlspecialchars($paso2Resto, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></h2>
       <br>
     </div>
     <div class="col-auto">
@@ -1053,7 +1130,7 @@ include __DIR__ . "/includes/header.php";
 </section>
 
 <section id="payment-step-section" class="container mt-3 mb-5" data-aos="fade-up">
-  <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso3') ?>" data-paso-linea<?= paso_estilo_css_inline('paso3') ?>><?= htmlspecialchars(paso_linea_texto('paso3'), ENT_QUOTES, 'UTF-8') ?></span></h2>
+  <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso3') ?>" data-paso-linea<?= paso_estilo_css_inline('paso3') ?>><?= htmlspecialchars(paso_linea_partes('paso3')['badge'], ENT_QUOTES, 'UTF-8') ?></span><?php $paso3Resto = paso_linea_partes('paso3')['resto']; if ($paso3Resto !== ''): ?> <span class="<?= paso_linea_class('paso3_resto') ?>"<?= paso_estilo_css_inline('paso3_resto') ?>><?= htmlspecialchars($paso3Resto, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></h2>
   <div class="payment-coupon-shell mt-4">
     <div class="payment-coupon-panel">
       <label class="form-label text-info mb-2">Cupón</label>
@@ -3957,9 +4034,26 @@ include __DIR__ . "/includes/header.php";
     line-height: 1.3;
   }
 
+  /* Botón de verificación con ícono a la izquierda del texto (opcional,
+     solo en modo personalizado — ver includes/paso_estilos.php). */
+  .paso-boton-verif {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .paso-boton-icon-img {
+    width: 1.2rem;
+    height: 1.2rem;
+    object-fit: contain;
+    display: block;
+  }
+
   /* Resultado del verificador de jugador (éxito/fallo), modo personalizado.
      En modo original sigue siendo el `alert alert-success/alert-danger`
-     normal de Bootstrap — esta clase solo existe cuando hay diseño propio. */
+     normal de Bootstrap — esta clase solo existe cuando hay diseño propio.
+     3 columnas: ícono | mensaje (nombre del jugador o motivo de fallo) |
+     insignia fija VERIFICADO/INVALIDO con su propio color, independiente
+     del resto del banner. */
   .paso-verif-banner {
     display: flex;
     align-items: center;
@@ -3972,6 +4066,12 @@ include __DIR__ . "/includes/header.php";
     line-height: 1;
     flex-shrink: 0;
   }
+  .paso-verif-banner .paso-verif-icon-img {
+    width: 1.6rem;
+    height: 1.6rem;
+    object-fit: contain;
+    display: block;
+  }
   .paso-verif-banner .paso-verif-text {
     flex: 1 1 auto;
     min-width: 0;
@@ -3982,6 +4082,8 @@ include __DIR__ . "/includes/header.php";
     font-size: 0.75rem;
     letter-spacing: 0.05em;
     white-space: nowrap;
+    padding: 0.3rem 0.65rem;
+    border-radius: 999px;
   }
 
   .purchase-summary-layout-single {
@@ -5856,12 +5958,10 @@ include __DIR__ . "/includes/header.php";
       sec2.style.display = 'none';
       sec2.querySelectorAll('[required]').forEach(function(el) { el.removeAttribute('required'); });
     }
-    // Cada título "PASO N: ..." vive en su propio <span data-paso-linea>
-    // (paso1/paso2/paso3 son 3 zonas rediseñables independientes, ver
-    // includes/paso_estilos.php) con texto editable desde el admin — acá
-    // solo se renumera el prefijo "PASO N" de lo que esté mostrando ese
-    // span en este momento (sea el texto de siempre o uno editado), igual
-    // de simple que el `.replace()` que ya hacía esto antes del rediseño.
+    // La insignia "PASO N" vive en su propio <span data-paso-linea> (el
+    // resto de la frase es OTRO span aparte, sin este atributo — ver
+    // includes/paso_estilos.php) así que acá solo hace falta renumerar ese
+    // span, que contiene únicamente "PASO N" y nada más.
     const paso2Linea = document.querySelector('#game-packages-section .page-step-title [data-paso-linea]');
     const paso3Linea = document.querySelector('#payment-step-section .page-step-title [data-paso-linea]');
     if (paso2Linea) paso2Linea.textContent = paso2Linea.textContent.replace(/^PASO\s*2/, 'PASO 1');
@@ -5908,6 +6008,10 @@ include __DIR__ . "/includes/header.php";
   const pasoEstiloVerificacion = <?= json_encode([
     'exito' => paso_estilo_js_config('exito'),
     'fallo' => paso_estilo_js_config('fallo'),
+    'boton' => [
+        'personalizado' => paso_estilo_esta_personalizado('boton'),
+        'texto' => paso_estilo_boton_texto_efectivo($playerVerificationConfig),
+    ],
   ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
   const bsPassStockConfig = <?= json_encode([
     'enabled' => bs_pass_stock_is_configured() && !empty($bsPassStockPackageIds) && $playerVerificationConfig !== null,
@@ -9201,6 +9305,16 @@ include __DIR__ . "/includes/header.php";
     return css;
   }
 
+  // Ícono de la columna 1 ya resuelto a HTML — un emoji plano o un <img> si
+  // el admin subió una imagen (ver paso_estilo_js_config() en el PHP).
+  function pasoEstiloIconoHtml(icono) {
+    if (!icono || icono.tipo === 'ninguno' || !icono.valor) return '';
+    if (icono.tipo === 'imagen') {
+      return '<img src="' + escapePaymentHtml(icono.valor) + '" alt="" class="paso-verif-icon-img">';
+    }
+    return escapePaymentHtml(icono.valor);
+  }
+
   function setPlayerVerificationFeedback(type, message) {
     if (!playerVerificationFeedback) {
       return;
@@ -9211,28 +9325,37 @@ include __DIR__ . "/includes/header.php";
       return;
     }
 
-    // Éxito y fallo tienen su propio diseño configurable (insignia con
-    // ícono, degradado y "VERIFICADO"/"INVALIDO") cuando esa zona está en
-    // modo personalizado — si sigue en modo original, se comporta EXACTO
-    // igual que antes (alerta simple de Bootstrap con solo el mensaje).
+    // Éxito y fallo tienen su propio diseño configurable en 3 columnas
+    // (ícono | mensaje editable | insignia fija VERIFICADO/INVALIDO con su
+    // propio color) cuando esa zona está en modo personalizado — si sigue
+    // en modo original, se comporta EXACTO igual que antes (alerta simple
+    // de Bootstrap con solo el mensaje).
     if (type === 'success' && pasoEstiloVerificacion.exito.personalizado) {
+      const cfg = pasoEstiloVerificacion.exito;
       const nombre = (playerVerificationState.playerName || '').trim();
       playerVerificationFeedback.className = 'paso-verif-banner mt-2';
-      playerVerificationFeedback.setAttribute('style', pasoEstiloBuildCss(pasoEstiloVerificacion.exito));
+      playerVerificationFeedback.setAttribute('style', pasoEstiloBuildCss(cfg));
       playerVerificationFeedback.innerHTML =
-        '<span class="paso-verif-icon" aria-hidden="true">' + escapePaymentHtml(pasoEstiloVerificacion.exito.icono) + '</span>'
+        '<span class="paso-verif-icon" aria-hidden="true">' + pasoEstiloIconoHtml(cfg.icono) + '</span>'
         + '<span class="paso-verif-text"><strong>' + escapePaymentHtml(nombre || message) + '</strong></span>'
-        + '<span class="paso-verif-badge">VERIFICADO</span>';
+        + '<span class="paso-verif-badge" style="background:' + cfg.badgeColorFondo + ';color:' + cfg.badgeColorTexto + ';">' + escapePaymentHtml(cfg.badgeTexto) + '</span>';
       return;
     }
 
     if (type === 'danger' && pasoEstiloVerificacion.fallo.personalizado) {
+      const cfg = pasoEstiloVerificacion.fallo;
+      // Columna 2: el mensaje real de la API (por defecto) o el texto fijo
+      // que haya escrito el admin — el formato (color/fuente) es el mismo
+      // en los 2 casos, solo cambia el contenido.
+      const mensajeColumna2 = (cfg.mensajeModo === 'personalizado' && cfg.mensajePersonalizado)
+        ? cfg.mensajePersonalizado
+        : message;
       playerVerificationFeedback.className = 'paso-verif-banner mt-2';
-      playerVerificationFeedback.setAttribute('style', pasoEstiloBuildCss(pasoEstiloVerificacion.fallo));
+      playerVerificationFeedback.setAttribute('style', pasoEstiloBuildCss(cfg));
       playerVerificationFeedback.innerHTML =
-        '<span class="paso-verif-icon" aria-hidden="true">' + escapePaymentHtml(pasoEstiloVerificacion.fallo.icono) + '</span>'
-        + '<span class="paso-verif-text">' + escapePaymentHtml(message) + '</span>'
-        + '<span class="paso-verif-badge">INVALIDO</span>';
+        '<span class="paso-verif-icon" aria-hidden="true">' + pasoEstiloIconoHtml(cfg.icono) + '</span>'
+        + '<span class="paso-verif-text">' + escapePaymentHtml(mensajeColumna2) + '</span>'
+        + '<span class="paso-verif-badge" style="background:' + cfg.badgeColorFondo + ';color:' + cfg.badgeColorTexto + ';">' + escapePaymentHtml(cfg.badgeTexto) + '</span>';
       return;
     }
 
@@ -9370,9 +9493,15 @@ include __DIR__ . "/includes/header.php";
 
     verifyPlayerButton.classList.remove('d-none');
     verifyPlayerButton.disabled = playerVerificationState.pending || !hasPlayerVerificationInputs();
-    verifyPlayerButton.textContent = playerVerificationState.pending
-      ? 'Verificando...'
-      : (playerVerificationConfig.buttonLabel || 'Verificar nombre del jugador');
+    // El texto vive en un <span> propio (verify-player-button-text) y no en
+    // el botón directamente, para no borrar el ícono al lado cada vez que
+    // se actualiza — ver pasoEstiloVerificacion.boton en el PHP de arriba.
+    const verifyPlayerButtonText = document.getElementById('verify-player-button-text');
+    if (verifyPlayerButtonText) {
+      verifyPlayerButtonText.textContent = playerVerificationState.pending
+        ? 'Verificando...'
+        : (pasoEstiloVerificacion.boton.texto || playerVerificationConfig.buttonLabel || 'Verificar nombre del jugador');
+    }
   }
 
   function handlePlayerVerificationFieldChange() {
