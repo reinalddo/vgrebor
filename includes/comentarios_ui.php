@@ -153,7 +153,7 @@ if (!function_exists('comentarios_render_seccion')) {
                     <button type="button" class="cmt-util<?= $item['yo_di_like'] ? ' activo' : '' ?>"
                             data-cmt-like="<?= (int) $item['id'] ?>"
                             data-cmt-logueado="<?= $usuarioId > 0 ? '1' : '0' ?>">
-                      <span aria-hidden="true">👍</span> Útil <span class="cmt-util-n"><?= (int) $item['likes'] > 0 ? '(' . (int) $item['likes'] . ')' : '' ?></span>
+                      <span aria-hidden="true">👍</span> Me gusta <span class="cmt-util-n"><?= (int) $item['likes'] > 0 ? '(' . (int) $item['likes'] . ')' : '' ?></span>
                     </button>
                   </div>
                 </article>
@@ -229,19 +229,22 @@ if (!function_exists('comentarios_render_seccion')) {
           .cmt-avatar-inicial { display:flex; align-items:center; justify-content:center; font-family:'Oxanium',sans-serif; font-weight:800; font-size:1.15rem; color:var(--theme-primary); background:rgba(var(--theme-bg-main-rgb),0.55); }
           .cmt-item-ident { flex:1; min-width:0; }
           .cmt-item-nombre { font-weight:700; color:var(--theme-text); display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap; font-size:0.98rem; }
-          .cmt-verificada { font-size:0.6rem; text-transform:uppercase; letter-spacing:0.08em; font-weight:800; color:var(--theme-success); border:1px solid rgba(var(--theme-success-rgb),0.55); border-radius:6px; padding:0.1rem 0.4rem; }
+          .cmt-verificada { font-size:0.6rem; text-transform:uppercase; letter-spacing:0.08em; font-weight:800; color:var(--theme-primary); border:1px solid rgba(var(--theme-primary-rgb),0.55); border-radius:6px; padding:0.1rem 0.4rem; }
           .cmt-destacada { font-size:0.6rem; text-transform:uppercase; letter-spacing:0.08em; font-weight:800; color:var(--theme-warning); border:1px solid rgba(var(--theme-warning-rgb),0.55); border-radius:6px; padding:0.1rem 0.4rem; }
           .cmt-item-meta { font-size:0.76rem; color:var(--theme-text-muted); margin-top:0.15rem; }
           .cmt-sep { opacity:0.5; margin:0 0.2rem; }
           .cmt-compra { color:var(--theme-primary); font-weight:600; }
           .cmt-item-texto { color:var(--theme-text); margin:0.7rem 0 0; font-size:0.93rem; line-height:1.5; overflow-wrap:anywhere; }
 
-          .cmt-respuesta { margin-top:0.8rem; background:rgba(var(--theme-warning-rgb),0.06); border:1px solid rgba(var(--theme-warning-rgb),0.28); border-left-width:3px; border-radius:0 10px 10px 0; padding:0.7rem 0.9rem; }
+          /* Respuesta oficial del admin: acento morado-azul fijo (no ligado al
+             tema del tenant) para que se distinga siempre de todo lo demás
+             de la reseña, igual que la referencia del cliente. */
+          .cmt-respuesta { margin-top:0.8rem; background:linear-gradient(135deg, #7C3AED, #3B82F6); border:1px solid rgba(124,58,237,0.55); border-left-width:3px; border-radius:0 10px 10px 0; padding:0.7rem 0.9rem; }
           .cmt-respuesta-head { display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; }
-          .cmt-respuesta-avatar { font-size:0.62rem; font-weight:800; letter-spacing:0.05em; background:var(--theme-warning); color:#1a1206; border-radius:5px; padding:0.1rem 0.35rem; }
-          .cmt-respuesta-nombre { font-weight:700; color:var(--theme-text); font-size:0.85rem; }
-          .cmt-respuesta-badge { font-size:0.58rem; text-transform:uppercase; letter-spacing:0.08em; font-weight:800; color:var(--theme-warning); border:1px solid rgba(var(--theme-warning-rgb),0.5); border-radius:5px; padding:0.08rem 0.35rem; }
-          .cmt-respuesta-texto { margin:0.45rem 0 0; font-size:0.86rem; color:var(--theme-text-muted); line-height:1.5; overflow-wrap:anywhere; }
+          .cmt-respuesta-avatar { font-size:0.62rem; font-weight:800; letter-spacing:0.05em; background:rgba(255,255,255,0.22); color:#fff; border-radius:5px; padding:0.1rem 0.35rem; }
+          .cmt-respuesta-nombre { font-weight:700; color:#fff; font-size:0.85rem; }
+          .cmt-respuesta-badge { font-size:0.58rem; text-transform:uppercase; letter-spacing:0.08em; font-weight:800; color:#fff; border:1px solid rgba(255,255,255,0.55); border-radius:5px; padding:0.08rem 0.35rem; }
+          .cmt-respuesta-texto { margin:0.45rem 0 0; font-size:0.86rem; color:rgba(255,255,255,0.92); line-height:1.5; overflow-wrap:anywhere; }
 
           .cmt-item-pie { margin-top:0.8rem; padding-top:0.7rem; border-top:1px solid rgba(var(--theme-text-muted-rgb),0.12); }
           .cmt-util { background:transparent; border:1px solid rgba(var(--theme-text-muted-rgb),0.3); border-radius:999px; color:var(--theme-text-muted); font-size:0.78rem; font-weight:600; padding:0.32rem 0.85rem; cursor:pointer; transition:border-color 0.15s, color 0.15s; }
@@ -723,7 +726,7 @@ if (!function_exists('comentarios_render_modales')) {
             pintar(5);
           })();
 
-          // Botón "Útil"
+          // Botón "Me gusta" (clase cmt-util sin cambios, es solo el texto visible)
           document.querySelectorAll('[data-cmt-like]').forEach(function (btn) {
             btn.addEventListener('click', function () {
               if (btn.dataset.cmtLogueado !== '1') {
