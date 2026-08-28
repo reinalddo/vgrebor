@@ -14,6 +14,7 @@ require_once __DIR__ . '/../includes/db_connect.php';
 require_once __DIR__ . '/../includes/store_config.php';
 require_once __DIR__ . '/../includes/win_points.php';
 require_once __DIR__ . '/../includes/comentarios.php';
+require_once __DIR__ . '/../includes/notificaciones.php';
 
 function comentarios_api_error(string $message, int $status = 400, array $extra = []): void {
     http_response_code($status);
@@ -147,6 +148,25 @@ switch ($accion) {
             comentarios_api_error($resultado['message'], 422);
         }
         comentarios_api_ok($resultado);
+        break;
+    }
+
+    // ── Notificaciones del usuario ──────────────────────────────────────
+    case 'notificaciones': {
+        $uid = comentarios_api_requiere_sesion();
+        comentarios_api_ok([
+            'items' => notificaciones_listar($mysqli, $uid),
+            'no_leidas' => notificaciones_no_leidas($mysqli, $uid),
+        ]);
+        break;
+    }
+
+    case 'notificaciones_leidas': {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            comentarios_api_error('Método no permitido.', 405);
+        }
+        $uid = comentarios_api_requiere_sesion();
+        comentarios_api_ok(['marcadas' => notificaciones_marcar_leidas($mysqli, $uid)]);
         break;
     }
 

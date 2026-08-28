@@ -1156,6 +1156,17 @@ if (!function_exists('comentarios_admin_destacar')) {
 
             $mysqli->commit();
 
+            // Notificación al usuario. Va DESPUÉS del commit a propósito: si
+            // fallara, no debe deshacer el destacado ni el bono ya acreditado
+            // (notificaciones_crear() tampoco lanza, por si acaso).
+            if ($destacar) {
+                require_once __DIR__ . '/notificaciones.php';
+                $mensaje = $bonoPagado > 0
+                    ? '¡Felicidades! Tu reseña ha sido destacada por la tienda y has ganado ' . $bonoPagado . ' RE Coins extra.'
+                    : '¡Felicidades! Tu reseña ha sido destacada por la tienda.';
+                notificaciones_crear($mysqli, $usuarioId, '¡Tu reseña fue destacada!', $mensaje, 'comentario_destacado', '#resenas');
+            }
+
             if (!$destacar) {
                 return ['ok' => true, 'message' => 'Se quitó el destacado.', 'destacado' => false];
             }

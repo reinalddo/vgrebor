@@ -335,6 +335,25 @@ if (!function_exists('comentarios_render_modales')) {
           </div>
         </div>
 
+        <!-- Modal: notificaciones del usuario -->
+        <div id="cmt-notificaciones" class="cmt-overlay d-none" role="dialog" aria-modal="true" aria-labelledby="cmt-notif-titulo">
+          <div class="cmt-overlay-fondo" data-cmt-cerrar-notif></div>
+          <div class="cmt-dialogo">
+            <div class="cmt-dialogo-head">
+              <div>
+                <div class="cmt-dialogo-eyebrow">Mi cuenta</div>
+                <h3 class="cmt-dialogo-titulo" id="cmt-notif-titulo">Notificaciones</h3>
+              </div>
+              <button type="button" class="cmt-cerrar" data-cmt-cerrar-notif aria-label="Cerrar">✕</button>
+            </div>
+            <div class="cmt-dialogo-body">
+              <div data-cmt-notif-lista class="cmt-notif-lista">
+                <div class="cmt-notif-cargando">Cargando...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Pop-up: no cumple los requisitos -->
         <div id="cmt-bloqueo" class="cmt-overlay d-none" role="dialog" aria-modal="true">
           <div class="cmt-overlay-fondo" data-cmt-cerrar-bloqueo></div>
@@ -394,6 +413,14 @@ if (!function_exists('comentarios_render_modales')) {
           .cmt-bloqueo-acciones .cmt-btn-principal { margin:0; }
           .cmt-btn-secundario { width:100%; border-radius:12px; padding:0.7rem 1rem; font-weight:700; font-size:0.9rem; background:transparent; color:var(--theme-primary); border:1px solid rgba(var(--theme-primary-rgb),0.6); cursor:pointer; }
           .cmt-btn-secundario:hover { background:rgba(var(--theme-primary-rgb),0.1); }
+          .cmt-notif-lista { display:flex; flex-direction:column; gap:0.5rem; max-height:60vh; overflow-y:auto; }
+          .cmt-notif-cargando, .cmt-notif-vacio { text-align:center; color:var(--theme-text-muted); padding:1.6rem 0; font-size:0.88rem; }
+          .cmt-notif-item { background:rgba(var(--theme-bg-main-rgb),0.5); border:1px solid rgba(var(--theme-primary-rgb),0.22); border-radius:11px; padding:0.7rem 0.9rem; }
+          .cmt-notif-item.no-leida { border-color:rgba(var(--theme-primary-rgb),0.6); background:rgba(var(--theme-primary-rgb),0.08); }
+          .cmt-notif-titulo-item { font-weight:700; color:var(--theme-text); font-size:0.9rem; display:flex; align-items:center; gap:0.4rem; }
+          .cmt-notif-punto { width:7px; height:7px; border-radius:50%; background:var(--theme-primary); flex-shrink:0; box-shadow:0 0 6px var(--theme-primary); }
+          .cmt-notif-msg { color:var(--theme-text-muted); font-size:0.83rem; line-height:1.45; margin-top:0.2rem; }
+          .cmt-notif-fecha { color:var(--theme-text-muted); opacity:0.7; font-size:0.7rem; margin-top:0.3rem; }
         </style>
 
         <script>
@@ -580,6 +607,89 @@ if (!function_exists('comentarios_render_modales')) {
                 });
             });
           }
+
+          // ── Notificaciones ───────────────────────────────────────────
+          (function () {
+            if (!LOGUEADO) return;
+            var modalNotif = document.getElementById('cmt-notificaciones');
+            var lista = modalNotif ? modalNotif.querySelector('[data-cmt-notif-lista]') : null;
+            var badges = document.querySelectorAll('[data-cmt-notif-badge]');
+            var botones = document.querySelectorAll('[data-cmt-abrir-notificaciones]');
+            if (!modalNotif || !lista) return;
+
+            function pintarBadge(n) {
+              badges.forEach(function (b) {
+                b.textContent = n > 99 ? '99+' : String(n);
+                b.classList.toggle('d-none', n <= 0);
+              });
+            }
+
+            function escapar(s) {
+              var d = document.createElement('div');
+              d.textContent = String(s == null ? '' : s);
+              return d.innerHTML;
+            }
+
+            function fechaCorta(iso) {
+              var t = Date.parse((iso || '').replace(' ', 'T'));
+              if (isNaN(t)) return '';
+              var d = new Date(t);
+              var meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+              return d.getDate() + ' ' + meses[d.getMonth()] + ' ' + d.getFullYear();
+            }
+
+            function cargar(marcarLeidas) {
+              fetch(API + '?action=notificaciones', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                  if (!d.ok) return;
+                  pintarBadge(d.no_leidas || 0);
+                  if (!marcarLeidas) return;
+
+                  if (!d.items || d.items.length === 0) {
+                    lista.innerHTML = '<div class="cmt-notif-vacio">Todavía no tienes notificaciones.</div>';
+                  } else {
+                    lista.innerHTML = d.items.map(function (n) {
+                      return '<div class="cmt-notif-item' + (n.leido ? '' : ' no-leida') + '">'
+                        + '<div class="cmt-notif-titulo-item">'
+                        + (n.leido ? '' : '<span class="cmt-notif-punto"></span>')
+                        + escapar(n.titulo || 'Notificación') + '</div>'
+                        + '<div class="cmt-notif-msg">' + escapar(n.mensaje) + '</div>'
+                        + '<div class="cmt-notif-fecha">' + escapar(fechaCorta(n.creado_en)) + '</div>'
+                        + '</div>';
+                    }).join('');
+                  }
+
+                  // Al abrirlas se marcan como leídas y se apaga el contador.
+                  if (d.no_leidas > 0) {
+                    fetch(API + '?action=notificaciones_leidas', {
+                      method: 'POST',
+                      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    }).then(function () { pintarBadge(0); }).catch(function () {});
+                  }
+                })
+                .catch(function () {
+                  if (marcarLeidas) lista.innerHTML = '<div class="cmt-notif-vacio">No se pudieron cargar tus notificaciones.</div>';
+                });
+            }
+
+            botones.forEach(function (b) {
+              b.addEventListener('click', function () {
+                lista.innerHTML = '<div class="cmt-notif-cargando">Cargando...</div>';
+                abrir(modalNotif);
+                cargar(true);
+              });
+            });
+            modalNotif.querySelectorAll('[data-cmt-cerrar-notif]').forEach(function (el) {
+              el.addEventListener('click', function () { cerrar(modalNotif); });
+            });
+            document.addEventListener('keydown', function (e) {
+              if (e.key === 'Escape' && !modalNotif.classList.contains('d-none')) cerrar(modalNotif);
+            });
+
+            // Contador al cargar la página (sin abrir el modal).
+            cargar(false);
+          })();
 
           // ── Registro con comentario integrado ────────────────────────
           // Lo llama el bloque post-compra de game.php cuando un INVITADO

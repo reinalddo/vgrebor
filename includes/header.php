@@ -1461,6 +1461,14 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
               <?php endif; ?>
               <button type="button" class="btn btn-admin w-100 rounded-3 border mb-2 fw-semibold" data-user-open="orders">Ver Pedidos</button>
               <button type="button" class="btn btn-outline-info w-100 rounded-3 border mb-2 fw-semibold" data-user-open="referrals">🤝 Mis Referidos</button>
+              <?php
+              // Sistema de Comentarios / Notificaciones: el contador de no
+              // leídas lo rellena el JS de includes/comentarios_ui.php.
+              ?>
+              <button type="button" class="btn btn-outline-info w-100 rounded-3 border mb-2 fw-semibold d-flex align-items-center justify-content-center gap-2" data-cmt-abrir-notificaciones>
+                <span>🔔 Notificaciones</span>
+                <span class="badge rounded-pill d-none" data-cmt-notif-badge style="background:var(--theme-danger);color:#fff;"></span>
+              </button>
               <button type="button" class="btn btn-outline-info w-100 rounded-3 border mb-2 fw-semibold" data-user-open="profile">Datos Usuario</button>
               <?php
                 // Acceso directo al gestor de streaming: revendedor → su panel; admin/root → el del admin.
