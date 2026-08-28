@@ -4031,7 +4031,12 @@ include __DIR__ . "/includes/header.php";
     display: inline-block;
     padding: 0.5rem 1.2rem;
     border-radius: 14px;
+    /* line-height propio (no el 1.08 heredado de .page-step-title) porque el
+       padding necesita más aire vertical para no verse apretado dentro del
+       recuadro — vertical-align corrige el nivel contra el span vecino sin
+       recuadro (el "resto" de la frase), que sí usa el line-height base. */
     line-height: 1.3;
+    vertical-align: middle;
   }
 
   /* Botón de verificación con ícono a la izquierda del texto (opcional,

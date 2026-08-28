@@ -3530,22 +3530,33 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   // sin depender de que el visitante encuentre el botón por su cuenta. Va al
   // final del body a propósito: necesita que el listener de data-user-open
   // ya esté enganchado (se define más arriba en este mismo archivo).
+  //
+  // También escucha "hashchange": el banner de la Galería del popup de
+  // inicio (home_gallery.php / index.php, clase startup-popup-gallery-slide)
+  // es un <a href="https://tudominio/#referidos"> — si el visitante ya está
+  // parado en esa misma página, el navegador NO recarga, solo cambia el
+  // hash, así que sin este listener el chequeo inicial nunca se repetiría.
   (function () {
-    try {
-      var params = new URLSearchParams(window.location.search);
-      var quiereReferidos = window.location.hash === '#referidos' || params.get('abrir') === 'referidos';
-      if (!quiereReferidos) return;
+    function intentarAbrirReferidos() {
+      try {
+        var params = new URLSearchParams(window.location.search);
+        var quiereReferidos = window.location.hash === '#referidos' || params.get('abrir') === 'referidos';
+        if (!quiereReferidos) return;
 
-      var botonReferidos = document.querySelector('[data-user-open="referrals"]');
-      if (botonReferidos) {
-        botonReferidos.click();
-        return;
-      }
-      // Sin sesión iniciada no existe ese botón en el DOM — se abre el login
-      // primero; al volver a entrar con el mismo link ya verá el panel.
-      var botonLogin = document.querySelector('[data-auth-open="login"]');
-      if (botonLogin) botonLogin.click();
-    } catch (e) {}
+        var botonReferidos = document.querySelector('[data-user-open="referrals"]');
+        if (botonReferidos) {
+          botonReferidos.click();
+          return;
+        }
+        // Sin sesión iniciada no existe ese botón en el DOM — se abre el
+        // login primero; al volver a entrar con el mismo link ya verá el panel.
+        var botonLogin = document.querySelector('[data-auth-open="login"]');
+        if (botonLogin) botonLogin.click();
+      } catch (e) {}
+    }
+
+    intentarAbrirReferidos();
+    window.addEventListener('hashchange', intentarAbrirReferidos);
   })();
   </script>
 
