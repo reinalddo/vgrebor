@@ -247,8 +247,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           if (function_exists('stream_notif_crear')) {
             $rn = (string) ($pdo->query("SELECT COALESCE(NULLIF(nombre,''),username) FROM usuarios WHERE id=$OWNER")->fetchColumn() ?: '');
             $plt = (string) ($pdo->query("SELECT plataforma FROM streaming_cuentas WHERE id=$cid")->fetchColumn() ?: '');
+            $ogCid = (int) ($pdo->query("SELECT COALESCE(origen_cuenta_id,0) FROM streaming_cuentas WHERE id=$cid")->fetchColumn() ?: 0);   // cuenta origen (para resaltar)
             stream_notif_crear($pdo, 0, 'cuenta', 'Cambio de nombre/PIN · ' . ($plt ?: 'perfil'),
-              'El revendedor ' . ($rn ?: '#' . $OWNER) . ' cambió el nombre/PIN de ' . $revSyncNP . ' perfil(es) de ' . ($plt ?: 'streaming') . '.', 'cuentas.php', (int) current_user_id());
+              'El revendedor ' . ($rn ?: '#' . $OWNER) . ' cambió el nombre/PIN de ' . $revSyncNP . ' perfil(es) de ' . ($plt ?: 'streaming') . '.',
+              'cuentas.php' . ($ogCid > 0 ? '?hl=' . $ogCid : ''), (int) current_user_id(), $ogCid ?: null);
           }
         } catch (Throwable $e) {}
       }
@@ -862,7 +864,7 @@ stream_head('Cuentas', 'cuentas');
       <div><label class="flbl">Revendedor</label><select id="f-rev" onchange="filtrar()" class="input"><option value="">Todos</option><?php foreach ($revList as $rv): ?><option value="<?= h(mb_strtolower((string) $rv['nombre'])) ?>"><?= h($rv['nombre']) ?></option><?php endforeach; ?></select></div>
       <?php endif; ?>
       <?php if ($verCostos): ?><div><label class="flbl">Proveedor</label><select id="f-prov" onchange="filtrar()" class="input"><option value="">Todos</option><?php foreach ($provNames as $pn): ?><option value="<?= h(mb_strtolower($pn)) ?>"><?= h($pn) ?></option><?php endforeach; ?></select></div><?php endif; ?>
-      <div><label class="flbl">Ordenar por</label><select id="f-orden" onchange="ordenar()" class="input"><option value="">— Por defecto —</option><option value="dias-asc">Vence primero</option><option value="dias-desc">Vence último</option><option value="plat-asc">Plataforma A→Z</option><option value="plat-desc">Plataforma Z→A</option></select></div>
+      <div><label class="flbl">Ordenar por</label><select id="f-orden" onchange="ordenar()" class="input"><option value="">— Por defecto —</option><option value="dias-asc">Vence primero</option><option value="dias-desc">Vence último</option><option value="plat-asc">Plataforma (A→Z)</option><option value="plat-desc">Plataforma (Z→A)</option><option value="correo-asc">Correo (A→Z)</option><option value="rev-asc">Vendedor (A→Z)</option></select></div>
     </div>
   </div>
 </div>
@@ -913,7 +915,7 @@ stream_head('Cuentas', 'cuentas');
         $fEstado = ($d === null) ? 'sinfecha' : ($d < 0 ? 'vencida' : ($d <= 5 ? 'porvencer' : 'vigente'));
         $fStock = (int) $c['libres'] > 0 ? 'con' : 'sin';
       ?>
-        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($c['plataforma'] ?? '')) ?>" data-estado="<?= $fEstado ?>" data-stock="<?= $fStock ?>" data-prov="<?= h(mb_strtolower($c['prov_nombre'] ?? '')) ?>" data-rev="<?= h((string) ($c['rev_nombres'] ?? '')) ?>" data-dias="<?= $d === null ? 999999 : (int) $d ?>">
+        <tr id="hl<?= (int) $c['id'] ?>" data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($c['plataforma'] ?? '')) ?>" data-correo="<?= h(mb_strtolower($c['correo'] ?? '')) ?>" data-estado="<?= $fEstado ?>" data-stock="<?= $fStock ?>" data-prov="<?= h(mb_strtolower((string) ($c['prov_nombre'] ?? ''))) ?>" data-rev="<?= h(mb_strtolower((string) ($c['rev_nombres'] ?? ''))) ?>" data-dias="<?= $d === null ? 999999 : (int) $d ?>">
           <td style="position:sticky;left:0;background:var(--surface);z-index:1"><input type="checkbox" class="ck-row" value="<?= (int) $c['id'] ?>" data-lbl="<?= h(trim(($c['plataforma'] ?? '') . ' · ' . ($c['correo'] ?? ''), ' ·')) ?>" onclick="event.stopPropagation();ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"></td>
           <td><div class="flex items-center gap-2.5">
             <?php if (!empty($c['logo'])): ?><img src="<?= h($c['logo']) ?>" class="celllogo" alt="">
@@ -923,7 +925,8 @@ stream_head('Cuentas', 'cuentas');
             <?php if (!empty($c['clave'])): ?><div class="flex items-center gap-1.5" style="color:var(--faint);font-size:11px;margin-top:2px"><i data-lucide="key" style="width:12px;height:12px"></i><?= h($c['clave']) ?></div><?php endif; ?></td>
           <td><div class="font-semibold" style="color:<?= (int) $c['libres'] > 0 ? 'var(--good)' : 'var(--bad)' ?>"><?= (int) $c['libres'] ?> / <?= (int) $c['perf'] ?></div>
             <?php if ($verCostos && $c['costo'] !== null): ?><div style="font-size:11px;color:var(--faint)">costo $<?= number_format((float) $c['costo'], 2) ?></div><?php endif; ?>
-            <?php if ($c['precio_venta'] !== null && (float) $c['precio_venta'] > 0): ?><div style="font-size:11px;color:var(--good);font-weight:600">venta $<?= number_format((float) $c['precio_venta'], 2) ?></div><?php endif; ?></td>
+            <?php if ($c['precio_venta'] !== null && (float) $c['precio_venta'] > 0): ?><div style="font-size:11px;color:var(--good);font-weight:600">venta $<?= number_format((float) $c['precio_venta'], 2) ?></div><?php endif; ?>
+            <?php if (isset($c['precio_reventa']) && $c['precio_reventa'] !== null && (float) $c['precio_reventa'] > 0): ?><div style="font-size:11px;color:var(--accent);font-weight:600" title="Precio para el revendedor">reventa $<?= number_format((float) $c['precio_reventa'], 2) ?></div><?php endif; ?></td>
           <?php if ($verCostos): ?><td><?= $c['prov_nombre'] ? h($c['prov_nombre']) : '<span style="color:var(--faint)">—</span>' ?></td><?php endif; ?>
           <td style="color:var(--faint);font-size:11.5px;max-width:180px" class="truncate"><?= h($c['notas'] ?: 'Sin notas') ?></td>
           <td>
@@ -1257,8 +1260,17 @@ stream_head('Cuentas', 'cuentas');
     if(sel.value){ if(nom){ nom.value=''; nom.disabled=true; nom.placeholder='(usando el cliente elegido arriba)'; } if(wa && !wa.value){ wa.value=(op&&op.dataset.wa)||''; } }
     else { if(nom){ nom.disabled=false; nom.placeholder='Dejar vacío = no cambiar'; } }
   }
-  function ordenar(){ const v=document.getElementById('f-orden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1; rows.sort((a,b)=>{ if(key==='dias'){ return ((parseInt(a.dataset.dias||'0',10))-(parseInt(b.dataset.dias||'0',10)))*mul; } return String(a.dataset.plat||'').localeCompare(String(b.dataset.plat||''))*mul; }); rows.forEach(r=>tb.appendChild(r)); }
+  function ordenar(){ const v=document.getElementById('f-orden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1; const ka=(key==='correo')?'correo':((key==='rev')?'rev':'plat'); rows.sort((a,b)=>{ if(key==='dias'){ return ((parseInt(a.dataset.dias||'0',10))-(parseInt(b.dataset.dias||'0',10)))*mul; } return String(a.dataset[ka]||'').localeCompare(String(b.dataset[ka]||''))*mul; }); rows.forEach(r=>tb.appendChild(r)); }
   function resetFiltros(){ ['f-busqueda','f-plat','f-estado','f-stock','f-prov','f-rev','f-orden','buscar'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';}); filtrar(); }
+  // Resaltar la cuenta a la que apunta una notificación (…?hl=ID): salta a ella y la ilumina un momento.
+  (function(){
+    var hl=null; try{ hl=new URLSearchParams(location.search).get('hl'); }catch(e){}
+    if(!hl) return;
+    function go(){ var el=document.getElementById('hl'+hl); if(!el) return; try{ el.scrollIntoView({block:'center',behavior:'smooth'}); }catch(e){ el.scrollIntoView(); }
+      var oldBg=el.style.background; el.style.transition='background .35s, box-shadow .35s'; el.style.background='var(--accent-soft)'; el.style.boxShadow='inset 0 0 0 2px var(--accent)';
+      setTimeout(function(){ el.style.background=oldBg; el.style.boxShadow=''; }, 3000); }
+    if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', function(){ setTimeout(go,350); }); else setTimeout(go,350);
+  })();
   document.getElementById('buscar')?.addEventListener('input', filtrar);
   const ov = document.getElementById('overlay');
   function cerrarModales(){ ov.classList.add('hidden'); ov.classList.remove('flex'); document.querySelectorAll('#overlay > div').forEach(m=>m.classList.add('hidden')); }

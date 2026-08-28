@@ -771,9 +771,12 @@ stream_head('Ventas', 'ventas');
   </select>
   <?php endif; ?>
   <select id="forden" onchange="ordenarVentas()" class="input" style="width:auto">
-    <option value="">Orden por defecto</option>
+    <option value="">Ordenar por…</option>
     <option value="venc-asc">Vence primero</option>
     <option value="venc-desc">Vence último</option>
+    <option value="cli-asc">Cliente (A→Z)</option>
+    <option value="correo-asc">Correo (A→Z)</option>
+    <option value="rev-asc">Vendedor (A→Z)</option>
   </select>
   <span style="font-size:12px;color:var(--faint)" class="hidden sm:inline">Mostrar <select id="mostrar" onchange="limitar(this.value)" class="input" style="width:auto;display:inline-block;padding:5px 8px"><option value="0" selected>Todas</option><option>25</option><option>50</option><option>100</option></select> registros</span>
   <span style="margin-left:auto"></span>
@@ -811,7 +814,7 @@ stream_head('Ventas', 'ventas');
       $estKey = $d === null ? 'sin' : ($d < 0 ? 'venc' : ($d <= 5 ? 'pronto' : 'activo'));
       $esManualV = in_array($v['modo'] ?? 'perfil', ['email_manual', 'invitacion', 'activacion'], true);
     ?>
-      <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower((string) $v['plataforma'])) ?>" data-est="<?= h($estKey) ?>" data-src="<?= $esRev ? 'rev' : 'propia' ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>" data-rev="<?= h(mb_strtolower($revNom)) ?>">
+      <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower((string) $v['plataforma'])) ?>" data-cli="<?= h(mb_strtolower((string) ($v['cliente'] ?? ''))) ?>" data-correo="<?= h(mb_strtolower((string) ($v['correo'] ?? ''))) ?>" data-est="<?= h($estKey) ?>" data-src="<?= $esRev ? 'rev' : 'propia' ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>" data-rev="<?= h(mb_strtolower($revNom)) ?>">
         <td style="position:sticky;left:0;background:var(--surface);z-index:1"><input type="checkbox" class="ck-row" value="<?= (int) $v['id'] ?>" data-rev="<?= ($esRev && !$esRevCtx) ? '1' : '0' ?>" onclick="event.stopPropagation();ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"></td>
         <td style="white-space:nowrap"><span onclick="event.stopPropagation();copiarCod('<?= h($codigo) ?>',this)" title="N° de pedido · clic para copiar" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);border:1px solid var(--border);border-radius:6px;padding:2px 7px;cursor:pointer"><?= h($codigo) ?></span></td>
         <td style="font-weight:600">
@@ -1223,7 +1226,7 @@ stream_head('Ventas', 'ventas');
     abrir('m-editar'); }
   function e_set(id,val){ document.getElementById(id).value = val==null?'':val; }
   function mEliminar(){ m3.classList.add('hidden'); setId('el-id'); abrir('m-eliminar'); }
-  function ordenarVentas(){ const v=document.getElementById('forden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const mul=v==='venc-desc'?-1:1; rows.sort((a,b)=>((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul); rows.forEach(r=>tb.appendChild(r)); aplicarFiltro(); }
+  function ordenarVentas(){ const v=document.getElementById('forden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1; rows.sort((a,b)=>{ if(key==='venc'){ return ((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul; } const ka=(key==='cli')?'cli':((key==='correo')?'correo':((key==='rev')?'rev':'venc')); return String(a.dataset[ka]||'').localeCompare(String(b.dataset[ka]||''))*mul; }); rows.forEach(r=>tb.appendChild(r)); aplicarFiltro(); }
   let LIM=0;   // 0 = mostrar TODAS por defecto (antes 25: ocultaba las de más abajo y no se veían al renovar/vencer).
   function aplicarFiltro(){
     const q=(document.getElementById('buscar').value||'').toLowerCase().trim();

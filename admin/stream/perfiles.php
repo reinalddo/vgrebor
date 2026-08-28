@@ -153,8 +153,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           $usados = (int) ($pdo->query("SELECT COALESCE(cambios_np,0) FROM streaming_perfiles WHERE id=$pid")->fetchColumn() ?: 0);
           if ($usados >= 2) throw new Exception('⚠ Ya cambiaste el nombre/PIN 2 veces este periodo. Se reinicia al renovar.');
         }
+        // Valores VIEJOS (para el aviso "antes → después").
+        $oldNP = ['etiqueta' => '', 'pin' => ''];
+        try { $oldNP = $pdo->query("SELECT COALESCE(etiqueta,'') etiqueta, COALESCE(pin,'') pin FROM streaming_perfiles WHERE id=$pid")->fetch(PDO::FETCH_ASSOC) ?: $oldNP; } catch (Throwable $e) {}
         $pdo->prepare("UPDATE streaming_perfiles SET etiqueta=?, pin=? WHERE id=?")->execute([$etq !== '' ? mb_substr($etq, 0, 60) : null, $pin !== '' ? $pin : null, $pid]);
         if ($esRevCtx && !$esCompleta) { try { $pdo->prepare("UPDATE streaming_perfiles SET cambios_np=COALESCE(cambios_np,0)+1 WHERE id=?")->execute([$pid]); } catch (Throwable $e) {} }
+        // Detalle "Antes → Ahora" reutilizable en el aviso.
+        $npCamb = [];
+        if ($etq !== '') $npCamb[] = 'Nombre: "' . ($oldNP['etiqueta'] ?: '—') . '" → "' . $etq . '"';
+        if ($pin !== '') $npCamb[] = 'PIN: "' . ($oldNP['pin'] ?: '—') . '" → "' . $pin . '"';
+        $npDetalle = $npCamb ? ' ' . implode(' · ', $npCamb) . '.' : '';
         if ($vid > 0) { $sv = []; $av = []; if ($etq !== '') { $sv[] = 'perfil=?'; $av[] = $etq; } if ($pin !== '') { $sv[] = 'pin=?'; $av[] = $pin; } if ($sv) { $av[] = $vid; $pdo->prepare("UPDATE streaming_ventas SET " . implode(',', $sv) . " WHERE id=?")->execute($av); } }
         require_once __DIR__ . '/../../api/_rev_avisos.php';
         $plt = (string) ($pdo->query("SELECT plataforma FROM streaming_cuentas WHERE id=$cid")->fetchColumn() ?: '');
@@ -171,8 +179,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($og > 0) {
               if ($svn) { $a = $avn; $a[] = $og; $pdo->prepare("UPDATE streaming_perfiles SET " . implode(',', $svn) . " WHERE id=?")->execute($a); }
               $rn = (string) ($pdo->query("SELECT COALESCE(NULLIF(nombre,''),username) FROM usuarios WHERE id=$OWNER")->fetchColumn() ?: '');
+              $ogCid = (int) ($pdo->query("SELECT cuenta_id FROM streaming_perfiles WHERE id=$og")->fetchColumn() ?: 0);   // cuenta origen (para resaltar)
               stream_notif_crear($pdo, 0, 'cuenta', 'Cambio de nombre/PIN · ' . ($plt ?: $tipoTxt),
-                'El revendedor ' . ($rn ?: '#' . $OWNER) . ' cambió el nombre/PIN de un ' . $tipoTxt . ' de ' . ($plt ?: 'streaming') . '.', 'cuentas.php', (int) current_user_id());
+                'El revendedor ' . ($rn ?: '#' . $OWNER) . ' cambió el nombre/PIN de un ' . $tipoTxt . ' de ' . ($plt ?: 'streaming') . '.' . $npDetalle,
+                'cuentas.php' . ($ogCid > 0 ? '?hl=' . $ogCid : ''), (int) current_user_id(), $ogCid ?: null);
             }
           } catch (Throwable $e) {}
         } else {
@@ -201,13 +211,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           // SOLO si la cuenta completa es del stock comprado a la tienda (origen). Si es PROPIA del
           // revendedor, no se toca el inventario del admin ni se le notifica.
           if ($origen > 0) {
+            $oldClave = (string) ($pdo->query("SELECT COALESCE(clave,'') FROM streaming_cuentas WHERE id=$origen")->fetchColumn() ?: '');   // clave vieja (antes→después)
             try { $pdo->prepare("UPDATE streaming_cuentas SET clave=? WHERE id=? AND owner_id=0")->execute([$clave, $origen]); } catch (Throwable $e) {}
             try { $pdo->prepare("UPDATE streaming_ventas SET clave=? WHERE cuenta_id=? AND estado='activa'")->execute([$clave, $origen]); } catch (Throwable $e) {}
             if (function_exists('st_rev_propagar_a_espejos')) { try { st_rev_propagar_a_espejos($pdo, $origen, null, $clave); } catch (Throwable $e) {} }
             try {
               $rn = (string) ($pdo->query("SELECT COALESCE(NULLIF(nombre,''),username) FROM usuarios WHERE id=$OWNER")->fetchColumn() ?: '');
               stream_notif_crear($pdo, 0, 'cuenta', 'Cambio de CLAVE · ' . ($plt ?: 'cuenta completa'),
-                'El revendedor ' . ($rn ?: '#' . $OWNER) . ' cambió la clave de su cuenta completa (' . $plt . '). Se actualizó en tu inventario.', 'cuentas.php', (int) current_user_id());
+                'El revendedor ' . ($rn ?: '#' . $OWNER) . ' cambió la clave de su cuenta completa (' . $plt . '). Clave: "' . ($oldClave ?: '—') . '" → "' . $clave . '". Se actualizó en tu inventario.',
+                'cuentas.php?hl=' . $origen, (int) current_user_id(), $origen);
             } catch (Throwable $e) {}
           }
         } elseif (!$esRevCtx) {
@@ -473,6 +485,17 @@ foreach ($perfiles as $p) {
     'venta' => $p['precio_venta'], 'reventa' => $p['precio_reventa']];
 }
 
+// Celda de precios (costo/venta/reventa) para la tabla. El cliente pidió ver estos precios en Perfiles.
+// costo = solo el dueño (verCostos); venta = precio al cliente; reventa = precio al revendedor (se muestra
+// también al revendedor para que vea el suyo).
+$precioCell = function ($costo, $venta, $reventa) use ($verCostos) {
+  $out = '';
+  if ($verCostos && $costo !== null && $costo !== '' && (float) $costo > 0) $out .= '<div style="font-size:11px;color:var(--faint)">costo $' . number_format((float) $costo, 2) . '</div>';
+  if ($venta !== null && $venta !== '' && (float) $venta > 0) $out .= '<div style="font-size:11px;color:var(--good);font-weight:600">venta $' . number_format((float) $venta, 2) . '</div>';
+  if ($reventa !== null && $reventa !== '' && (float) $reventa > 0) $out .= '<div style="font-size:11px;color:var(--accent);font-weight:600" title="Precio para el revendedor">reventa $' . number_format((float) $reventa, 2) . '</div>';
+  return $out !== '' ? $out : '<span style="color:var(--faint)">—</span>';
+};
+
 stream_head('Perfiles', 'perfiles');
 ?>
 <div class="pagehd">
@@ -510,7 +533,7 @@ stream_head('Perfiles', 'perfiles');
       <?php if ((int) $OWNER === 0 && !empty($revList)): ?>
       <div><label class="flbl">Revendedor</label><select id="f-rev" onchange="filtrar()" class="input"><option value="">Todos</option><?php foreach ($revList as $rv): ?><option value="<?= h(mb_strtolower((string) $rv['nombre'])) ?>"><?= h($rv['nombre']) ?></option><?php endforeach; ?></select></div>
       <?php endif; ?>
-      <div><label class="flbl">Ordenar por</label><select id="f-orden" onchange="ordenar()" class="input"><option value="">— Por defecto —</option><option value="plat-asc">Plataforma A→Z</option><option value="correo-asc">Correo A→Z</option><option value="venc-asc">Vence primero</option></select></div>
+      <div><label class="flbl">Ordenar por</label><select id="f-orden" onchange="ordenar()" class="input"><option value="">— Por defecto —</option><option value="plat-asc">Plataforma (A→Z)</option><option value="correo-asc">Correo (A→Z)</option><option value="rev-asc">Vendedor (A→Z)</option><option value="venc-asc">Vence primero</option></select></div>
     </div>
   </div>
 </div>
@@ -536,7 +559,7 @@ stream_head('Perfiles', 'perfiles');
     <table class="dtable">
       <thead><tr>
         <th style="width:34px"><input type="checkbox" id="ck-all" onclick="ckTodo(this)" title="Seleccionar los visibles (libres)" style="width:15px;height:15px;accent-color:var(--acc)"></th>
-        <th>Plataforma</th><th>Correo</th><th>Perfil</th><th>PIN</th><th>Estado</th><th>Asignado a</th><th>Vence</th><th style="text-align:center">Acciones</th>
+        <th>Plataforma</th><th>Correo</th><th>Perfil</th><th>PIN</th><th>Estado</th><th>Precios</th><th>Asignado a</th><th>Vence</th><th style="text-align:center">Acciones</th>
       </tr></thead>
       <tbody id="tbody">
       <?php foreach ($renderItems as $it): ?>
@@ -558,6 +581,7 @@ stream_head('Perfiles', 'perfiles');
           <td style="color:var(--muted)"><?= h($it['correo'] ?: '—') ?><?php if (!empty($it['clave'])): ?><br><span style="font-size:10px;color:var(--faint)">🔑 <?= h($it['clave']) ?></span><?php endif; ?></td>
           <td style="font-weight:650" colspan="2">Cuenta completa · <?= (int) $it['total'] ?> perfil(es)<?php if ($it['libres'] > 0 && $it['vendidos'] > 0): ?> · <?= (int) $it['libres'] ?> libre(s)<?php endif; ?></td>
           <td><?php if ($it['libres'] > 0): ?><span class="tag" style="color:var(--good)">Libre</span><?php else: ?><span class="pill wait">Vendida</span><?php endif; ?></td>
+          <td><?= $precioCell($it['costo'], $it['precio_venta'], $it['precio_reventa']) ?></td>
           <td style="color:var(--muted);font-size:12.5px"><?= $asignado ? h($asignado) : '<span style="color:var(--faint)">—</span>' ?></td>
           <td><span class="<?= $pill ?>"><?= h($txt) ?></span></td>
           <td style="text-align:center;white-space:nowrap">
@@ -586,6 +610,7 @@ stream_head('Perfiles', 'perfiles');
           <td style="font-weight:650"><?= h($p['etiqueta'] ?: '—') ?></td>
           <td style="color:var(--faint);font-family:ui-monospace,monospace"><?= h($p['pin'] ?: '—') ?></td>
           <td><?php if ($vend): ?><span class="pill wait">Vendido</span><?php else: ?><span class="tag" style="color:var(--good)">Libre</span><?php endif; ?></td>
+          <td><?= $precioCell($p['costo'] ?? null, $p['precio_venta'] ?? null, $p['precio_reventa'] ?? null) ?></td>
           <td style="color:var(--muted);font-size:12.5px"><?= $asignado ? h($asignado) : '<span style="color:var(--faint)">—</span>' ?></td>
           <td><span class="<?= $pill ?>" title="Vence para tu cliente"><?= h($txt) ?></span>
             <?php if ($vend && $esRevCtx && !empty($p['vencimiento']) && !empty($p['venta_venc']) && substr((string) $p['vencimiento'], 0, 10) !== substr((string) $p['venta_venc'], 0, 10)): ?>
@@ -812,7 +837,7 @@ stream_head('Perfiles', 'perfiles');
     ckSync();
   }
   function ordenar(){ const v=document.getElementById('f-orden').value; if(!v) return; const tb=document.getElementById('tbody'); const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1;
-    rows.sort((a,b)=>{ if(key==='venc'){ return ((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul; } const ka=key==='correo'?'correo':'plat'; return String(a.dataset[ka]||'').localeCompare(String(b.dataset[ka]||''))*mul; });
+    rows.sort((a,b)=>{ if(key==='venc'){ return ((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul; } const ka=(key==='correo')?'correo':((key==='rev')?'rev':'plat'); return String(a.dataset[ka]||'').localeCompare(String(b.dataset[ka]||''))*mul; });
     rows.forEach(r=>tb.appendChild(r)); }
   function ckTodo(m){ filasVisibles().forEach(tr=>{ const c=tr.querySelector('.ck-row'); if(c) c.checked=m.checked; }); ckSync(); }
   function selTodos(){ ckTodo({checked:true}); }

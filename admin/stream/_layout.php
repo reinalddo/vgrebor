@@ -460,10 +460,17 @@ function stream_foot(): void {
   (function(){
     var last=null, lastTk=0, primed=false, ac=null;
     function ctx(){ try{ if(!ac) ac=new (window.AudioContext||window.webkitAudioContext)(); if(ac.state==='suspended') ac.resume(); }catch(e){} return ac; }
-    // El navegador exige un gesto del usuario para permitir audio: lo habilitamos en el primer clic.
-    document.addEventListener('click', function(){ ctx(); }, {once:true});
-    function beep(freqs){ var a=ctx(); if(!a) return; try{ var t=a.currentTime; freqs.forEach(function(f,i){ var o=a.createOscillator(), g=a.createGain(); o.type='sine'; o.frequency.value=f; o.connect(g); g.connect(a.destination); var s=t+i*0.17; g.gain.setValueAtTime(0.0001,s); g.gain.exponentialRampToValueAtTime(0.2,s+0.02); g.gain.exponentialRampToValueAtTime(0.0001,s+0.15); o.start(s); o.stop(s+0.16); }); }catch(e){} }
-    function toast(txt,url,tk){ var d=document.createElement('div'); d.textContent=(tk?'🎫 ':'🔔 ')+txt; d.style.cssText='position:fixed;right:18px;bottom:18px;z-index:9999;max-width:330px;background:var(--surface,#fff);color:var(--text,#111);border:1px solid var(--border,#ddd);border-left:4px solid var(--accent,#3f4fb5);border-radius:11px;padding:12px 15px;box-shadow:0 14px 38px rgba(0,0,0,.3);font-size:13px;font-weight:600;cursor:pointer;animation:tkin .25s ease'; if(url) d.onclick=function(){ location.href=url; }; document.body.appendChild(d); setTimeout(function(){ d.style.transition='opacity .4s'; d.style.opacity='0'; setTimeout(function(){ d.remove(); },420); }, 7000); }
+    // El navegador exige un gesto del usuario para permitir audio Y para pedir permiso de notificaciones
+    // del sistema: ambos se habilitan en el primer clic. Las notificaciones del sistema sí avisan aunque
+    // la pestaña esté en segundo plano (resuelve "solo suena si estoy en esa pantalla").
+    function armar(){ ctx(); try{ if('Notification' in window && Notification.permission==='default') Notification.requestPermission(); }catch(e){} }
+    document.addEventListener('click', armar, {once:true});
+    // Al volver a la pestaña, reanuda el audio (algunos navegadores lo suspenden en segundo plano).
+    document.addEventListener('visibilitychange', function(){ if(!document.hidden) ctx(); });
+    // Tono MÁS FUERTE y más largo (el cliente lo oía muy leve): 3 pulsos con más volumen.
+    function beep(freqs){ var a=ctx(); if(!a) return; try{ var t=a.currentTime; freqs.forEach(function(f,i){ var o=a.createOscillator(), g=a.createGain(); o.type='triangle'; o.frequency.value=f; o.connect(g); g.connect(a.destination); var s=t+i*0.20; g.gain.setValueAtTime(0.0001,s); g.gain.exponentialRampToValueAtTime(0.6,s+0.02); g.gain.exponentialRampToValueAtTime(0.0001,s+0.22); o.start(s); o.stop(s+0.24); }); }catch(e){} }
+    function sysNotif(txt,url,tk){ try{ if(!('Notification' in window) || Notification.permission!=='granted') return false; var n=new Notification((tk?'🎫 Nuevo ticket de soporte':'🔔 Nueva notificación'), {body:txt, tag:'stream-notif', renotify:true}); n.onclick=function(){ window.focus(); if(url) location.href=url; n.close(); }; return true; }catch(e){ return false; } }
+    function toast(txt,url,tk){ var d=document.createElement('div'); d.textContent=(tk?'🎫 ':'🔔 ')+txt; d.style.cssText='position:fixed;right:18px;bottom:18px;z-index:9999;max-width:330px;background:var(--surface,#fff);color:var(--text,#111);border:1px solid var(--border,#ddd);border-left:4px solid var(--accent,#3f4fb5);border-radius:11px;padding:12px 15px;box-shadow:0 14px 38px rgba(0,0,0,.3);font-size:13px;font-weight:600;cursor:pointer;animation:tkin .25s ease'; if(url) d.onclick=function(){ location.href=url; }; document.body.appendChild(d); setTimeout(function(){ d.style.transition='opacity .4s'; d.style.opacity='0'; setTimeout(function(){ d.remove(); },420); }, 8000); }
     function updBadge(n){ document.querySelectorAll('.sb-nav a.lnk span').forEach(function(s){ if(/^Notificaciones/.test(s.textContent)) s.textContent='Notificaciones'+(n>0?' ('+n+')':''); }); }
     function poll(){
       fetch('notificaciones.php?ajax=count',{headers:{'X-Requested-With':'fetch'},cache:'no-store'})
@@ -473,15 +480,17 @@ function stream_foot(): void {
           if(!primed){ primed=true; last=tot; lastTk=tk; return; }
           if(tot>last){
             var isTk = tk>lastTk;
-            beep(isTk?[900,1200]:[680]);
             var t=(d.last&&d.last.titulo)?d.last.titulo:(isTk?'Nuevo ticket de soporte':'Tienes una notificación nueva');
-            toast(t,(d.last&&d.last.url)?d.last.url:'notificaciones.php',isTk);
+            var u=(d.last&&d.last.url)?d.last.url:'notificaciones.php';
+            beep(isTk?[900,1200,1500]:[680,900]);   // suena SIEMPRE (y con permiso, además avisa el sistema)
+            sysNotif(t,u,isTk);                       // aviso del sistema: llega aunque la pestaña no esté activa
+            toast(t,u,isTk);
           }
           last=tot; lastTk=tk;
         }).catch(function(){});
     }
     var st=document.createElement('style'); st.textContent='@keyframes tkin{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}'; document.head.appendChild(st);
-    setTimeout(poll, 2500); setInterval(poll, 25000);
+    setTimeout(poll, 2500); setInterval(poll, 20000);
   })();
 </script>
 </body></html>
