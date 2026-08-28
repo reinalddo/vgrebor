@@ -15197,6 +15197,13 @@ include __DIR__ . "/includes/header.php";
 <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
 <script>AOS.init({duration:750,easing:'ease-out-cubic',once:true,offset:60});</script>
 <?php
+// Sistema de Comentarios: sección completa ("Lo que opinan de nosotros",
+// panel de calificación + lista paginada + botón "Deja un comentario"),
+// filtrada a reseñas de compras de ESTE juego — la vitrina general con solo
+// destacados de todos los juegos vive en el home (index.php).
+require_once __DIR__ . "/includes/comentarios_ui.php";
+comentarios_render_seccion($mysqli, (int) ($game['id'] ?? 0));
+
 include __DIR__ . "/includes/footer.php";
 ?>
 <button type="button" id="float-cart-fab" class="floating-social-button float-cart-fab-btn" aria-label="Ver carrito" style="display:none;">

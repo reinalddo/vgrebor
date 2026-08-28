@@ -44,6 +44,33 @@ if (!function_exists('comentarios_ui_avatar')) {
     }
 }
 
+// "Aullmaryz Guerrero" -> "Aullmaryz G." — solo para el slider del home,
+// donde el espacio de cada tarjeta es chico (la sección completa de
+// game.php sigue mostrando el nombre entero).
+if (!function_exists('comentarios_ui_nombre_corto')) {
+    function comentarios_ui_nombre_corto(string $nombreCompleto): string {
+        $partes = preg_split('/\s+/', trim($nombreCompleto), -1, PREG_SPLIT_NO_EMPTY);
+        if (empty($partes)) {
+            return 'Usuario';
+        }
+        if (count($partes) === 1) {
+            return $partes[0];
+        }
+        $inicial = mb_strtoupper(mb_substr($partes[1], 0, 1, 'UTF-8'), 'UTF-8');
+        return $partes[0] . ' ' . $inicial . '.';
+    }
+}
+
+// Color del anillo del avatar en el slider del home — determinístico por
+// usuario (mismo color siempre, no cambia entre recargas de página) para
+// que cada tarjeta se vea distinta, igual que la referencia del cliente.
+if (!function_exists('comentarios_ui_color_avatar')) {
+    function comentarios_ui_color_avatar(int $usuarioId): string {
+        $paleta = ['#22D3EE', '#A78BFA', '#34D399', '#F472B6', '#FBBF24', '#60A5FA'];
+        return $paleta[$usuarioId % count($paleta)];
+    }
+}
+
 // Construye una URL conservando los demás parámetros de la página actual.
 if (!function_exists('comentarios_ui_url')) {
     function comentarios_ui_url(array $cambios): string {
@@ -60,16 +87,20 @@ if (!function_exists('comentarios_ui_url')) {
     }
 }
 
+// $juegoId > 0: sección de game.php, todo queda filtrado a reseñas de
+// compras de ESE juego (destacadas y no destacadas mezcladas, igual que
+// antes) — pedido explícito del cliente. 0 = comportamiento de siempre
+// (toda la tienda), por si algo más además de game.php la necesita.
 if (!function_exists('comentarios_render_seccion')) {
-    function comentarios_render_seccion(mysqli $mysqli): void {
+    function comentarios_render_seccion(mysqli $mysqli, int $juegoId = 0): void {
         $usuarioId = (int) ($_SESSION['auth_user']['id'] ?? 0);
         $filtro = (int) ($_GET['resenas_estrellas'] ?? 0);
         $pagina = (int) ($_GET['resenas_pagina'] ?? 1);
 
-        $resumen = comentarios_resumen_calificaciones($mysqli);
-        $listado = comentarios_listar_publicos($mysqli, $filtro, $pagina, $usuarioId);
+        $resumen = comentarios_resumen_calificaciones($mysqli, $juegoId);
+        $listado = comentarios_listar_publicos($mysqli, $filtro, $pagina, $usuarioId, $juegoId);
 
-        $puedeComentar = $usuarioId > 0 && comentarios_usuario_puede_comentar($mysqli, $usuarioId);
+        $puedeComentar = $usuarioId > 0 && comentarios_usuario_puede_comentar($mysqli, $usuarioId, $juegoId);
         // El botón siempre se muestra; el estado decide qué pasa al pulsarlo
         // (abrir el formulario o el pop-up explicando el requisito).
         $botonEstado = $usuarioId <= 0 ? 'invitado' : ($puedeComentar ? 'puede' : 'sin-compras');
@@ -113,7 +144,13 @@ if (!function_exists('comentarios_render_seccion')) {
             <div class="cmt-lista">
               <?php if (empty($listado['items'])): ?>
                 <div class="cmt-vacio">
-                  <?= $filtro > 0 ? 'Todavía no hay reseñas con esta calificación.' : 'Todavía no hay reseñas publicadas. ¡Sé el primero en opinar!' ?>
+                  <?php if ($filtro > 0): ?>
+                    Todavía no hay reseñas con esta calificación.
+                  <?php elseif ($juegoId > 0): ?>
+                    Todavía no hay reseñas de este juego. ¡Sé el primero en opinar!
+                  <?php else: ?>
+                    Todavía no hay reseñas publicadas. ¡Sé el primero en opinar!
+                  <?php endif; ?>
                 </div>
               <?php else: foreach ($listado['items'] as $item): ?>
                 <article class="cmt-item<?= $item['destacado'] ? ' destacado' : '' ?>">
@@ -264,10 +301,78 @@ if (!function_exists('comentarios_render_seccion')) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Slider del home: solo reseñas DESTACADAS de cualquier juego, sin panel de
+// calificación ni paginación — la lista completa filtrada por juego vive
+// ahora en comentarios_render_seccion(), llamada desde cada game.php.
+// ─────────────────────────────────────────────────────────────────────────
+if (!function_exists('comentarios_render_destacados_home')) {
+    function comentarios_render_destacados_home(mysqli $mysqli): void {
+        $resumen = comentarios_resumen_calificaciones($mysqli);
+        $destacados = comentarios_destacados_home($mysqli);
+
+        // Vitrina de marketing: si todavía no hay ninguna reseña destacada,
+        // no tiene sentido mostrar un slider vacío en el home — el CTA para
+        // "sé el primero en opinar" ya vive en cada game.php.
+        if (empty($destacados)) {
+            return;
+        }
+        ?>
+        <section id="resenas" class="container mt-5 mb-4" data-aos="fade-up">
+          <div class="cmt-home-head">
+            <h2 class="cmt-home-titulo">Lo que dicen nuestros clientes</h2>
+            <?php if ($resumen['total'] > 0): ?>
+              <div class="cmt-home-resumen">
+                <?= comentarios_ui_estrellas((int) round((float) $resumen['promedio']), 'cmt-stars cmt-home-resumen-stars') ?>
+                <strong><?= number_format((float) $resumen['promedio'], 1) ?></strong>
+                <span class="cmt-sep">·</span>
+                <?= number_format((int) $resumen['total'], 0, ',', '.') ?> reseña<?= $resumen['total'] === 1 ? '' : 's' ?>
+              </div>
+            <?php endif; ?>
+          </div>
+
+          <div class="cmt-home-slider" data-cmt-home-slider>
+            <?php foreach ($destacados as $item): ?>
+              <article class="cmt-home-slide">
+                <div class="cmt-home-slide-head">
+                  <span class="cmt-home-slide-avatar" style="border-color:<?= htmlspecialchars(comentarios_ui_color_avatar($item['usuario_id']), ENT_QUOTES, 'UTF-8') ?>;color:<?= htmlspecialchars(comentarios_ui_color_avatar($item['usuario_id']), ENT_QUOTES, 'UTF-8') ?>;"><?= htmlspecialchars(mb_strtoupper(mb_substr($item['usuario_nombre'], 0, 1, 'UTF-8'), 'UTF-8'), ENT_QUOTES, 'UTF-8') ?></span>
+                  <span class="cmt-home-slide-nombre"><?= htmlspecialchars(comentarios_ui_nombre_corto($item['usuario_nombre']), ENT_QUOTES, 'UTF-8') ?></span>
+                </div>
+                <?= comentarios_ui_estrellas($item['estrellas'], 'cmt-stars cmt-home-slide-stars') ?>
+                <p class="cmt-home-slide-texto">&ldquo;<?= htmlspecialchars($item['texto'], ENT_QUOTES, 'UTF-8') ?>&rdquo;</p>
+              </article>
+            <?php endforeach; ?>
+          </div>
+        </section>
+
+        <style>
+          .cmt-home-head { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+          .cmt-home-titulo { font-family:'Oxanium',sans-serif; font-weight:800; font-size:clamp(1.2rem,2.4vw,1.7rem); letter-spacing:0.03em; color:var(--theme-text); text-transform:uppercase; margin:0; }
+          .cmt-home-resumen { display:flex; align-items:center; gap:0.4rem; font-size:0.85rem; color:var(--theme-text-muted); white-space:nowrap; }
+          .cmt-home-resumen strong { color:var(--theme-text); }
+          .cmt-home-resumen-stars { font-size:0.85rem; }
+
+          .cmt-home-slider { display:flex; gap:1rem; overflow-x:auto; padding-bottom:0.4rem; scroll-snap-type:x proximity; scrollbar-width:none; }
+          .cmt-home-slider::-webkit-scrollbar { display:none; }
+          .cmt-home-slide { flex:0 0 auto; width:clamp(210px,26vw,270px); scroll-snap-align:start; background:var(--theme-panel-gradient); border:1px solid rgba(var(--theme-primary-rgb),0.18); border-radius:14px; padding:1rem 1.1rem; }
+          .cmt-home-slide-head { display:flex; align-items:center; gap:0.6rem; margin-bottom:0.4rem; }
+          .cmt-home-slide-avatar { flex-shrink:0; width:38px; height:38px; border-radius:50%; border:1.5px solid; display:flex; align-items:center; justify-content:center; font-family:'Oxanium',sans-serif; font-weight:800; font-size:0.95rem; }
+          .cmt-home-slide-nombre { font-weight:700; color:var(--theme-text); font-size:0.92rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+          .cmt-home-slide-stars { font-size:0.78rem; }
+          .cmt-home-slide-texto { margin:0.5rem 0 0; font-size:0.85rem; line-height:1.45; color:var(--theme-text-muted); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+        </style>
+        <?php
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Modales (se imprimen una sola vez, desde includes/footer.php)
 // ─────────────────────────────────────────────────────────────────────────
+// $juegoId > 0 (pasado desde includes/footer.php cuando $game está en
+// contexto, ver game.php): el modal solo ofrece pedidos/reseñas propias de
+// ESE juego — el botón "Deja un comentario" debe funcionar solo para el
+// juego actual, pedido explícito del cliente.
 if (!function_exists('comentarios_render_modales')) {
-    function comentarios_render_modales(mysqli $mysqli): void {
+    function comentarios_render_modales(mysqli $mysqli, int $juegoId = 0): void {
         static $yaImpreso = false;
         if ($yaImpreso) {
             return;
@@ -275,8 +380,8 @@ if (!function_exists('comentarios_render_modales')) {
         $yaImpreso = true;
 
         $usuarioId = (int) ($_SESSION['auth_user']['id'] ?? 0);
-        $pedidos = $usuarioId > 0 ? comentarios_pedidos_disponibles($mysqli, $usuarioId) : [];
-        $mis = $usuarioId > 0 ? comentarios_mis_comentarios($mysqli, $usuarioId) : [];
+        $pedidos = $usuarioId > 0 ? comentarios_pedidos_disponibles($mysqli, $usuarioId, 20, $juegoId) : [];
+        $mis = $usuarioId > 0 ? comentarios_mis_comentarios($mysqli, $usuarioId, $juegoId) : [];
         $apiUrl = app_path('/api/comentarios.php');
         ?>
         <!-- Modal: escribir / editar reseña -->
@@ -430,6 +535,7 @@ if (!function_exists('comentarios_render_modales')) {
         (function () {
           var API = <?= json_encode($apiUrl, JSON_UNESCAPED_SLASHES) ?>;
           var LOGUEADO = <?= $usuarioId > 0 ? 'true' : 'false' ?>;
+          var SOLO_JUEGO = <?= $juegoId > 0 ? 'true' : 'false' ?>;
           var modal = document.getElementById('cmt-modal');
           var bloqueo = document.getElementById('cmt-bloqueo');
           if (!modal || !bloqueo) return;
@@ -493,7 +599,9 @@ if (!function_exists('comentarios_render_modales')) {
               if (acciones) acciones.innerHTML = '';
 
               if (estado === 'invitado') {
-                if (texto) texto.textContent = 'Realiza tu primera recarga para poder dejar un comentario y ayudar a otros. Si ya tienes cuenta, inicia sesión.';
+                if (texto) texto.textContent = (SOLO_JUEGO
+                  ? 'Realiza tu primera recarga de este juego para poder dejar un comentario y ayudar a otros. '
+                  : 'Realiza tu primera recarga para poder dejar un comentario y ayudar a otros. ') + 'Si ya tienes cuenta, inicia sesión.';
                 if (acciones) {
                   var bReg = document.createElement('button');
                   bReg.type = 'button';
@@ -515,7 +623,9 @@ if (!function_exists('comentarios_render_modales')) {
                   acciones.appendChild(bLog);
                 }
               } else {
-                if (texto) texto.textContent = 'Para dejar un comentario necesitas al menos una recarga completada. ¡Haz tu primera recarga y cuéntanos tu experiencia!';
+                if (texto) texto.textContent = SOLO_JUEGO
+                  ? 'Para dejar un comentario sobre este juego necesitas al menos una recarga completada aquí. ¡Haz tu primera recarga y cuéntanos tu experiencia!'
+                  : 'Para dejar un comentario necesitas al menos una recarga completada. ¡Haz tu primera recarga y cuéntanos tu experiencia!';
                 if (acciones) {
                   var bIr = document.createElement('button');
                   bIr.type = 'button';

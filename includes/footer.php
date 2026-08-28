@@ -2403,10 +2403,14 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   <?php
   // Sistema de Comentarios: modales de "Deja un comentario" y del pop-up de
   // requisitos. Se imprimen una sola vez (la función se autoprotege) y desde
-  // acá quedan disponibles en cualquier página que use el footer.
+  // acá quedan disponibles en cualquier página que use el footer. Si quien
+  // incluyó este footer es game.php, ya existe una variable $game en su
+  // scope (PHP comparte variables con los archivos incluidos) — se usa su
+  // id para que el modal solo ofrezca pedidos/reseñas de ESE juego.
   if (isset($mysqli) && $mysqli instanceof mysqli) {
       require_once __DIR__ . '/comentarios_ui.php';
-      comentarios_render_modales($mysqli);
+      $comentariosJuegoId = (isset($game) && is_array($game)) ? (int) ($game['id'] ?? 0) : 0;
+      comentarios_render_modales($mysqli, $comentariosJuegoId);
   }
   ?>
   <div id="live-recharge-notifications" class="live-recharge-stack" data-position="<?php echo htmlspecialchars($rechargeNotificationPosition, ENT_QUOTES, 'UTF-8'); ?>" aria-live="polite" aria-atomic="false"></div>

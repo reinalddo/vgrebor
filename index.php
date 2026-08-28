@@ -5291,10 +5291,12 @@ RLTSCRIPT;
 </script>
 
 <?php
-// Sistema de Comentarios: sección "Lo que opinan de nosotros", debajo de
-// todas las secciones de compra y justo antes del footer.
+// Sistema de Comentarios: slider "Lo que dicen nuestros clientes" (solo
+// reseñas destacadas de cualquier juego), debajo de todas las secciones de
+// compra y justo antes del footer. La lista completa (con panel de
+// calificación y paginación) se movió a cada game.php, filtrada por juego.
 require_once __DIR__ . "/includes/comentarios_ui.php";
-comentarios_render_seccion($mysqli);
+comentarios_render_destacados_home($mysqli);
 
 include __DIR__ . "/includes/footer.php";
 ?>

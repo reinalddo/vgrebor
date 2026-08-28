@@ -333,8 +333,12 @@ if (!function_exists('comentarios_ensure_schema')) {
 // Un usuario con 5 pedidos entregados puede dejar hasta 5 comentarios (uno
 // por pedido), nunca 2 sobre el mismo pedido — eso lo garantiza además el
 // UNIQUE KEY sobre pedido_id, no solo esta consulta.
+// $juegoId > 0 restringe a compras de ESE juego (el botón "Deja un
+// comentario" abierto desde game.php solo debe ofrecer pedidos de ese
+// juego puntual — pedido explícito del cliente); 0 = todas las compras del
+// usuario, tal como funcionaba antes de tener reseñas por juego.
 if (!function_exists('comentarios_pedidos_disponibles')) {
-    function comentarios_pedidos_disponibles(mysqli $mysqli, int $usuarioId, int $limite = 20): array {
+    function comentarios_pedidos_disponibles(mysqli $mysqli, int $usuarioId, int $limite = 20, int $juegoId = 0): array {
         if ($usuarioId <= 0) {
             return [];
         }
@@ -346,14 +350,18 @@ if (!function_exists('comentarios_pedidos_disponibles')) {
                 LEFT JOIN comentarios_clientes c ON c.pedido_id = p.id
                 WHERE p.cliente_usuario_id = ?
                   AND p.estado = ?
-                  AND c.id IS NULL
+                  AND c.id IS NULL' . ($juegoId > 0 ? ' AND p.juego_id = ?' : '') . '
                 ORDER BY p.creado_en DESC
                 LIMIT ?';
         $stmt = $mysqli->prepare($sql);
         if (!$stmt) {
             return [];
         }
-        $stmt->bind_param('isi', $usuarioId, $estadoCompletado, $limite);
+        if ($juegoId > 0) {
+            $stmt->bind_param('isii', $usuarioId, $estadoCompletado, $juegoId, $limite);
+        } else {
+            $stmt->bind_param('isi', $usuarioId, $estadoCompletado, $limite);
+        }
         $stmt->execute();
         $resultado = $stmt->get_result();
 
@@ -390,8 +398,8 @@ if (!function_exists('comentarios_etiqueta_pedido')) {
 }
 
 if (!function_exists('comentarios_usuario_puede_comentar')) {
-    function comentarios_usuario_puede_comentar(mysqli $mysqli, int $usuarioId): bool {
-        return !empty(comentarios_pedidos_disponibles($mysqli, $usuarioId, 1));
+    function comentarios_usuario_puede_comentar(mysqli $mysqli, int $usuarioId, int $juegoId = 0): bool {
+        return !empty(comentarios_pedidos_disponibles($mysqli, $usuarioId, 1, $juegoId));
     }
 }
 
@@ -401,20 +409,35 @@ if (!function_exists('comentarios_usuario_puede_comentar')) {
 // Devuelve promedio, total y el desglose por estrella con su porcentaje —
 // exactamente lo que dibuja el panel izquierdo (barras 5★→1★ con su %).
 // Solo cuenta comentarios 'aprobado' (los que se ven públicamente).
+// $juegoId > 0 lo limita a reseñas de compras de ese juego (panel de
+// game.php); 0 = todas las reseñas de la tienda (resumen compacto del home).
 if (!function_exists('comentarios_resumen_calificaciones')) {
-    function comentarios_resumen_calificaciones(mysqli $mysqli): array {
+    function comentarios_resumen_calificaciones(mysqli $mysqli, int $juegoId = 0): array {
         comentarios_ensure_schema();
 
         $conteo = [5 => 0, 4 => 0, 3 => 0, 2 => 0, 1 => 0];
         $total = 0;
         $suma = 0;
 
-        $resultado = $mysqli->query(
-            "SELECT estrellas, COUNT(*) AS cantidad
-             FROM comentarios_clientes
-             WHERE estado = 'aprobado'
-             GROUP BY estrellas"
-        );
+        if ($juegoId > 0) {
+            $stmt = $mysqli->prepare(
+                "SELECT c.estrellas, COUNT(*) AS cantidad
+                 FROM comentarios_clientes c
+                 INNER JOIN pedidos p ON p.id = c.pedido_id
+                 WHERE c.estado = 'aprobado' AND p.juego_id = ?
+                 GROUP BY c.estrellas"
+            );
+            $stmt->bind_param('i', $juegoId);
+            $stmt->execute();
+            $resultado = $stmt->get_result();
+        } else {
+            $resultado = $mysqli->query(
+                "SELECT estrellas, COUNT(*) AS cantidad
+                 FROM comentarios_clientes
+                 WHERE estado = 'aprobado'
+                 GROUP BY estrellas"
+            );
+        }
         if ($resultado instanceof mysqli_result) {
             while ($row = $resultado->fetch_assoc()) {
                 $estrella = (int) $row['estrellas'];
@@ -449,9 +472,11 @@ if (!function_exists('comentarios_resumen_calificaciones')) {
 // ─────────────────────────────────────────────────────────────────────────
 // $filtroEstrellas: 0 = todas, 1-5 = solo esa calificación (lo que pasa al
 // hacer clic en una barra del panel izquierdo).
+// $juegoId > 0 restringe a reseñas de compras de ese juego (game.php);
+// 0 = todas las reseñas de la tienda (comportamiento de siempre).
 // Los destacados van primero, luego por fecha descendente.
 if (!function_exists('comentarios_listar_publicos')) {
-    function comentarios_listar_publicos(mysqli $mysqli, int $filtroEstrellas = 0, int $pagina = 1, int $usuarioId = 0): array {
+    function comentarios_listar_publicos(mysqli $mysqli, int $filtroEstrellas = 0, int $pagina = 1, int $usuarioId = 0, int $juegoId = 0): array {
         comentarios_ensure_schema();
 
         $porPagina = comentarios_por_pagina();
@@ -459,14 +484,29 @@ if (!function_exists('comentarios_listar_publicos')) {
         $filtro = ($filtroEstrellas >= 1 && $filtroEstrellas <= 5) ? $filtroEstrellas : 0;
 
         // Total para la paginación
-        if ($filtro > 0) {
-            $totalStmt = $mysqli->prepare("SELECT COUNT(*) AS total FROM comentarios_clientes WHERE estado = 'aprobado' AND estrellas = ?");
-            $totalStmt->bind_param('i', $filtro);
-        } else {
-            $totalStmt = $mysqli->prepare("SELECT COUNT(*) AS total FROM comentarios_clientes WHERE estado = 'aprobado'");
+        $countSql = "SELECT COUNT(*) AS total FROM comentarios_clientes c";
+        if ($juegoId > 0) {
+            $countSql .= " INNER JOIN pedidos p ON p.id = c.pedido_id";
         }
+        $countSql .= " WHERE c.estado = 'aprobado'";
+        $countTypes = '';
+        $countParams = [];
+        if ($filtro > 0) {
+            $countSql .= " AND c.estrellas = ?";
+            $countTypes .= 'i';
+            $countParams[] = $filtro;
+        }
+        if ($juegoId > 0) {
+            $countSql .= " AND p.juego_id = ?";
+            $countTypes .= 'i';
+            $countParams[] = $juegoId;
+        }
+        $totalStmt = $mysqli->prepare($countSql);
         if (!$totalStmt) {
             return ['items' => [], 'total' => 0, 'pagina' => 1, 'paginas' => 1, 'filtro' => $filtro];
+        }
+        if ($countTypes !== '') {
+            $totalStmt->bind_param($countTypes, ...$countParams);
         }
         $totalStmt->execute();
         $totalRow = $totalStmt->get_result()->fetch_assoc();
@@ -495,25 +535,34 @@ if (!function_exists('comentarios_listar_publicos')) {
                 LEFT JOIN comentarios_respuestas r ON r.comentario_id = c.id
                 LEFT JOIN usuarios ra ON ra.id = r.admin_usuario_id
                 WHERE c.estado = 'aprobado'";
+
+        $types = '';
+        $params = [];
+        if ($usuarioId > 0) {
+            $types .= 'i';
+            $params[] = $usuarioId;
+        }
         if ($filtro > 0) {
             $sql .= " AND c.estrellas = ?";
+            $types .= 'i';
+            $params[] = $filtro;
+        }
+        if ($juegoId > 0) {
+            $sql .= " AND p.juego_id = ?";
+            $types .= 'i';
+            $params[] = $juegoId;
         }
         $sql .= " ORDER BY c.destacado DESC, c.creado_en DESC LIMIT ? OFFSET ?";
+        $types .= 'ii';
+        $params[] = $porPagina;
+        $params[] = $offset;
 
         $stmt = $mysqli->prepare($sql);
         if (!$stmt) {
             return ['items' => [], 'total' => $total, 'pagina' => $pagina, 'paginas' => $paginas, 'filtro' => $filtro];
         }
 
-        if ($usuarioId > 0 && $filtro > 0) {
-            $stmt->bind_param('iiii', $usuarioId, $filtro, $porPagina, $offset);
-        } elseif ($usuarioId > 0) {
-            $stmt->bind_param('iii', $usuarioId, $porPagina, $offset);
-        } elseif ($filtro > 0) {
-            $stmt->bind_param('iii', $filtro, $porPagina, $offset);
-        } else {
-            $stmt->bind_param('ii', $porPagina, $offset);
-        }
+        $stmt->bind_param($types, ...$params);
 
         $stmt->execute();
         $resultado = $stmt->get_result();
@@ -552,6 +601,50 @@ if (!function_exists('comentarios_listar_publicos')) {
             'filtro' => $filtro,
             'por_pagina' => $porPagina,
         ];
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Slider del home ("Lo que dicen nuestros clientes")
+// ─────────────────────────────────────────────────────────────────────────
+// Solo reseñas DESTACADAS (de cualquier juego) — el home es una vitrina
+// general, no la lista completa; esa vive ahora en cada game.php, filtrada
+// por juego. Sin paginación: es un slider, no una lista.
+if (!function_exists('comentarios_destacados_home')) {
+    function comentarios_destacados_home(mysqli $mysqli, int $limite = 20): array {
+        comentarios_ensure_schema();
+
+        $stmt = $mysqli->prepare(
+            "SELECT c.id, c.usuario_id, c.estrellas, c.texto, c.creado_en, u.nombre AS usuario_nombre, u.foto_perfil
+             FROM comentarios_clientes c
+             LEFT JOIN usuarios u ON u.id = c.usuario_id
+             WHERE c.estado = 'aprobado' AND c.destacado = 1
+             ORDER BY c.creado_en DESC
+             LIMIT ?"
+        );
+        if (!$stmt) {
+            return [];
+        }
+        $stmt->bind_param('i', $limite);
+        $stmt->execute();
+        $resultado = $stmt->get_result();
+
+        $items = [];
+        if ($resultado instanceof mysqli_result) {
+            while ($row = $resultado->fetch_assoc()) {
+                $items[] = [
+                    'id' => (int) $row['id'],
+                    'usuario_id' => (int) $row['usuario_id'],
+                    'usuario_nombre' => trim((string) ($row['usuario_nombre'] ?? '')) !== '' ? trim((string) $row['usuario_nombre']) : 'Usuario',
+                    'foto_perfil' => trim((string) ($row['foto_perfil'] ?? '')),
+                    'estrellas' => (int) $row['estrellas'],
+                    'texto' => (string) $row['texto'],
+                    'creado_en' => (string) ($row['creado_en'] ?? ''),
+                ];
+            }
+        }
+        $stmt->close();
+        return $items;
     }
 }
 
@@ -949,24 +1042,29 @@ if (!function_exists('comentarios_obtener_de_usuario')) {
 }
 
 // Lista los comentarios que ya dejó el usuario (para su panel).
+// $juegoId > 0 restringe a reseñas de compras de ese juego — el modal
+// abierto desde game.php solo debe ofrecer editar la reseña de ESE juego.
 if (!function_exists('comentarios_mis_comentarios')) {
-    function comentarios_mis_comentarios(mysqli $mysqli, int $usuarioId): array {
+    function comentarios_mis_comentarios(mysqli $mysqli, int $usuarioId, int $juegoId = 0): array {
         comentarios_ensure_schema();
         if ($usuarioId <= 0) {
             return [];
         }
-        $stmt = $mysqli->prepare(
-            'SELECT c.id, c.pedido_id, c.estrellas, c.texto, c.estado, c.destacado, c.creado_en, c.editado_en,
+        $sql = 'SELECT c.id, c.pedido_id, c.estrellas, c.texto, c.estado, c.destacado, c.creado_en, c.editado_en,
                     p.juego_nombre, p.paquete_nombre
              FROM comentarios_clientes c
              LEFT JOIN pedidos p ON p.id = c.pedido_id
-             WHERE c.usuario_id = ?
-             ORDER BY c.creado_en DESC'
-        );
+             WHERE c.usuario_id = ?' . ($juegoId > 0 ? ' AND p.juego_id = ?' : '') . '
+             ORDER BY c.creado_en DESC';
+        $stmt = $mysqli->prepare($sql);
         if (!$stmt) {
             return [];
         }
-        $stmt->bind_param('i', $usuarioId);
+        if ($juegoId > 0) {
+            $stmt->bind_param('ii', $usuarioId, $juegoId);
+        } else {
+            $stmt->bind_param('i', $usuarioId);
+        }
         $stmt->execute();
         $resultado = $stmt->get_result();
 
