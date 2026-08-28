@@ -216,8 +216,10 @@ if (!function_exists('comentarios_ensure_schema')) {
 
         // Flag persistido: evita repetir SHOW COLUMNS/SHOW INDEX en cada
         // request una vez que el esquema ya se creó (mismo truco que
-        // referidos_schema_version).
-        if (trim((string) store_config_get('comentarios_schema_version', '')) === '1') {
+        // referidos_schema_version). Al agregar columnas nuevas hay que
+        // SUBIR este número, si no la migración nunca corre en instalaciones
+        // que ya tenían la versión anterior.
+        if (trim((string) store_config_get('comentarios_schema_version', '')) === '2') {
             return;
         }
 
@@ -240,6 +242,7 @@ if (!function_exists('comentarios_ensure_schema')) {
                 estado ENUM('pendiente','aprobado','rechazado','oculto') NOT NULL DEFAULT 'pendiente',
                 destacado TINYINT(1) NOT NULL DEFAULT 0,
                 recoins_otorgados INT NOT NULL DEFAULT 0,
+                bono_destacado_otorgado TINYINT(1) NOT NULL DEFAULT 0,
                 veces_editado INT NOT NULL DEFAULT 0,
                 creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 editado_en DATETIME NULL DEFAULT NULL,
@@ -289,7 +292,8 @@ if (!function_exists('comentarios_ensure_schema')) {
                 'estado'            => "ALTER TABLE comentarios_clientes ADD COLUMN estado ENUM('pendiente','aprobado','rechazado','oculto') NOT NULL DEFAULT 'pendiente' AFTER texto",
                 'destacado'         => "ALTER TABLE comentarios_clientes ADD COLUMN destacado TINYINT(1) NOT NULL DEFAULT 0 AFTER estado",
                 'recoins_otorgados' => "ALTER TABLE comentarios_clientes ADD COLUMN recoins_otorgados INT NOT NULL DEFAULT 0 AFTER destacado",
-                'veces_editado'     => "ALTER TABLE comentarios_clientes ADD COLUMN veces_editado INT NOT NULL DEFAULT 0 AFTER recoins_otorgados",
+                'bono_destacado_otorgado' => "ALTER TABLE comentarios_clientes ADD COLUMN bono_destacado_otorgado TINYINT(1) NOT NULL DEFAULT 0 AFTER recoins_otorgados",
+                'veces_editado'     => "ALTER TABLE comentarios_clientes ADD COLUMN veces_editado INT NOT NULL DEFAULT 0 AFTER bono_destacado_otorgado",
                 'creado_en'         => "ALTER TABLE comentarios_clientes ADD COLUMN creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER veces_editado",
                 'editado_en'        => "ALTER TABLE comentarios_clientes ADD COLUMN editado_en DATETIME NULL DEFAULT NULL AFTER creado_en",
                 'moderado_por'      => "ALTER TABLE comentarios_clientes ADD COLUMN moderado_por INT NULL DEFAULT NULL AFTER editado_en",
@@ -318,7 +322,7 @@ if (!function_exists('comentarios_ensure_schema')) {
             }
         }
 
-        store_config_upsert('comentarios_schema_version', '1', 'No tocar: marca que el esquema del sistema de Comentarios ya fue creado, para no repetir SHOW COLUMNS en cada request.');
+        store_config_upsert('comentarios_schema_version', '2', 'No tocar: marca la versión del esquema del sistema de Comentarios ya aplicada, para no repetir SHOW COLUMNS en cada request.');
     }
 }
 
@@ -1037,5 +1041,333 @@ if (!function_exists('comentarios_alternar_like')) {
         $conteoStmt->close();
 
         return ['ok' => true, 'likes' => $conteo, 'activo' => !$quitado];
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// FASE 3: moderación (panel de administración)
+// ─────────────────────────────────────────────────────────────────────────
+
+if (!function_exists('comentarios_estados_moderacion')) {
+    function comentarios_estados_moderacion(): array {
+        return ['pendiente', 'aprobado', 'rechazado', 'oculto'];
+    }
+}
+
+// Cambia el estado de un comentario (aprobar / rechazar / ocultar / volver a
+// pendiente). No mueve RE Coins: rechazar u ocultar solo lo saca de la vista
+// pública; los RE Coins solo se revierten al ELIMINAR (regla del cliente:
+// "si un comentario es eliminado manualmente por mala conducta, el sistema
+// descuenta automáticamente los REcoins otorgados").
+if (!function_exists('comentarios_admin_moderar')) {
+    function comentarios_admin_moderar(mysqli $mysqli, int $comentarioId, string $nuevoEstado, int $adminId): array {
+        comentarios_ensure_schema();
+
+        if (!in_array($nuevoEstado, comentarios_estados_moderacion(), true)) {
+            return ['ok' => false, 'message' => 'Estado no válido.'];
+        }
+
+        $stmt = $mysqli->prepare('UPDATE comentarios_clientes SET estado = ?, moderado_por = ?, moderado_en = NOW() WHERE id = ?');
+        if (!$stmt) {
+            return ['ok' => false, 'message' => 'No se pudo actualizar el comentario.'];
+        }
+        $stmt->bind_param('sii', $nuevoEstado, $adminId, $comentarioId);
+        $stmt->execute();
+        $afectadas = $stmt->affected_rows;
+        $stmt->close();
+
+        if ($afectadas === 0) {
+            // affected_rows = 0 también si se reenvía el mismo estado; se
+            // comprueba que el comentario exista para no mentir con el error.
+            $existe = $mysqli->query('SELECT id FROM comentarios_clientes WHERE id = ' . (int) $comentarioId);
+            if (!($existe instanceof mysqli_result) || $existe->num_rows === 0) {
+                return ['ok' => false, 'message' => 'Ese comentario ya no existe.'];
+            }
+        }
+
+        $etiquetas = [
+            'aprobado' => 'aprobado y ya es visible en la página',
+            'rechazado' => 'rechazado',
+            'oculto' => 'ocultado',
+            'pendiente' => 'devuelto a pendiente',
+        ];
+        return ['ok' => true, 'message' => 'Comentario ' . ($etiquetas[$nuevoEstado] ?? 'actualizado') . '.', 'estado' => $nuevoEstado];
+    }
+}
+
+// Marca/desmarca un comentario como Destacado. El bono de RE Coins se paga
+// UNA SOLA VEZ (columna bono_destacado_otorgado): si se desmarca y se vuelve
+// a destacar, no se paga de nuevo — si no, sería una fuente infinita de
+// RE Coins con solo hacer clic dos veces.
+if (!function_exists('comentarios_admin_destacar')) {
+    function comentarios_admin_destacar(mysqli $mysqli, int $comentarioId, int $adminId, bool $destacar): array {
+        comentarios_ensure_schema();
+
+        $stmt = $mysqli->prepare('SELECT id, usuario_id, pedido_id, destacado, bono_destacado_otorgado, recoins_otorgados FROM comentarios_clientes WHERE id = ? LIMIT 1');
+        if (!$stmt) {
+            return ['ok' => false, 'message' => 'No se pudo cargar el comentario.'];
+        }
+        $stmt->bind_param('i', $comentarioId);
+        $stmt->execute();
+        $comentario = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$comentario) {
+            return ['ok' => false, 'message' => 'Ese comentario ya no existe.'];
+        }
+
+        $usuarioId = (int) $comentario['usuario_id'];
+        $yaPagoBono = (int) $comentario['bono_destacado_otorgado'] === 1;
+        $bono = comentarios_bono_destacado();
+        $debePagarBono = $destacar && !$yaPagoBono && $bono > 0;
+
+        // Fuera de la transacción por el commit implícito del DDL de
+        // win_points (ver comentarios_precalentar_win_points).
+        if ($debePagarBono) {
+            comentarios_precalentar_win_points($mysqli, $usuarioId);
+        }
+
+        $mysqli->begin_transaction();
+        try {
+            $destacadoValor = $destacar ? 1 : 0;
+            $upd = $mysqli->prepare('UPDATE comentarios_clientes SET destacado = ?, moderado_por = ?, moderado_en = NOW() WHERE id = ?');
+            $upd->bind_param('iii', $destacadoValor, $adminId, $comentarioId);
+            $upd->execute();
+            $upd->close();
+
+            $bonoPagado = 0;
+            if ($debePagarBono) {
+                $bonoPagado = comentarios_mover_recoins(
+                    $mysqli,
+                    $usuarioId,
+                    $bono,
+                    'destacado',
+                    'Bono por reseña destacada por la tienda',
+                    (int) $comentario['pedido_id']
+                );
+                if ($bonoPagado > 0) {
+                    $totalOtorgado = (int) $comentario['recoins_otorgados'] + $bonoPagado;
+                    $marcar = $mysqli->prepare('UPDATE comentarios_clientes SET bono_destacado_otorgado = 1, recoins_otorgados = ? WHERE id = ?');
+                    $marcar->bind_param('ii', $totalOtorgado, $comentarioId);
+                    $marcar->execute();
+                    $marcar->close();
+                }
+            }
+
+            $mysqli->commit();
+
+            if (!$destacar) {
+                return ['ok' => true, 'message' => 'Se quitó el destacado.', 'destacado' => false];
+            }
+            return [
+                'ok' => true,
+                'destacado' => true,
+                'bono' => $bonoPagado,
+                'message' => $bonoPagado > 0
+                    ? 'Comentario destacado. Se acreditaron ' . $bonoPagado . ' RE Coins de bono al usuario.'
+                    : ($yaPagoBono
+                        ? 'Comentario destacado (el bono ya se había pagado antes, no se paga dos veces).'
+                        : 'Comentario destacado.'),
+            ];
+        } catch (Throwable $e) {
+            $mysqli->rollback();
+            error_log('TVG comentarios: fallo al destacar #' . $comentarioId . ': ' . $e->getMessage());
+            return ['ok' => false, 'message' => 'No se pudo destacar el comentario.'];
+        }
+    }
+}
+
+// Elimina un comentario y revierte los RE Coins que había otorgado.
+//
+// ⚠️ Diferencia deliberada con la edición: al usuario SÍ se le bloquea editar
+// si no le alcanza el saldo, pero al admin NUNCA se le bloquea eliminar (si
+// no, no se podría borrar spam de alguien que ya gastó sus puntos). Por eso
+// acá el descuento se acota al saldo disponible en vez de abortar, y se
+// informa cuánto se pudo descontar realmente.
+if (!function_exists('comentarios_admin_eliminar')) {
+    function comentarios_admin_eliminar(mysqli $mysqli, int $comentarioId, int $adminId, bool $revertirRecoins = true): array {
+        comentarios_ensure_schema();
+
+        $stmt = $mysqli->prepare('SELECT id, usuario_id, pedido_id, recoins_otorgados FROM comentarios_clientes WHERE id = ? LIMIT 1');
+        if (!$stmt) {
+            return ['ok' => false, 'message' => 'No se pudo cargar el comentario.'];
+        }
+        $stmt->bind_param('i', $comentarioId);
+        $stmt->execute();
+        $comentario = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$comentario) {
+            return ['ok' => false, 'message' => 'Ese comentario ya no existe.'];
+        }
+
+        $usuarioId = (int) $comentario['usuario_id'];
+        $otorgados = (int) $comentario['recoins_otorgados'];
+        $aRevertir = 0;
+
+        if ($revertirRecoins && $otorgados > 0) {
+            comentarios_precalentar_win_points($mysqli, $usuarioId);
+            $saldo = function_exists('win_points_wallet_balance') ? win_points_wallet_balance($mysqli, $usuarioId) : 0;
+            $aRevertir = min($otorgados, max(0, $saldo));
+        }
+
+        $mysqli->begin_transaction();
+        try {
+            $mysqli->query('DELETE FROM comentarios_likes WHERE comentario_id = ' . (int) $comentarioId);
+            $mysqli->query('DELETE FROM comentarios_respuestas WHERE comentario_id = ' . (int) $comentarioId);
+            $mysqli->query('DELETE FROM comentarios_clientes WHERE id = ' . (int) $comentarioId);
+
+            $revertidos = 0;
+            if ($aRevertir > 0) {
+                $revertidos = comentarios_mover_recoins(
+                    $mysqli,
+                    $usuarioId,
+                    -$aRevertir,
+                    'reverso',
+                    'Reverso de RE Coins por reseña eliminada',
+                    (int) $comentario['pedido_id']
+                );
+            }
+
+            $mysqli->commit();
+
+            $mensaje = 'Comentario eliminado.';
+            if ($otorgados > 0) {
+                if ($aRevertir >= $otorgados) {
+                    $mensaje .= ' Se descontaron ' . abs($revertidos) . ' RE Coins al usuario.';
+                } elseif ($aRevertir > 0) {
+                    $mensaje .= ' Solo se pudieron descontar ' . abs($revertidos) . ' de ' . $otorgados . ' RE Coins (el usuario ya gastó el resto).';
+                } else {
+                    $mensaje .= ' No se pudieron descontar los ' . $otorgados . ' RE Coins (el usuario no tiene saldo).';
+                }
+            }
+            return ['ok' => true, 'message' => $mensaje, 'recoins_revertidos' => abs($revertidos)];
+        } catch (Throwable $e) {
+            $mysqli->rollback();
+            error_log('TVG comentarios: fallo al eliminar #' . $comentarioId . ': ' . $e->getMessage());
+            return ['ok' => false, 'message' => 'No se pudo eliminar el comentario.'];
+        }
+    }
+}
+
+// Respuesta oficial de la tienda (1 por comentario). Guardar vacío la borra.
+if (!function_exists('comentarios_admin_responder')) {
+    function comentarios_admin_responder(mysqli $mysqli, int $comentarioId, int $adminId, string $texto): array {
+        comentarios_ensure_schema();
+
+        $texto = trim($texto);
+
+        $existeComentario = $mysqli->query('SELECT id FROM comentarios_clientes WHERE id = ' . (int) $comentarioId);
+        if (!($existeComentario instanceof mysqli_result) || $existeComentario->num_rows === 0) {
+            return ['ok' => false, 'message' => 'Ese comentario ya no existe.'];
+        }
+
+        if ($texto === '') {
+            $mysqli->query('DELETE FROM comentarios_respuestas WHERE comentario_id = ' . (int) $comentarioId);
+            return ['ok' => true, 'message' => 'Respuesta eliminada.', 'respuesta' => ''];
+        }
+
+        if (mb_strlen($texto, 'UTF-8') > 600) {
+            $texto = mb_substr($texto, 0, 600, 'UTF-8');
+        }
+
+        // Upsert manual (la tabla tiene UNIQUE sobre comentario_id).
+        $stmt = $mysqli->prepare(
+            'INSERT INTO comentarios_respuestas (comentario_id, admin_usuario_id, texto)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE texto = VALUES(texto), admin_usuario_id = VALUES(admin_usuario_id), actualizado_en = NOW()'
+        );
+        if (!$stmt) {
+            return ['ok' => false, 'message' => 'No se pudo guardar la respuesta.'];
+        }
+        $stmt->bind_param('iis', $comentarioId, $adminId, $texto);
+        $stmt->execute();
+        $stmt->close();
+
+        return ['ok' => true, 'message' => 'Respuesta publicada.', 'respuesta' => $texto];
+    }
+}
+
+// Listado para el panel de administración: todos los estados, con el dato
+// del usuario, el pedido y la respuesta oficial si la tiene.
+if (!function_exists('comentarios_admin_listar')) {
+    function comentarios_admin_listar(mysqli $mysqli, string $filtroEstado = '', int $limite = 200): array {
+        comentarios_ensure_schema();
+
+        $sql = "SELECT c.id, c.usuario_id, c.pedido_id, c.estrellas, c.texto, c.estado, c.destacado,
+                       c.recoins_otorgados, c.bono_destacado_otorgado, c.veces_editado,
+                       c.creado_en, c.editado_en, c.moderado_en,
+                       u.nombre AS usuario_nombre, u.email AS usuario_email,
+                       p.juego_nombre, p.paquete_nombre,
+                       r.texto AS respuesta_texto,
+                       (SELECT COUNT(*) FROM comentarios_likes l WHERE l.comentario_id = c.id) AS likes
+                FROM comentarios_clientes c
+                LEFT JOIN usuarios u ON u.id = c.usuario_id
+                LEFT JOIN pedidos p ON p.id = c.pedido_id
+                LEFT JOIN comentarios_respuestas r ON r.comentario_id = c.id";
+        $filtroValido = in_array($filtroEstado, comentarios_estados_moderacion(), true);
+        if ($filtroValido) {
+            $sql .= " WHERE c.estado = ?";
+        }
+        $sql .= " ORDER BY c.creado_en DESC LIMIT ?";
+
+        $stmt = $mysqli->prepare($sql);
+        if (!$stmt) {
+            return [];
+        }
+        if ($filtroValido) {
+            $stmt->bind_param('si', $filtroEstado, $limite);
+        } else {
+            $stmt->bind_param('i', $limite);
+        }
+        $stmt->execute();
+        $resultado = $stmt->get_result();
+
+        $items = [];
+        if ($resultado instanceof mysqli_result) {
+            while ($row = $resultado->fetch_assoc()) {
+                $items[] = [
+                    'id' => (int) $row['id'],
+                    'usuario_id' => (int) $row['usuario_id'],
+                    'usuario_nombre' => trim((string) ($row['usuario_nombre'] ?? '')) !== '' ? trim((string) $row['usuario_nombre']) : 'Usuario',
+                    'usuario_email' => trim((string) ($row['usuario_email'] ?? '')),
+                    'pedido_id' => (int) $row['pedido_id'],
+                    'pedido_etiqueta' => comentarios_etiqueta_pedido($row),
+                    'estrellas' => (int) $row['estrellas'],
+                    'texto' => (string) $row['texto'],
+                    'estado' => (string) $row['estado'],
+                    'destacado' => (int) $row['destacado'] === 1,
+                    'recoins_otorgados' => (int) $row['recoins_otorgados'],
+                    'bono_pagado' => (int) $row['bono_destacado_otorgado'] === 1,
+                    'veces_editado' => (int) $row['veces_editado'],
+                    'creado_en' => (string) ($row['creado_en'] ?? ''),
+                    'editado_en' => (string) ($row['editado_en'] ?? ''),
+                    'likes' => (int) ($row['likes'] ?? 0),
+                    'respuesta' => trim((string) ($row['respuesta_texto'] ?? '')),
+                ];
+            }
+        }
+        $stmt->close();
+        return $items;
+    }
+}
+
+// Conteo por estado, para las pestañas del panel.
+if (!function_exists('comentarios_admin_conteos')) {
+    function comentarios_admin_conteos(mysqli $mysqli): array {
+        comentarios_ensure_schema();
+        $conteos = ['pendiente' => 0, 'aprobado' => 0, 'rechazado' => 0, 'oculto' => 0, 'total' => 0];
+        $resultado = $mysqli->query('SELECT estado, COUNT(*) AS cantidad FROM comentarios_clientes GROUP BY estado');
+        if ($resultado instanceof mysqli_result) {
+            while ($row = $resultado->fetch_assoc()) {
+                $estado = (string) $row['estado'];
+                $cantidad = (int) $row['cantidad'];
+                if (isset($conteos[$estado])) {
+                    $conteos[$estado] = $cantidad;
+                }
+                $conteos['total'] += $cantidad;
+            }
+        }
+        return $conteos;
     }
 }

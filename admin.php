@@ -3900,6 +3900,7 @@ require_once __DIR__ . '/includes/header.php';
                 <a href="/admin/referidos" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🎁</span>Referidos</a>
                 <a href="/admin/ayuda" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>❔</span>Módulo Ayuda</a>
                 <a href="/admin/diseno-pasos" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🎨</span>Diseño de Pasos</a>
+                <a href="/admin/comentarios" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>💬</span>Comentarios</a>
                 <?php if (trim((string) store_config_get('win_points', '0')) === '1'): ?>
                 <a href="/admin/win-points" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🏆</span>Win Points</a>
                 <?php endif; ?>
