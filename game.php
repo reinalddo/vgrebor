@@ -10411,8 +10411,14 @@ include __DIR__ . "/includes/header.php";
     if (paymentStatusModal && paymentWindowThemeEnabled) {
       paymentStatusModal.setAttribute('data-payment-status-state', normalizedType);
     }
-    // Sistema de Comentarios: bloque post-compra, solo si la compra salió bien.
-    aplicarBloquePostCompra(normalizedType === 'success');
+    // Sistema de Comentarios: bloque post-compra. Por defecto solo si el
+    // modal es de éxito, pero el llamador puede forzarlo con
+    // options.reviewCta — caso puntual: un método de pago SIN verificación
+    // por API (ej. Zinli) SIEMPRE queda "pendiente" (type=info, no success),
+    // y aun así debe mostrar el CTA porque ese es su funcionamiento normal,
+    // no una falla — instrucción explícita del cliente.
+    const mostrarCtaComentario = (options && typeof options.reviewCta === 'boolean') ? options.reviewCta : normalizedType === 'success';
+    aplicarBloquePostCompra(mostrarCtaComentario);
     scrollPaymentModalToTop();
     setOverlayVisible(paymentStatusModal, true);
   }
@@ -13321,6 +13327,25 @@ include __DIR__ . "/includes/header.php";
                       return;
                     }
 
+                    // Método de pago SIN verificación por API (ej. Zinli): el
+                    // pago queda "pendiente" de que el administrador lo
+                    // confirme manualmente — es el funcionamiento normal de
+                    // ese método, no una falla (a diferencia del caso de
+                    // arriba, que sí es un error real de verificación
+                    // bancaria). Antes este caso no calzaba con ningún `if`
+                    // de aquí arriba y el modal se cerraba en silencio sin
+                    // avisarle nada al cliente ni mostrar el CTA de reseña.
+                    if (nextState === 'pendiente') {
+                      const pendingReviewMessage = data.message || 'Tu pago quedó registrado y pendiente de verificación por el administrador.';
+                      setPaymentAlert(pendingReviewMessage, 'warning');
+                      clearPaymentSupportUi();
+                      setPaymentFormDisabled(true);
+                      clearPaymentTimer();
+                      setCancelOrderButtonMode('close');
+                      showPaymentStatusModal('Pago recibido', pendingReviewMessage, 'info', { reviewCta: true });
+                      return;
+                    }
+
                     closePaymentModal(true);
                     resetCheckoutState();
                   })
@@ -14895,7 +14920,9 @@ include __DIR__ . "/includes/header.php";
 
                 let doneCount = 0;
                 let allSuccess = true;
+                let anyError = false;
                 let manualReviewWhatsappUrl = '';
+                let firstDeliveredOrderId = 0;
                 const deliveredAccounts = [];
                 const deliveredCodes = [];
 
@@ -14949,6 +14976,8 @@ include __DIR__ . "/includes/header.php";
                   if (isError) console.error('[VG] error en batch_fulfill_item order_id=' + orderId + ':', result);
 
                   if (!isDone && !isPartial) allSuccess = false;
+                  if (isError) anyError = true;
+                  if (isDone && !firstDeliveredOrderId) firstDeliveredOrderId = orderId;
 
                   if (row) {
                     let icon, statusText, statusClass;
@@ -15170,6 +15199,49 @@ include __DIR__ . "/includes/header.php";
                     const waBtn = document.getElementById('batch-manual-review-whatsapp-btn');
                     if (waBtn) {
                       waBtn.addEventListener('click', () => window.open(manualReviewWhatsappUrl, '_blank', 'noopener'));
+                    }
+                  }
+
+                  // Sistema de Comentarios: mismo llamado a la acción que ya
+                  // existe en el modal de compra de UN solo paquete
+                  // (#cmt-postcompra / aplicarBloquePostCompra) — antes solo
+                  // vivía ahí, así que una compra por carrito/lote nunca lo
+                  // mostraba. Se muestra si NINGÚN ítem dio error real —
+                  // "manual" (pago sin verificación por API, ej. Zinli:
+                  // siempre queda pendiente de revisión manual, eso es lo
+                  // normal para ese método, no una falla) SÍ debe mostrar el
+                  // CTA; solo un error de verdad (método CON verificación
+                  // por API que falló) lo oculta — pedido explícito del
+                  // cliente.
+                  if (!anyError && !batchProgressFooter.querySelector('.batch-postcompra-cta')) {
+                    const ctaBlock = document.createElement('div');
+                    ctaBlock.className = 'batch-postcompra-cta batch-accounts-footer-list';
+                    ctaBlock.innerHTML = `<div class="batch-accounts-footer-title">¡Gracias por su compra!</div>
+                      <p style="margin:0 0 0.75rem;color:#e2e8f0;">Ven, califícanos y cuéntanos la experiencia de tu compra.</p>
+                      <button type="button" id="batch-postcompra-btn" class="btn btn-outline-info fw-bold w-100">Deja tu comentario</button>`;
+                    batchProgressFooter.insertBefore(ctaBlock, batchProgressFooter.firstChild);
+
+                    const ctaBtn = document.getElementById('batch-postcompra-btn');
+                    if (ctaBtn) {
+                      ctaBtn.addEventListener('click', function () {
+                        const logueado = <?= isset($_SESSION['auth_user']['id']) ? 'true' : 'false' ?>;
+                        if (logueado) {
+                          setOverlayVisible(batchProgressModal, false);
+                          const abrir = document.querySelector('[data-cmt-abrir]');
+                          if (abrir) {
+                            abrir.click();
+                          } else {
+                            window.location.href = <?= json_encode(app_path('/') . '#resenas', JSON_UNESCAPED_SLASHES) ?>;
+                          }
+                          return;
+                        }
+                        setOverlayVisible(batchProgressModal, false);
+                        if (typeof window.cmtPrepararRegistroConComentario === 'function') {
+                          window.cmtPrepararRegistroConComentario(firstDeliveredOrderId);
+                        } else if (typeof window.openAuthModal === 'function') {
+                          window.openAuthModal('register');
+                        }
+                      });
                     }
                   }
 
