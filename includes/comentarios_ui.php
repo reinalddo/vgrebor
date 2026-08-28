@@ -94,6 +94,10 @@ if (!function_exists('comentarios_ui_url')) {
 if (!function_exists('comentarios_render_seccion')) {
     function comentarios_render_seccion(mysqli $mysqli, int $juegoId = 0): void {
         $usuarioId = (int) ($_SESSION['auth_user']['id'] ?? 0);
+        // Admin viendo la página pública: acciones de moderación en línea
+        // (ocultar/destacar/responder/eliminar) para no tener que ir siempre
+        // al panel — pedido explícito del cliente.
+        $esAdminViendo = in_array(trim((string) ($_SESSION['auth_user']['rol'] ?? '')), ['admin', 'root'], true);
         $filtro = (int) ($_GET['resenas_estrellas'] ?? 0);
         $pagina = (int) ($_GET['resenas_pagina'] ?? 1);
 
@@ -176,9 +180,9 @@ if (!function_exists('comentarios_render_seccion')) {
                   <p class="cmt-item-texto"><?= htmlspecialchars($item['texto'], ENT_QUOTES, 'UTF-8') ?></p>
 
                   <?php if ($item['respuesta']): ?>
-                    <div class="cmt-respuesta">
+                    <div class="cmt-respuesta" data-cmt-respuesta-vista-item="<?= (int) $item['id'] ?>">
                       <div class="cmt-respuesta-head">
-                        <span class="cmt-respuesta-avatar">GM</span>
+                        <span class="cmt-respuesta-avatar">ADMIN</span>
                         <span class="cmt-respuesta-nombre"><?= htmlspecialchars($item['respuesta']['admin_nombre'], ENT_QUOTES, 'UTF-8') ?></span>
                         <span class="cmt-respuesta-badge">Soporte oficial</span>
                       </div>
@@ -186,12 +190,40 @@ if (!function_exists('comentarios_render_seccion')) {
                     </div>
                   <?php endif; ?>
 
+                  <?php $esPropio = $usuarioId > 0 && $usuarioId === (int) $item['usuario_id']; ?>
                   <div class="cmt-item-pie">
-                    <button type="button" class="cmt-util<?= $item['yo_di_like'] ? ' activo' : '' ?>"
-                            data-cmt-like="<?= (int) $item['id'] ?>"
-                            data-cmt-logueado="<?= $usuarioId > 0 ? '1' : '0' ?>">
-                      <span aria-hidden="true">👍</span> Me gusta <span class="cmt-util-n"><?= (int) $item['likes'] > 0 ? '(' . (int) $item['likes'] . ')' : '' ?></span>
-                    </button>
+                    <div class="d-flex gap-2 flex-wrap align-items-center">
+                      <button type="button" class="cmt-util<?= $item['yo_di_like'] ? ' activo' : '' ?>"
+                              data-cmt-like="<?= (int) $item['id'] ?>"
+                              data-cmt-logueado="<?= $usuarioId > 0 ? '1' : '0' ?>">
+                        <span aria-hidden="true">👍</span> Me gusta <span class="cmt-util-n"><?= (int) $item['likes'] > 0 ? '(' . (int) $item['likes'] . ')' : '' ?></span>
+                      </button>
+
+                      <?php if ($esPropio): ?>
+                        <button type="button" class="cmt-mini-accion" data-cmt-editar="<?= (int) $item['id'] ?>"
+                                data-cmt-estrellas="<?= (int) $item['estrellas'] ?>"
+                                data-cmt-texto="<?= htmlspecialchars($item['texto'], ENT_QUOTES, 'UTF-8') ?>">
+                          ✏️ Editar
+                        </button>
+                      <?php endif; ?>
+
+                      <?php if ($esAdminViendo): ?>
+                        <button type="button" class="cmt-mini-accion" data-cmt-admin-accion="ocultar" data-cmt-admin-id="<?= (int) $item['id'] ?>">Ocultar</button>
+                        <button type="button" class="cmt-mini-accion<?= $item['destacado'] ? ' activo' : '' ?>" data-cmt-admin-accion="destacar" data-cmt-admin-id="<?= (int) $item['id'] ?>" data-cmt-admin-destacar="<?= $item['destacado'] ? '0' : '1' ?>">
+                          <?= $item['destacado'] ? 'Quitar destacado' : 'Destacar' ?>
+                        </button>
+                        <button type="button" class="cmt-mini-accion" data-cmt-admin-toggle-responder="<?= (int) $item['id'] ?>">Responder</button>
+                        <button type="button" class="cmt-mini-accion cmt-mini-accion-peligro" data-cmt-admin-accion="eliminar" data-cmt-admin-id="<?= (int) $item['id'] ?>">Eliminar</button>
+                      <?php endif; ?>
+                    </div>
+
+                    <?php if ($esAdminViendo): ?>
+                      <div class="cmt-admin-respuesta-editor d-none" data-cmt-admin-respuesta="<?= (int) $item['id'] ?>">
+                        <textarea class="cmt-textarea" rows="2" data-cmt-admin-respuesta-input placeholder="Responder oficialmente (vacío borra la respuesta)"><?= htmlspecialchars($item['respuesta']['texto'] ?? '', ENT_QUOTES, 'UTF-8') ?></textarea>
+                        <button type="button" class="cmt-mini-accion mt-2" data-cmt-admin-accion="responder" data-cmt-admin-id="<?= (int) $item['id'] ?>">Guardar respuesta</button>
+                      </div>
+                      <div class="cmt-flash-mini d-none" data-cmt-admin-flash="<?= (int) $item['id'] ?>"></div>
+                    <?php endif; ?>
                   </div>
                 </article>
               <?php endforeach; endif; ?>
@@ -238,9 +270,9 @@ if (!function_exists('comentarios_render_seccion')) {
           .cmt-panel-label { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.18em; color:var(--theme-text-muted); }
           .cmt-promedio { font-family:'Oxanium',sans-serif; font-weight:800; font-size:3.4rem; line-height:1; color:var(--theme-warning); margin:0.4rem 0 0.3rem; text-shadow:0 0 22px rgba(var(--theme-warning-rgb),0.35); }
           .cmt-panel-total { font-size:0.75rem; color:var(--theme-text-muted); text-transform:uppercase; letter-spacing:0.08em; margin-top:0.4rem; }
-          .cmt-stars { color:var(--theme-warning); letter-spacing:0.12em; white-space:nowrap; }
+          .cmt-stars { color:var(--theme-warning); letter-spacing:0.12em; white-space:nowrap; text-shadow:0 0 6px rgba(var(--theme-warning-rgb),0.55); }
           .cmt-stars-lg { font-size:1.3rem; }
-          .cmt-stars-off { color:rgba(var(--theme-text-muted-rgb),0.32); }
+          .cmt-stars-off { color:rgba(var(--theme-text-muted-rgb),0.32); text-shadow:none; }
 
           .cmt-barras { display:flex; flex-direction:column; gap:0.35rem; margin:1.1rem 0 1.2rem; }
           .cmt-barra-fila { display:flex; align-items:center; gap:0.5rem; text-decoration:none; padding:0.18rem 0.35rem; border-radius:8px; border:1px solid transparent; transition:background 0.15s, border-color 0.15s; }
@@ -260,7 +292,7 @@ if (!function_exists('comentarios_render_seccion')) {
           .cmt-lista { display:flex; flex-direction:column; gap:0.85rem; min-width:0; }
           .cmt-vacio { background:var(--theme-panel-gradient); border:1px dashed rgba(var(--theme-primary-rgb),0.28); border-radius:14px; padding:2.2rem 1rem; text-align:center; color:var(--theme-text-muted); }
           .cmt-item { background:var(--theme-panel-gradient); border:1px solid rgba(var(--theme-primary-rgb),0.18); border-radius:14px; padding:1rem 1.15rem; }
-          .cmt-item.destacado { border-color:rgba(var(--theme-warning-rgb),0.5); box-shadow:0 0 16px rgba(var(--theme-warning-rgb),0.12); }
+          .cmt-item.destacado { border-color:rgba(var(--theme-primary-rgb),0.55); box-shadow:0 0 16px rgba(var(--theme-primary-rgb),0.14); }
           .cmt-item-head { display:flex; align-items:flex-start; gap:0.75rem; }
           .cmt-avatar { flex-shrink:0; width:46px; height:46px; border-radius:50%; object-fit:cover; border:1px solid rgba(var(--theme-primary-rgb),0.45); }
           .cmt-avatar-inicial { display:flex; align-items:center; justify-content:center; font-family:'Oxanium',sans-serif; font-weight:800; font-size:1.15rem; color:var(--theme-primary); background:rgba(var(--theme-bg-main-rgb),0.55); }
@@ -276,17 +308,30 @@ if (!function_exists('comentarios_render_seccion')) {
           /* Respuesta oficial del admin: acento morado-azul fijo (no ligado al
              tema del tenant) para que se distinga siempre de todo lo demás
              de la reseña, igual que la referencia del cliente. */
-          .cmt-respuesta { margin-top:0.8rem; background:linear-gradient(135deg, #7C3AED, #3B82F6); border:1px solid rgba(124,58,237,0.55); border-left-width:3px; border-radius:0 10px 10px 0; padding:0.7rem 0.9rem; }
+          .cmt-respuesta { margin-top:0.8rem; background:linear-gradient(135deg, #7C3AED, #EC4899, #3B82F6); border:1px solid rgba(124,58,237,0.55); border-left-width:3px; border-radius:0 10px 10px 0; padding:0.7rem 0.9rem; }
           .cmt-respuesta-head { display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; }
-          .cmt-respuesta-avatar { font-size:0.62rem; font-weight:800; letter-spacing:0.05em; background:rgba(255,255,255,0.22); color:#fff; border-radius:5px; padding:0.1rem 0.35rem; }
+          .cmt-respuesta-avatar { font-size:0.62rem; font-weight:800; letter-spacing:0.05em; background:rgba(var(--theme-primary-rgb),0.35); color:#fff; border-radius:5px; padding:0.1rem 0.35rem; }
           .cmt-respuesta-nombre { font-weight:700; color:#fff; font-size:0.85rem; }
-          .cmt-respuesta-badge { font-size:0.58rem; text-transform:uppercase; letter-spacing:0.08em; font-weight:800; color:#fff; border:1px solid rgba(255,255,255,0.55); border-radius:5px; padding:0.08rem 0.35rem; }
+          .cmt-respuesta-badge { font-size:0.58rem; text-transform:uppercase; letter-spacing:0.08em; font-weight:800; color:var(--theme-warning); border:1px solid var(--theme-warning); border-radius:5px; padding:0.08rem 0.35rem; }
           .cmt-respuesta-texto { margin:0.45rem 0 0; font-size:0.86rem; color:rgba(255,255,255,0.92); line-height:1.5; overflow-wrap:anywhere; }
 
           .cmt-item-pie { margin-top:0.8rem; padding-top:0.7rem; border-top:1px solid rgba(var(--theme-text-muted-rgb),0.12); }
           .cmt-util { background:transparent; border:1px solid rgba(var(--theme-text-muted-rgb),0.3); border-radius:999px; color:var(--theme-text-muted); font-size:0.78rem; font-weight:600; padding:0.32rem 0.85rem; cursor:pointer; transition:border-color 0.15s, color 0.15s; }
           .cmt-util:hover { border-color:var(--theme-primary); color:var(--theme-primary); }
           .cmt-util.activo { border-color:var(--theme-primary); color:var(--theme-primary); background:rgba(var(--theme-primary-rgb),0.1); }
+
+          /* Acciones en línea: "Editar" del autor + moderación rápida del
+             admin (ocultar/destacar/responder/eliminar), directo en la
+             tarjeta pública — para no tener que ir siempre a /admin/comentarios. */
+          .cmt-mini-accion { background:transparent; border:1px solid rgba(var(--theme-text-muted-rgb),0.3); border-radius:999px; color:var(--theme-text-muted); font-size:0.78rem; font-weight:600; padding:0.32rem 0.85rem; cursor:pointer; transition:border-color 0.15s, color 0.15s; }
+          .cmt-mini-accion:hover { border-color:var(--theme-primary); color:var(--theme-primary); }
+          .cmt-mini-accion.activo { border-color:var(--theme-warning); color:var(--theme-warning); background:rgba(var(--theme-warning-rgb),0.1); }
+          .cmt-mini-accion-peligro { border-color:rgba(var(--theme-danger-rgb),0.4); color:var(--theme-danger); }
+          .cmt-mini-accion-peligro:hover { border-color:var(--theme-danger); color:var(--theme-danger); }
+          .cmt-admin-respuesta-editor { margin-top:0.6rem; }
+          .cmt-flash-mini { font-size:0.78rem; font-weight:600; margin-top:0.4rem; }
+          .cmt-flash-mini.ok { color:var(--theme-success); }
+          .cmt-flash-mini.error { color:var(--theme-danger); }
 
           .cmt-paginacion { display:flex; align-items:center; justify-content:center; gap:0.35rem; flex-wrap:wrap; margin-top:0.6rem; padding:0.6rem; background:var(--theme-panel-gradient); border:1px solid rgba(var(--theme-primary-rgb),0.16); border-radius:999px; }
           .cmt-pag-btn, .cmt-pag-num { text-decoration:none; color:var(--theme-text-muted); font-size:0.82rem; font-weight:600; padding:0.35rem 0.7rem; border-radius:999px; }
@@ -380,7 +425,11 @@ if (!function_exists('comentarios_render_modales')) {
         $yaImpreso = true;
 
         $usuarioId = (int) ($_SESSION['auth_user']['id'] ?? 0);
-        $pedidos = $usuarioId > 0 ? comentarios_pedidos_disponibles($mysqli, $usuarioId, 20, $juegoId) : [];
+        // Ya no se elige la compra a comentar — instrucción explícita del
+        // cliente: siempre es la más reciente (y si fue un carrito con varios
+        // paquetes, el de mayor valor de ese lote), para que nadie pueda
+        // "inflar" su reseña eligiendo a mano un paquete caro.
+        $sugerido = $usuarioId > 0 ? comentarios_pedido_sugerido($mysqli, $usuarioId, $juegoId) : null;
         $mis = $usuarioId > 0 ? comentarios_mis_comentarios($mysqli, $usuarioId, $juegoId) : [];
         $apiUrl = app_path('/api/comentarios.php');
         ?>
@@ -399,12 +448,12 @@ if (!function_exists('comentarios_render_modales')) {
               <div class="cmt-aviso d-none" data-cmt-aviso></div>
 
               <form id="cmt-form" novalidate>
-                <label class="cmt-label">¿Sobre cuál de tus compras?</label>
-                <select class="cmt-select" name="pedido_id" data-cmt-pedido>
-                  <?php foreach ($pedidos as $p): ?>
-                    <option value="<?= (int) $p['id'] ?>"><?= htmlspecialchars($p['etiqueta'] !== '' ? $p['etiqueta'] : ('Pedido #' . $p['id']), ENT_QUOTES, 'UTF-8') ?></option>
-                  <?php endforeach; ?>
-                </select>
+                <input type="hidden" name="juego_id" value="<?= (int) $juegoId ?>">
+                <?php if ($sugerido): ?>
+                  <label class="cmt-label">Sobre tu compra</label>
+                  <div class="cmt-compra-fija" data-cmt-compra-fija><?= htmlspecialchars($sugerido['etiqueta'] !== '' ? $sugerido['etiqueta'] : ('Pedido #' . $sugerido['id']), ENT_QUOTES, 'UTF-8') ?></div>
+                  <div class="cmt-nota mb-2">Es tu compra más reciente disponible para comentar.</div>
+                <?php endif; ?>
 
                 <?php if (!empty($mis)): ?>
                   <div class="cmt-mis">
@@ -493,7 +542,8 @@ if (!function_exists('comentarios_render_modales')) {
           .cmt-cerrar-flotante { position:absolute; top:0.8rem; right:0.8rem; z-index:2; }
           .cmt-dialogo-body { padding:1.2rem 1.3rem 1.4rem; }
           .cmt-label { display:block; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.14em; color:var(--theme-primary); margin-bottom:0.35rem; }
-          .cmt-select, .cmt-textarea { width:100%; background:rgba(var(--theme-bg-main-rgb),0.6); color:var(--theme-text); border:1px solid rgba(var(--theme-primary-rgb),0.4); border-radius:10px; padding:0.6rem 0.8rem; font-size:0.9rem; }
+          .cmt-select, .cmt-textarea, .cmt-compra-fija { width:100%; background:rgba(var(--theme-bg-main-rgb),0.6); color:var(--theme-text); border:1px solid rgba(var(--theme-primary-rgb),0.4); border-radius:10px; padding:0.6rem 0.8rem; font-size:0.9rem; }
+          .cmt-compra-fija { font-weight:700; color:var(--theme-primary); }
           .cmt-select:focus, .cmt-textarea:focus { outline:none; border-color:var(--theme-primary); box-shadow:0 0 0 3px rgba(var(--theme-primary-rgb),0.18); }
           .cmt-textarea { resize:vertical; }
           .cmt-contador { text-align:right; font-size:0.72rem; color:var(--theme-text-muted); margin-top:0.25rem; }
@@ -545,7 +595,7 @@ if (!function_exists('comentarios_render_modales')) {
           var contador = modal.querySelector('[data-cmt-contador]');
           var aviso = modal.querySelector('[data-cmt-aviso]');
           var inputEstrellas = modal.querySelector('[data-cmt-estrellas-valor]');
-          var selectPedido = modal.querySelector('[data-cmt-pedido]');
+          var inputJuegoId = form ? form.querySelector('[name="juego_id"]') : null;
           var btnEnviar = modal.querySelector('[data-cmt-enviar]');
           var tituloModal = document.getElementById('cmt-modal-titulo');
           // Cuando se está editando, guarda el id; si es null, es una reseña nueva.
@@ -660,8 +710,11 @@ if (!function_exists('comentarios_render_modales')) {
 
           if (textarea) textarea.addEventListener('input', actualizarContador);
 
-          // Editar una reseña existente
-          modal.querySelectorAll('[data-cmt-editar]').forEach(function (btn) {
+          // Editar una reseña existente — el botón puede estar dentro del
+          // modal (lista "Mis comentarios") o afuera, en la propia tarjeta
+          // pública del comentario (ver comentarios_render_seccion(), solo
+          // visible para el autor) — document.querySelectorAll cubre ambos.
+          document.querySelectorAll('[data-cmt-editar]').forEach(function (btn) {
             btn.addEventListener('click', function () {
               editandoId = btn.dataset.cmtEditar;
               if (tituloModal) tituloModal.textContent = 'Editar tu comentario';
@@ -670,6 +723,7 @@ if (!function_exists('comentarios_render_modales')) {
               pintarEstrellas(parseInt(btn.dataset.cmtEstrellas, 10) || 5);
               actualizarContador();
               limpiarAviso();
+              abrir(modal);
               if (textarea) textarea.focus();
             });
           });
@@ -689,7 +743,7 @@ if (!function_exists('comentarios_render_modales')) {
                 datos.comentario_id = editandoId;
               } else {
                 accion = 'publicar';
-                datos.pedido_id = selectPedido ? selectPedido.value : '';
+                datos.juego_id = inputJuegoId ? inputJuegoId.value : '0';
               }
 
               btnEnviar.disabled = true;
@@ -861,6 +915,136 @@ if (!function_exists('comentarios_render_modales')) {
                 .finally(function () { btn.disabled = false; });
             });
           });
+
+          // Moderación en línea del admin (ocultar/destacar/responder/
+          // eliminar) directo en la tarjeta pública — reusa el mismo
+          // endpoint y contrato de acciones que /admin/comentarios.php
+          // (csrf_verify_soft() no bloquea; la sesión de admin ya es válida
+          // en cualquier página del sitio).
+          (function () {
+            var botonesAdmin = document.querySelectorAll('[data-cmt-admin-accion]');
+            if (!botonesAdmin.length) return;
+
+            var ADMIN_ENDPOINT = <?= json_encode(app_path('/admin/comentarios.php'), JSON_UNESCAPED_SLASHES) ?>;
+
+            function flashDe(id) { return document.querySelector('[data-cmt-admin-flash="' + id + '"]'); }
+            function mostrarFlashMini(id, texto, ok) {
+              var el = flashDe(id);
+              if (!el) return;
+              el.textContent = texto;
+              el.className = 'cmt-flash-mini ' + (ok ? 'ok' : 'error');
+              el.classList.remove('d-none');
+              window.setTimeout(function () { el.classList.add('d-none'); }, 4000);
+            }
+
+            function enviarAdmin(datos) {
+              var body = new FormData();
+              Object.keys(datos).forEach(function (k) { body.append(k, datos[k]); });
+              return fetch(ADMIN_ENDPOINT, {
+                method: 'POST',
+                body: body,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+              }).then(function (r) { return r.json(); });
+            }
+
+            document.querySelectorAll('[data-cmt-admin-toggle-responder]').forEach(function (btn) {
+              btn.addEventListener('click', function () {
+                var editor = document.querySelector('[data-cmt-admin-respuesta="' + btn.dataset.cmtAdminToggleResponder + '"]');
+                if (editor) editor.classList.toggle('d-none');
+              });
+            });
+
+            botonesAdmin.forEach(function (btn) {
+              btn.addEventListener('click', function () {
+                var accion = btn.dataset.cmtAdminAccion;
+                var id = btn.dataset.cmtAdminId;
+                var article = btn.closest('.cmt-item');
+
+                if (accion === 'eliminar' && !window.confirm('¿Eliminar este comentario? Se descontarán al usuario los RE Coins que se le otorgaron por él.')) {
+                  return;
+                }
+                if (accion === 'ocultar' && !window.confirm('¿Ocultar este comentario de la página?')) {
+                  return;
+                }
+
+                var datos = { comentario_id: id };
+                if (accion === 'ocultar') {
+                  datos.accion = 'moderar';
+                  datos.estado = 'oculto';
+                } else if (accion === 'destacar') {
+                  datos.accion = 'destacar';
+                  datos.destacar = btn.dataset.cmtAdminDestacar;
+                } else if (accion === 'eliminar') {
+                  datos.accion = 'eliminar';
+                } else if (accion === 'responder') {
+                  datos.accion = 'responder';
+                  var editorResp = document.querySelector('[data-cmt-admin-respuesta="' + id + '"]');
+                  var input = editorResp ? editorResp.querySelector('[data-cmt-admin-respuesta-input]') : null;
+                  datos.respuesta = input ? input.value : '';
+                } else {
+                  return;
+                }
+
+                btn.disabled = true;
+                enviarAdmin(datos)
+                  .then(function (data) {
+                    if (!data.success) {
+                      mostrarFlashMini(id, data.message || 'No se pudo completar la acción.', false);
+                      return;
+                    }
+
+                    if (accion === 'ocultar' || accion === 'eliminar') {
+                      if (article) {
+                        article.style.transition = 'opacity 0.3s';
+                        article.style.opacity = '0';
+                        window.setTimeout(function () { article.remove(); }, 300);
+                      }
+                      return;
+                    }
+
+                    if (accion === 'destacar') {
+                      var ahoraDestacado = !!data.destacado;
+                      btn.dataset.cmtAdminDestacar = ahoraDestacado ? '0' : '1';
+                      btn.textContent = ahoraDestacado ? 'Quitar destacado' : 'Destacar';
+                      btn.classList.toggle('activo', ahoraDestacado);
+                      if (article) article.classList.toggle('destacado', ahoraDestacado);
+                      mostrarFlashMini(id, ahoraDestacado ? 'Destacado.' : 'Se quitó el destacado.', true);
+                    }
+
+                    if (accion === 'responder') {
+                      var vista = document.querySelector('[data-cmt-respuesta-vista-item="' + id + '"]');
+                      if (data.respuesta) {
+                        mostrarFlashMini(id, 'Respuesta guardada.', true);
+                        if (vista) {
+                          var textoEl = vista.querySelector('.cmt-respuesta-texto');
+                          if (textoEl) textoEl.textContent = data.respuesta;
+                        } else if (article) {
+                          var nuevo = document.createElement('div');
+                          nuevo.className = 'cmt-respuesta';
+                          nuevo.setAttribute('data-cmt-respuesta-vista-item', id);
+                          nuevo.innerHTML = '<div class="cmt-respuesta-head">'
+                            + '<span class="cmt-respuesta-avatar">ADMIN</span>'
+                            + '<span class="cmt-respuesta-nombre"></span>'
+                            + '<span class="cmt-respuesta-badge">Soporte oficial</span>'
+                            + '</div><p class="cmt-respuesta-texto"></p>';
+                          nuevo.querySelector('.cmt-respuesta-nombre').textContent = data.admin_nombre || 'Soporte';
+                          nuevo.querySelector('.cmt-respuesta-texto').textContent = data.respuesta;
+                          var textoPrincipal = article.querySelector('.cmt-item-texto');
+                          if (textoPrincipal) textoPrincipal.insertAdjacentElement('afterend', nuevo);
+                        }
+                      } else {
+                        mostrarFlashMini(id, 'Respuesta eliminada.', true);
+                        if (vista) vista.remove();
+                      }
+                    }
+                  })
+                  .catch(function () {
+                    mostrarFlashMini(id, 'Error de conexión. Intenta de nuevo.', false);
+                  })
+                  .finally(function () { btn.disabled = false; });
+              });
+            });
+          })();
         })();
         </script>
         <?php

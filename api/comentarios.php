@@ -99,12 +99,17 @@ switch ($accion) {
         }
         $uid = comentarios_api_requiere_sesion();
         $input = comentarios_api_input();
+        // El pedido NUNCA lo elige el cliente — se autoselecciona server-side
+        // la compra más reciente disponible de este juego (ver
+        // comentarios_pedido_sugerido()). juego_id solo dice "en qué página
+        // estás", no concede nada: como mucho elige OTRA compra propia.
         $resultado = comentarios_publicar(
             $mysqli,
             $uid,
-            (int) ($input['pedido_id'] ?? 0),
             $input['estrellas'] ?? 0,
-            (string) ($input['texto'] ?? '')
+            (string) ($input['texto'] ?? ''),
+            0,
+            (int) ($input['juego_id'] ?? 0)
         );
         if (!$resultado['ok']) {
             comentarios_api_error($resultado['message'], 422);

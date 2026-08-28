@@ -800,10 +800,104 @@ if (!function_exists('comentarios_mover_recoins')) {
     }
 }
 
-// Publica un comentario nuevo sobre un pedido completado.
-// Devuelve ['ok' => bool, 'message' => string, 'comentario_id' => int, 'recoins' => int].
+// Dado un pedido "ancla" (uno que el llamador ya sabe que es de este
+// usuario), si pertenece a una compra por carrito (varios paquetes en un
+// mismo lote, mismo cart_batch_id), se reemplaza por el de MAYOR VALOR de
+// ese mismo lote que siga disponible para comentar — instrucción explícita
+// del cliente: "el que sale es el de mayor valor, no a elección, la mayoría
+// pondrá uno alto para creerse más". Si el ancla no es parte de un lote, o
+// ya no está disponible, se devuelve tal cual (o null si dejó de ser válido).
+if (!function_exists('comentarios_pedido_resolver_mayor_valor')) {
+    function comentarios_pedido_resolver_mayor_valor(mysqli $mysqli, int $usuarioId, int $pedidoAncla): ?array {
+        $estadoCompletado = comentarios_estado_pedido_completado();
+        $stmtAncla = $mysqli->prepare(
+            'SELECT p.id, p.cart_batch_id, p.juego_nombre, p.paquete_nombre
+             FROM pedidos p
+             LEFT JOIN comentarios_clientes c ON c.pedido_id = p.id
+             WHERE p.id = ? AND p.cliente_usuario_id = ? AND p.estado = ? AND c.id IS NULL
+             LIMIT 1'
+        );
+        if (!$stmtAncla) {
+            return null;
+        }
+        $stmtAncla->bind_param('iis', $pedidoAncla, $usuarioId, $estadoCompletado);
+        $stmtAncla->execute();
+        $filaAncla = $stmtAncla->get_result()->fetch_assoc();
+        $stmtAncla->close();
+        if (!$filaAncla) {
+            return null;
+        }
+
+        $batchId = trim((string) ($filaAncla['cart_batch_id'] ?? ''));
+        if ($batchId === '') {
+            return ['id' => (int) $filaAncla['id'], 'etiqueta' => comentarios_etiqueta_pedido($filaAncla)];
+        }
+
+        $stmtLote = $mysqli->prepare(
+            'SELECT p.id, p.juego_nombre, p.paquete_nombre
+             FROM pedidos p
+             LEFT JOIN comentarios_clientes c ON c.pedido_id = p.id
+             WHERE p.cart_batch_id = ? AND p.cliente_usuario_id = ? AND p.estado = ? AND c.id IS NULL
+             ORDER BY p.precio DESC, p.id ASC
+             LIMIT 1'
+        );
+        if (!$stmtLote) {
+            return ['id' => (int) $filaAncla['id'], 'etiqueta' => comentarios_etiqueta_pedido($filaAncla)];
+        }
+        $stmtLote->bind_param('sis', $batchId, $usuarioId, $estadoCompletado);
+        $stmtLote->execute();
+        $mejor = $stmtLote->get_result()->fetch_assoc();
+        $stmtLote->close();
+
+        $fila = $mejor ?: $filaAncla;
+        return ['id' => (int) $fila['id'], 'etiqueta' => comentarios_etiqueta_pedido($fila)];
+    }
+}
+
+// Para el modal "Deja un comentario" sin pedido elegido a mano: toma la
+// compra MÁS RECIENTE disponible del usuario (filtrada por juego si se pasa
+// $juegoId) y la resuelve al de mayor valor si es parte de un lote, mismo
+// criterio que comentarios_pedido_resolver_mayor_valor().
+if (!function_exists('comentarios_pedido_sugerido')) {
+    function comentarios_pedido_sugerido(mysqli $mysqli, int $usuarioId, int $juegoId = 0): ?array {
+        if ($usuarioId <= 0) {
+            return null;
+        }
+        $estadoCompletado = comentarios_estado_pedido_completado();
+        $sql = 'SELECT p.id
+                FROM pedidos p
+                LEFT JOIN comentarios_clientes c ON c.pedido_id = p.id
+                WHERE p.cliente_usuario_id = ? AND p.estado = ? AND c.id IS NULL'
+                . ($juegoId > 0 ? ' AND p.juego_id = ?' : '')
+                . ' ORDER BY p.creado_en DESC LIMIT 1';
+        $stmt = $mysqli->prepare($sql);
+        if (!$stmt) {
+            return null;
+        }
+        if ($juegoId > 0) {
+            $stmt->bind_param('isi', $usuarioId, $estadoCompletado, $juegoId);
+        } else {
+            $stmt->bind_param('is', $usuarioId, $estadoCompletado);
+        }
+        $stmt->execute();
+        $fila = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if (!$fila) {
+            return null;
+        }
+
+        return comentarios_pedido_resolver_mayor_valor($mysqli, $usuarioId, (int) $fila['id']);
+    }
+}
+
+// Publica un comentario nuevo. El pedido NUNCA lo elige el cliente: si se
+// pasa $pedidoAncla (flujo de "registrarse comentando" recién comprado) se
+// resuelve a su lote; si no, se autoselecciona la compra más reciente
+// disponible (filtrada por $juegoId si se pasa) — ver los 2 resolvers de
+// arriba. Devuelve ['ok' => bool, 'message' => string, 'comentario_id' =>
+// int, 'recoins' => int].
 if (!function_exists('comentarios_publicar')) {
-    function comentarios_publicar(mysqli $mysqli, int $usuarioId, int $pedidoId, $estrellasRaw, string $textoRaw): array {
+    function comentarios_publicar(mysqli $mysqli, int $usuarioId, $estrellasRaw, string $textoRaw, int $pedidoAncla = 0, int $juegoId = 0): array {
         comentarios_ensure_schema();
 
         if ($usuarioId <= 0) {
@@ -823,27 +917,14 @@ if (!function_exists('comentarios_publicar')) {
         }
         $texto = $validacion['texto'];
 
-        // El pedido debe ser de ESTE usuario, estar completado y no tener
-        // comentario todavía. Se valida contra la BD, nunca confiando en lo
-        // que mande el navegador.
-        $estadoCompletado = comentarios_estado_pedido_completado();
-        $stmt = $mysqli->prepare(
-            'SELECT p.id FROM pedidos p
-             LEFT JOIN comentarios_clientes c ON c.pedido_id = p.id
-             WHERE p.id = ? AND p.cliente_usuario_id = ? AND p.estado = ? AND c.id IS NULL
-             LIMIT 1'
-        );
-        if (!$stmt) {
-            return ['ok' => false, 'message' => 'No se pudo validar tu pedido en este momento.'];
-        }
-        $stmt->bind_param('iis', $pedidoId, $usuarioId, $estadoCompletado);
-        $stmt->execute();
-        $pedidoValido = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
+        $pedidoResuelto = $pedidoAncla > 0
+            ? comentarios_pedido_resolver_mayor_valor($mysqli, $usuarioId, $pedidoAncla)
+            : comentarios_pedido_sugerido($mysqli, $usuarioId, $juegoId);
 
-        if (!$pedidoValido) {
-            return ['ok' => false, 'message' => 'Este pedido no está disponible para comentar (o ya lo comentaste).'];
+        if (!$pedidoResuelto) {
+            return ['ok' => false, 'message' => 'No tienes ninguna compra disponible para comentar (o ya la comentaste).'];
         }
+        $pedidoId = (int) $pedidoResuelto['id'];
 
         $recompensa = comentarios_recompensa_publicar();
 

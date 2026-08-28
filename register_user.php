@@ -109,9 +109,9 @@ if ($ok) {
                 $comentarioResultado = comentarios_publicar(
                     $mysqli,
                     $nuevoUsuarioId,
-                    $comentarioPedidoId,
                     $data['comentario_estrellas'] ?? 5,
-                    $comentarioTexto
+                    $comentarioTexto,
+                    $comentarioPedidoId
                 );
             } else {
                 $comentarioResultado = ['ok' => false, 'message' => 'No pudimos asociar tu comentario a una compra de este navegador.'];

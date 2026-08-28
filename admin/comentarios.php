@@ -43,6 +43,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         case 'responder':
             $resultado = comentarios_admin_responder($mysqli, $comentarioId, $adminId, (string) ($_POST['respuesta'] ?? ''));
+            // El nombre del admin no viaja en el resultado de la función (esa
+            // vive en includes/comentarios.php sin acceso a la sesión) — se
+            // agrega acá para que la tarjeta pública (comentarios_render_seccion())
+            // pueda insertar el bloque de respuesta sin recargar la página.
+            if (!empty($resultado['ok'])) {
+                $resultado['admin_nombre'] = trim((string) ($_SESSION['auth_user']['nombre'] ?? '')) !== ''
+                    ? trim((string) $_SESSION['auth_user']['nombre'])
+                    : 'Soporte';
+            }
             break;
 
         case 'guardar_configuracion': {
@@ -269,6 +278,7 @@ $etiquetasEstado = [
             <p class="cm-texto"><?= htmlspecialchars($c['texto'], ENT_QUOTES, 'UTF-8') ?></p>
             <div class="cm-meta mt-2">
               <?= htmlspecialchars(substr($c['creado_en'], 0, 16), ENT_QUOTES, 'UTF-8') ?>
+              <?php if (!empty($c['usuario_email'])): ?> · <?= htmlspecialchars($c['usuario_email'], ENT_QUOTES, 'UTF-8') ?><?php endif; ?>
               <?php if ($c['pedido_etiqueta'] !== ''): ?> · <?= htmlspecialchars($c['pedido_etiqueta'], ENT_QUOTES, 'UTF-8') ?><?php endif; ?>
               · Pedido #<?= $c['pedido_id'] ?>
               · 👍 <?= $c['likes'] ?>
