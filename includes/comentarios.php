@@ -408,7 +408,9 @@ if (!function_exists('comentarios_usuario_puede_comentar')) {
 // ─────────────────────────────────────────────────────────────────────────
 // Devuelve promedio, total y el desglose por estrella con su porcentaje —
 // exactamente lo que dibuja el panel izquierdo (barras 5★→1★ con su %).
-// Solo cuenta comentarios 'aprobado' (los que se ven públicamente).
+// Cuenta 'pendiente' y 'aprobado' (ambos son públicos — ya no hay cola de
+// moderación previa, ver comentarios_publicar(); solo 'rechazado'/'oculto'
+// están fuera de la vista pública, porque el admin los sacó a propósito).
 // $juegoId > 0 lo limita a reseñas de compras de ese juego (panel de
 // game.php); 0 = todas las reseñas de la tienda (resumen compacto del home).
 if (!function_exists('comentarios_resumen_calificaciones')) {
@@ -424,7 +426,7 @@ if (!function_exists('comentarios_resumen_calificaciones')) {
                 "SELECT c.estrellas, COUNT(*) AS cantidad
                  FROM comentarios_clientes c
                  INNER JOIN pedidos p ON p.id = c.pedido_id
-                 WHERE c.estado = 'aprobado' AND p.juego_id = ?
+                 WHERE c.estado IN ('pendiente','aprobado') AND p.juego_id = ?
                  GROUP BY c.estrellas"
             );
             $stmt->bind_param('i', $juegoId);
@@ -434,7 +436,7 @@ if (!function_exists('comentarios_resumen_calificaciones')) {
             $resultado = $mysqli->query(
                 "SELECT estrellas, COUNT(*) AS cantidad
                  FROM comentarios_clientes
-                 WHERE estado = 'aprobado'
+                 WHERE estado IN ('pendiente','aprobado')
                  GROUP BY estrellas"
             );
         }
@@ -488,7 +490,7 @@ if (!function_exists('comentarios_listar_publicos')) {
         if ($juegoId > 0) {
             $countSql .= " INNER JOIN pedidos p ON p.id = c.pedido_id";
         }
-        $countSql .= " WHERE c.estado = 'aprobado'";
+        $countSql .= " WHERE c.estado IN ('pendiente','aprobado')";
         $countTypes = '';
         $countParams = [];
         if ($filtro > 0) {
@@ -534,7 +536,7 @@ if (!function_exists('comentarios_listar_publicos')) {
                 LEFT JOIN pedidos p ON p.id = c.pedido_id
                 LEFT JOIN comentarios_respuestas r ON r.comentario_id = c.id
                 LEFT JOIN usuarios ra ON ra.id = r.admin_usuario_id
-                WHERE c.estado = 'aprobado'";
+                WHERE c.estado IN ('pendiente','aprobado')";
 
         $types = '';
         $params = [];
@@ -618,7 +620,7 @@ if (!function_exists('comentarios_destacados_home')) {
             "SELECT c.id, c.usuario_id, c.estrellas, c.texto, c.creado_en, u.nombre AS usuario_nombre, u.foto_perfil
              FROM comentarios_clientes c
              LEFT JOIN usuarios u ON u.id = c.usuario_id
-             WHERE c.estado = 'aprobado' AND c.destacado = 1
+             WHERE c.estado IN ('pendiente','aprobado') AND c.destacado = 1
              ORDER BY c.creado_en DESC
              LIMIT ?"
         );
@@ -851,9 +853,16 @@ if (!function_exists('comentarios_publicar')) {
 
         $mysqli->begin_transaction();
         try {
+            // 'aprobado' directo, sin cola de moderación previa — instrucción
+            // explícita del cliente: las reseñas se publican solas en la
+            // página de su juego; el admin ya no "aprueba", solo puede
+            // ocultarlas o eliminarlas después si hace falta (ver
+            // comentarios_admin_moderar()/comentarios_admin_eliminar()).
+            // "Destacar" (columna aparte, sin relación con este estado) es lo
+            // único que decide si además aparece en el slider del home.
             $insert = $mysqli->prepare(
                 "INSERT INTO comentarios_clientes (usuario_id, pedido_id, estrellas, texto, estado, recoins_otorgados)
-                 VALUES (?, ?, ?, ?, 'pendiente', 0)"
+                 VALUES (?, ?, ?, ?, 'aprobado', 0)"
             );
             if (!$insert) {
                 throw new RuntimeException('No se pudo preparar el guardado del comentario.');
@@ -889,8 +898,8 @@ if (!function_exists('comentarios_publicar')) {
             return [
                 'ok' => true,
                 'message' => $otorgados > 0
-                    ? 'Tu reseña fue enviada y ganaste ' . $otorgados . ' RE Coins. Quedará visible cuando el administrador la apruebe.'
-                    : 'Tu reseña fue enviada y quedará visible cuando el administrador la apruebe.',
+                    ? '¡Gracias por tu reseña! Ya está publicada y ganaste ' . $otorgados . ' RE Coins.'
+                    : '¡Gracias por tu reseña! Ya está publicada.',
                 'comentario_id' => $comentarioId,
                 'recoins' => $otorgados,
             ];
@@ -1100,7 +1109,7 @@ if (!function_exists('comentarios_alternar_like')) {
         }
 
         // Solo se puede dar "útil" a comentarios visibles públicamente.
-        $stmt = $mysqli->prepare("SELECT id FROM comentarios_clientes WHERE id = ? AND estado = 'aprobado' LIMIT 1");
+        $stmt = $mysqli->prepare("SELECT id FROM comentarios_clientes WHERE id = ? AND estado IN ('pendiente','aprobado') LIMIT 1");
         if (!$stmt) {
             return ['ok' => false, 'message' => 'No se pudo procesar tu voto.'];
         }

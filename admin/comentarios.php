@@ -109,9 +109,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 require_once __DIR__ . '/../includes/header.php';
 
 $conteos = comentarios_admin_conteos($mysqli);
-$filtroActual = trim((string) ($_GET['estado'] ?? 'pendiente'));
+// 'todos' por defecto: las reseñas ya se publican solas (ver
+// comentarios_publicar()), así que ya no tiene sentido aterrizar en
+// "Pendientes" — normalmente estará vacía.
+$filtroActual = trim((string) ($_GET['estado'] ?? 'todos'));
 if (!in_array($filtroActual, comentarios_estados_moderacion(), true) && $filtroActual !== 'todos') {
-    $filtroActual = 'pendiente';
+    $filtroActual = 'todos';
 }
 $listado = comentarios_admin_listar($mysqli, $filtroActual === 'todos' ? '' : $filtroActual);
 $resumenPublico = comentarios_resumen_calificaciones($mysqli);
@@ -151,7 +154,7 @@ $etiquetasEstado = [
     <div class="col-12 text-center">
       <p class="text-uppercase text-info mb-1">Panel</p>
       <h1 class="display-5 fw-bold text-info mb-2">Comentarios</h1>
-      <p class="text-secondary">Modera las reseñas de tus clientes. Solo las <strong>aprobadas</strong> se muestran en la página.</p>
+      <p class="text-secondary">Las reseñas se publican solas en la página de su juego. Puedes <strong>ocultarlas</strong> o <strong>eliminarlas</strong> si hace falta, y <strong>destacar</strong> las mejores para que también aparezcan en el inicio.</p>
     </div>
   </div>
 
@@ -286,9 +289,10 @@ $etiquetasEstado = [
             </div>
 
             <div class="d-flex gap-2 flex-wrap mt-3">
-              <button type="button" class="btn btn-sm btn-success" data-cm-accion="moderar" data-cm-estado-nuevo="aprobado" <?= $c['estado'] === 'aprobado' ? 'disabled' : '' ?>>Aprobar</button>
-              <button type="button" class="btn btn-sm btn-outline-danger" data-cm-accion="moderar" data-cm-estado-nuevo="rechazado" <?= $c['estado'] === 'rechazado' ? 'disabled' : '' ?>>Rechazar</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary" data-cm-accion="moderar" data-cm-estado-nuevo="oculto" <?= $c['estado'] === 'oculto' ? 'disabled' : '' ?>>Ocultar</button>
+              <?php $estaOculto = in_array($c['estado'], ['oculto', 'rechazado'], true); ?>
+              <button type="button" class="btn btn-sm <?= $estaOculto ? 'btn-success' : 'btn-outline-secondary' ?>" data-cm-accion="moderar" data-cm-estado-nuevo="<?= $estaOculto ? 'aprobado' : 'oculto' ?>">
+                <?= $estaOculto ? 'Mostrar' : 'Ocultar' ?>
+              </button>
               <button type="button" class="btn btn-sm btn-outline-warning" data-cm-accion="destacar" data-cm-destacar="<?= $c['destacado'] ? '0' : '1' ?>">
                 <?= $c['destacado'] ? 'Quitar destacado' : ('Destacar' . (!$c['bono_pagado'] && comentarios_bono_destacado() > 0 ? ' (+' . comentarios_bono_destacado() . ' RE Coins)' : '')) ?>
               </button>
@@ -372,10 +376,13 @@ $etiquetasEstado = [
               badge.className = 'cm-badge cm-estado-' + data.estado;
               badge.textContent = data.estado.charAt(0).toUpperCase() + data.estado.slice(1);
             }
-            // Rehabilitar/deshabilitar los botones de estado según el nuevo
-            item.querySelectorAll('[data-cm-accion="moderar"]').forEach(function (otro) {
-              otro.disabled = otro.dataset.cmEstadoNuevo === data.estado;
-            });
+            // El botón es un toggle Ocultar/Mostrar (ya no hay "Aprobar" ni
+            // "Rechazar" por separado) — se recalcula según el nuevo estado.
+            var estaOcultoAhora = data.estado === 'oculto' || data.estado === 'rechazado';
+            btn.textContent = estaOcultoAhora ? 'Mostrar' : 'Ocultar';
+            btn.dataset.cmEstadoNuevo = estaOcultoAhora ? 'aprobado' : 'oculto';
+            btn.classList.toggle('btn-success', estaOcultoAhora);
+            btn.classList.toggle('btn-outline-secondary', !estaOcultoAhora);
           }
 
           if (accion === 'destacar') {

@@ -437,7 +437,7 @@ if (!function_exists('comentarios_render_modales')) {
                 <div class="cmt-contador"><span data-cmt-contador>0</span>/<?= comentarios_max_caracteres() ?> · mínimo <?= comentarios_min_caracteres() ?></div>
 
                 <button type="submit" class="cmt-btn-principal mt-3" data-cmt-enviar>Publicar comentario</button>
-                <div class="cmt-nota mt-2">Tu reseña la revisa el administrador antes de publicarse. Al publicarla ganas <?= comentarios_recompensa_publicar() ?> RE Coins.</div>
+                <div class="cmt-nota mt-2">Tu reseña se publica de inmediato. Al publicarla ganas <?= comentarios_recompensa_publicar() ?> RE Coins.</div>
               </form>
             </div>
           </div>
