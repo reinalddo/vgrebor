@@ -617,9 +617,10 @@ if (!function_exists('comentarios_destacados_home')) {
         comentarios_ensure_schema();
 
         $stmt = $mysqli->prepare(
-            "SELECT c.id, c.usuario_id, c.estrellas, c.texto, c.creado_en, u.nombre AS usuario_nombre, u.foto_perfil
+            "SELECT c.id, c.usuario_id, c.estrellas, c.texto, c.creado_en, u.nombre AS usuario_nombre, u.foto_perfil, p.juego_id
              FROM comentarios_clientes c
              LEFT JOIN usuarios u ON u.id = c.usuario_id
+             LEFT JOIN pedidos p ON p.id = c.pedido_id
              WHERE c.estado IN ('pendiente','aprobado') AND c.destacado = 1
              ORDER BY c.creado_en DESC
              LIMIT ?"
@@ -642,6 +643,7 @@ if (!function_exists('comentarios_destacados_home')) {
                     'estrellas' => (int) $row['estrellas'],
                     'texto' => (string) $row['texto'],
                     'creado_en' => (string) ($row['creado_en'] ?? ''),
+                    'juego_id' => (int) ($row['juego_id'] ?? 0),
                 ];
             }
         }

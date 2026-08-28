@@ -157,7 +157,7 @@ if (!function_exists('comentarios_render_seccion')) {
                   <?php endif; ?>
                 </div>
               <?php else: foreach ($listado['items'] as $item): ?>
-                <article class="cmt-item<?= $item['destacado'] ? ' destacado' : '' ?>">
+                <article class="cmt-item<?= $item['destacado'] ? ' destacado' : '' ?>" id="comentario-<?= (int) $item['id'] ?>">
                   <div class="cmt-item-head">
                     <?= comentarios_ui_avatar($item) ?>
                     <div class="cmt-item-ident">
@@ -340,7 +340,28 @@ if (!function_exists('comentarios_render_seccion')) {
           .cmt-pag-num.actual { background:var(--theme-warning); color:#1a1206; font-weight:800; box-shadow:0 0 12px rgba(var(--theme-warning-rgb),0.45); }
           .cmt-pag-puntos { color:var(--theme-text-muted); opacity:0.6; }
           .cmt-pag-info { text-align:center; font-size:0.72rem; color:var(--theme-text-muted); text-transform:uppercase; letter-spacing:0.08em; margin-top:0.5rem; }
+
+          /* Llegada desde el slider del home (#comentario-N) — ver
+             comentarios_render_destacados_home() y el script de abajo. */
+          .cmt-item.resaltado { border-color:var(--theme-primary); box-shadow:0 0 22px rgba(var(--theme-primary-rgb),0.4); }
         </style>
+        <script>
+        (function () {
+          // Si se llega con #comentario-123 (clic en una tarjeta del slider
+          // del home), el navegador ya hace scroll ahí solo (es un id real
+          // en el DOM) — esto solo agrega un resaltado momentáneo para que
+          // quede claro CUÁL reseña es, ya que puede no ser la primera de
+          // la lista.
+          var m = window.location.hash.match(/^#comentario-(\d+)$/);
+          if (!m) return;
+          var el = document.getElementById('comentario-' + m[1]);
+          if (!el) return;
+          window.setTimeout(function () {
+            el.classList.add('resaltado');
+            window.setTimeout(function () { el.classList.remove('resaltado'); }, 2600);
+          }, 300);
+        })();
+        </script>
         <?php
     }
 }
@@ -376,15 +397,22 @@ if (!function_exists('comentarios_render_destacados_home')) {
           </div>
 
           <div class="cmt-home-slider" data-cmt-home-slider>
-            <?php foreach ($destacados as $item): ?>
-              <article class="cmt-home-slide">
+            <?php foreach ($destacados as $item):
+              $juegoId = (int) ($item['juego_id'] ?? 0);
+              // Clic en la tarjeta -> directo al juego, anclado a esta
+              // reseña puntual (ver id="comentario-N" en comentarios_render_seccion()
+              // y el resaltado momentáneo que hace ese script al llegar).
+              $href = $juegoId > 0 ? app_path('/game.php?id=' . $juegoId . '#comentario-' . (int) $item['id']) : '';
+              $tag = $href !== '' ? 'a' : 'div';
+            ?>
+              <<?= $tag ?> class="cmt-home-slide"<?= $href !== '' ? ' href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
                 <div class="cmt-home-slide-head">
                   <span class="cmt-home-slide-avatar" style="border-color:<?= htmlspecialchars(comentarios_ui_color_avatar($item['usuario_id']), ENT_QUOTES, 'UTF-8') ?>;color:<?= htmlspecialchars(comentarios_ui_color_avatar($item['usuario_id']), ENT_QUOTES, 'UTF-8') ?>;"><?= htmlspecialchars(mb_strtoupper(mb_substr($item['usuario_nombre'], 0, 1, 'UTF-8'), 'UTF-8'), ENT_QUOTES, 'UTF-8') ?></span>
                   <span class="cmt-home-slide-nombre"><?= htmlspecialchars(comentarios_ui_nombre_corto($item['usuario_nombre']), ENT_QUOTES, 'UTF-8') ?></span>
                 </div>
                 <?= comentarios_ui_estrellas($item['estrellas'], 'cmt-stars cmt-home-slide-stars') ?>
                 <p class="cmt-home-slide-texto">&ldquo;<?= htmlspecialchars($item['texto'], ENT_QUOTES, 'UTF-8') ?>&rdquo;</p>
-              </article>
+              </<?= $tag ?>>
             <?php endforeach; ?>
           </div>
         </section>
@@ -398,7 +426,8 @@ if (!function_exists('comentarios_render_destacados_home')) {
 
           .cmt-home-slider { display:flex; gap:1rem; overflow-x:auto; padding-bottom:0.4rem; scroll-snap-type:x proximity; scrollbar-width:none; }
           .cmt-home-slider::-webkit-scrollbar { display:none; }
-          .cmt-home-slide { flex:0 0 auto; width:clamp(210px,26vw,270px); scroll-snap-align:start; background:var(--theme-panel-gradient); border:1px solid rgba(var(--theme-primary-rgb),0.18); border-radius:14px; padding:1rem 1.1rem; }
+          .cmt-home-slide { display:block; flex:0 0 auto; width:clamp(210px,26vw,270px); scroll-snap-align:start; background:var(--theme-panel-gradient); border:1px solid rgba(var(--theme-primary-rgb),0.18); border-radius:14px; padding:1rem 1.1rem; color:inherit; text-decoration:none; transition:border-color 0.15s, box-shadow 0.15s; }
+          a.cmt-home-slide:hover { border-color:rgba(var(--theme-primary-rgb),0.55); box-shadow:0 0 14px rgba(var(--theme-primary-rgb),0.18); }
           .cmt-home-slide-head { display:flex; align-items:center; gap:0.6rem; margin-bottom:0.4rem; }
           .cmt-home-slide-avatar { flex-shrink:0; width:38px; height:38px; border-radius:50%; border:1.5px solid; display:flex; align-items:center; justify-content:center; font-family:'Oxanium',sans-serif; font-weight:800; font-size:0.95rem; }
           .cmt-home-slide-nombre { font-weight:700; color:var(--theme-text); font-size:0.92rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

@@ -1853,6 +1853,7 @@ include __DIR__ . "/includes/header.php";
   .batch-progress-modal-header {
     padding: 1.1rem 1.25rem 0.6rem;
     border-bottom: 1px solid rgba(34,211,238,.2);
+    text-align: center;
   }
   .batch-progress-modal-title { font-size: 1.05rem; font-weight: 700; color: #22d3ee; margin: 0 0 0.25rem; }
   .batch-progress-current-label { font-size: 0.8rem; color: #94a3b8; margin: 0; }
@@ -1871,23 +1872,25 @@ include __DIR__ . "/includes/header.php";
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.55rem 1.25rem;
+    justify-content: center;
+    text-align: center;
+    gap: 0.35rem 0.5rem;
+    padding: 0.6rem 1.25rem;
     border-bottom: 1px solid rgba(255,255,255,.05);
     font-size: 0.83rem;
   }
   .batch-progress-item:last-child { border-bottom: none; }
-  .batch-progress-item-icon { width: 1.25rem; text-align: center; font-size: 0.9rem; flex-shrink: 0; }
-  .batch-progress-item-name { flex: 1; color: #e2e8f0; font-weight: 600; line-height: 1.2; }
+  .batch-progress-item-icon { width: 1.5rem; text-align: center; font-size: 1.3rem; flex-shrink: 0; }
+  .batch-progress-item-name { color: #e2e8f0; font-weight: 700; line-height: 1.2; }
   .batch-progress-item-qty { color: #94a3b8; flex-shrink: 0; }
-  .batch-progress-item-status { flex-shrink: 0; font-weight: 700; font-size: 0.76rem; }
+  .batch-progress-item-status { flex-basis: 100%; font-weight: 700; font-size: 0.85rem; margin-top: 0.1rem; }
   .batch-status-pending { color: #94a3b8; }
   .batch-status-processing { color: #facc15; }
   .batch-status-done { color: #4ade80; }
   .batch-status-partial { color: #fb923c; }
   .batch-status-error { color: #f87171; }
   .batch-account-delivery { width: 100%; margin-top: 0.5rem; padding: 0.75rem; background: rgba(16,185,129,.08); border: 1px solid rgba(16,185,129,.3); border-radius: 8px; }
-  .batch-account-text { font-family: monospace; font-size: 0.78rem; color: #d1fae5; white-space: pre-wrap; word-break: break-all; margin-bottom: 0.4rem; }
+  .batch-account-text { font-family: monospace; font-size: 0.78rem; color: #d1fae5; white-space: pre-wrap; word-break: break-all; margin-bottom: 0.4rem; text-align: left; }
   .batch-account-copy-btn { margin-top: 0.3rem; padding: 0.25rem 0.7rem; font-size: 0.73rem; background: rgba(16,185,129,.2); color: #34d399; border: 1px solid rgba(16,185,129,.4); border-radius: 6px; cursor: pointer; }
   .batch-account-copy-btn:hover { background: rgba(16,185,129,.35); }
   .batch-account-gallery { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
@@ -1898,7 +1901,7 @@ include __DIR__ . "/includes/header.php";
   .batch-account-summary-item:last-child { border-bottom: none; }
   .batch-account-summary-name { font-size: 0.8rem; font-weight: 600; color: #94a3b8; margin-bottom: 0.35rem; }
   .cart-account-qty-fixed { color: #34d399; font-size: 0.78rem; font-weight: 700; padding: 0 0.2rem; }
-  .batch-progress-footer { padding: 0.85rem 1.25rem; border-top: 1px solid rgba(34,211,238,.2); }
+  .batch-progress-footer { padding: 0.85rem 1.25rem; border-top: 1px solid rgba(34,211,238,.2); text-align: center; }
   /* ── Payment modal cart summary ────────────────────────────── */
   #payment-cart-summary { display: none; }
   #payment-cart-summary.is-visible { display: block; }
@@ -14982,7 +14985,7 @@ include __DIR__ . "/includes/header.php";
                   if (row) {
                     let icon, statusText, statusClass;
                     if (isDone) {
-                      icon = '✅'; statusText = 'Enviado'; statusClass = 'batch-status-done';
+                      icon = '✅'; statusText = 'Envío exitoso'; statusClass = 'batch-status-done';
                     } else if (isPartial) {
                       icon = '🔄'; statusText = 'En proceso'; statusClass = 'batch-status-partial';
                     } else if (isManual) {
