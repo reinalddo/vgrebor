@@ -3521,5 +3521,33 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
   })();
   </script>
 
+  <script>
+  // Deep-link al panel "Mis Referidos": si la URL trae #referidos o
+  // ?abrir=referidos, se simula un clic en el botón real del menú de usuario
+  // (data-user-open="referrals", ver includes/header.php) para reusar tal
+  // cual su lógica de abrir el modal y cargar los datos — así sirve para
+  // enlazar directo desde un banner de la Galería (o cualquier otro link)
+  // sin depender de que el visitante encuentre el botón por su cuenta. Va al
+  // final del body a propósito: necesita que el listener de data-user-open
+  // ya esté enganchado (se define más arriba en este mismo archivo).
+  (function () {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var quiereReferidos = window.location.hash === '#referidos' || params.get('abrir') === 'referidos';
+      if (!quiereReferidos) return;
+
+      var botonReferidos = document.querySelector('[data-user-open="referrals"]');
+      if (botonReferidos) {
+        botonReferidos.click();
+        return;
+      }
+      // Sin sesión iniciada no existe ese botón en el DOM — se abre el login
+      // primero; al volver a entrar con el mismo link ya verá el panel.
+      var botonLogin = document.querySelector('[data-auth-open="login"]');
+      if (botonLogin) botonLogin.click();
+    } catch (e) {}
+  })();
+  </script>
+
 </body>
 </html>
