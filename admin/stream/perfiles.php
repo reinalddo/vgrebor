@@ -429,11 +429,12 @@ $perfiles = [];
 try {
   $perfiles = $pdo->query("SELECT p.id, p.etiqueta, p.pin, p.estado, COALESCE(p.cambios_np,0) AS cambios_np,
         c.id AS cuenta_id, c.plataforma, c.correo, c.clave, c.vencimiento, c.costo, c.precio_venta, c.precio_reventa, COALESCE(c.rev_editable,0) AS rev_editable, COALESCE(c.origen_cuenta_id,0) AS origen_cuenta_id,
-        COALESCE(pl.unidad_venta,'perfil') AS unidad_venta,
+        COALESCE(pl.unidad_venta,'perfil') AS unidad_venta, pr.nombre AS prov_nombre,
         v.cliente_nombre, v.cliente_wa, v.revendedor_id, ru.nombre AS rev_nombre, v.fecha_vencimiento AS venta_venc
       FROM streaming_perfiles p
       JOIN streaming_cuentas c ON c.id = p.cuenta_id
       LEFT JOIN streaming_plataformas pl ON pl.id = c.plataforma_id AND pl.owner_id = c.owner_id
+      LEFT JOIN streaming_proveedores pr ON pr.id = c.proveedor_id AND pr.owner_id = c.owner_id
       LEFT JOIN streaming_ventas v ON v.id = p.venta_id
       LEFT JOIN usuarios ru ON ru.id = v.revendedor_id
       WHERE c.owner_id=$OWNER
@@ -461,7 +462,7 @@ foreach ($perfiles as $p) {
       $ccIdx[$cid] = count($renderItems);
       $renderItems[] = ['cc' => true, 'cuenta_id' => $cid, 'plataforma' => $p['plataforma'], 'correo' => $p['correo'], 'clave' => $p['clave'],
         'vencimiento' => $p['vencimiento'], 'rev_editable' => (int) $p['rev_editable'], 'costo' => $p['costo'], 'origen_cuenta_id' => (int) ($p['origen_cuenta_id'] ?? 0),
-        'precio_venta' => $p['precio_venta'], 'precio_reventa' => $p['precio_reventa'],
+        'precio_venta' => $p['precio_venta'], 'precio_reventa' => $p['precio_reventa'], 'prov_nombre' => $p['prov_nombre'] ?? null,
         'libres_ids' => [], 'vendidos_ids' => [], 'total' => 0, 'libres' => 0, 'vendidos' => 0,
         'venta_venc' => null, 'cliente_nombre' => null, 'cliente_wa' => null, 'rev_nombre' => null, 'first_id' => (int) $p['id']];
     }
@@ -488,9 +489,12 @@ foreach ($perfiles as $p) {
 // Celda de precios (costo/venta/reventa) para la tabla. El cliente pidió ver estos precios en Perfiles.
 // costo = solo el dueño (verCostos); venta = precio al cliente; reventa = precio al revendedor (se muestra
 // también al revendedor para que vea el suyo).
-$precioCell = function ($costo, $venta, $reventa) use ($verCostos) {
+$precioCell = function ($costo, $venta, $reventa) {
+  // costo = para el ADMIN lo que paga al proveedor; para el REVENDEDOR lo que le costó (lo que la tienda
+  // le vende). Cada quien ve el de SUS cuentas (la consulta filtra por owner) → no hay fuga. Se muestra a
+  // ambos (el cliente pidió que el revendedor vea su costo).
   $out = '';
-  if ($verCostos && $costo !== null && $costo !== '' && (float) $costo > 0) $out .= '<div style="font-size:11px;color:var(--faint)">costo $' . number_format((float) $costo, 2) . '</div>';
+  if ($costo !== null && $costo !== '' && (float) $costo > 0) $out .= '<div style="font-size:11px;color:var(--faint)">costo $' . number_format((float) $costo, 2) . '</div>';
   if ($venta !== null && $venta !== '' && (float) $venta > 0) $out .= '<div style="font-size:11px;color:var(--good);font-weight:600">venta $' . number_format((float) $venta, 2) . '</div>';
   if ($reventa !== null && $reventa !== '' && (float) $reventa > 0) $out .= '<div style="font-size:11px;color:var(--accent);font-weight:600" title="Precio para el revendedor">reventa $' . number_format((float) $reventa, 2) . '</div>';
   return $out !== '' ? $out : '<span style="color:var(--faint)">—</span>';
@@ -533,7 +537,10 @@ stream_head('Perfiles', 'perfiles');
       <?php if ((int) $OWNER === 0 && !empty($revList)): ?>
       <div><label class="flbl">Revendedor</label><select id="f-rev" onchange="filtrar()" class="input"><option value="">Todos</option><?php foreach ($revList as $rv): ?><option value="<?= h(mb_strtolower((string) $rv['nombre'])) ?>"><?= h($rv['nombre']) ?></option><?php endforeach; ?></select></div>
       <?php endif; ?>
-      <div><label class="flbl">Ordenar por</label><select id="f-orden" onchange="ordenar()" class="input"><option value="">— Por defecto —</option><option value="plat-asc">Plataforma (A→Z)</option><option value="correo-asc">Correo (A→Z)</option><option value="rev-asc">Vendedor (A→Z)</option><option value="venc-asc">Vence primero</option></select></div>
+      <?php if ($verCostos && !empty($proveedores)): ?>
+      <div><label class="flbl">Proveedor</label><select id="f-prov" onchange="filtrar()" class="input"><option value="">Todos</option><?php foreach ($proveedores as $pv): ?><option value="<?= h(mb_strtolower((string) $pv['nombre'])) ?>"><?= h($pv['nombre']) ?></option><?php endforeach; ?></select></div>
+      <?php endif; ?>
+      <div><label class="flbl">Ordenar por</label><select id="f-orden" onchange="ordenar()" class="input"><option value="">— Por defecto —</option><option value="plat-asc">Plataforma (A→Z)</option><option value="correo-asc">Correo (A→Z)</option><option value="cli-asc">Cliente (A→Z)</option><option value="rev-asc">Vendedor (A→Z)</option><?php if ($verCostos): ?><option value="prov-asc">Proveedor (A→Z)</option><?php endif; ?><option value="venc-asc">Vence primero</option></select></div>
     </div>
   </div>
 </div>
@@ -559,7 +566,7 @@ stream_head('Perfiles', 'perfiles');
     <table class="dtable">
       <thead><tr>
         <th style="width:34px"><input type="checkbox" id="ck-all" onclick="ckTodo(this)" title="Seleccionar los visibles (libres)" style="width:15px;height:15px;accent-color:var(--acc)"></th>
-        <th>Plataforma</th><th>Correo</th><th>Perfil</th><th>PIN</th><th>Estado</th><th>Precios</th><th>Asignado a</th><th>Vence</th><th style="text-align:center">Acciones</th>
+        <th>Plataforma</th><th>Correo</th><th>Perfil</th><th>PIN</th><th>Estado</th><th>Precios</th><?php if ($verCostos): ?><th>Proveedor</th><?php endif; ?><th>Asignado a</th><th>Vence</th><th style="text-align:center">Acciones</th>
       </tr></thead>
       <tbody id="tbody">
       <?php foreach ($renderItems as $it): ?>
@@ -575,13 +582,14 @@ stream_head('Perfiles', 'perfiles');
         $estadoData = $it['libres'] > 0 ? 'libre' : 'vendido';
         $busca = mb_strtolower(($it['plataforma'] ?? '') . ' ' . ($it['correo'] ?? '') . ' cuenta completa ' . $asignado);
       ?>
-        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($it['plataforma'] ?? '')) ?>" data-estado="<?= h($estadoData) ?>" data-correo="<?= h(mb_strtolower($it['correo'] ?? '')) ?>" data-rev="<?= h(mb_strtolower((string) ($it['rev_nombre'] ?? ''))) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
+        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($it['plataforma'] ?? '')) ?>" data-estado="<?= h($estadoData) ?>" data-correo="<?= h(mb_strtolower($it['correo'] ?? '')) ?>" data-rev="<?= h(mb_strtolower((string) ($it['rev_nombre'] ?? ''))) ?>" data-prov="<?= h(mb_strtolower((string) ($it['prov_nombre'] ?? ''))) ?>" data-cli="<?= h(mb_strtolower((string) ($it['cliente_nombre'] ?? ''))) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
           <td><?php $ccVal = $it['libres'] > 0 ? $it['libres_ids'] : $it['vendidos_ids']; if ($ccVal): ?><input type="checkbox" class="ck-row" value="<?= h(implode(',', $ccVal)) ?>" onclick="ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"><?php endif; ?></td>
           <td><b style="color:var(--text)"><?= h($it['plataforma']) ?></b> <span class="tag" style="font-size:10px;color:var(--accent)">Cuenta completa</span></td>
           <td style="color:var(--muted)"><?= h($it['correo'] ?: '—') ?><?php if (!empty($it['clave'])): ?><br><span style="font-size:10px;color:var(--faint)">🔑 <?= h($it['clave']) ?></span><?php endif; ?></td>
           <td style="font-weight:650" colspan="2">Cuenta completa · <?= (int) $it['total'] ?> perfil(es)<?php if ($it['libres'] > 0 && $it['vendidos'] > 0): ?> · <?= (int) $it['libres'] ?> libre(s)<?php endif; ?></td>
           <td><?php if ($it['libres'] > 0): ?><span class="tag" style="color:var(--good)">Libre</span><?php else: ?><span class="pill wait">Vendida</span><?php endif; ?></td>
           <td><?= $precioCell($it['costo'], $it['precio_venta'], $it['precio_reventa']) ?></td>
+          <?php if ($verCostos): ?><td style="color:var(--muted);font-size:11.5px"><?= !empty($it['prov_nombre']) ? h($it['prov_nombre']) : '<span style="color:var(--faint)">—</span>' ?></td><?php endif; ?>
           <td style="color:var(--muted);font-size:12.5px"><?= $asignado ? h($asignado) : '<span style="color:var(--faint)">—</span>' ?></td>
           <td><span class="<?= $pill ?>"><?= h($txt) ?></span></td>
           <td style="text-align:center;white-space:nowrap">
@@ -603,7 +611,7 @@ stream_head('Perfiles', 'perfiles');
         $asignado = $vend ? (($p['rev_nombre'] ? 'Rev: ' . $p['rev_nombre'] : ($p['cliente_nombre'] ?: 'Cliente')) . ($p['cliente_wa'] ? ' · ' . $p['cliente_wa'] : '')) : '';
         $busca = mb_strtolower(($p['plataforma'] ?? '') . ' ' . ($p['correo'] ?? '') . ' ' . ($p['etiqueta'] ?? '') . ' ' . $asignado);
       ?>
-        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($p['plataforma'] ?? '')) ?>" data-estado="<?= h($p['estado']) ?>" data-correo="<?= h(mb_strtolower($p['correo'] ?? '')) ?>" data-rev="<?= h(mb_strtolower((string) ($p['rev_nombre'] ?? ''))) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
+        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($p['plataforma'] ?? '')) ?>" data-estado="<?= h($p['estado']) ?>" data-correo="<?= h(mb_strtolower($p['correo'] ?? '')) ?>" data-rev="<?= h(mb_strtolower((string) ($p['rev_nombre'] ?? ''))) ?>" data-prov="<?= h(mb_strtolower((string) ($p['prov_nombre'] ?? ''))) ?>" data-cli="<?= h(mb_strtolower((string) ($p['cliente_nombre'] ?? ''))) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
           <td><input type="checkbox" class="ck-row" value="<?= (int) $p['id'] ?>" onclick="ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"></td>
           <td><b style="color:var(--text)"><?= h($p['plataforma']) ?></b></td>
           <td style="color:var(--muted)"><?= h($p['correo'] ?: '—') ?><?php if (!empty($p['clave'])): ?><br><span style="font-size:10px;color:var(--faint)">🔑 <?= h($p['clave']) ?></span><?php endif; ?></td>
@@ -611,6 +619,7 @@ stream_head('Perfiles', 'perfiles');
           <td style="color:var(--faint);font-family:ui-monospace,monospace"><?= h($p['pin'] ?: '—') ?></td>
           <td><?php if ($vend): ?><span class="pill wait">Vendido</span><?php else: ?><span class="tag" style="color:var(--good)">Libre</span><?php endif; ?></td>
           <td><?= $precioCell($p['costo'] ?? null, $p['precio_venta'] ?? null, $p['precio_reventa'] ?? null) ?></td>
+          <?php if ($verCostos): ?><td style="color:var(--muted);font-size:11.5px"><?= !empty($p['prov_nombre']) ? h($p['prov_nombre']) : '<span style="color:var(--faint)">—</span>' ?></td><?php endif; ?>
           <td style="color:var(--muted);font-size:12.5px"><?= $asignado ? h($asignado) : '<span style="color:var(--faint)">—</span>' ?></td>
           <td><span class="<?= $pill ?>" title="Vence para tu cliente"><?= h($txt) ?></span>
             <?php if ($vend && $esRevCtx && !empty($p['vencimiento']) && !empty($p['venta_venc']) && substr((string) $p['vencimiento'], 0, 10) !== substr((string) $p['venta_venc'], 0, 10)): ?>
@@ -825,19 +834,21 @@ stream_head('Perfiles', 'perfiles');
     const q=(document.getElementById('f-busqueda').value||'').toLowerCase().trim();
     const plat=document.getElementById('f-plat').value, est=document.getElementById('f-estado').value;
     const revEl=document.getElementById('f-rev'); const rev=revEl?revEl.value:'';
+    const provEl=document.getElementById('f-prov'); const prov=provEl?provEl.value:'';
     document.querySelectorAll('#tbody tr').forEach(tr=>{
       let ok=true;
       if(q && !(tr.dataset.b||'').includes(q)) ok=false;
       if(plat && tr.dataset.plat!==plat) ok=false;
       if(est && tr.dataset.estado!==est) ok=false;
       if(rev && (tr.dataset.rev||'')!==rev) ok=false;
+      if(prov && (tr.dataset.prov||'')!==prov) ok=false;
       tr.style.display=ok?'':'none';
       if(!ok){ const c=tr.querySelector('.ck-row'); if(c) c.checked=false; }
     });
     ckSync();
   }
   function ordenar(){ const v=document.getElementById('f-orden').value; if(!v) return; const tb=document.getElementById('tbody'); const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1;
-    rows.sort((a,b)=>{ if(key==='venc'){ return ((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul; } const ka=(key==='correo')?'correo':((key==='rev')?'rev':'plat'); return String(a.dataset[ka]||'').localeCompare(String(b.dataset[ka]||''))*mul; });
+    rows.sort((a,b)=>{ if(key==='venc'){ return ((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul; } const map={correo:'correo',rev:'rev',prov:'prov',cli:'cli'}; const ka=map[key]||'plat'; return String(a.dataset[ka]||'').localeCompare(String(b.dataset[ka]||''))*mul; });
     rows.forEach(r=>tb.appendChild(r)); }
   function ckTodo(m){ filasVisibles().forEach(tr=>{ const c=tr.querySelector('.ck-row'); if(c) c.checked=m.checked; }); ckSync(); }
   function selTodos(){ ckTodo({checked:true}); }

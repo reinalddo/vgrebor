@@ -89,10 +89,10 @@ if (($_GET['export'] ?? '') === 'plantilla') {
   }
   header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename="plantilla-cuentas.csv"');
   echo "\xEF\xBB\xBF"; $o = fopen('php://output', 'w');
-  fputcsv($o, ['Vendedor (opcional)', 'Plataforma', 'Vence (AAAA-MM-DD o DD/MM/AAAA)', 'Correo', 'Clave', 'Costo (opcional)', 'Nombre del perfil', 'PIN (opcional)']);
-  fputcsv($o, ['Netflix', 'correo@x.com', 'clave123', 'Rebeca JR', '9669', '01/08/2026', '3.50']);
-  fputcsv($o, ['Netflix', 'correo@x.com', 'clave123', 'Pedro', '1234', '01/08/2026', '']);
-  fputcsv($o, ['Disney+', 'otro@x.com', 'clave99', '', '', '2026-09-15', '']);
+  fputcsv($o, ['Vendedor (opcional)', 'Plataforma', 'Vence (AAAA-MM-DD o DD/MM/AAAA)', 'Correo', 'Clave', 'Proveedor (opcional)', 'Nombre del perfil', 'PIN (opcional)']);
+  fputcsv($o, ['', 'Netflix', '01/08/2026', 'correo@x.com', 'clave123', 'MiProveedor', 'Rebeca JR', '9669']);
+  fputcsv($o, ['', 'Netflix', '01/08/2026', 'correo@x.com', 'clave123', '', 'Pedro', '1234']);
+  fputcsv($o, ['', 'Disney+', '2026-09-15', 'otro@x.com', 'clave99', '', 'Ana', '']);
   fclose($o); exit;
 }
 if (($_GET['export'] ?? '') === 'csv') {
@@ -544,14 +544,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($a === 'cuentas_masivo') {
       // Carga masiva CENTRADA EN PERFILES: cada línea es UN perfil (con su nombre y PIN).
       // Las líneas con el MISMO correo (y plataforma) se agrupan en UNA sola cuenta (no una por línea).
-      // Formato (nuevo orden): Vendedor(opcional), Plataforma, Vencimiento, Correo, Clave, Costo(opcional), NombrePerfil, PIN(opcional al final)
+      // Formato: Vendedor(opcional), Plataforma, Vencimiento, Correo, Clave, Proveedor(opcional), NombrePerfil, PIN(opcional al final)
+      // CAMBIO 2026-08-28 (pedido del cliente): se QUITÓ el Costo del import (lo pone él en «Cambiar precios»)
+      // y se agregó el PROVEEDOR. El proveedor se detecta contra los YA creados: si el 6º campo NO es un
+      // proveedor conocido, ese campo se toma como el NOMBRE del perfil → así, aunque NO pongas proveedor,
+      // NADA se corre (se acabó el lío de que el nombre saliera como PIN).
       $pmap = []; $platPub = [];   // nombre→id  y  id→precio de venta (público) para las ventas a cliente
       try { foreach ($pdo->query("SELECT id, nombre, precio_publico FROM streaming_plataformas WHERE owner_id=$OWNER") as $r) { $pmap[mb_strtolower(trim($r['nombre']))] = (int) $r['id']; $platPub[(int) $r['id']] = ($r['precio_publico'] !== null && $r['precio_publico'] !== '') ? (float) $r['precio_publico'] : null; } } catch (Throwable $e) {}
-      // Vendedor opcional (8ª columna): mapea nombre / usuario / email → id de revendedor. Solo el dueño (owner 0) asigna.
+      // Proveedores YA creados (nombre→id) para asignarlos automáticamente al importar.
+      $provMap = [];
+      try { foreach ($pdo->query("SELECT id, nombre FROM streaming_proveedores WHERE owner_id=$OWNER") as $r) { $kk = mb_strtolower(trim((string) $r['nombre'])); if ($kk !== '') $provMap[$kk] = (int) $r['id']; } } catch (Throwable $e) {}
+      // Vendedor opcional (1ª columna): mapea nombre / usuario / email → id de revendedor. Solo el dueño (owner 0) asigna.
       $revMap = [];
       if ((int) $OWNER === 0) { try { foreach ($pdo->query("SELECT id, nombre, username, email FROM usuarios WHERE rol='revendedor'") as $r) { foreach ([$r['nombre'], $r['username'], $r['email']] as $kk) { $kk = mb_strtolower(trim((string) $kk)); if ($kk !== '') $revMap[$kk] = (int) $r['id']; } } } catch (Throwable $e) {} }
       $insPlat   = $pdo->prepare("INSERT INTO streaming_plataformas (owner_id, nombre, dias_default, activo) VALUES ($OWNER,?,30,1)");
-      $insCuenta = $pdo->prepare("INSERT INTO streaming_cuentas (owner_id,plataforma,plataforma_id,correo,clave,perfiles_total,vencimiento,costo) VALUES ($OWNER,?,?,?,?,0,?,?)");
+      $insCuenta = $pdo->prepare("INSERT INTO streaming_cuentas (owner_id,plataforma,plataforma_id,proveedor_id,correo,clave,perfiles_total,vencimiento) VALUES ($OWNER,?,?,?,?,?,0,?)");
       $insPerf   = $pdo->prepare("INSERT INTO streaming_perfiles (cuenta_id,etiqueta,pin) VALUES (?,?,?)");
       // Si la línea trae vendedor → se crea la venta a ese revendedor y el perfil queda VENDIDO (no stock).
       $insVentaMasiva = $pdo->prepare("INSERT INTO streaming_ventas (owner_id,plataforma,tipo,cuenta_id,correo,clave,perfil,pin,fecha_inicio,fecha_vencimiento,creado_por,revendedor_id,entregada) VALUES ($OWNER,?,'perfil',?,?,?,?,?,CURDATE(),?,?,?,1)");
@@ -563,7 +570,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       // Nota: los valores finales se calculan en PHP (abajo), NO con COALESCE(NULLIF(?,''),col):
       // ese patrón mezcla la collation del parámetro con la de la columna y revienta en servidores
       // cuya conexión es utf8mb4_general_ci mientras las tablas son utf8mb4_unicode_ci (error 1267).
-      $updCuenta = $pdo->prepare("UPDATE streaming_cuentas SET perfiles_total=?, clave=?, vencimiento=?, costo=? WHERE id=?");
+      $updCuenta = $pdo->prepare("UPDATE streaming_cuentas SET perfiles_total=?, clave=?, vencimiento=?, proveedor_id=? WHERE id=?");
       // Fecha flexible: acepta AAAA-MM-DD y DD/MM/AAAA (evita que 1/8/2026 se lea como mes/día al estilo EEUU).
       $parseFecha = static function ($s) {
         $s = trim((string) $s); if ($s === '') return null;
@@ -595,10 +602,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $venc    = $parseFecha($p[$b + 1] ?? '');
         $correo  = trim((string) ($p[$b + 2] ?? ''));
         $clave   = trim((string) ($p[$b + 3] ?? ''));
-        $costoRaw = str_replace(',', '.', trim((string) ($p[$b + 4] ?? '')));   // costo (acepta coma o punto)
-        $costo    = ($costoRaw !== '' && is_numeric($costoRaw)) ? (float) $costoRaw : null;
-        $nombreP = ltrim(trim((string) ($p[$b + 5] ?? '')), '#');   // nombre del perfil (por si escriben "#nombre")
-        $pin     = trim((string) ($p[$b + 6] ?? ''));               // PIN al final: si falta, queda vacío
+        // PROVEEDOR (opcional): el 6º campo cuenta como proveedor SOLO si (a) COINCIDE con un proveedor ya
+        // creado, o (b) está VACÍO pero hay más campos detrás (o sea, dejaste el hueco del proveedor a
+        // propósito con dos comas). En cualquier otro caso, ese campo ES el NOMBRE del perfil → así, si NO
+        // pones proveedor, el nombre/PIN NO se corren (se acabó el "el nombre salía como PIN").
+        $provCand = trim((string) ($p[$b + 4] ?? '')); $provCandL = mb_strtolower($provCand);
+        $provKnown = ($provCand !== '' && isset($provMap[$provCandL]));
+        $slotProvVacio = ($provCand === '' && trim((string) ($p[$b + 5] ?? '')) !== '');
+        if ($provKnown || $slotProvVacio) {
+          $provId  = $provKnown ? (int) $provMap[$provCandL] : null;
+          $nombreP = ltrim(trim((string) ($p[$b + 5] ?? '')), '#');   // nombre del perfil (por si escriben "#nombre")
+          $pin     = trim((string) ($p[$b + 6] ?? ''));               // PIN al final: si falta, queda vacío
+        } else {
+          $provId  = null;
+          $nombreP = ltrim(trim((string) ($p[$b + 4] ?? '')), '#');
+          $pin     = trim((string) ($p[$b + 5] ?? ''));
+        }
 
         $k = mb_strtolower($platNom); $pid = $pmap[$k] ?? null;
         if ($pid === null) { $insPlat->execute([$platNom]); $pid = (int) $pdo->lastInsertId(); $pmap[$k] = $pid; }
@@ -607,13 +626,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $gkey = $k . '|' . mb_strtolower($correo);
         if ($correo === '') $gkey .= '|solo' . $nPerf;
         if (!isset($cuentas[$gkey])) {
-          $insCuenta->execute([$platNom, $pid, $correo ?: null, $clave ?: null, $venc, $costo]);
-          $cuentas[$gkey] = ['cid' => (int) $pdo->lastInsertId(), 'nperf' => 0, 'clave' => $clave, 'venc' => $venc, 'costo' => $costo];
+          $insCuenta->execute([$platNom, $pid, $provId, $correo ?: null, $clave ?: null, $venc]);
+          $cuentas[$gkey] = ['cid' => (int) $pdo->lastInsertId(), 'nperf' => 0, 'clave' => $clave, 'venc' => $venc, 'provId' => $provId];
         }
         $cuentas[$gkey]['nperf']++;
         if ($cuentas[$gkey]['clave'] === '' && $clave !== '') $cuentas[$gkey]['clave'] = $clave;
         if ($cuentas[$gkey]['venc'] === null && $venc !== null) $cuentas[$gkey]['venc'] = $venc;
-        if ($cuentas[$gkey]['costo'] === null && $costo !== null) $cuentas[$gkey]['costo'] = $costo;
+        if (($cuentas[$gkey]['provId'] ?? null) === null && $provId !== null) $cuentas[$gkey]['provId'] = $provId;
         // El NOMBRE del perfil (nombre del cliente) se guarda como etiqueta; si viene vacío, P1..Pn.
         $etiqueta = $nombreP !== '' ? mb_substr($nombreP, 0, 60) : ('P' . $cuentas[$gkey]['nperf']);
         $insPerf->execute([$cuentas[$gkey]['cid'], $etiqueta, $pin !== '' ? $pin : null]);
@@ -628,7 +647,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           // (owner=revId) para que le aparezca en SU inventario. Antes esto NO se hacía → se marcaba vendida
           // del lado del admin pero al revendedor no le salía nada. Igual que "Vender varias → revendedor".
           if (function_exists('st_rev_entregar')) {
-            try { st_rev_entregar($pdo, $rvId, (int) $cuentas[$gkey]['cid'], [['id' => $newPid, 'etiqueta' => $etiqueta, 'pin' => $pin]], (float) ($costo ?? 0), false, $sVenc); } catch (Throwable $e) {}
+            try { st_rev_entregar($pdo, $rvId, (int) $cuentas[$gkey]['cid'], [['id' => $newPid, 'etiqueta' => $etiqueta, 'pin' => $pin]], 0.0, false, $sVenc); } catch (Throwable $e) {}
           }
           $revsTocados[$rvId] = true;
           $vendMasivo++;
@@ -643,8 +662,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (++$nPerf >= 3000) break;
       }
-      // Ajusta el total de perfiles + clave/vencimiento/costo de cada cuenta según lo importado.
-      foreach ($cuentas as $c) $updCuenta->execute([$c['nperf'], ($c['clave'] !== '' ? $c['clave'] : null), $c['venc'], $c['costo'], $c['cid']]);
+      // Ajusta el total de perfiles + clave/vencimiento/proveedor de cada cuenta según lo importado.
+      foreach ($cuentas as $c) $updCuenta->execute([$c['nperf'], ($c['clave'] !== '' ? $c['clave'] : null), $c['venc'], ($c['provId'] ?? null), $c['cid']]);
       // BOT de códigos: asigna UNA vez el correo de cada cuenta nueva a su revendedor (fuera de transacción).
       if (function_exists('bot_codigos_flush')) { foreach (array_keys($revsTocados) as $rt) { try { bot_codigos_flush($pdo, (int) $rt); } catch (Throwable $e) {} } }
       $nCta = count($cuentas);
@@ -1150,18 +1169,18 @@ stream_head('Cuentas', 'cuentas');
   <div id="m-masivo" class="modal hidden w-full max-w-lg my-8">
     <div class="modal-hd"><h3><i data-lucide="upload-cloud"></i> Carga Masiva de Perfiles</h3><button onclick="cerrarModales()" class="modal-x"><i data-lucide="x"></i></button></div>
     <form method="post" class="p-5 space-y-3"><input type="hidden" name="_csrf" value="<?= h($csrf) ?>"><input type="hidden" name="accion" value="cuentas_masivo">
-      <p style="font-size:11.5px;color:var(--faint)"><b>Una línea por PERFIL:</b> <code class="softbox" style="padding:1px 6px;border-radius:6px">Vendedor, Plataforma, Vencimiento, Correo, Clave, Costo, Nombre del perfil, PIN</code><br>
+      <p style="font-size:11.5px;color:var(--faint)"><b>Una línea por PERFIL:</b> <code class="softbox" style="padding:1px 6px;border-radius:6px">Vendedor, Plataforma, Vencimiento, Correo, Clave, Proveedor, Nombre del perfil, PIN</code><br>
         · Los perfiles con el <b>mismo correo</b> se agrupan en una <b>sola cuenta</b> (no una por línea).<br>
         · <b>Nombre del perfil</b> = el que quieras (ej. el nombre del cliente); si lo dejas vacío se numera P1, P2…<br>
         · <b>PIN</b> (opcional, <b>ÚLTIMA</b> columna): si la plataforma <b>no tiene PIN</b> (Paramount, Disney, Spotify…), <b>omítelo</b> o déjalo vacío — como va al final, no corre nada.<br>
         · <b>Vence</b> = vencimiento de la <b>CUENTA</b> (cuándo se vence la suscripción). Fecha: <b>AAAA-MM-DD</b> o <b>DD/MM/AAAA</b>.<br>
-        · <b>Costo</b> = <b>TU costo</b> (lo que TÚ pagas por la cuenta), <b>no</b> el precio de venta. Opcional, solo para tu control de ganancia.<br>
+        · <b>Proveedor</b> (opcional) = el nombre de un proveedor que <b>ya hayas creado</b> (en <b>Proveedores</b>) → se le asigna solo a la cuenta. Si lo dejas <b>vacío</b> (dos comas seguidas) o pones uno que no existe, ese campo se toma como el <b>nombre del perfil</b> — así <b>nada se corre</b> aunque no pongas proveedor. <b>El costo ya NO va aquí:</b> ponlo en <b>«Cambiar precios»</b>.<br>
         · El <b>precio de venta</b> al cliente/revendedor <b>no va aquí</b>: se toma de <b>Tipos de cuentas</b> (precio de la plataforma), o lo pones luego en <b>«Cambiar precios»</b> o al vender.<br>
         · <b>PRIMERA</b> columna (opcional) — el sistema la lee sola:<br>
         &nbsp;&nbsp;— <b>correo o nombre de un REVENDEDOR</b> tuyo → se sube ya <b>vendido/asignado a ese revendedor</b> (le aparece en su inventario).<br>
         &nbsp;&nbsp;— <b>un NOMBRE cualquiera</b> (no es revendedor ni plataforma) → se sube ya <b>vendido a ese CLIENTE directo</b> (queda como venta tuya al precio de la plataforma; lo ajustas luego si quieres).<br>
         &nbsp;&nbsp;— <b>vacía</b> (arranca directo por la plataforma) → se sube a <b>STOCK</b> (perfil libre). El sistema lo detecta y no se corre.</p>
-      <textarea name="datos" rows="8" class="input" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace" placeholder="rev@x.com, Netflix, 01/08/2026, correo@x.com, clave123, 3.50, Rebeca JR, 9669&#10;Disney+, 2026-09-15, otro@x.com, clave99, , Ana&#10;rev@x.com, Spotify, 2026-09-15, s@x.com, clave, 1.75, Leo"></textarea>
+      <textarea name="datos" rows="8" class="input" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace" placeholder="Netflix, 01/08/2026, correo@x.com, clave123, MiProveedor, Rebeca JR, 9669&#10;Disney+, 2026-09-15, otro@x.com, clave99, , Ana&#10;rev@x.com, Spotify, 2026-09-15, s@x.com, clave, , Leo, 1234"></textarea>
       <div class="flex justify-end gap-2"><button type="button" onclick="cerrarModales()" class="btn ghost">Cancelar</button><button class="btn primary">Importar</button></div>
     </form>
   </div>
