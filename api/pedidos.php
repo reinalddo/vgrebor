@@ -7697,6 +7697,74 @@ function notify_free_fire_recharge_success(
     }
 }
 
+/**
+ * Correo de entrega de un paquete de STREAMING vendido en la tienda (api_provider = 'streaming').
+ *
+ * POR QUÉ SE AGREGÓ (2026-08-30): la rama de streaming de batch_fulfill_item entregaba las
+ * credenciales SOLO en pantalla y respondía sin callback — era la única vía de entrega de la tienda
+ * que no mandaba ningún correo (las de recargas por API y la de venta de cuentas sí lo tenían).
+ * El cliente pidió justamente que las compras de cuentas de streaming lleguen también al correo.
+ *
+ * $datos viene de execute_streaming_order_dispatch(): plataforma, correo, clave, perfil, pin, vencimiento.
+ */
+function notify_streaming_delivery(mysqli $mysqli, array $order, array $datos): void {
+    $orderId = (int) ($order['id'] ?? 0);
+    if ($orderId <= 0) {
+        return;
+    }
+
+    $adminEmail = resolve_admin_email($mysqli);
+    $brandingImages = email_branding_embedded_images();
+
+    // Solo se pintan los datos que vinieron con valor (un perfil sin PIN no debe mostrar "PIN: ").
+    $linea = static function (string $etiqueta, $valor): string {
+        $valor = trim((string) $valor);
+        return $valor === ''
+            ? ''
+            : '<p style="margin:0 0 6px;">' . email_escape($etiqueta) . ': <strong>' . email_escape($valor) . '</strong></p>';
+    };
+    $credenciales = $linea('Plataforma', $datos['plataforma'] ?? '')
+        . $linea('Correo', $datos['correo'] ?? '')
+        . $linea('Clave', $datos['clave'] ?? '')
+        . $linea('Perfil', $datos['perfil'] ?? '')
+        . $linea('PIN', $datos['pin'] ?? '')
+        . $linea('Vence', $datos['vencimiento'] ?? '');
+
+    $datosPedido = [
+        'order_id' => $orderId,
+        'game_name' => $order['juego_nombre'] ?? '',
+        'pack_name' => $order['paquete_nombre'] ?? '',
+        'pack_amount' => $order['paquete_cantidad'] ?? '',
+        'currency' => $order['moneda'] ?? '',
+        'price' => number_format((float) ($order['precio'] ?? 0), 2, '.', ','),
+        'user_identifier' => $order['user_identifier'] ?? '',
+        'email' => $order['email'] ?? '',
+        'coupon' => $order['cupon'] ?? null,
+        'payment_method' => trim((string) ($order['metodo_pago'] ?? 'Método de pago')),
+        'reference_number' => trim((string) ($order['numero_referencia'] ?? '')),
+        'phone' => trim((string) ($order['telefono_contacto'] ?? '')),
+        'status' => 'Enviado',
+    ];
+
+    $customerHtml = render_order_email('Tu cuenta de streaming está lista', 'Cliente',
+        '<p style="margin:0 0 12px;">Tu pago fue verificado y tu acceso ya está activo. Estos son tus datos:</p>'
+        . $credenciales
+        . '<p style="margin:12px 0 0;">Por favor <strong>no cambies el correo ni la contraseña</strong> de la cuenta, y entra solo en el perfil que te asignamos: si lo haces, el acceso puede dejar de funcionar.</p>',
+        $datosPedido, '#34d399');
+
+    $adminHtml = render_order_email('Streaming entregado', 'Administrador',
+        '<p style="margin:0 0 12px;">Se entregó automáticamente un acceso de streaming del inventario.</p>'
+        . $credenciales,
+        $datosPedido, '#34d399');
+
+    if (!empty($order['email']) && filter_var($order['email'], FILTER_VALIDATE_EMAIL)) {
+        send_app_mail((string) $order['email'], "Cuenta de streaming entregada #{$orderId}", $customerHtml, null, $brandingImages);
+    }
+    if ($adminEmail !== null) {
+        send_app_mail($adminEmail, "Streaming entregado #{$orderId}", $adminHtml, null, $brandingImages);
+    }
+}
+
 function render_account_sale_gallery_email_html(array $gallery): string {
     if (empty($gallery)) {
         return '';
@@ -13377,7 +13445,11 @@ if ($action === 'batch_fulfill_item') {
             $updOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
             win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
             recharge_notifications_emit_for_order($mysqli, $updOrder);
-            json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Streaming entregado.', 'provider_code' => $codigo]);
+            // Correo con las credenciales (agregado): igual que las demás entregas, va en el callback
+            // para que salga DESPUÉS de responderle al navegador y no lo deje esperando al SMTP.
+            json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Streaming entregado.', 'provider_code' => $codigo], 200, static function () use ($mysqli, $updOrder, $sres): void {
+                notify_streaming_delivery($mysqli, $updOrder, $sres);
+            });
         }
         json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $sres['message'] ?? 'No se pudo entregar el streaming (sin stock).']);
     }
