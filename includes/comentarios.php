@@ -892,6 +892,31 @@ if (!function_exists('comentarios_pedido_sugerido')) {
     }
 }
 
+// Avisa a todos los admin/root (menos al autor, por si un admin comenta su
+// propia compra) de que llegó una reseña nueva — pedido explícito del
+// cliente: antes solo se notificaba al AUTOR cuando se destacaba su
+// comentario, nunca al admin de que había algo nuevo que revisar. No lanza
+// (mismo criterio que notificaciones_crear()) para no tumbar la publicación
+// si esto falla.
+if (!function_exists('comentarios_notificar_admins_nuevo')) {
+    function comentarios_notificar_admins_nuevo(mysqli $mysqli, int $comentarioId, int $autorId, int $estrellas, string $texto, string $etiquetaPedido): void {
+        require_once __DIR__ . '/notificaciones.php';
+        $admins = $mysqli->query("SELECT id FROM usuarios WHERE rol IN ('admin','root')");
+        if (!($admins instanceof mysqli_result)) {
+            return;
+        }
+        $resumenTexto = mb_strlen($texto, 'UTF-8') > 80 ? mb_substr($texto, 0, 80, 'UTF-8') . '…' : $texto;
+        $mensaje = str_repeat('★', max(0, min(5, $estrellas))) . ($etiquetaPedido !== '' ? ' — ' . $etiquetaPedido : '') . ': "' . $resumenTexto . '"';
+        while ($fila = $admins->fetch_assoc()) {
+            $adminId = (int) $fila['id'];
+            if ($adminId <= 0 || $adminId === $autorId) {
+                continue;
+            }
+            notificaciones_crear($mysqli, $adminId, 'Nueva reseña recibida', $mensaje, 'comentario_nuevo', '/admin/comentarios');
+        }
+    }
+}
+
 // Publica un comentario nuevo. El pedido NUNCA lo elige el cliente: si se
 // pasa $pedidoAncla (flujo de "registrarse comentando" recién comprado) se
 // resuelve a su lote; si no, se autoselecciona la compra más reciente
@@ -977,6 +1002,11 @@ if (!function_exists('comentarios_publicar')) {
             }
 
             $mysqli->commit();
+
+            // Notificación al/los admin(s). Va DESPUÉS del commit a
+            // propósito (mismo criterio que comentarios_admin_destacar()):
+            // si fallara, no debe deshacer la reseña ya publicada.
+            comentarios_notificar_admins_nuevo($mysqli, $comentarioId, $usuarioId, $estrellas, $texto, (string) ($pedidoResuelto['etiqueta'] ?? ''));
 
             return [
                 'ok' => true,

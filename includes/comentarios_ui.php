@@ -396,26 +396,49 @@ if (!function_exists('comentarios_render_destacados_home')) {
             <?php endif; ?>
           </div>
 
-          <div class="cmt-home-slider" data-cmt-home-slider>
-            <?php foreach ($destacados as $item):
-              $juegoId = (int) ($item['juego_id'] ?? 0);
-              // Clic en la tarjeta -> directo al juego, anclado a esta
-              // reseña puntual (ver id="comentario-N" en comentarios_render_seccion()
-              // y el resaltado momentáneo que hace ese script al llegar).
-              $href = $juegoId > 0 ? app_path('/game.php?id=' . $juegoId . '#comentario-' . (int) $item['id']) : '';
-              $tag = $href !== '' ? 'a' : 'div';
-            ?>
-              <<?= $tag ?> class="cmt-home-slide"<?= $href !== '' ? ' href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
-                <div class="cmt-home-slide-head">
-                  <span class="cmt-home-slide-avatar" style="border-color:<?= htmlspecialchars(comentarios_ui_color_avatar($item['usuario_id']), ENT_QUOTES, 'UTF-8') ?>;color:<?= htmlspecialchars(comentarios_ui_color_avatar($item['usuario_id']), ENT_QUOTES, 'UTF-8') ?>;"><?= htmlspecialchars(mb_strtoupper(mb_substr($item['usuario_nombre'], 0, 1, 'UTF-8'), 'UTF-8'), ENT_QUOTES, 'UTF-8') ?></span>
-                  <span class="cmt-home-slide-nombre"><?= htmlspecialchars(comentarios_ui_nombre_corto($item['usuario_nombre']), ENT_QUOTES, 'UTF-8') ?></span>
-                </div>
-                <?= comentarios_ui_estrellas($item['estrellas'], 'cmt-stars cmt-home-slide-stars') ?>
-                <p class="cmt-home-slide-texto">&ldquo;<?= htmlspecialchars($item['texto'], ENT_QUOTES, 'UTF-8') ?>&rdquo;</p>
-              </<?= $tag ?>>
-            <?php endforeach; ?>
+          <div class="cmt-home-slider-wrap">
+            <button type="button" class="cmt-home-nav cmt-home-nav-prev" data-cmt-home-nav="prev" aria-label="Ver reseñas anteriores">‹</button>
+            <div class="cmt-home-slider" data-cmt-home-slider>
+              <?php foreach ($destacados as $item):
+                $juegoId = (int) ($item['juego_id'] ?? 0);
+                // Clic en la tarjeta -> directo al juego, anclado a esta
+                // reseña puntual (ver id="comentario-N" en comentarios_render_seccion()
+                // y el resaltado momentáneo que hace ese script al llegar).
+                $href = $juegoId > 0 ? app_path('/game.php?id=' . $juegoId . '#comentario-' . (int) $item['id']) : '';
+                $tag = $href !== '' ? 'a' : 'div';
+              ?>
+                <<?= $tag ?> class="cmt-home-slide"<?= $href !== '' ? ' href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
+                  <div class="cmt-home-slide-head">
+                    <span class="cmt-home-slide-avatar" style="border-color:<?= htmlspecialchars(comentarios_ui_color_avatar($item['usuario_id']), ENT_QUOTES, 'UTF-8') ?>;color:<?= htmlspecialchars(comentarios_ui_color_avatar($item['usuario_id']), ENT_QUOTES, 'UTF-8') ?>;"><?= htmlspecialchars(mb_strtoupper(mb_substr($item['usuario_nombre'], 0, 1, 'UTF-8'), 'UTF-8'), ENT_QUOTES, 'UTF-8') ?></span>
+                    <span class="cmt-home-slide-nombre"><?= htmlspecialchars(comentarios_ui_nombre_corto($item['usuario_nombre']), ENT_QUOTES, 'UTF-8') ?></span>
+                  </div>
+                  <?= comentarios_ui_estrellas($item['estrellas'], 'cmt-stars cmt-home-slide-stars') ?>
+                  <p class="cmt-home-slide-texto">&ldquo;<?= htmlspecialchars($item['texto'], ENT_QUOTES, 'UTF-8') ?>&rdquo;</p>
+                </<?= $tag ?>>
+              <?php endforeach; ?>
+            </div>
+            <button type="button" class="cmt-home-nav cmt-home-nav-next" data-cmt-home-nav="next" aria-label="Ver más reseñas">›</button>
           </div>
         </section>
+
+        <script>
+        (function () {
+          // Flechas del slider del home: en PC dejan avanzar/retroceder de a
+          // una tarjeta; en móvil no hacen falta (el scroll horizontal ya
+          // funciona con el dedo, es nativo del navegador) — se ocultan solo
+          // por CSS en pantallas chicas.
+          document.querySelectorAll('[data-cmt-home-nav]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var wrap = btn.closest('.cmt-home-slider-wrap');
+              var slider = wrap ? wrap.querySelector('[data-cmt-home-slider]') : null;
+              if (!slider) return;
+              var card = slider.querySelector('.cmt-home-slide');
+              var paso = card ? card.getBoundingClientRect().width + 16 : 260;
+              slider.scrollBy({ left: btn.dataset.cmtHomeNav === 'next' ? paso : -paso, behavior: 'smooth' });
+            });
+          });
+        })();
+        </script>
 
         <style>
           .cmt-home-head { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
@@ -424,6 +447,14 @@ if (!function_exists('comentarios_render_destacados_home')) {
           .cmt-home-resumen strong { color:var(--theme-text); }
           .cmt-home-resumen-stars { font-size:0.85rem; }
 
+          /* Base de .cmt-stars — comentarios_render_seccion() define la suya
+             propia (game.php), pero esta función tiene su PROPIO bloque
+             <style> y se imprime en el home, así que necesita su propia
+             copia o las estrellas salen sin color (bug reportado). */
+          .cmt-stars { color:var(--theme-warning); letter-spacing:0.12em; white-space:nowrap; text-shadow:0 0 6px rgba(var(--theme-warning-rgb),0.55); }
+          .cmt-stars-off { color:rgba(var(--theme-text-muted-rgb),0.32); text-shadow:none; }
+
+          .cmt-home-slider-wrap { position:relative; }
           .cmt-home-slider { display:flex; gap:1rem; overflow-x:auto; padding-bottom:0.4rem; scroll-snap-type:x proximity; scrollbar-width:none; }
           .cmt-home-slider::-webkit-scrollbar { display:none; }
           .cmt-home-slide { display:block; flex:0 0 auto; width:clamp(210px,26vw,270px); scroll-snap-align:start; background:var(--theme-panel-gradient); border:1px solid rgba(var(--theme-primary-rgb),0.18); border-radius:14px; padding:1rem 1.1rem; color:inherit; text-decoration:none; transition:border-color 0.15s, box-shadow 0.15s; }
@@ -433,6 +464,22 @@ if (!function_exists('comentarios_render_destacados_home')) {
           .cmt-home-slide-nombre { font-weight:700; color:var(--theme-text); font-size:0.92rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
           .cmt-home-slide-stars { font-size:0.78rem; }
           .cmt-home-slide-texto { margin:0.5rem 0 0; font-size:0.85rem; line-height:1.45; color:var(--theme-text-muted); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+
+          /* Flechas — solo PC (hover:hover detecta puntero fino de mouse); en
+             móvil se navega con el dedo, ya funciona nativo por overflow-x:auto. */
+          .cmt-home-nav { display:none; }
+          @media (hover:hover) and (pointer:fine) {
+            .cmt-home-nav {
+              display:flex; position:absolute; top:38%; transform:translateY(-50%); z-index:2;
+              width:34px; height:34px; border-radius:50%; align-items:center; justify-content:center;
+              background:var(--theme-panel-gradient); border:1px solid rgba(var(--theme-primary-rgb),0.4);
+              color:var(--theme-primary); font-size:1.3rem; line-height:1; cursor:pointer;
+              box-shadow:0 0 10px rgba(0,0,0,0.35);
+            }
+            .cmt-home-nav:hover { border-color:var(--theme-primary); background:rgba(var(--theme-primary-rgb),0.15); }
+            .cmt-home-nav-prev { left:-14px; }
+            .cmt-home-nav-next { right:-14px; }
+          }
         </style>
         <?php
     }
