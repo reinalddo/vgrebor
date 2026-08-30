@@ -35,6 +35,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($upd->rowCount() > 0) {
       try { $pdo->prepare("INSERT INTO streaming_venta_registro (venta_id,evento,descripcion,usuario_id) VALUES (?,?,?,?)")
                 ->execute([$vid, 'activada', 'Aprobada: invitación enviada al correo del cliente', current_user_id()]); } catch (Throwable $e) {}
+      // Correo de credenciales (agregado): AQUÍ es donde las credenciales de una compra "por
+      // activación/invitación" se vuelven reales por primera vez (en comprar.php todavía no existían:
+      // la venta nacía con entregada=0, sin cuenta asignada). Si esta venta NO tiene revendedor, es una
+      // venta DIRECTA de la tienda a un cliente → se le avisa a él aquí mismo. Si SÍ tiene revendedor,
+      // el aviso va más abajo, sobre SU venta enlazada (misma correo/clave que aquí, ya real).
+      try {
+        require_once __DIR__ . '/../../includes/stream_mailer.php';
+        $tieneRev = (bool) ($pdo->query("SELECT revendedor_id FROM streaming_ventas WHERE id=$vid")->fetchColumn());
+        if (!$tieneRev) { stream_email_notificar_venta($pdo, $vid, 'compra'); }
+      } catch (Throwable $e) {}
       // COMPLETA POR ACTIVACIÓN (Spotify Familiar / YouTube Premium): si la venta tiene cupos, al aprobarla
       // se le crea al REVENDEDOR una cuenta COMPLETA en SU stock (credenciales que pasó + N perfiles),
       // editable, lista para revender. "Solo la completa va a stock" (el perfil se queda solo en Ventas).
@@ -82,6 +92,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 stream_notif_crear($pdo, (int) $lv['owner_id'], 'compra', 'Activado · ' . $lv['plataforma'],
                   'Tu compra de ' . $lv['plataforma'] . ' (' . (string) $lv['email_activar'] . ') ya fue activada por la tienda.', 'ventas.php');
               }
+            } catch (Throwable $e) {}
+            // Correo de credenciales (agregado): esta es la venta del REVENDEDOR (owner=revendedor_id=él,
+            // ver comprar.php) — ya con correo/clave reales tras la activación. stream_email_notificar_venta
+            // decide sola el destinatario: su cliente (si le puso uno al comprar) + él mismo.
+            try {
+              require_once __DIR__ . '/../../includes/stream_mailer.php';
+              stream_email_notificar_venta($pdo, (int) $lv['id'], 'compra');
             } catch (Throwable $e) {}
           }
         }

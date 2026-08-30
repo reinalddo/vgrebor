@@ -192,6 +192,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $pdo->prepare("UPDATE streaming_ventas SET entregada=1 WHERE id=?")->execute([$vid]);
       st_log($pdo, $vid, 'activada', 'Activada manualmente (invitación enviada al correo del cliente)');
       $msg = '✓ Marcada como activada.';
+      // Correo de credenciales (agregado): mismo caso que pendientes.php — aquí es donde una venta
+      // "por invitación/activación" pasa a tener datos reales por primera vez.
+      try { stream_email_notificar_venta($pdo, $vid, 'compra'); } catch (Throwable $e) {}
     }
     elseif ($a === 'renovar') {
       $hasta = trim((string) ($_POST['hasta'] ?? ''));
