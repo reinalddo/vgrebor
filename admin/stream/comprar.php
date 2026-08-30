@@ -139,9 +139,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     try { $pdo->prepare("INSERT INTO streaming_venta_registro (venta_id, evento, descripcion, usuario_id) VALUES (?,?,?,?)")
                           ->execute([$vidAdmin, 'creada', 'Compra ' . ($esCompletaAct ? 'COMPLETA por activación' : $modo) . ' de ' . $miNombre . ' · correo ' . $svcEmail, $uid]); } catch (Throwable $e) {}
                     // Venta del REVENDEDOR (owner=uid): pendiente y ENLAZADA a la del admin (origen_venta_id).
+                    // BUG PRE-EXISTENTE corregido (2026-08-30, desde el 09/08 original): faltaba un
+                    // placeholder para fecha_vencimiento — la lista tiene 19 columnas y el VALUES traía
+                    // solo 18, error real de MySQL "1136 Column count doesn't match value count". El
+                    // array de abajo YA traía $venc en su lugar correcto; solo faltaba el '?' del SQL.
                     $insR = $pdo->prepare("INSERT INTO streaming_ventas
                         (owner_id, plataforma, tipo, revendedor_id, cliente_id, cliente_nombre, cliente_wa, correo, clave, email_activar, precio, precio_venta_cliente, cupos, fecha_inicio, fecha_vencimiento, estado, entregada, origen_venta_id, creado_por)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'activa', 0, ?, ?)");
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'activa', 0, ?, ?)");
                     $insR->execute([$uid, $plat['nombre'], $tipoV, $uid, $cliId, $cliNombre, $cliWa, $svcEmail, $claveGuardar, $svcEmail, ($precioVenta !== null ? $precioVenta : $precio), $precioVenta, $cupos, date('Y-m-d'), $venc, $vidAdmin, $uid]);
                     $pdo->commit();
                     try {
