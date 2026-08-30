@@ -141,6 +141,52 @@ if (!function_exists('stream_mail_branding')) {
     }
 }
 
+if (!function_exists('stream_mail_instancia')) {
+    /** Instancia de PHPMailer REUTILIZADA durante todo el request (SMTPKeepAlive).
+     *
+     *  POR QUÉ: una renovación en LOTE puede tocar hasta 200 ventas y cada una manda 2 correos
+     *  (cliente + dueño). Abrir y cerrar una conexión SMTP por cada uno serían ~400 handshakes en
+     *  un solo request: la página se caería por timeout. Con keep-alive se negocia una sola vez.
+     *
+     *  $reset=true descarta la conexión: después de un envío fallido puede quedar en un estado
+     *  inconsistente, así que la siguiente llamada reconecta limpia. Nunca lanza.
+     *  Devuelve la instancia, o null si no se pudo crear. */
+    function stream_mail_instancia(array $cfg = [], bool $reset = false) {
+        static $mail = null;
+        if ($reset) {
+            try { if ($mail !== null) { $mail->smtpClose(); } } catch (Throwable $e) {}
+            $mail = null;
+            return null;
+        }
+        if ($mail !== null) return $mail;
+        if (!$cfg) return null;
+        try {
+            require_once __DIR__ . '/PHPMailerAutoload.php';
+            if (!class_exists('PHPMailer\\PHPMailer\\PHPMailer')) return null;
+            $m = new PHPMailer\PHPMailer\PHPMailer(true);
+            $m->CharSet = 'UTF-8';
+            $m->isSMTP();
+            $m->Host         = (string) ($cfg['smtp_host'] ?? '');
+            $m->SMTPAuth     = true;
+            $m->Username     = (string) ($cfg['smtp_user'] ?? '');
+            $m->Password     = (string) ($cfg['smtp_pass'] ?? '');
+            $m->SMTPSecure   = (string) ($cfg['smtp_secure'] ?? 'tls');
+            $m->Port         = (int) ($cfg['smtp_port'] ?? 587);
+            $m->Timeout      = 12;
+            $m->Timelimit    = 12;
+            $m->SMTPKeepAlive = true;
+            $m->setFrom((string) ($cfg['desde'] ?? ''), (string) ($cfg['nombre'] ?? ''));
+            $m->isHTML(true);
+            // Cierra la conexión al terminar el request (keep-alive no se cierra solo).
+            register_shutdown_function(static function (): void { stream_mail_instancia([], true); });
+            return $mail = $m;
+        } catch (Throwable $e) {
+            error_log('stream_mail no pudo abrir SMTP: ' . $e->getMessage());
+            return null;
+        }
+    }
+}
+
 if (!function_exists('stream_mail_send')) {
     /** Envía un correo HTML. Devuelve true si salió. NUNCA lanza: si falla, solo deja rastro en el log.
      *  $logoPath (opcional) se incrusta como cid:stream-logo. */
@@ -165,35 +211,29 @@ if (!function_exists('stream_mail_send')) {
         }
         $marca = stream_mail_branding($pdo);
 
+        $mail = stream_mail_instancia($s + ['desde' => $desde, 'nombre' => $marca['nombre']]);
+        if ($mail === null) {
+            error_log('stream_mail sin instancia SMTP: ' . $asunto . ' → ' . $para);
+            return false;
+        }
+
         try {
-            require_once __DIR__ . '/PHPMailerAutoload.php';
-            if (!class_exists('PHPMailer\\PHPMailer\\PHPMailer')) {
-                throw new RuntimeException('PHPMailer no disponible');
-            }
-            $mail = new PHPMailer\PHPMailer\PHPMailer(true);
-            $mail->CharSet = 'UTF-8';
-            $mail->isSMTP();
-            $mail->Host       = $s['smtp_host'];
-            $mail->SMTPAuth   = true;
-            $mail->Username   = $s['smtp_user'];
-            $mail->Password   = $s['smtp_pass'];
-            $mail->SMTPSecure = $s['smtp_secure'];
-            $mail->Port       = $s['smtp_port'];
-            $mail->Timeout    = 12;
-            $mail->Timelimit  = 12;
-            $mail->SMTPKeepAlive = false;
-            $mail->setFrom($desde, $marca['nombre']);
+            // La instancia se reusa entre correos: hay que limpiar destinatarios e imágenes de la
+            // vuelta anterior o se le apilarían (el segundo correo le llegaría también al primero).
+            $mail->clearAddresses();
+            $mail->clearAttachments();
             $mail->addAddress($para);
             if ($logoPath !== '' && is_file($logoPath)) {
                 $mail->addEmbeddedImage($logoPath, 'stream-logo', basename($logoPath), 'base64', 'image/png');
             }
-            $mail->isHTML(true);
             $mail->Subject = $asunto;
             $mail->Body    = $html;
             $mail->send();
             return true;
         } catch (Throwable $e) {
             error_log('stream_mail error (' . $asunto . ' → ' . $para . '): ' . $e->getMessage());
+            // Tras un fallo la conexión puede quedar sucia → se descarta para que la próxima reconecte.
+            stream_mail_instancia([], true);
             return false;
         }
     }

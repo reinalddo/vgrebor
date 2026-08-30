@@ -256,6 +256,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       } catch (Throwable $e) {}
       st_log($pdo, $vid, 'renovada', 'Renovada hasta ' . date('d/m/Y', strtotime($nueva)) . ($metodo ? " · $metodo" : ''));
       $msg = '✓ Renovada hasta ' . date('d/m/Y', strtotime($nueva)) . '.';
+      // AVISO POR CORREO (agregado): al cliente su renovación y al dueño de la operación su copia.
+      // Va al FINAL, con la fecha nueva ya guardada, y en try/catch: si el correo falla la renovación
+      // sigue siendo válida. Esta rama NO corre dentro de una transacción, así que es seguro aquí.
+      try {
+        $nMail = stream_email_notificar_venta($pdo, $vid, 'renovacion');
+        if ($nMail) $msg .= " ✉ $nMail correo(s) enviado(s).";
+      } catch (Throwable $e) {}
     }
     elseif ($a === 'nota') {
       $nota = trim((string) ($_POST['nota'] ?? ''));
@@ -523,6 +530,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $saltadas = count($ids) - count($rows);
         $n = 0;
         $revsFlush = [];   // revendedores nuevos a los que hay que asignarles en el bot (tras el commit)
+        $idsRenovadas = []; // ventas realmente renovadas → llevan aviso por correo DESPUÉS del commit
 
         if ($op === 'renovar') {
           $hasta = trim((string) ($_POST['hasta'] ?? ''));
@@ -561,6 +569,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $up->execute([$ini, $nueva, (int) $r['id']]);
             $n += $up->rowCount();
+            if ($up->rowCount() > 0) { $idsRenovadas[] = (int) $r['id']; }   // para el aviso por correo
             // Propaga la nueva fecha al ESPEJO del revendedor (que a él también se le renueve y no se borre).
             if (!$esRevCtx && (int) ($r['revendedor_id'] ?? 0) > 0 && (int) ($r['cuenta_id'] ?? 0) > 0 && function_exists('st_rev_propagar_vencimiento')) {
               try { $pids = array_map('intval', $pdo->query("SELECT id FROM streaming_perfiles WHERE venta_id=" . (int) $r['id'])->fetchAll(PDO::FETCH_COLUMN)); st_rev_propagar_vencimiento($pdo, (int) $r['cuenta_id'], $nueva, $pids); } catch (Throwable $e) {}
@@ -654,6 +663,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->commit();
         // BOT de códigos (tras el commit): asigna a los revendedores nuevos las cuentas que recibieron.
         if (!empty($revsFlush) && function_exists('bot_codigos_flush')) { foreach (array_keys($revsFlush) as $rf) { try { bot_codigos_flush($pdo, (int) $rf); } catch (Throwable $e) {} } }
+        // AVISO POR CORREO de las renovadas en lote — SIEMPRE tras el commit (jamás SMTP dentro de una
+        // transacción: sostener candados de BD esperando a un servidor de correo traba a los demás).
+        // PRESUPUESTO DE TIEMPO: un lote son hasta 200 ventas × 2 correos; aunque la conexión SMTP se
+        // reusa, si se pasa de 25s se corta el envío para no tumbar la página por timeout. Lo ya hecho
+        // en BD queda intacto (el commit ya pasó) y el mensaje avisa cuántas quedaron sin correo.
+        if ($idsRenovadas) {
+          $nMail = 0; $sinMail = 0; $t0 = microtime(true);
+          foreach ($idsRenovadas as $vidR) {
+            if (microtime(true) - $t0 > 25) { $sinMail++; continue; }
+            try { $nMail += stream_email_notificar_venta($pdo, (int) $vidR, 'renovacion'); } catch (Throwable $e) {}
+          }
+          if ($nMail)   $msg .= " ✉ $nMail correo(s) enviado(s).";
+          if ($sinMail) $msg .= " ⏱ $sinMail venta(s) quedaron renovadas pero sin aviso por correo (el envío tardaba demasiado).";
+        }
         if ($saltadas > 0) $msg .= " $saltadas omitida(s): " . ($esRevCtx ? 'no eran tuyas o ya no existen.' : 'son de revendedores y no tienes acceso.');
       } catch (Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
     }
