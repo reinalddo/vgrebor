@@ -188,11 +188,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $nuevo = wallet_saldo($pdo, $rid);
                 $msg = '✓ Saldo acreditado: $' . number_format($monto, 2) . '. Nuevo saldo del revendedor: $' . number_format($nuevo, 2) . '.';
                 // Correo de saldo acreditado (agregado): fuera de cualquier transacción, el crédito ya
-                // es real. Solo al revendedor — el admin ya sabe, es quien acaba de hacer el ajuste.
-                if (function_exists('stream_email_saldo_acreditado')) {
-                    require_once __DIR__ . '/../../includes/stream_mailer.php';
-                    try { stream_email_saldo_acreditado($pdo, $rid, ['monto' => $monto, 'motivo' => $motivo, 'metodo' => 'Ajuste manual']); } catch (Throwable $e) {}
-                }
+                // es real.
+                // BUG CORREGIDO (2026-08-30): el require_once estaba DENTRO del function_exists(), así
+                // que la condición siempre daba falso (la función nunca llegaba a existir para probarse)
+                // y el correo no se mandaba NUNCA. El require va primero, sin condición.
+                require_once __DIR__ . '/../../includes/stream_mailer.php';
+                try { stream_email_saldo_acreditado($pdo, $rid, ['monto' => $monto, 'motivo' => $motivo, 'metodo' => 'Ajuste manual']); } catch (Throwable $e) {}
             } else {
                 if (!wallet_debitar($pdo, $rid, $monto, 'ajuste_admin', $motivo)) {
                     throw new Exception('El revendedor no tiene saldo suficiente para descontar.');
@@ -218,10 +219,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw $e;
             }
             // Correo de saldo acreditado (agregado): SIEMPRE después del commit.
-            if (function_exists('stream_email_saldo_acreditado')) {
-                require_once __DIR__ . '/../../includes/stream_mailer.php';
-                try { stream_email_saldo_acreditado($pdo, $rid, ['monto' => (float) $r['monto'], 'metodo' => (string) ($r['metodo'] ?? ''), 'referencia' => (string) ($r['referencia'] ?? ''), 'motivo' => 'Recarga aprobada por el administrador']); } catch (Throwable $e) {}
-            }
+            // BUG CORREGIDO (2026-08-30): mismo error que en 'acreditar' — el require_once estaba
+            // atrapado dentro de un function_exists() que nunca podía dar verdadero.
+            require_once __DIR__ . '/../../includes/stream_mailer.php';
+            try { stream_email_saldo_acreditado($pdo, $rid, ['monto' => (float) $r['monto'], 'metodo' => (string) ($r['metodo'] ?? ''), 'referencia' => (string) ($r['referencia'] ?? ''), 'motivo' => 'Recarga aprobada por el administrador']); } catch (Throwable $e) {}
         } elseif ($a === 'rechazar_recarga') {
             $recId = (int) ($_POST['recarga_id'] ?? 0);
             $pdo->prepare("UPDATE wallet_recargas SET estado='rechazada', resuelto_en=NOW() WHERE id=? AND usuario_id=? AND estado='pendiente'")->execute([$recId, $rid]);
