@@ -44,9 +44,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $cliId = ((int) ($_POST['cliente_id'] ?? 0)) ?: null;
     $cliNombre = trim((string) ($_POST['cliente_nombre'] ?? ''));
     $cliWa = wa_norm((string) ($_POST['cliente_wa'] ?? ''));
+    // CORREO del cliente (agregado): sirve para enviarle sus datos de acceso y queda guardado en su
+    // ficha para las próximas ventas. Si no es un correo válido se ignora en silencio — nunca debe
+    // impedir registrar la venta, que es lo importante.
+    $cliEmail = trim((string) ($_POST['cliente_email'] ?? ''));
+    if ($cliEmail !== '' && !filter_var($cliEmail, FILTER_VALIDATE_EMAIL)) { $cliEmail = ''; }
     if ($cliId) { $c = $pdo->query("SELECT nombre, wa FROM streaming_clientes WHERE id=" . (int) $cliId . " AND owner_id=$OWNER")->fetch(PDO::FETCH_ASSOC); if ($c) { $cliNombre = $c['nombre']; if (!$cliWa) $cliWa = wa_norm((string) ($c['wa'] ?? '')); } else { $cliId = null; } }
     if ($cliNombre === '') throw new Exception('Elige un cliente.');
-    if (!$cliId && $cliNombre !== '') { $pdo->prepare("INSERT INTO streaming_clientes (owner_id,nombre,wa) VALUES (?,?,?)")->execute([$OWNER, $cliNombre, $cliWa ?: null]); $cliId = (int) $pdo->lastInsertId(); }
+    if (!$cliId && $cliNombre !== '') { $pdo->prepare("INSERT INTO streaming_clientes (owner_id,nombre,wa,email) VALUES (?,?,?,?)")->execute([$OWNER, $cliNombre, $cliWa ?: null, $cliEmail ?: null]); $cliId = (int) $pdo->lastInsertId(); }
+    // Cliente ya existente: si escribieron un correo en el formulario, se guarda en su ficha.
+    elseif ($cliId && $cliEmail !== '') { try { $pdo->prepare("UPDATE streaming_clientes SET email=? WHERE id=? AND owner_id=?")->execute([$cliEmail, $cliId, $OWNER]); } catch (Throwable $e) {} }
     // Si el cliente/WhatsApp pertenece a un revendedor, la venta nace ya con su revendedor_id (auto-atribución).
     $revId = st_revendedor_de_cliente($pdo, $cliId, $cliWa);
 
@@ -62,6 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $rc = (array) ($_POST['r_cuenta'] ?? []); $rpin = (array) ($_POST['r_pin'] ?? []); $rf = (array) ($_POST['r_fecha'] ?? []); $rpr = (array) ($_POST['r_precio'] ?? []); $rpid = (array) ($_POST['r_perfilid'] ?? []); $rperfil = (array) ($_POST['r_perfil'] ?? []); $rrenov = (array) ($_POST['r_renovacion'] ?? []);
     if (!$rc) throw new Exception('No agregaste ningún perfil. Vuelve al paso 4.');
     $creadas = 0; $enviadas = 0; $noVentana = 0; $errEnvio = 0; $sinStock = 0;
+    $idsCreadas = [];   // ventas con perfil realmente asignado → son las que llevan aviso por correo
     foreach ($rc as $i => $cuRaw) {
       $cuentaId = (int) $cuRaw; if ($cuentaId <= 0) continue;
       $cu = $pdo->query("SELECT plataforma, correo, clave FROM streaming_cuentas WHERE id=$cuentaId AND owner_id=$OWNER")->fetch(PDO::FETCH_ASSOC);
@@ -114,9 +122,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         elseif (($rr['error'] ?? '') === 'ventana_cerrada') { $noVentana++; }
         else { $errEnvio++; }
       }
+      if ($asignado) { $idsCreadas[] = $vid; }
       $creadas++;
     }
+
+    // ── AVISO POR CORREO (agregado) ────────────────────────────────────────────────────────────
+    // A cada quien el suyo: al CLIENTE sus datos de acceso y al DUEÑO de la operación su copia
+    // (lo decide stream_email_notificar_venta). Va DESPUÉS del bucle a propósito: no se hace una
+    // conexión SMTP a mitad de las inserciones. Solo para ventas con perfil realmente asignado —
+    // si no hubo stock no hay credenciales que mandar. En try/catch: un fallo de correo NUNCA
+    // invalida las ventas, que ya quedaron guardadas.
+    $mails = 0;
+    foreach ($idsCreadas as $vidOk) {
+      try { $mails += stream_email_notificar_venta($pdo, (int) $vidOk, 'compra'); } catch (Throwable $e) {}
+    }
+
     $resumen = "✓ $creadas venta(s) creada(s).";
+    if ($mails) $resumen .= " ✉ $mails correo(s) enviado(s).";
     if ($enviadas)  $resumen .= " 📤 $enviadas enviada(s) al cliente por WhatsApp.";
     if ($noVentana) $resumen .= " ⏰ $noVentana SIN enviar: el cliente no escribió en las últimas 24h. Pídele que te mande un mensaje y reenvía desde Ventas › ⋮ › Notificar (o pásale los datos a mano).";
     if ($errEnvio)  $resumen .= " ⚠ $errEnvio con error de envío (revisa Ventas › Notificar).";
@@ -134,7 +156,7 @@ $flash = (string) ($_GET['msg'] ?? '');
 $hasTipoCli = false;
 try { $hasTipoCli = (bool) $pdo->query("SHOW COLUMNS FROM streaming_clientes LIKE 'tipo'")->fetch(); } catch (Throwable $e) {}
 $selTipo = $hasTipoCli ? ", tipo" : ", 'cliente' AS tipo";
-$clientes = $pdo->query("SELECT id, nombre, wa$selTipo FROM streaming_clientes WHERE owner_id=$OWNER ORDER BY nombre LIMIT 3000")->fetchAll(PDO::FETCH_ASSOC);
+$clientes = $pdo->query("SELECT id, nombre, wa, email$selTipo FROM streaming_clientes WHERE owner_id=$OWNER ORDER BY nombre LIMIT 3000")->fetchAll(PDO::FETCH_ASSOC);
 $plataformas = $pdo->query("SELECT id, nombre, logo_url, color, precio_publico, precio_sugerido, dias_default FROM streaming_plataformas WHERE owner_id=$OWNER AND activo=1 ORDER BY nombre")->fetchAll(PDO::FETCH_ASSOC);
 $hoy = date('Y-m-d');
 $cuentasRaw = $pdo->query("SELECT c.id, c.plataforma_id, COALESCE(pl.nombre,c.plataforma) plataforma, c.correo, c.vencimiento, c.costo, pl.logo_url, pl.color, pl.precio_publico, pl.precio_sugerido, pl.precio_distribuidor, pl.dias_default,
@@ -232,12 +254,19 @@ stream_head('Nueva Venta', 'ventas');
     <div class="step" data-step="0">
       <label class="wz-lbl">Seleccione el Cliente</label>
       <div class="flex gap-2">
-        <select id="sel-cliente" onchange="if(window.repreciarFilas)repreciarFilas()" class="input" style="flex:1"><option value="">Seleccione un cliente</option>
-          <?php foreach ($clientes as $c): $esDist = (($c['tipo'] ?? 'cliente') === 'distribuidor'); ?><option value="<?= (int) $c['id'] ?>" data-wa="<?= h($c['wa']) ?>" data-nom="<?= h($c['nombre']) ?>" data-rev="<?= $esDist ? '1' : '0' ?>"><?= h($c['nombre']) ?><?= $esDist ? ' · REVENDEDOR' : '' ?><?= $c['wa'] ? ' · ' . h($c['wa']) : '' ?></option><?php endforeach; ?></select>
+        <select id="sel-cliente" onchange="if(window.repreciarFilas)repreciarFilas();autoEmail()" class="input" style="flex:1"><option value="">Seleccione un cliente</option>
+          <?php foreach ($clientes as $c): $esDist = (($c['tipo'] ?? 'cliente') === 'distribuidor'); ?><option value="<?= (int) $c['id'] ?>" data-wa="<?= h($c['wa']) ?>" data-nom="<?= h($c['nombre']) ?>" data-email="<?= h((string) ($c['email'] ?? '')) ?>" data-rev="<?= $esDist ? '1' : '0' ?>"><?= h($c['nombre']) ?><?= $esDist ? ' · REVENDEDOR' : '' ?><?= $c['wa'] ? ' · ' . h($c['wa']) : '' ?></option><?php endforeach; ?></select>
         <button type="button" onclick="location.reload()" class="btn ghost" style="padding:0 12px"><i data-lucide="rotate-cw"></i></button>
       </div>
       <div id="aviso-rev" style="display:none;margin-top:8px;padding:8px 11px;border-radius:9px;background:rgba(245,166,35,.10);border:1px solid rgba(245,166,35,.35);font-size:12px;color:var(--warn)">
         <b>Es REVENDEDOR</b> — los precios se llenan con tu <b>Precio Revendedor</b> (el de Plataformas). Puedes editarlos igual.
+      </div>
+      <!-- CORREO del cliente: con él se le envían sus datos de acceso al confirmar la venta.
+           Se autocompleta con el que ya tenga guardado y se guarda en su ficha si lo cambias. -->
+      <div style="margin-top:12px">
+        <label class="wz-lbl" style="margin-bottom:6px">Correo del cliente <small>(para enviarle sus datos de acceso)</small></label>
+        <input name="cliente_email" id="cliente_email" type="email" oninput="this.dataset.tocado='1'" placeholder="cliente@correo.com" class="input">
+        <div style="font-size:11.5px;color:var(--faint);margin-top:6px">Si lo dejas vacío no se le envía correo. Queda guardado en su ficha para las próximas ventas.</div>
       </div>
       <details style="margin-top:12px"><summary style="font-size:12px;color:var(--faint);cursor:pointer">¿Cliente nuevo? créalo aquí</summary>
         <div class="grid grid-cols-2 gap-2" style="margin-top:8px"><input name="cliente_nombre" id="cliente_nombre" placeholder="Nombre" class="input"><input name="cliente_wa" id="cliente_wa" placeholder="WhatsApp" class="input"></div></details>
@@ -315,6 +344,14 @@ stream_head('Nueva Venta', 'ventas');
     return !!(o && o.dataset.rev==='1');
   }
   function precioDe(c){ return (cliEsRev() ? (c.precio_rev||c.precio) : c.precio) || ''; }
+  /* Trae el correo guardado del cliente elegido. Si ya escribiste uno a mano (dataset.tocado), no
+     te lo pisa: lo que teclea el usuario siempre manda sobre el autocompletado. */
+  function autoEmail(){
+    const s=document.getElementById('sel-cliente'), inp=document.getElementById('cliente_email');
+    if(!s||!inp||inp.dataset.tocado==='1') return;
+    const o=s.selectedOptions[0];
+    inp.value=(o&&o.dataset.email)||'';
+  }
   /* Si cambias el cliente DESPUÉS de armar las filas, re-precia las que no tocaste a mano. */
   function repreciarFilas(){
     const rev=cliEsRev();
