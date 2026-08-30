@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../includes/store_config.php';
 require_once __DIR__ . '/../../includes/paypal_pay.php';
 require_once __DIR__ . '/../../admin/_streaming_schema.php';
 require_once __DIR__ . '/../wallet/_helpers.php';
+require_once __DIR__ . '/../../includes/stream_mailer.php';
 
 stream_ensure_schema($pdo);
 
@@ -64,13 +65,21 @@ try {
     try {
         $claim = $pdo->prepare("UPDATE wallet_recargas SET estado='aprobada', resuelto_en=NOW(), pasarela_ref=? WHERE id=? AND estado='pendiente'");
         $claim->execute([$orderId, $recId]);
+        $acreditado = false;
         if ($claim->rowCount() === 1) {
             wallet_acreditar($pdo, (int) $r['usuario_id'], (float) $r['monto'], 'recarga', 'Recarga PayPal (automática)', $orderId);
+            $acreditado = true;
         }
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
         throw $e;
+    }
+
+    // Correo de saldo acreditado (agregado): DESPUÉS del commit, nunca antes — si algo revierte la
+    // transacción no debe salir un correo avisando de un crédito que no ocurrió. Best-effort.
+    if ($acreditado) {
+        try { stream_email_saldo_acreditado($pdo, (int) $r['usuario_id'], ['monto' => (float) $r['monto'], 'metodo' => 'PayPal', 'referencia' => $orderId, 'motivo' => 'Recarga automática']); } catch (Throwable $e) {}
     }
 
     cb_back('✓ ¡Pago confirmado! Se acreditaron $' . number_format((float) $r['monto'], 2) . ' a tu saldo.');

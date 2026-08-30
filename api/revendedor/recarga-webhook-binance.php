@@ -11,6 +11,7 @@ require_once __DIR__ . '/../../includes/store_config.php';
 require_once __DIR__ . '/../../includes/binance_pay.php';
 require_once __DIR__ . '/../../admin/_streaming_schema.php';
 require_once __DIR__ . '/../wallet/_helpers.php';
+require_once __DIR__ . '/../../includes/stream_mailer.php';
 
 header('Content-Type: text/plain; charset=UTF-8');
 
@@ -63,13 +64,20 @@ try {
     try {
         $claim = $pdo->prepare("UPDATE wallet_recargas SET estado='aprobada', resuelto_en=NOW() WHERE id=? AND estado='pendiente'");
         $claim->execute([(int) $r['id']]);
+        $acreditado = false;
         if ($claim->rowCount() === 1) {
             wallet_acreditar($pdo, (int) $r['usuario_id'], (float) $r['monto'], 'recarga', 'Recarga Binance (automática)', $orderNo);
+            $acreditado = true;
         }
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
         throw $e;
+    }
+    // Correo de saldo acreditado (agregado): tras el commit, best-effort — nunca debe afectar el ACK
+    // que espera CoinPal, así que va en try/catch propio.
+    if ($acreditado) {
+        try { stream_email_saldo_acreditado($pdo, (int) $r['usuario_id'], ['monto' => (float) $r['monto'], 'metodo' => 'Binance', 'referencia' => $orderNo, 'motivo' => 'Recarga automática']); } catch (Throwable $e) {}
     }
     http_response_code(200);
     echo 'success';

@@ -64,6 +64,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ? $vr['message']
                         : '✓ Recarga por $' . number_format($monto, 2) . ' registrada. ' . ($vr['message'] ?? 'Se acreditará al confirmarse el pago.');
                 }
+                // Correo de saldo acreditado (agregado): SOLO si sbr_verify_recarga() ya acreditó (verificación
+                // automática al instante). Si quedó pendiente de aprobación manual, el correo sale más abajo,
+                // en revendedores.php, cuando el admin la apruebe — nunca antes de que el crédito sea real.
+                if (!empty($vr['credited'])) {
+                    require_once __DIR__ . '/../../includes/stream_mailer.php';
+                    try { stream_email_saldo_acreditado($pdo, $uid, ['monto' => $monto, 'metodo' => $metodo, 'referencia' => $ref, 'motivo' => 'Recarga automática']); } catch (Throwable $e) {}
+                }
             } else {
                 $msg = '✓ Solicitud de recarga por $' . number_format($monto, 2) . ' registrada. Se acreditará al confirmarse el pago.';
             }

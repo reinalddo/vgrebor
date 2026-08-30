@@ -515,6 +515,73 @@ if (!function_exists('stream_email_html_garantia')) {
     }
 }
 
+if (!function_exists('stream_email_html_saldo')) {
+    /** HTML del correo de "saldo acreditado" (recarga de billetera del revendedor).
+     *  $paraQuien: 'revendedor' | 'dueno' — cambia el tono del encabezado y el título. */
+    function stream_email_html_saldo(PDO $pdo, array $datos, string $paraQuien = 'revendedor'): string {
+        $monto  = (float) ($datos['monto'] ?? 0);
+        $saldo  = $datos['saldo_nuevo'] ?? null;
+        $motivo = trim((string) ($datos['motivo'] ?? ''));
+        $ref    = trim((string) ($datos['referencia'] ?? ''));
+        $metodo = trim((string) ($datos['metodo'] ?? ''));
+        $nombre = trim((string) ($datos['revendedor_nombre'] ?? ''));
+
+        $intro = $paraQuien === 'revendedor'
+            ? '¡Hola' . ($nombre !== '' ? ' ' . stream_mail_e(explode(' ', $nombre)[0]) : '') . '! Se acreditaron <b>$' . number_format($monto, 2) . '</b> a tu saldo.'
+            : 'Se acreditaron <b>$' . number_format($monto, 2) . '</b> al saldo de <b>' . stream_mail_e($nombre ?: 'un revendedor') . '</b>.';
+
+        return stream_mail_layout($pdo, [
+            'titulo'     => 'Saldo acreditado',
+            'eyebrow'    => $paraQuien === 'revendedor' ? 'Revendedor' : 'Administrador',
+            'intro'      => $intro,
+            'encabezado' => 'Recarga de saldo',
+            'filas'      => [
+                ['Monto',      '$' . number_format($monto, 2)],
+                ['Método',     $metodo],
+                ['Referencia', $ref],
+                ['Motivo',     $motivo],
+            ],
+            'destacado'  => $saldo !== null ? ['Saldo actual', '$' . number_format((float) $saldo, 2)] : [],
+            'nota'       => '',
+            'acento'     => '#34d399',
+        ]);
+    }
+}
+
+if (!function_exists('stream_email_saldo_acreditado')) {
+    /** Manda el correo de "saldo acreditado" al revendedor + copia al admin. Best-effort, nunca lanza.
+     *  Llamar SIEMPRE después de que el crédito ya esté confirmado en BD (después del commit, si la
+     *  operación corrió dentro de una transacción) — nunca antes, para no avisar de un crédito que
+     *  todavía podría revertirse.
+     *
+     *  $datos: monto (float, requerido), motivo, metodo, referencia (opcionales, se omiten si vienen vacíos).
+     *  Devuelve cuántos correos salieron. */
+    function stream_email_saldo_acreditado(PDO $pdo, int $revId, array $datos): int {
+        if ($revId <= 0 || (float) ($datos['monto'] ?? 0) <= 0) return 0;
+        $n = 0;
+        try {
+            $nombre = '';
+            try { $nombre = (string) ($pdo->query("SELECT COALESCE(NULLIF(nombre,''),username,email) FROM usuarios WHERE id=" . (int) $revId)->fetchColumn() ?: ''); } catch (Throwable $e) {}
+            $saldoNuevo = null;
+            if (function_exists('wallet_saldo')) { try { $saldoNuevo = wallet_saldo($pdo, $revId); } catch (Throwable $e) {} }
+            $datos = $datos + ['saldo_nuevo' => $saldoNuevo, 'revendedor_nombre' => $nombre];
+
+            $asunto = 'Saldo acreditado · $' . number_format((float) $datos['monto'], 2);
+            $logo = stream_mail_branding($pdo)['logo_path'];
+
+            $mailRev = stream_mail_user_email($pdo, $revId);
+            if ($mailRev !== '') {
+                if (stream_mail_send($pdo, $mailRev, $asunto, stream_email_html_saldo($pdo, $datos, 'revendedor'), $logo)) $n++;
+            }
+            $mailAdmin = (string) (stream_mail_admin_email($pdo) ?? '');
+            if ($mailAdmin !== '') {
+                if (stream_mail_send($pdo, $mailAdmin, $asunto, stream_email_html_saldo($pdo, $datos, 'dueno'), $logo)) $n++;
+            }
+        } catch (Throwable $e) { error_log('stream_email_saldo_acreditado #' . $revId . ': ' . $e->getMessage()); }
+        return $n;
+    }
+}
+
 if (!function_exists('stream_email_cola_entregas')) {
     /** COLA de ventas espejo recién creadas por st_rev_entregar(), pendientes de aviso por correo.
      *
