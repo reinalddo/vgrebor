@@ -107,6 +107,13 @@ if ($action === 'comprar_streaming') {
         $up->execute([$vid, $p['pid']]);
         if ($up->rowCount() < 1) { $pdo->rollBack(); api_err('Sin stock disponible.', 409); }
         $pdo->commit();
+        // Aviso por correo al revendedor con los datos de la cuenta que acaba de comprar. Va DESPUÉS
+        // del commit (nunca SMTP con una transacción abierta) y en try/catch: si el correo falla, la
+        // compra ya está hecha y las credenciales igual van en esta misma respuesta JSON.
+        try {
+            require_once __DIR__ . '/../../includes/stream_mailer.php';
+            stream_email_notificar_venta($pdo, $vid, 'entrega');
+        } catch (Throwable $eMail) { error_log('api revendedor correo compra: ' . $eMail->getMessage()); }
         api_out(['ok' => true, 'venta_id' => $vid, 'plataforma' => $plat['nombre'],
                  'correo' => $p['correo'], 'clave' => $p['clave'], 'perfil' => $p['etiqueta'], 'pin' => $p['ppin'],
                  'vencimiento' => $venc, 'total' => $precio, 'saldo' => round(wallet_saldo($pdo, $uid), 2)]);

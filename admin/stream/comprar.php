@@ -220,6 +220,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $resumen = []; $misVentas = 0; $aStock = 0;
+                // Ids para el aviso por correo, que se manda DESPUÉS del commit (nunca SMTP dentro de
+                // la transacción). $idsAClientes = ventas a su cliente · $idsAStock = lo que entró a su stock.
+                $idsAClientes = []; $idsAStock = [];
                 foreach ($lotes as $lote) {
                     $cta = $lote['cuenta'];
                     // 3.1) Marcar VENDIDOS los perfiles del admin (claim atómico por perfil).
@@ -284,9 +287,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $vidRev = (int) $pdo->lastInsertId();
                             $pdo->prepare("UPDATE streaming_perfiles SET estado='vendido', venta_id=? WHERE id=? AND estado='libre'")->execute([$vidRev, $mpid]);
                             $misVentas++;
+                            $idsAClientes[] = $vidRev;
                         }
                     } else {
                         $aStock += count($mirrorPerfs);   // queda en SU stock, para venderlo cuando quiera
+                        // Sin cliente asignado: el aviso es "entró esto a tu stock", sobre la venta del
+                        // admin (owner 0 + revendedor_id = él) → el correo le llega a él.
+                        $idsAStock[] = $vidAdmin;
                     }
                     $resumen[] = ($cta['correo'] ?? '') . ' (' . count($idsOk) . ')';
                 }
@@ -295,6 +302,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // BOT de códigos (FUERA de la transacción): asigna UNA vez por correo nuevo del revendedor.
                 if (function_exists('bot_codigos_flush')) { try { bot_codigos_flush($pdo, $uid); } catch (Throwable $e) {} }
+
+                // Aviso por CORREO (agregado), también fuera de la transacción y en try/catch: la compra
+                // ya está commiteada, un fallo de correo no puede tumbarla. Las ventas a su cliente van
+                // como 'compra' (le llegan a su cliente y a él); lo que quedó en stock va como 'entrega'.
+                foreach ($idsAClientes as $vidC) { try { stream_email_notificar_venta($pdo, (int) $vidC, 'compra'); } catch (Throwable $e) {} }
+                foreach ($idsAStock as $vidS)    { try { stream_email_notificar_venta($pdo, (int) $vidS, 'entrega'); } catch (Throwable $e) {} }
 
                 // Notificaciones (fuera de la transacción: nunca deben tumbar la compra).
                 try {

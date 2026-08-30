@@ -663,6 +663,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->commit();
         // BOT de códigos (tras el commit): asigna a los revendedores nuevos las cuentas que recibieron.
         if (!empty($revsFlush) && function_exists('bot_codigos_flush')) { foreach (array_keys($revsFlush) as $rf) { try { bot_codigos_flush($pdo, (int) $rf); } catch (Throwable $e) {} } }
+        // Aviso por correo de las cuentas que cambiaron de vendedor (op 'reasignar' encola en st_rev_entregar).
+        if (function_exists('stream_email_flush_entregas')) {
+          try { $nEnt = stream_email_flush_entregas($pdo); if ($nEnt) $msg .= " ✉ $nEnt correo(s) de entrega enviado(s)."; } catch (Throwable $e) {}
+        }
         // AVISO POR CORREO de las renovadas en lote — SIEMPRE tras el commit (jamás SMTP dentro de una
         // transacción: sostener candados de BD esperando a un servidor de correo traba a los demás).
         // PRESUPUESTO DE TIEMPO: un lote son hasta 200 ventas × 2 correos; aunque la conexión SMTP se

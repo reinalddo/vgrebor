@@ -115,9 +115,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'perfiles.php', (int) current_user_id());
         } catch (Throwable $e) {}
       }
+      // Aviso por CORREO al revendedor de lo que acaba de entrar a su stock (encolado en st_rev_entregar,
+      // se manda aquí porque el encolado ocurre dentro de la transacción de arriba).
+      $nMail = 0;
+      if (function_exists('stream_email_flush_entregas')) { try { $nMail = stream_email_flush_entregas($pdo); } catch (Throwable $e) {} }
       $saltados = count($ids) - $vend;
       $msg = "✓ $vend perfil(es) vendido(s)" . ($saltados > 0 ? " · $saltados ya no estaban libres" : '')
-           . ($revId ? " · $entregados quedaron en el stock del revendedor" : '') . '. Míralos en Ventas.';
+           . ($revId ? " · $entregados quedaron en el stock del revendedor" : '') . '. Míralos en Ventas.'
+           . ($nMail ? " ✉ $nMail correo(s) enviado(s)." : '');
     }
     // #12: editar un perfil — nombre y PIN; y (para el dueño) costo/venta/reventa de SU cuenta.
     elseif (($_POST['accion'] ?? '') === 'editar_perfil') {

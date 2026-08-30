@@ -539,7 +539,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       } catch (Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
       // BOT de códigos (tras el commit): asigna UNA vez cada correo nuevo que le quedó al revendedor.
       if ($revId && function_exists('bot_codigos_flush')) { try { bot_codigos_flush($pdo, (int) $revId); } catch (Throwable $e) {} }
-      $msg = "✓ Vendido: $vendidas cuenta(s) completa(s)" . ($vend > 0 ? " + $vend perfil(es)" : '') . '. Míralas en Ventas.';
+      // Aviso por CORREO al revendedor de las cuentas que acaba de recibir (encoladas en st_rev_entregar).
+      // También tras el commit y por el mismo motivo: nunca SMTP con una transacción abierta.
+      $nMail = 0;
+      if (function_exists('stream_email_flush_entregas')) { try { $nMail = stream_email_flush_entregas($pdo); } catch (Throwable $e) {} }
+      $msg = "✓ Vendido: $vendidas cuenta(s) completa(s)" . ($vend > 0 ? " + $vend perfil(es)" : '') . '. Míralas en Ventas.'
+           . ($nMail ? " ✉ $nMail correo(s) enviado(s)." : '');
     }
     elseif ($a === 'cuentas_masivo') {
       // Carga masiva CENTRADA EN PERFILES: cada línea es UN perfil (con su nombre y PIN).
@@ -666,8 +671,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       foreach ($cuentas as $c) $updCuenta->execute([$c['nperf'], ($c['clave'] !== '' ? $c['clave'] : null), $c['venc'], ($c['provId'] ?? null), $c['cid']]);
       // BOT de códigos: asigna UNA vez el correo de cada cuenta nueva a su revendedor (fuera de transacción).
       if (function_exists('bot_codigos_flush')) { foreach (array_keys($revsTocados) as $rt) { try { bot_codigos_flush($pdo, (int) $rt); } catch (Throwable $e) {} } }
+      // Aviso por CORREO de las entregas encoladas durante la importación (mismo criterio que el bot).
+      $nMail = 0;
+      if (function_exists('stream_email_flush_entregas')) { try { $nMail = stream_email_flush_entregas($pdo); } catch (Throwable $e) {} }
       $nCta = count($cuentas);
-      $msg = "✓ $nPerf perfil(es) importados en $nCta cuenta(s)" . ($vendMasivo > 0 ? " · $vendMasivo ya vendido(s) a su revendedor" : '') . '.';
+      $msg = "✓ $nPerf perfil(es) importados en $nCta cuenta(s)" . ($vendMasivo > 0 ? " · $vendMasivo ya vendido(s) a su revendedor" : '') . '.'
+           . ($nMail ? " ✉ $nMail correo(s) enviado(s)." : '');
     }
   } catch (Throwable $e) { $msg = '⚠ ' . $e->getMessage(); }
   header('Location: cuentas.php?msg=' . urlencode($msg));

@@ -8,6 +8,10 @@ if (!defined('CONEC_ADMIN')) { http_response_code(403); exit; }
 
 // Integración con el BOT de códigos (asignar/desasignar correo al revendedor). Best-effort, opcional.
 require_once __DIR__ . '/../includes/bot_codigos.php';
+// Avisos por CORREO del módulo (stream_email_*). Viven en includes/ y NO aquí a propósito: así los
+// endpoints públicos (api/revendedor/*) pueden mandarlos sin cargar este archivo, que exige CONEC_ADMIN
+// y funciones de contexto admin (db(), stream_owner_id(), current_user_id()) que ahí no existen.
+require_once __DIR__ . '/../includes/stream_mailer.php';
 
 /** Color + inicial de respaldo por nombre de plataforma (cuando no hay color propio). */
 function streamPlatFallback(string $p): array {
@@ -924,6 +928,9 @@ function st_rev_entregar(PDO $pdo, int $revId, int $cuentaAdminId, array $perfil
         $insV->execute([$revId, $plt, 'cuenta', $mirror, $cor, $clv, $nombres, (string) ($mps[0]['pin'] ?? ''), $precioT, $precioT, $venc, $revId]);
         $vid = (int) $pdo->lastInsertId();
         foreach ($mps as $m) { $pdo->prepare("UPDATE streaming_perfiles SET estado='vendido', venta_id=? WHERE id=? AND estado='libre'")->execute([$vid, (int) $m['mpid']]); }
+        // Aviso por correo al revendedor: se ENCOLA, no se manda (esto va dentro de una transacción).
+        // El llamador lo suelta con stream_email_flush_entregas() tras el commit, igual que bot_codigos_flush.
+        if (function_exists('stream_email_cola_entregas')) { stream_email_cola_entregas($vid); }
       } catch (Throwable $e) {}
     } else {
       // Por PERFIL → una venta por cada uno.
@@ -932,136 +939,11 @@ function st_rev_entregar(PDO $pdo, int $revId, int $cuentaAdminId, array $perfil
           $insV->execute([$revId, $plt, 'perfil', $mirror, $cor, $clv, $m['etq'], $m['pin'], round($costoUnit, 2), round($costoUnit, 2), $venc, $revId]);
           $vid = (int) $pdo->lastInsertId();
           $pdo->prepare("UPDATE streaming_perfiles SET estado='vendido', venta_id=? WHERE id=? AND estado='libre'")->execute([$vid, (int) $m['mpid']]);
+          // Aviso por correo al revendedor: encolado, se manda tras el commit (ver comentario arriba).
+          if (function_exists('stream_email_cola_entregas')) { stream_email_cola_entregas($vid); }
         } catch (Throwable $e) {}
       }
     }
     return count($mps);
   } catch (Throwable $e) { return 0; }
-}
-
-/* ══════════════════════════════════════════════════════════════════════════════════════════════
-   NOTIFICACIONES POR CORREO (agregado — no altera ningún flujo existente)
-   ─────────────────────────────────────────────────────────────────────────────────────────────
-   Todo lo de abajo es ADITIVO: son avisos por correo que se disparan DESPUÉS de que la operación
-   ya se guardó. Ninguna función lanza excepciones ni devuelve nada que cambie el flujo del que la
-   llama: si el correo falla, la venta/renovación/entrega queda igual de válida (solo error_log).
-
-   ANTI-BANEO — POR QUÉ AQUÍ SÍ VAN LAS CREDENCIALES:
-   Por WhatsApp NUNCA se mandan correo/clave crudos (eso fue lo que provocó el baneo permanente de
-   la WABA; ver stream_msg_credenciales, que manda un link privado). Esa restricción es de Meta y NO
-   aplica al correo electrónico, así que aquí sí se envían los datos reales de acceso.
-   ══════════════════════════════════════════════════════════════════════════════════════════════ */
-
-/** Correo registrado de un cliente de streaming. '' si no tiene o no es válido. */
-function stream_email_de_cliente(PDO $pdo, ?int $clienteId, int $ownerId): string {
-  $cid = (int) $clienteId;
-  if ($cid <= 0) return '';
-  try {
-    $st = $pdo->prepare("SELECT email FROM streaming_clientes WHERE id=? AND owner_id=? LIMIT 1");
-    $st->execute([$cid, $ownerId]);
-    $e = trim((string) ($st->fetchColumn() ?: ''));
-    return filter_var($e, FILTER_VALIDATE_EMAIL) ? $e : '';
-  } catch (Throwable $e) { return ''; }
-}
-
-/** Arma el HTML de un correo de datos de acceso a partir de una venta.
- *  $motivo: 'compra' (venta nueva) · 'renovacion' · 'entrega' (stock entregado a un revendedor).
- *  $paraQuien: 'cliente' | 'revendedor' | 'dueno' — solo cambia el tono y la etiqueta del encabezado. */
-function stream_email_html_credenciales(PDO $pdo, array $v, string $motivo = 'compra', string $paraQuien = 'cliente'): string {
-  require_once __DIR__ . '/../includes/stream_mailer.php';
-
-  $plat   = trim((string) ($v['plataforma'] ?? '')) ?: 'Streaming';
-  $venc   = !empty($v['fecha_vencimiento']) ? date('d/m/Y', strtotime((string) $v['fecha_vencimiento'])) : '';
-  $cli    = trim((string) ($v['cliente_nombre'] ?? ''));
-  $primer = $cli !== '' ? explode(' ', $cli)[0] : '';
-  $cod    = stream_cod_pedido($v['id'] ?? 0);
-
-  // Encabezado y texto de entrada según el motivo y a quién se le escribe.
-  if ($motivo === 'renovacion') {
-    $titulo = $paraQuien === 'cliente' ? 'Tu suscripción fue renovada' : 'Renovación registrada';
-    $intro  = $paraQuien === 'cliente'
-      ? '¡Hola' . ($primer !== '' ? ' ' . stream_mail_e($primer) : '') . '! Tu <b>' . stream_mail_e($plat) . '</b> quedó renovado. Tus datos de acceso siguen siendo los mismos:'
-      : 'Se renovó el <b>' . stream_mail_e($plat) . '</b>' . ($cli !== '' ? ' de <b>' . stream_mail_e($cli) . '</b>' : '') . '. Datos de la suscripción:';
-    $acento = '#34d399';
-  } elseif ($motivo === 'entrega') {
-    $titulo = 'Nueva cuenta en tu stock';
-    $intro  = 'Se agregó un <b>' . stream_mail_e($plat) . '</b> a tu inventario. Estos son los datos de acceso:';
-    $acento = '#22d3ee';
-  } else {
-    $titulo = $paraQuien === 'cliente' ? 'Tus datos de acceso' : 'Venta registrada';
-    $intro  = $paraQuien === 'cliente'
-      ? '¡Hola' . ($primer !== '' ? ' ' . stream_mail_e($primer) : '') . '! Tu <b>' . stream_mail_e($plat) . '</b> ya está activo. Estos son tus datos de acceso:'
-      : 'Se registró una venta de <b>' . stream_mail_e($plat) . '</b>' . ($cli !== '' ? ' para <b>' . stream_mail_e($cli) . '</b>' : '') . '. Datos entregados:';
-    $acento = '#22d3ee';
-  }
-
-  $filas = [
-    ['Plataforma', $plat],
-    ['Correo',     (string) ($v['correo'] ?? '')],
-    ['Clave',      (string) ($v['clave'] ?? '')],
-    ['Perfil',     (string) ($v['perfil'] ?? '')],
-    ['PIN',        (string) ($v['pin'] ?? '')],
-  ];
-  if ($paraQuien !== 'cliente' && $cli !== '') { $filas[] = ['Cliente', $cli]; }
-
-  // Aviso de cuidado solo al cliente final: es quien puede romper la cuenta sin saberlo.
-  $nota = $paraQuien === 'cliente'
-    ? '<b>Importante:</b> no cambies el correo ni la contraseña de la cuenta, y entra solo en el perfil que te asignamos. Si lo haces, el acceso puede dejar de funcionar.'
-    : '';
-
-  return stream_mail_layout($pdo, [
-    'titulo'     => $titulo,
-    'eyebrow'    => $paraQuien === 'cliente' ? 'Cliente' : ($paraQuien === 'revendedor' ? 'Revendedor' : 'Administrador'),
-    'intro'      => $intro,
-    'encabezado' => $plat . ' · ' . $cod,
-    'filas'      => $filas,
-    'destacado'  => $venc !== '' ? ['Válido hasta', $venc] : [],
-    'nota'       => $nota,
-    'acento'     => $acento,
-  ]);
-}
-
-/** Manda los correos que correspondan a UNA venta, a cada quien el suyo:
- *    · al CLIENTE final (si tiene correo registrado) → sus datos de acceso;
- *    · al DUEÑO de la operación (el revendedor si la venta es suya, o el admin) → su copia.
- *  Excepción heredada del diseño anti-filtración ya existente: si la venta es del admin pero está
- *  etiquetada a un revendedor (revendedor_id > 0), el cliente final es DEL REVENDEDOR y no se le
- *  escribe — se le avisa a él, que vende con su propia marca. Mismo criterio que usa el aviso de
- *  cambio de cuenta en ventas.php.
- *
- *  Devuelve cuántos correos salieron. NUNCA lanza. Llamar SIEMPRE fuera de una transacción. */
-function stream_email_notificar_venta(PDO $pdo, int $ventaId, string $motivo = 'compra'): int {
-  if ($ventaId <= 0) return 0;
-  $n = 0;
-  try {
-    require_once __DIR__ . '/../includes/stream_mailer.php';
-    $st = $pdo->prepare("SELECT * FROM streaming_ventas WHERE id=? LIMIT 1");
-    $st->execute([$ventaId]);
-    $v = $st->fetch(PDO::FETCH_ASSOC);
-    if (!$v) return 0;
-
-    $ownerId = (int) ($v['owner_id'] ?? 0);
-    $revId   = (int) ($v['revendedor_id'] ?? 0);
-    $plat    = trim((string) ($v['plataforma'] ?? '')) ?: 'Streaming';
-    $cod     = stream_cod_pedido($v['id'] ?? 0);
-    $asunto  = ($motivo === 'renovacion' ? 'Renovación' : ($motivo === 'entrega' ? 'Nueva cuenta' : 'Datos de acceso'))
-             . ' · ' . $plat . ' · ' . $cod;
-
-    // 1) CLIENTE final — solo si la venta NO es de un cliente de otro revendedor.
-    if ($revId <= 0) {
-      $mailCli = stream_email_de_cliente($pdo, $v['cliente_id'] ?? null, $ownerId);
-      if ($mailCli !== '') {
-        if (stream_mail_send($pdo, $mailCli, $asunto, stream_email_html_credenciales($pdo, $v, $motivo, 'cliente'), stream_mail_branding($pdo)['logo_path'])) $n++;
-      }
-    }
-
-    // 2) DUEÑO de la operación: el revendedor (si la venta es suya o va etiquetada a él) o el admin.
-    $idDueno = $ownerId > 0 ? $ownerId : $revId;
-    $mailDueno = $idDueno > 0 ? stream_mail_user_email($pdo, $idDueno) : (string) (stream_mail_admin_email($pdo) ?? '');
-    if ($mailDueno !== '') {
-      $quien = $idDueno > 0 ? 'revendedor' : 'dueno';
-      if (stream_mail_send($pdo, $mailDueno, $asunto, stream_email_html_credenciales($pdo, $v, $motivo, $quien), stream_mail_branding($pdo)['logo_path'])) $n++;
-    }
-  } catch (Throwable $e) { error_log('stream_email_notificar_venta #' . $ventaId . ': ' . $e->getMessage()); }
-  return $n;
 }
