@@ -71,6 +71,7 @@ function ntf_estilo(string $t): array {
     case 'credenciales': return ['🔑', '#dc2626', 'Cambio de credenciales'];
     case 'asignacion': return ['📦', '#059669', 'Asignación'];
     case 'ticket':     return ['🎫', '#0891b2', 'Soporte'];
+    case 'recarga_juego': return ['🎮', '#7c3aed', 'Recarga de juego'];
     default:           return ['🔔', '#64748b', 'Aviso'];
   }
 }

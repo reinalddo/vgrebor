@@ -110,6 +110,22 @@ stream_head('Recargas', 'recargas');
 const RC_URL = <?= json_encode($recargarUrl) ?>;
 const VERIFY_URL = <?= json_encode($verifyUrl) ?>;
 let rcSel = null;
+function rcEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// Muestra el CÓDIGO entregado por el proveedor (gift cards / PIN), si el motor lo devolvió, con botón de copiar.
+function rcCodeHtml(d2){
+  var code = d2 && (d2.provider_code || d2.codigo || d2.code || d2.pin);
+  var ref  = d2 && (d2.provider_reference || d2.reference);
+  var out = '';
+  if (code){ out += '<div style="margin-top:8px;padding:10px 12px;border:1px dashed var(--accent);border-radius:9px;background:var(--accent-soft)"><div style="font-size:10.5px;font-weight:700;text-transform:uppercase;color:var(--faint);letter-spacing:.03em">Código de la recarga</div><div style="font-family:ui-monospace,monospace;font-weight:800;font-size:15px;color:var(--text);word-break:break-all;cursor:pointer;margin-top:2px" title="Clic para copiar" onclick="rcCopy('+JSON.stringify(String(code))+',this)">'+rcEsc(code)+'</div></div>'; }
+  if (ref){ out += '<div style="font-size:11px;color:var(--faint);margin-top:4px">Ref: '+rcEsc(ref)+'</div>'; }
+  return out;
+}
+function rcCopy(txt, el){
+  function done(){ if(el){ var o=el.textContent; el.textContent='¡Copiado!'; setTimeout(function(){ el.textContent=o; }, 1100); } }
+  try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done,done); return; } }catch(e){}
+  try{ var t=document.createElement('textarea'); t.value=txt; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); }catch(e){}
+  done();
+}
 function rcComprar(p){
   rcSel = p;
   document.getElementById('rcTitle').textContent = 'Recargar ' + p.juego;
@@ -131,6 +147,7 @@ async function rcConfirmar(){
   const zone = (document.getElementById('rcZone')?.value || '').trim();
   const qty = Math.max(1, parseInt(document.getElementById('rcQty').value||'1'));
   const res = document.getElementById('rcResult');
+  let verifiedName = '';   // nombre del jugador verificado (se conserva para mostrarlo al final)
   // Zona/servidor (opcional): se envía con todos los alias que usa la tienda por si el juego lo pide.
   let pfieldsJson = '';
   if (zone){ pfieldsJson = JSON.stringify({ zone_id: zone, input2: zone, server_id: zone, zone: zone }); }
@@ -152,7 +169,8 @@ async function rcConfirmar(){
         res.innerHTML = '<span style="color:var(--bad)">✗ '+(dv.message||'El ID del jugador no es válido. Revísalo.')+'</span>';
         btn.disabled = false; return;
       }
-      res.innerHTML = (dv && dv.player_name) ? '<span style="color:var(--good)">✓ Jugador: '+dv.player_name+'</span> · Procesando pago…' : 'Procesando pago…';
+      verifiedName = (dv && dv.player_name) ? String(dv.player_name) : '';
+      res.innerHTML = verifiedName ? '<span style="color:var(--good)">✓ Jugador: '+verifiedName+'</span> · Procesando pago…' : 'Procesando pago…';
     } else {
       res.innerHTML = 'Procesando pago…';
     }
@@ -171,10 +189,12 @@ async function rcConfirmar(){
     const r2 = await fetch(d1.fulfill_url + '?action=batch_fulfill_item', {method:'POST', body:fd2, headers:{'X-Requested-With':'XMLHttpRequest'}});
     let d2 = {}; try { d2 = await r2.json(); } catch(e){}
     rcSel._done = true;
+    const nameLine = verifiedName ? '<div style="font-size:12px;color:var(--good);margin-bottom:4px">✓ Jugador: '+rcEsc(verifiedName)+'</div>' : '';
+    const codeHtml = rcCodeHtml(d2);
     if (d2.estado === 'enviado'){
-      res.innerHTML = '<span style="color:var(--good)">✓ Recarga enviada. Saldo: $'+(d1.saldo).toFixed(2)+'</span>';
+      res.innerHTML = nameLine + '<span style="color:var(--good)">✓ Recarga enviada. Saldo: $'+(d1.saldo).toFixed(2)+'</span>' + codeHtml;
     } else if (d2.ok || d2.manual){
-      res.innerHTML = '<span style="color:var(--warn)">✓ Pago hecho. La recarga se procesa (estado: '+(d2.estado||'pagado')+'). Saldo: $'+(d1.saldo).toFixed(2)+'</span>';
+      res.innerHTML = nameLine + '<span style="color:var(--warn)">✓ Pago hecho. La recarga se procesa (estado: '+(d2.estado||'pagado')+'). Saldo: $'+(d1.saldo).toFixed(2)+'</span>' + codeHtml;
     } else {
       // La entrega falló de verdad → pedir REVERSO del saldo (no cobrar sin entregar).
       try {

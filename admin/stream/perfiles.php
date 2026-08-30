@@ -848,7 +848,7 @@ stream_head('Perfiles', 'perfiles');
     ckSync();
   }
   function ordenar(){ const v=document.getElementById('f-orden').value; if(!v) return; const tb=document.getElementById('tbody'); const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1;
-    rows.sort((a,b)=>{ if(key==='venc'){ return ((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul; } const map={correo:'correo',rev:'rev',prov:'prov',cli:'cli'}; const ka=map[key]||'plat'; return String(a.dataset[ka]||'').localeCompare(String(b.dataset[ka]||''))*mul; });
+    rows.sort((a,b)=>{ if(key==='venc'){ return ((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul; } const map={correo:'correo',rev:'rev',prov:'prov',cli:'cli'}; const ka=map[key]||'plat'; const va=String(a.dataset[ka]||''), vb=String(b.dataset[ka]||''); if(!va&&!vb) return 0; if(!va) return 1; if(!vb) return -1; return va.localeCompare(vb)*mul; });
     rows.forEach(r=>tb.appendChild(r)); }
   function ckTodo(m){ filasVisibles().forEach(tr=>{ const c=tr.querySelector('.ck-row'); if(c) c.checked=m.checked; }); ckSync(); }
   function selTodos(){ ckTodo({checked:true}); }

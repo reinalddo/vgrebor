@@ -182,6 +182,20 @@ try {
     rr_err('No se pudo crear la recarga. Intenta de nuevo.', 500);
 }
 
+// Aviso al ADMIN de la compra de recarga → aparece en Notificaciones y le suena el tono en tiempo real.
+// (El cliente notó que las compras de recargas no generaban notificación.) Nunca rompe la respuesta.
+try {
+    require_once __DIR__ . '/../_rev_avisos.php';
+    if (function_exists('stream_notif_crear')) {
+        $rn = '';
+        try { $rn = (string) ($pdo->query("SELECT COALESCE(NULLIF(nombre,''),username,email) FROM usuarios WHERE id=" . (int) $uid)->fetchColumn() ?: ''); } catch (Throwable $e) {}
+        stream_notif_crear($pdo, 0, 'recarga_juego',
+            'Recarga comprada · ' . $pkg['juego_nombre'],
+            ($rn ?: 'Un revendedor') . ' compró ' . $pkg['nombre'] . ($qty > 1 ? " x$qty" : '') . ' de ' . $pkg['juego_nombre'] . ' por $' . number_format((float) $total, 2) . '.',
+            'recargas.php', (int) $uid, $orderId);
+    }
+} catch (Throwable $e) {}
+
 // El frontend ahora llama a api/pedidos.php?action=batch_fulfill_item con estos datos para
 // disparar el despacho al proveedor (reusa el motor de la tienda).
 echo json_encode([

@@ -162,6 +162,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($a !== 'lote_ventas' && !$permAsignada && !st_puede_ver($pdo, $vid, $verCostos)) throw new Exception('No tienes acceso a esa venta (es de un revendedor).');
     // Guarda de aislamiento por dueño (anti-IDOR): la venta DEBE ser del contexto actual (o asignada a él).
     if ($a !== 'lote_ventas' && $vid > 0 && !$permAsignada && !st_venta($pdo, $vid)) throw new Exception('Venta no encontrada.');
+    // Precio que la TIENDA le cobra a un REVENDEDOR por renovar (de su saldo): 1º el de renovación de la
+    // plataforma (reventa), si no el de compra (precio_distribuidor, lo mismo que pagó al comprar), y como
+    // último recurso el precio de la venta (para no renovar NUNCA gratis). Se usa en renovar individual y lote.
+    $costoRenovRev = function (string $platName, $ventaPrecioRenov, $ventaPrecio) use ($pdo): float {
+      $c = null;
+      try {
+        $qc = $pdo->prepare("SELECT COALESCE(
+            (SELECT precio_renovacion FROM streaming_plataformas WHERE nombre=? AND owner_id=0 AND precio_renovacion IS NOT NULL AND precio_renovacion>0 ORDER BY id LIMIT 1),
+            (SELECT precio_distribuidor FROM streaming_plataformas WHERE nombre=? AND owner_id=0 AND precio_distribuidor IS NOT NULL AND precio_distribuidor>0 ORDER BY id LIMIT 1)
+          )");
+        $qc->execute([$platName, $platName]); $c = $qc->fetchColumn();
+      } catch (Throwable $e) {}
+      $c = ($c !== null && $c !== false) ? (float) $c : 0.0;
+      if ($c <= 0) { $c = ((float) ($ventaPrecioRenov ?? 0)) ?: (float) ($ventaPrecio ?? 0); }
+      return round($c, 2);
+    };
     if ($a === 'notificar') {
       $v = st_venta($pdo, $vid);
       $texto = trim((string) ($_POST['mensaje'] ?? ''));
@@ -185,6 +201,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $f = $pdo->query("SELECT fecha_vencimiento FROM streaming_ventas WHERE id=$vid")->fetchColumn();
         $base = ($f && strtotime($f) > time()) ? $f : date('Y-m-d');
         $nueva = date('Y-m-d', strtotime($base . " +$meses months"));
+      }
+      // COBRO AL REVENDEDOR (bug reportado: "renovaba sin saldo"). Si quien renueva es un REVENDEDOR, la
+      // tienda le cobra el precio de renovación de SU saldo — igual que al comprar. Si no le alcanza, NO se
+      // renueva (se aborta ANTES de tocar la fecha). El ADMIN sigue renovando sin cobro (es su inventario).
+      if ($esRevCtx) {
+        $vr = $pdo->query("SELECT plataforma, precio_renovacion, precio FROM streaming_ventas WHERE id=$vid")->fetch(PDO::FETCH_ASSOC) ?: [];
+        $platName = (string) ($vr['plataforma'] ?? '');
+        $costoRenov = $costoRenovRev($platName, $vr['precio_renovacion'] ?? null, $vr['precio'] ?? null);
+        if ($costoRenov > 0) {
+          require_once __DIR__ . '/../../api/wallet/_helpers.php';
+          $mio = (int) current_user_id();
+          if (!function_exists('wallet_debitar') || !wallet_debitar($pdo, $mio, $costoRenov, 'renovacion_streaming', 'Renovación ' . ($platName ?: 'streaming'))) {
+            $sal = function_exists('wallet_saldo') ? wallet_saldo($pdo, $mio) : 0.0;
+            throw new Exception('⚠ Saldo insuficiente para renovar: cuesta $' . number_format($costoRenov, 2) . ' y tu saldo es $' . number_format($sal, 2) . '. Recarga tu saldo y vuelve a intentar.');
+          }
+        }
       }
       $pdo->prepare("UPDATE streaming_ventas SET fecha_vencimiento=?, estado='activa', recordado=0, recordado_at=NULL WHERE id=?")->execute([$nueva, $vid]);
       // Al renovar se reinicia el contador de cambios de nombre/PIN del perfil de esta venta (2 nuevos).
@@ -485,7 +517,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // st_eliminar_cuenta() las deja con cuenta_id=NULL para que no queden zombis). Al ELIMINAR sí se
         // pueden borrar las canceladas (son justamente las FANTASMA que el revendedor quiere limpiar).
         $estadoGate = ($op === 'eliminar') ? '' : " AND estado <> 'cancelada'";
-        $rows = $pdo->query("SELECT id, revendedor_id, cuenta_id, fecha_inicio, fecha_vencimiento
+        $rows = $pdo->query("SELECT id, revendedor_id, cuenta_id, fecha_inicio, fecha_vencimiento, plataforma, precio_renovacion, precio
                                FROM streaming_ventas
                               WHERE id IN ($in) AND $gate $estadoGate FOR UPDATE")->fetchAll(PDO::FETCH_ASSOC);
         $saltadas = count($ids) - count($rows);
@@ -498,7 +530,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new Exception('La fecha debe ser de hoy en adelante.');
           $meses = max(1, min(24, (int) ($_POST['meses'] ?? 1)));
           $up = $pdo->prepare("UPDATE streaming_ventas SET fecha_inicio=?, fecha_vencimiento=?, estado='activa', recordado=0, recordado_at=NULL WHERE id=?");
+          $sinSaldo = 0;   // renovaciones de revendedor que NO se hicieron por falta de saldo
+          if ($esRevCtx) { require_once __DIR__ . '/../../api/wallet/_helpers.php'; }
           foreach ($rows as $r) {
+            // COBRO AL REVENDEDOR también en lote (si no, se salta el cobro renovando varias). Si no le
+            // alcanza el saldo para ESTA, se salta sin renovarla (las demás sí). El admin no paga.
+            if ($esRevCtx) {
+              $costoR = $costoRenovRev((string) ($r['plataforma'] ?? ''), $r['precio_renovacion'] ?? null, $r['precio'] ?? null);
+              if ($costoR > 0 && (!function_exists('wallet_debitar') || !wallet_debitar($pdo, (int) current_user_id(), $costoR, 'renovacion_streaming', 'Renovación ' . ((string) ($r['plataforma'] ?? '') ?: 'streaming')))) { $sinSaldo++; continue; }
+            }
             // fecha_inicio SÍ se avanza: el renovar individual NO lo hace y eso REGALA días. La
             // auto-renovación calcula la duración como (vencimiento − inicio) y cobra el precio
             // completo (api/revendedor/renovar-streaming.php); si el inicio nunca avanza, ese lapso
@@ -529,7 +569,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           }
           // NO se insertan pagos: el individual registra monto = precio de la venta, y copiarlo aquí
           // inventaría N cobros que nadie hizo y descuadraría las métricas.
-          $msg = "✓ $n venta(s) renovadas.";
+          $msg = "✓ $n venta(s) renovadas." . ($sinSaldo > 0 ? " ⚠ $sinSaldo NO se renovaron por saldo insuficiente." : '');
         }
         elseif ($op === 'eliminar') {
           if ((string) ($_POST['confirmar'] ?? '') !== 'ELIMINAR') throw new Exception('Escribe ELIMINAR para confirmar.');
@@ -1226,7 +1266,7 @@ stream_head('Ventas', 'ventas');
     abrir('m-editar'); }
   function e_set(id,val){ document.getElementById(id).value = val==null?'':val; }
   function mEliminar(){ m3.classList.add('hidden'); setId('el-id'); abrir('m-eliminar'); }
-  function ordenarVentas(){ const v=document.getElementById('forden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1; rows.sort((a,b)=>{ if(key==='venc'){ return ((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul; } const ka=(key==='cli')?'cli':((key==='correo')?'correo':((key==='rev')?'rev':'venc')); return String(a.dataset[ka]||'').localeCompare(String(b.dataset[ka]||''))*mul; }); rows.forEach(r=>tb.appendChild(r)); aplicarFiltro(); }
+  function ordenarVentas(){ const v=document.getElementById('forden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1; rows.sort((a,b)=>{ if(key==='venc'){ return ((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul; } const ka=(key==='cli')?'cli':((key==='correo')?'correo':((key==='rev')?'rev':'venc')); const va=String(a.dataset[ka]||''), vb=String(b.dataset[ka]||''); if(!va&&!vb) return 0; if(!va) return 1; if(!vb) return -1; return va.localeCompare(vb)*mul; }); rows.forEach(r=>tb.appendChild(r)); aplicarFiltro(); }
   let LIM=0;   // 0 = mostrar TODAS por defecto (antes 25: ocultaba las de más abajo y no se veían al renovar/vencer).
   function aplicarFiltro(){
     const q=(document.getElementById('buscar').value||'').toLowerCase().trim();

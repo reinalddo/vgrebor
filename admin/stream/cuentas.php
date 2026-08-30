@@ -689,9 +689,12 @@ try {
             pr.nombre AS prov_nombre, pl.logo_url AS logo, pl.color AS color,
             (SELECT COUNT(*) FROM streaming_perfiles p WHERE p.cuenta_id=c.id AND p.estado='libre') AS libres,
             (SELECT COUNT(*) FROM streaming_perfiles p WHERE p.cuenta_id=c.id) AS perf,
-            (SELECT GROUP_CONCAT(DISTINCT LOWER(ru.nombre) SEPARATOR ' ')
+            (SELECT GROUP_CONCAT(DISTINCT LOWER(ru.nombre) SEPARATOR '|')
                FROM streaming_ventas sv JOIN usuarios ru ON ru.id = sv.revendedor_id
-              WHERE sv.cuenta_id = c.id AND COALESCE(sv.revendedor_id,0) > 0) AS rev_nombres
+              WHERE sv.cuenta_id = c.id AND COALESCE(sv.revendedor_id,0) > 0) AS rev_nombres,
+            (SELECT GROUP_CONCAT(DISTINCT ru.nombre SEPARATOR ', ')
+               FROM streaming_ventas sv JOIN usuarios ru ON ru.id = sv.revendedor_id
+              WHERE sv.cuenta_id = c.id AND COALESCE(sv.revendedor_id,0) > 0) AS rev_nombres_disp
      FROM streaming_cuentas c
      LEFT JOIN streaming_proveedores pr ON pr.id = c.proveedor_id AND pr.owner_id = c.owner_id
      LEFT JOIN streaming_plataformas pl ON pl.id = c.plataforma_id AND pl.owner_id = c.owner_id
@@ -913,7 +916,7 @@ stream_head('Cuentas', 'cuentas');
       <thead><tr>
         <th style="width:34px;position:sticky;left:0;background:var(--surface);z-index:2"><input type="checkbox" id="ck-all" onclick="ckTodo(this)" title="Seleccionar los visibles" style="width:15px;height:15px;accent-color:var(--acc)"></th>
         <th>Plataforma</th><th>Credenciales</th>
-        <th>Inventario</th><?php if ($verCostos): ?><th>Proveedor</th><?php endif; ?>
+        <th>Inventario</th><?php if ($verCostos): ?><th>Proveedor</th><?php endif; ?><?php if ((int) $OWNER === 0): ?><th>Vendedor</th><?php endif; ?>
         <th>Observaciones</th><th>Estado / Días faltantes</th><th style="text-align:center">Acciones</th>
       </tr></thead>
       <tbody id="tbody">
@@ -947,6 +950,7 @@ stream_head('Cuentas', 'cuentas');
             <?php if ($c['precio_venta'] !== null && (float) $c['precio_venta'] > 0): ?><div style="font-size:11px;color:var(--good);font-weight:600">venta $<?= number_format((float) $c['precio_venta'], 2) ?></div><?php endif; ?>
             <?php if (isset($c['precio_reventa']) && $c['precio_reventa'] !== null && (float) $c['precio_reventa'] > 0): ?><div style="font-size:11px;color:var(--accent);font-weight:600" title="Precio para el revendedor">reventa $<?= number_format((float) $c['precio_reventa'], 2) ?></div><?php endif; ?></td>
           <?php if ($verCostos): ?><td><?= $c['prov_nombre'] ? h($c['prov_nombre']) : '<span style="color:var(--faint)">—</span>' ?></td><?php endif; ?>
+          <?php if ((int) $OWNER === 0): ?><td style="color:var(--muted);font-size:11.5px"><?= !empty($c['rev_nombres_disp']) ? h($c['rev_nombres_disp']) : '<span style="color:var(--faint)">—</span>' ?></td><?php endif; ?>
           <td style="color:var(--faint);font-size:11.5px;max-width:180px" class="truncate"><?= h($c['notas'] ?: 'Sin notas') ?></td>
           <td>
             <span style="display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;color:<?= $vColor ?>;background:<?= $vBg ?>"><?= $vEstado ?></span>
@@ -1216,7 +1220,7 @@ stream_head('Cuentas', 'cuentas');
     const q=(fval('f-busqueda')+' '+fval('buscar')).toLowerCase().trim().split(/\s+/).filter(Boolean);
     const plat=fval('f-plat'), estado=fval('f-estado'), stock=fval('f-stock'), prov=fval('f-prov'), rev=fval('f-rev');
     document.querySelectorAll('#tbody tr').forEach(tr=>{ const b=tr.dataset.b||'';
-      const ok = q.every(t=>b.includes(t)) && (!plat||tr.dataset.plat===plat) && (!estado||tr.dataset.estado===estado) && (!stock||tr.dataset.stock===stock) && (!prov||tr.dataset.prov===prov) && (!rev||(tr.dataset.rev||'').split(' ').includes(rev));
+      const ok = q.every(t=>b.includes(t)) && (!plat||tr.dataset.plat===plat) && (!estado||tr.dataset.estado===estado) && (!stock||tr.dataset.stock===stock) && (!prov||tr.dataset.prov===prov) && (!rev||(tr.dataset.rev||'').split('|').includes(rev));
       tr.style.display=ok?'':'none';
       // REGLA DE ORO: fila oculta = DESMARCADA. Si no, marcas → filtras → "Eliminar varias"
       // borraría lo que ya no ves. Es el escenario más fácil de provocar sin querer.
@@ -1279,7 +1283,7 @@ stream_head('Cuentas', 'cuentas');
     if(sel.value){ if(nom){ nom.value=''; nom.disabled=true; nom.placeholder='(usando el cliente elegido arriba)'; } if(wa && !wa.value){ wa.value=(op&&op.dataset.wa)||''; } }
     else { if(nom){ nom.disabled=false; nom.placeholder='Dejar vacío = no cambiar'; } }
   }
-  function ordenar(){ const v=document.getElementById('f-orden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1; const ka=(key==='correo')?'correo':((key==='rev')?'rev':'plat'); rows.sort((a,b)=>{ if(key==='dias'){ return ((parseInt(a.dataset.dias||'0',10))-(parseInt(b.dataset.dias||'0',10)))*mul; } return String(a.dataset[ka]||'').localeCompare(String(b.dataset[ka]||''))*mul; }); rows.forEach(r=>tb.appendChild(r)); }
+  function ordenar(){ const v=document.getElementById('f-orden').value; if(!v) return; const tb=document.getElementById('tbody'); if(!tb) return; const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1; const ka=(key==='correo')?'correo':((key==='rev')?'rev':'plat'); rows.sort((a,b)=>{ if(key==='dias'){ return ((parseInt(a.dataset.dias||'0',10))-(parseInt(b.dataset.dias||'0',10)))*mul; } const va=String(a.dataset[ka]||''), vb=String(b.dataset[ka]||''); if(!va&&!vb) return 0; if(!va) return 1; if(!vb) return -1; return va.localeCompare(vb)*mul; }); rows.forEach(r=>tb.appendChild(r)); }
   function resetFiltros(){ ['f-busqueda','f-plat','f-estado','f-stock','f-prov','f-rev','f-orden','buscar'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';}); filtrar(); }
   // Resaltar la cuenta a la que apunta una notificación (…?hl=ID): salta a ella y la ilumina un momento.
   (function(){
