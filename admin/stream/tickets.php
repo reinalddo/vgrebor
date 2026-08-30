@@ -102,6 +102,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $msg = '✓ Mensaje enviado.';
       header('Location: tickets.php?id=' . $tid . '&msg=' . urlencode($msg)); exit;
     }
+    elseif ($a === 'garantia') {
+      // GARANTÍA / REEMPLAZO (agregado): el admin le manda por correo al revendedor los datos de la
+      // cuenta que le entrega en reemplazo, y queda el respaldo por escrito en el historial del ticket.
+      // Solo el ADMIN: es él quien entrega el reemplazo.
+      if ($esRev) throw new Exception('Solo el administrador envía datos de garantía.');
+      $tid = (int) ($_POST['id'] ?? 0);
+      $t = $cargarTicket($pdo, $tid, false, 0);
+      if (!$t) throw new Exception('Ticket no encontrado.');
+      $revId = (int) $t['owner_id'];
+
+      // Los datos salen de una VENTA existente del revendedor (lo normal, así no se teclean mal) o,
+      // si la cuenta todavía no está cargada en el sistema, de los campos escritos a mano.
+      $ventaId = (int) ($_POST['venta_id'] ?? 0);
+      $datos = [];
+      if ($ventaId > 0) {
+        // Aislamiento: la venta DEBE ser del revendedor de ESTE ticket (suya, o del admin etiquetada a él).
+        $q = $pdo->prepare("SELECT plataforma, correo, clave, perfil, pin, fecha_vencimiento
+                              FROM streaming_ventas WHERE id=? AND (owner_id=? OR revendedor_id=?) LIMIT 1");
+        $q->execute([$ventaId, $revId, $revId]);
+        $v = $q->fetch(PDO::FETCH_ASSOC);
+        if (!$v) throw new Exception('Esa cuenta no pertenece al revendedor de este ticket.');
+        $datos = ['plataforma' => $v['plataforma'], 'correo' => $v['correo'], 'clave' => $v['clave'],
+                  'perfil' => $v['perfil'], 'pin' => $v['pin'], 'vencimiento' => $v['fecha_vencimiento']];
+      } else {
+        foreach (['plataforma', 'correo', 'clave', 'perfil', 'pin', 'vencimiento'] as $k) {
+          $datos[$k] = trim((string) ($_POST['g_' . $k] ?? ''));
+        }
+      }
+      if (trim((string) $datos['plataforma']) === '' || trim((string) $datos['correo']) === '') {
+        throw new Exception('Elige una cuenta o escribe al menos la plataforma y el correo.');
+      }
+
+      $nota = trim((string) ($_POST['g_nota'] ?? ''));
+      $mailRev = stream_mail_user_email($pdo, $revId);
+      if ($mailRev === '') throw new Exception('El revendedor no tiene un correo válido registrado; no se le puede enviar la garantía.');
+
+      $asunto = 'Garantía · ' . $datos['plataforma'] . ' · Ticket #' . $tid;
+      $logo = stream_mail_branding($pdo)['logo_path'];
+      $enviado = stream_mail_send($pdo, $mailRev, $asunto, stream_email_html_garantia($pdo, $tid, $datos, $nota, 'revendedor'), $logo);
+      // Copia al admin, para que le quede el respaldo del reemplazo entregado.
+      $adminMail = (string) (stream_mail_admin_email($pdo) ?? '');
+      if ($adminMail !== '') { stream_mail_send($pdo, $adminMail, $asunto, stream_email_html_garantia($pdo, $tid, $datos, $nota, 'dueno'), $logo); }
+
+      // Queda en el historial del ticket SIEMPRE, haya salido el correo o no: es el registro de que el
+      // admin entregó el reemplazo. La clave NO se escribe aquí (el historial lo ve el revendedor, pero
+      // también queda guardado en claro en la BD; los datos completos ya van en el correo).
+      $resumen = 'Datos de garantía enviados a ' . $mailRev . ' · ' . $datos['plataforma'] . ' · ' . $datos['correo']
+               . ($nota !== '' ? "\n" . $nota : '')
+               . ($enviado ? '' : "\n(⚠ el correo no pudo enviarse; revisa la configuración SMTP)");
+      $evento($pdo, $tid, 'garantia', $resumen);
+      stream_notif_crear($pdo, $revId, 'ticket', 'Garantía enviada · ticket #' . $tid,
+        'Te enviamos por correo los datos de la cuenta de reemplazo (' . $datos['plataforma'] . ').', 'tickets.php?id=' . $tid, (int) current_user_id(), $tid);
+
+      $msg = $enviado
+        ? '✓ Datos de garantía enviados a ' . $mailRev . '.'
+        : '⚠ Quedó registrado en el ticket, pero el correo NO pudo enviarse (revisa la configuración SMTP).';
+      header('Location: tickets.php?id=' . $tid . '&msg=' . urlencode($msg)); exit;
+    }
     elseif ($a === 'resolver' || $a === 'reabrir') {
       if ($esRev) throw new Exception('Solo el administrador resuelve tickets.');
       $tid = (int) ($_POST['id'] ?? 0);
@@ -147,6 +205,22 @@ if ($verId > 0) {
   try { $st = $pdo->prepare("SELECT * FROM streaming_ticket_eventos WHERE ticket_id=? ORDER BY id ASC"); $st->execute([$verId]); $eventos = $st->fetchAll(PDO::FETCH_ASSOC); } catch (Throwable $e) {}
   $revNombre = '';
   if (!$esRev) { try { $revNombre = (string) ($pdo->query("SELECT COALESCE(NULLIF(nombre,''),username,email) FROM usuarios WHERE id=" . (int) $t['owner_id'])->fetchColumn() ?: ('#' . (int) $t['owner_id'])); } catch (Throwable $e) {} }
+  // Cuentas del revendedor de este ticket, para el selector de GARANTÍA (solo las ve el admin).
+  // Incluye las suyas (owner_id) y las del admin etiquetadas a él (revendedor_id) — las dos formas en
+  // que una cuenta puede estar en sus manos. Las más recientes primero: el reemplazo suele ser reciente.
+  $ctasRev = [];
+  $revMail = '';
+  if (!$esRev) {
+    try {
+      $q = $pdo->prepare("SELECT id, plataforma, correo, perfil, fecha_vencimiento
+                            FROM streaming_ventas
+                           WHERE (owner_id=? OR revendedor_id=?) AND estado<>'cancelada'
+                           ORDER BY id DESC LIMIT 200");
+      $q->execute([(int) $t['owner_id'], (int) $t['owner_id']]);
+      $ctasRev = $q->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) { $ctasRev = []; }
+    $revMail = stream_mail_user_email($pdo, (int) $t['owner_id']);
+  }
   stream_head('Soporte · Ticket #' . $verId, 'tickets');
   ?>
   <?php if ($flash !== ''): ?><div class="card" style="padding:10px 14px;margin-bottom:12px;border-left:3px solid <?= str_starts_with($flash, '⚠') ? 'var(--bad)' : 'var(--good)' ?>"><?= h($flash) ?></div><?php endif; ?>
@@ -183,7 +257,7 @@ if ($verId > 0) {
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--faint);letter-spacing:.04em;margin-bottom:10px">Historial</div>
         <?php foreach ($eventos as $ev):
           $lado = ((int) $ev['es_admin'] === 1);
-          $icon = ['creado' => '📩', 'mensaje' => '💬', 'resuelto' => '✅', 'reabierto' => '🔁'][(string) $ev['tipo']] ?? '•';
+          $icon = ['creado' => '📩', 'mensaje' => '💬', 'resuelto' => '✅', 'reabierto' => '🔁', 'garantia' => '🛡️'][(string) $ev['tipo']] ?? '•';
         ?>
           <div style="display:flex;gap:10px;margin-bottom:12px;<?= $lado ? 'flex-direction:row-reverse;text-align:right' : '' ?>">
             <div style="flex:0 0 30px;height:30px;border-radius:8px;display:grid;place-items:center;font-size:15px;background:var(--surface-2)"><?= $icon ?></div>
@@ -234,6 +308,53 @@ if ($verId > 0) {
         <p style="font-size:12px;color:var(--muted);margin:0">Cuando el administrador lo resuelva, verás aquí el estado <b>Resuelto</b> y te llegará una notificación.</p>
       <?php endif; ?>
     </div>
+
+    <?php if (!$esRev): ?>
+    <!-- GARANTÍA / REEMPLAZO: le manda al revendedor por correo los datos de la cuenta de reemplazo. -->
+    <div class="card" style="padding:16px;margin-top:12px">
+      <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px"><i data-lucide="shield-check" style="width:14px;height:14px;vertical-align:-2px"></i> Enviar garantía</div>
+      <p style="font-size:11.5px;color:var(--faint);margin:0 0 10px">Le llegan por correo los datos de la cuenta de reemplazo y queda registrado en este ticket.</p>
+      <?php if ($revMail === ''): ?>
+        <p style="font-size:12px;color:var(--bad);margin:0"><b><?= h($revNombre) ?></b> no tiene un correo válido registrado, así que no se le puede enviar la garantía.</p>
+      <?php else: ?>
+        <form method="post">
+          <input type="hidden" name="_csrf" value="<?= h($csrf) ?>"><input type="hidden" name="accion" value="garantia"><input type="hidden" name="id" value="<?= (int) $verId ?>">
+          <div style="font-size:11px;color:var(--faint);margin-bottom:8px">Para: <b style="color:var(--muted)"><?= h($revMail) ?></b></div>
+          <select name="venta_id" id="g-venta" onchange="gToggle()" class="input" style="margin-bottom:8px">
+            <option value="0">— Escribir los datos a mano —</option>
+            <?php foreach ($ctasRev as $c):
+              $et = trim((string) $c['plataforma']) . ' · ' . trim((string) $c['correo'])
+                  . (trim((string) $c['perfil']) !== '' ? ' · ' . trim((string) $c['perfil']) : '')
+                  . (!empty($c['fecha_vencimiento']) ? ' · vence ' . date('d/m/Y', strtotime((string) $c['fecha_vencimiento'])) : '');
+            ?>
+              <option value="<?= (int) $c['id'] ?>"><?= h($et) ?></option>
+            <?php endforeach; ?>
+          </select>
+          <?php if (!$ctasRev): ?>
+            <div style="font-size:11px;color:var(--faint);margin:-4px 0 8px">Este revendedor no tiene cuentas registradas todavía: escribe los datos a mano.</div>
+          <?php endif; ?>
+          <div id="g-manual" class="grid grid-cols-2 gap-2" style="margin-bottom:8px">
+            <input name="g_plataforma" class="input" placeholder="Plataforma">
+            <input name="g_correo" class="input" placeholder="Correo de la cuenta">
+            <input name="g_clave" class="input" placeholder="Clave">
+            <input name="g_perfil" class="input" placeholder="Perfil (opcional)">
+            <input name="g_pin" class="input" placeholder="PIN (opcional)">
+            <input name="g_vencimiento" type="date" class="input" title="Vencimiento (opcional)">
+          </div>
+          <textarea name="g_nota" rows="2" class="input" placeholder="Nota para el revendedor (opcional)" style="margin-bottom:8px"></textarea>
+          <button class="btn primary" style="width:100%"><i data-lucide="mail" style="width:15px;height:15px"></i> Enviar datos de garantía</button>
+        </form>
+        <script>
+          /* Si eligió una cuenta guardada, se ocultan los campos manuales (sus datos salen de la venta). */
+          function gToggle(){
+            var s=document.getElementById('g-venta'), m=document.getElementById('g-manual');
+            if(s&&m) m.style.display = (s.value!=='0') ? 'none' : '';
+          }
+          gToggle();
+        </script>
+      <?php endif; ?>
+    </div>
+    <?php endif; ?>
   </div>
   <?php
   stream_foot();

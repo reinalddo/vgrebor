@@ -475,6 +475,46 @@ if (!function_exists('stream_email_notificar_venta')) {
     }
 }
 
+if (!function_exists('stream_email_html_garantia')) {
+    /** HTML del correo de GARANTÍA / REEMPLAZO que el admin manda desde un ticket de soporte.
+     *
+     *  Caso de uso (pedido del cliente): el revendedor reporta por ticket que una cuenta "pide rotación";
+     *  el admin le entrega otra y con este correo le manda los datos de la de reemplazo, dejando el
+     *  respaldo por escrito de que la garantía se cumplió.
+     *
+     *  $datos: plataforma, correo, clave, perfil, pin, vencimiento (los vacíos no se pintan).
+     *  $nota: texto libre opcional del admin. $paraQuien: 'revendedor' | 'dueno' (la copia del admin). */
+    function stream_email_html_garantia(PDO $pdo, int $ticketId, array $datos, string $nota = '', string $paraQuien = 'revendedor'): string {
+        $plat = trim((string) ($datos['plataforma'] ?? '')) ?: 'Streaming';
+        $venc = trim((string) ($datos['vencimiento'] ?? ''));
+        if ($venc !== '' && strtotime($venc)) { $venc = date('d/m/Y', strtotime($venc)); }
+
+        $intro = $paraQuien === 'revendedor'
+            ? 'Procesamos tu solicitud de <b>garantía</b>. Esta es la cuenta de reemplazo, ya lista para usar:'
+            : 'Se envió una cuenta de reemplazo por garantía desde el ticket #' . (int) $ticketId . '.';
+
+        return stream_mail_layout($pdo, [
+            'titulo'     => 'Garantía · cuenta de reemplazo',
+            'eyebrow'    => $paraQuien === 'revendedor' ? 'Garantía' : 'Administrador',
+            'intro'      => $intro . ($nota !== '' ? '<p style="margin:12px 0 0;">' . stream_mail_e($nota) . '</p>' : ''),
+            'encabezado' => $plat . ' · Ticket #' . (int) $ticketId,
+            'filas'      => [
+                ['Plataforma', $plat],
+                ['Correo',     (string) ($datos['correo'] ?? '')],
+                ['Clave',      (string) ($datos['clave'] ?? '')],
+                ['Perfil',     (string) ($datos['perfil'] ?? '')],
+                ['PIN',        (string) ($datos['pin'] ?? '')],
+            ],
+            'destacado'  => $venc !== '' ? ['Válido hasta', $venc] : [],
+            'nota'       => $paraQuien === 'revendedor'
+                ? '<b>Importante:</b> no cambies el correo ni la contraseña de la cuenta. Si el reemplazo también falla, respóndenos en este mismo ticket.'
+                : '',
+            // Ámbar: distingue de un vistazo la garantía de una venta normal (turquesa) o una renovación (verde).
+            'acento'     => '#f59e0b',
+        ]);
+    }
+}
+
 if (!function_exists('stream_email_cola_entregas')) {
     /** COLA de ventas espejo recién creadas por st_rev_entregar(), pendientes de aviso por correo.
      *
