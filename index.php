@@ -3289,12 +3289,33 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             .gg-drops-info-row { padding: 0.21rem 0.3rem; gap: 0.19rem; }
             .gg-drops-price-stack { flex-direction: column; align-items: flex-end; gap: 0.05rem; }
           }
+
+          /* Flechas: opcionales, solo para saltar más rápido — la animación
+             de scroll continuo (ver script más abajo) sigue igual, esto solo
+             empuja scrollLeft de una vez en vez de esperar el avance de a
+             poco. Visibles en PC y en móvil (a diferencia del slider de
+             reseñas, acá no se pidió limitarlas a mouse). */
+          .gg-drops-wrap { position: relative; }
+          .gg-drops-nav {
+            position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+            width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            background: rgba(11,20,32,0.85); border: 1px solid rgba(34,211,238,0.4); color: #22d3ee;
+            font-size: 1.3rem; line-height: 1; cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.35);
+          }
+          .gg-drops-nav:hover { border-color: #22d3ee; background: rgba(34,211,238,0.15); }
+          .gg-drops-nav-prev { left: -6px; }
+          .gg-drops-nav-next { right: -6px; }
+          @media (max-width: 576px) {
+            .gg-drops-nav { width: 28px; height: 28px; font-size: 1.1rem; }
+          }
         </style>
         <div class="d-flex align-items-center mb-3">
           <h2 class="fw-bold mb-0" style="font-family:'Oxanium',sans-serif;font-size:1.1rem;letter-spacing:0.04em;">
             <?= htmlspecialchars(store_config_get('gg_drops_nombre', 'GG DROPS'), ENT_QUOTES, 'UTF-8') ?> <span style="color:#22d3ee;">&#9889;</span>
           </h2>
         </div>
+        <div class="gg-drops-wrap">
+        <button type="button" class="gg-drops-nav gg-drops-nav-prev" data-gg-drops-nav="prev" aria-label="Retroceder">‹</button>
         <div class="gg-drops-track" id="gg-drops-track">
           <?php foreach ($ggDropsPackages as $dpkg):
             $dpkgImgSrc = '';
@@ -3360,6 +3381,8 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             </a>
           <?php endforeach; ?>
         </div>
+        <button type="button" class="gg-drops-nav gg-drops-nav-next" data-gg-drops-nav="next" aria-label="Avanzar">›</button>
+        </div>
         <script>
         (function () {
           var track = document.getElementById('gg-drops-track');
@@ -3370,7 +3393,10 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
             track.appendChild(card.cloneNode(true));
           });
 
-          var speed = 0.8; // px per frame (~48 px/s at 60 fps)
+          var baseSpeed = 0.8; // px per frame (~48 px/s at 60 fps) — velocidad "2" de siempre
+          var boostMultiplier = 2.5; // al mantener presionada una flecha, sube a velocidad "5"
+          var speed = baseSpeed;
+          var direction = 1; // 1 = hacia adelante (igual que siempre); -1 = hacia atrás mientras se sostiene "‹"
           var paused = false;
 
           track.addEventListener('mouseenter', function () { paused = true; });
@@ -3379,15 +3405,51 @@ $rouletteEnabled  = !empty($rouletteConfig['enabled']);
           function tick() {
             if (!paused) {
               var half = track.scrollWidth / 2;
-              track.scrollLeft += speed;
+              track.scrollLeft += speed * direction;
               if (track.scrollLeft >= half) {
                 track.scrollLeft -= half;
+              } else if (track.scrollLeft < 0) {
+                track.scrollLeft += half;
               }
             }
             requestAnimationFrame(tick);
           }
 
           requestAnimationFrame(tick);
+
+          // Flechas: NO saltan de golpe (se sentía brusco) — mientras se
+          // mantiene presionada (mouse o dedo), la MISMA animación de
+          // arriba acelera (velocidad base x2.5) y, si es la flecha
+          // izquierda, invierte el sentido; al soltar, vuelve sola a la
+          // velocidad y dirección de siempre.
+          var wrap = track.closest('.gg-drops-wrap');
+          if (wrap) {
+            function iniciarImpulso(dir) {
+              speed = baseSpeed * boostMultiplier;
+              direction = dir;
+            }
+            function detenerImpulso() {
+              speed = baseSpeed;
+              direction = 1;
+            }
+            wrap.querySelectorAll('[data-gg-drops-nav]').forEach(function (btn) {
+              var dir = btn.dataset.ggDropsNav === 'next' ? 1 : -1;
+              ['mousedown', 'touchstart'].forEach(function (evento) {
+                btn.addEventListener(evento, function (e) { e.preventDefault(); iniciarImpulso(dir); });
+              });
+              ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(function (evento) {
+                btn.addEventListener(evento, detenerImpulso);
+              });
+              // Respaldo para activación por teclado (Enter/Espacio): esos no
+              // disparan mousedown/touchstart, así que el "click" que sí
+              // generan da un empujón cronometrado en vez de quedar pegado.
+              btn.addEventListener('click', function (e) {
+                if (e.detail !== 0) return;
+                iniciarImpulso(dir);
+                window.setTimeout(detenerImpulso, 900);
+              });
+            });
+          }
         })();
         </script>
       </section>
