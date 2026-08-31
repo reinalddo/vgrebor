@@ -651,10 +651,18 @@ if (!function_exists('comentarios_render_modales')) {
           .cmt-notif-cargando, .cmt-notif-vacio { text-align:center; color:var(--theme-text-muted); padding:1.6rem 0; font-size:0.88rem; }
           .cmt-notif-item { background:rgba(var(--theme-bg-main-rgb),0.5); border:1px solid rgba(var(--theme-primary-rgb),0.22); border-radius:11px; padding:0.7rem 0.9rem; }
           .cmt-notif-item.no-leida { border-color:rgba(var(--theme-primary-rgb),0.6); background:rgba(var(--theme-primary-rgb),0.08); }
-          .cmt-notif-titulo-item { font-weight:700; color:var(--theme-text); font-size:0.9rem; display:flex; align-items:center; gap:0.4rem; }
+          .cmt-notif-fila { display:flex; align-items:flex-start; gap:0.5rem; }
+          .cmt-notif-cuerpo { flex:1; min-width:0; display:block; color:inherit; text-decoration:none; }
+          .cmt-notif-cuerpo:hover .cmt-notif-titulo-item { color:var(--theme-primary); }
+          .cmt-notif-titulo-item { font-weight:700; color:var(--theme-text); font-size:0.9rem; display:flex; align-items:center; gap:0.4rem; transition:color 0.15s; }
           .cmt-notif-punto { width:7px; height:7px; border-radius:50%; background:var(--theme-primary); flex-shrink:0; box-shadow:0 0 6px var(--theme-primary); }
           .cmt-notif-msg { color:var(--theme-text-muted); font-size:0.83rem; line-height:1.45; margin-top:0.2rem; }
           .cmt-notif-fecha { color:var(--theme-text-muted); opacity:0.7; font-size:0.7rem; margin-top:0.3rem; }
+          /* Botón "⋯" que despliega Destacar/Ocultar/Eliminar sin salir de la notificación. */
+          .cmt-notif-toggle { flex-shrink:0; width:28px; height:28px; border-radius:50%; border:1px solid rgba(var(--theme-text-muted-rgb),0.3); background:transparent; color:var(--theme-text-muted); font-size:1rem; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:border-color 0.15s, color 0.15s; }
+          .cmt-notif-toggle:hover, .cmt-notif-toggle.abierto { border-color:var(--theme-primary); color:var(--theme-primary); }
+          .cmt-notif-acciones { display:none; gap:0.5rem; flex-wrap:wrap; margin-top:0.6rem; padding-top:0.6rem; border-top:1px solid rgba(var(--theme-text-muted-rgb),0.18); }
+          .cmt-notif-acciones.abierta { display:flex; }
         </style>
 
         <script>
@@ -893,12 +901,45 @@ if (!function_exists('comentarios_render_modales')) {
                     lista.innerHTML = '<div class="cmt-notif-vacio">Todavía no tienes notificaciones.</div>';
                   } else {
                     lista.innerHTML = d.items.map(function (n) {
-                      return '<div class="cmt-notif-item' + (n.leido ? '' : ' no-leida') + '">'
+                      // Las reseñas nuevas (comentario_nuevo) llevan #comentario-{id} al final de su
+                      // url (ver comentarios_notificar_admins_nuevo): de ahí sale el id para las
+                      // acciones de moderación. Sin ese ancla, es una notificación normal sin acciones.
+                      var m = /#comentario-(\d+)/.exec(n.url || '');
+                      var comentarioId = m ? m[1] : '';
+                      var esResena = n.tipo === 'comentario_nuevo' && comentarioId !== '';
+                      var tieneLink = !!n.url && n.url !== '#';
+
+                      // El mensaje empieza con las estrellas en texto plano ("★★★★★ — ..."): se
+                      // separan para pintarlas con el mismo brillo ámbar que en el resto del sitio,
+                      // en vez de salir como texto plano sin color.
+                      var msgCruda = String(n.mensaje == null ? '' : n.mensaje);
+                      var mEstrellas = /^(★+)(.*)$/.exec(msgCruda);
+                      var msgHtml = mEstrellas
+                        ? '<span class="cmt-stars">' + escapar(mEstrellas[1]) + '</span>' + escapar(mEstrellas[2])
+                        : escapar(msgCruda);
+
+                      var cuerpoTag = tieneLink ? 'a' : 'div';
+                      var cuerpoAttrs = tieneLink ? ' href="' + escapar(n.url) + '"' : '';
+                      var cuerpo = '<' + cuerpoTag + ' class="cmt-notif-cuerpo"' + cuerpoAttrs + '>'
                         + '<div class="cmt-notif-titulo-item">'
                         + (n.leido ? '' : '<span class="cmt-notif-punto"></span>')
                         + escapar(n.titulo || 'Notificación') + '</div>'
-                        + '<div class="cmt-notif-msg">' + escapar(n.mensaje) + '</div>'
+                        + '<div class="cmt-notif-msg">' + msgHtml + '</div>'
                         + '<div class="cmt-notif-fecha">' + escapar(fechaCorta(n.creado_en)) + '</div>'
+                        + '</' + cuerpoTag + '>';
+
+                      var toggle = esResena ? '<button type="button" class="cmt-notif-toggle" data-cmt-notif-toggle aria-label="Más opciones">⋯</button>' : '';
+                      var acciones = esResena
+                        ? '<div class="cmt-notif-acciones">'
+                          + '<button type="button" class="cmt-mini-accion" data-cmt-admin-accion="ocultar" data-cmt-admin-id="' + comentarioId + '">Ocultar</button>'
+                          + '<button type="button" class="cmt-mini-accion" data-cmt-admin-accion="destacar" data-cmt-admin-id="' + comentarioId + '" data-cmt-admin-destacar="1">Destacar</button>'
+                          + '<button type="button" class="cmt-mini-accion cmt-mini-accion-peligro" data-cmt-admin-accion="eliminar" data-cmt-admin-id="' + comentarioId + '">Eliminar</button>'
+                          + '</div>'
+                        : '';
+
+                      return '<div class="cmt-notif-item' + (n.leido ? '' : ' no-leida') + '">'
+                        + '<div class="cmt-notif-fila">' + cuerpo + toggle + '</div>'
+                        + acciones
                         + '</div>';
                     }).join('');
                   }
@@ -928,6 +969,82 @@ if (!function_exists('comentarios_render_modales')) {
             });
             document.addEventListener('keydown', function (e) {
               if (e.key === 'Escape' && !modalNotif.classList.contains('d-none')) cerrar(modalNotif);
+            });
+
+            // Moderación DENTRO de la notificación (Destacar/Ocultar/Eliminar) — delegado en `lista`
+            // porque las notificaciones se pintan de nuevo cada vez que se abre el modal (innerHTML),
+            // así que un listener puesto directo en los botones se perdería en la siguiente carga.
+            // Reusa el mismo endpoint/contrato que la moderación en línea de la tarjeta pública
+            // (admin/comentarios.php), pero es un manejador APARTE: ese otro nunca se toca.
+            var ADMIN_ENDPOINT_NOTIF = <?= json_encode(app_path('/admin/comentarios.php'), JSON_UNESCAPED_SLASHES) ?>;
+            var notifAbierta = null; // <div class="cmt-notif-acciones"> actualmente desplegada (una sola a la vez)
+
+            function cerrarAccionesAbiertas() {
+              if (!notifAbierta) return;
+              notifAbierta.classList.remove('abierta');
+              var t = notifAbierta.previousElementSibling ? notifAbierta.previousElementSibling.querySelector('[data-cmt-notif-toggle]') : null;
+              if (t) t.classList.remove('abierto');
+              notifAbierta = null;
+            }
+
+            lista.addEventListener('click', function (e) {
+              var toggle = e.target.closest('[data-cmt-notif-toggle]');
+              if (toggle) {
+                e.preventDefault();
+                var item = toggle.closest('.cmt-notif-item');
+                var acciones = item ? item.querySelector('.cmt-notif-acciones') : null;
+                if (!acciones) return;
+                var yaAbierta = acciones === notifAbierta;
+                cerrarAccionesAbiertas(); // una sola desplegada a la vez: cerrar cualquier otra antes de abrir esta
+                if (!yaAbierta) {
+                  acciones.classList.add('abierta');
+                  toggle.classList.add('abierto');
+                  notifAbierta = acciones;
+                }
+                return;
+              }
+
+              var btn = e.target.closest('[data-cmt-admin-accion]');
+              if (!btn) return;
+              e.preventDefault();
+              var accion = btn.dataset.cmtAdminAccion;
+              var id = btn.dataset.cmtAdminId;
+              var item = btn.closest('.cmt-notif-item');
+
+              if (accion === 'eliminar' && !window.confirm('¿Eliminar este comentario? Se descontarán al usuario los RE Coins que se le otorgaron por él.')) return;
+              if (accion === 'ocultar' && !window.confirm('¿Ocultar este comentario de la página?')) return;
+
+              var datos = { comentario_id: id };
+              if (accion === 'ocultar') { datos.accion = 'moderar'; datos.estado = 'oculto'; }
+              else if (accion === 'destacar') { datos.accion = 'destacar'; datos.destacar = btn.dataset.cmtAdminDestacar; }
+              else if (accion === 'eliminar') { datos.accion = 'eliminar'; }
+              else return;
+
+              btn.disabled = true;
+              var body = new FormData();
+              Object.keys(datos).forEach(function (k) { body.append(k, datos[k]); });
+              fetch(ADMIN_ENDPOINT_NOTIF, { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                  btn.disabled = false;
+                  if (!data.success) { window.alert(data.message || 'No se pudo completar la acción.'); return; }
+
+                  if (accion === 'ocultar' || accion === 'eliminar') {
+                    if (item) {
+                      item.style.transition = 'opacity 0.25s';
+                      item.style.opacity = '0';
+                      window.setTimeout(function () { item.remove(); }, 250);
+                    }
+                    return;
+                  }
+                  if (accion === 'destacar') {
+                    var ahoraDestacado = !!data.destacado;
+                    btn.dataset.cmtAdminDestacar = ahoraDestacado ? '0' : '1';
+                    btn.textContent = ahoraDestacado ? 'Quitar destacado' : 'Destacar';
+                    btn.classList.toggle('activo', ahoraDestacado);
+                  }
+                })
+                .catch(function () { btn.disabled = false; window.alert('No se pudo completar la acción.'); });
             });
 
             // Contador al cargar la página (sin abrir el modal).

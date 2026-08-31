@@ -899,7 +899,7 @@ if (!function_exists('comentarios_pedido_sugerido')) {
 // (mismo criterio que notificaciones_crear()) para no tumbar la publicación
 // si esto falla.
 if (!function_exists('comentarios_notificar_admins_nuevo')) {
-    function comentarios_notificar_admins_nuevo(mysqli $mysqli, int $comentarioId, int $autorId, int $estrellas, string $texto, string $etiquetaPedido): void {
+    function comentarios_notificar_admins_nuevo(mysqli $mysqli, int $comentarioId, int $autorId, int $estrellas, string $texto, string $etiquetaPedido, int $juegoId = 0): void {
         require_once __DIR__ . '/notificaciones.php';
         $admins = $mysqli->query("SELECT id FROM usuarios WHERE rol IN ('admin','root')");
         if (!($admins instanceof mysqli_result)) {
@@ -907,12 +907,17 @@ if (!function_exists('comentarios_notificar_admins_nuevo')) {
         }
         $resumenTexto = mb_strlen($texto, 'UTF-8') > 80 ? mb_substr($texto, 0, 80, 'UTF-8') . '…' : $texto;
         $mensaje = str_repeat('★', max(0, min(5, $estrellas))) . ($etiquetaPedido !== '' ? ' — ' . $etiquetaPedido : '') . ': "' . $resumenTexto . '"';
+        // Link directo al comentario en la ficha del juego (mismo ancla #comentario-{id} que ya usa
+        // el slider de destacados del home) — antes iba a '/admin/comentarios' sin identificar CUÁL
+        // reseña, así que tocar la notificación no llevaba a ningún lado útil. Si por algo no hay
+        // juego_id (pedido legado sin ese dato), cae al link genérico de antes, nunca se rompe.
+        $url = $juegoId > 0 ? ('/game.php?id=' . $juegoId . '#comentario-' . $comentarioId) : '/admin/comentarios';
         while ($fila = $admins->fetch_assoc()) {
             $adminId = (int) $fila['id'];
             if ($adminId <= 0 || $adminId === $autorId) {
                 continue;
             }
-            notificaciones_crear($mysqli, $adminId, 'Nueva reseña recibida', $mensaje, 'comentario_nuevo', '/admin/comentarios');
+            notificaciones_crear($mysqli, $adminId, 'Nueva reseña recibida', $mensaje, 'comentario_nuevo', $url);
         }
     }
 }
@@ -1006,7 +1011,17 @@ if (!function_exists('comentarios_publicar')) {
             // Notificación al/los admin(s). Va DESPUÉS del commit a
             // propósito (mismo criterio que comentarios_admin_destacar()):
             // si fallara, no debe deshacer la reseña ya publicada.
-            comentarios_notificar_admins_nuevo($mysqli, $comentarioId, $usuarioId, $estrellas, $texto, (string) ($pedidoResuelto['etiqueta'] ?? ''));
+            $juegoIdNotif = 0;
+            try {
+                $qJuego = $mysqli->prepare('SELECT juego_id FROM pedidos WHERE id = ? LIMIT 1');
+                if ($qJuego) {
+                    $qJuego->bind_param('i', $pedidoId);
+                    $qJuego->execute();
+                    $juegoIdNotif = (int) ($qJuego->get_result()->fetch_assoc()['juego_id'] ?? 0);
+                    $qJuego->close();
+                }
+            } catch (Throwable $e) {}
+            comentarios_notificar_admins_nuevo($mysqli, $comentarioId, $usuarioId, $estrellas, $texto, (string) ($pedidoResuelto['etiqueta'] ?? ''), $juegoIdNotif);
 
             return [
                 'ok' => true,
