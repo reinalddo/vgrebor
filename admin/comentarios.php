@@ -142,6 +142,10 @@ $etiquetasEstado = [
     .cm-input:focus { background:#222c3a; color:#00fff7; border-color:#00fff7; box-shadow:0 0 0 0.2rem rgba(0,255,247,0.25); }
     .cm-item { background:#141c28; border:1px solid #222c3a; border-radius:12px; padding:1rem 1.2rem; margin-bottom:0.85rem; }
     .cm-item.destacado { border-color:rgba(250,204,21,0.55); box-shadow:0 0 12px rgba(250,204,21,0.12); }
+    /* Resaltado momentáneo al llegar desde una notificación (#comentario-N),
+       mismo gesto que ya hace la ficha pública del juego: la lista puede ser
+       larga y sin esto no se sabe CUÁL reseña se vino a ver. */
+    .cm-item.resaltado { border-color:#00fff7; box-shadow:0 0 22px rgba(0,255,247,0.45); }
     .cm-avatar { flex-shrink:0; width:42px; height:42px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:800; background:rgba(0,255,247,0.12); color:#00fff7; border:1px solid rgba(0,255,247,0.4); }
     .cm-estrellas { color:#facc15; font-size:0.9rem; letter-spacing:0.08em; }
     .cm-texto { color:#e2e8f0; font-size:0.95rem; margin:0.4rem 0 0; }
@@ -265,7 +269,7 @@ $etiquetasEstado = [
     <?php if (empty($listado)): ?>
       <p class="text-secondary text-center mb-0">No hay comentarios en esta categoría.</p>
     <?php else: foreach ($listado as $c): ?>
-      <div class="cm-item<?= $c['destacado'] ? ' destacado' : '' ?>" data-cm-item="<?= $c['id'] ?>">
+      <div class="cm-item<?= $c['destacado'] ? ' destacado' : '' ?>" id="comentario-<?= (int) $c['id'] ?>" data-cm-item="<?= $c['id'] ?>">
         <div class="d-flex gap-3 align-items-start">
           <span class="cm-avatar"><?= htmlspecialchars(mb_strtoupper(mb_substr($c['usuario_nombre'], 0, 1)), ENT_QUOTES, 'UTF-8') ?></span>
           <div class="flex-grow-1 min-w-0">
@@ -344,6 +348,21 @@ $etiquetasEstado = [
         mostrarFlash(flashEl, 'Error de conexión. Intenta de nuevo.', false);
       });
   }
+
+  // Llegada desde una notificación de reseña (#comentario-N): hacer scroll a
+  // ESA reseña y resaltarla. Sin esto, el link de la notificación dejaba al
+  // admin arriba de la página de configuración sin señalar cuál era la reseña
+  // — justo lo que se reportó ("te envía a la configuración de comentarios,
+  // pero no en específico al que se le dio clic").
+  (function () {
+    var m = (window.location.hash || '').match(/^#comentario-(\d+)$/);
+    if (!m) return;
+    var el = document.getElementById('comentario-' + m[1]);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('resaltado');
+    window.setTimeout(function () { el.classList.remove('resaltado'); }, 3000);
+  })();
 
   // Acciones sobre cada comentario
   document.querySelectorAll('[data-cm-item]').forEach(function (item) {

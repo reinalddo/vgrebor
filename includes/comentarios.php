@@ -219,7 +219,7 @@ if (!function_exists('comentarios_ensure_schema')) {
         // referidos_schema_version). Al agregar columnas nuevas hay que
         // SUBIR este número, si no la migración nunca corre en instalaciones
         // que ya tenían la versión anterior.
-        if (trim((string) store_config_get('comentarios_schema_version', '')) === '2') {
+        if (trim((string) store_config_get('comentarios_schema_version', '')) === '3') {
             return;
         }
 
@@ -322,7 +322,105 @@ if (!function_exists('comentarios_ensure_schema')) {
             }
         }
 
-        store_config_upsert('comentarios_schema_version', '2', 'No tocar: marca la versión del esquema del sistema de Comentarios ya aplicada, para no repetir SHOW COLUMNS en cada request.');
+        comentarios_reparar_urls_notificaciones($mysqli);
+
+        store_config_upsert('comentarios_schema_version', '3', 'No tocar: marca la versión del esquema del sistema de Comentarios ya aplicada, para no repetir SHOW COLUMNS en cada request.');
+    }
+}
+
+// Repara las notificaciones de reseña YA creadas con la URL rota (sin el
+// ancla #comentario-N) — ver el bug en comentarios_resolver_juego_id_pedido().
+// Sin esto, las notificaciones que el admin ya tiene en pantalla seguirían sin
+// botones y apuntando a la configuración, aunque las nuevas salgan bien.
+//
+// El emparejamiento NO es adivinado: el mensaje que se guarda es determinista
+// (estrellas + etiqueta del pedido + texto recortado a 80, ver
+// comentarios_notificar_admins_nuevo), así que se reconstruye para cada reseña
+// y se compara EXACTO contra el mensaje almacenado. Si un mismo mensaje casara
+// con varias reseñas (dos idénticas), se usa la más cercana en tiempo a la
+// notificación; si aun así hay empate, se deja como está (nunca se inventa un
+// destino). Idempotente: solo toca filas sin el ancla.
+if (!function_exists('comentarios_reparar_urls_notificaciones')) {
+    function comentarios_reparar_urls_notificaciones(mysqli $mysqli): void {
+        try {
+            $tabla = $mysqli->query("SHOW TABLES LIKE 'notificaciones'");
+            if (!($tabla instanceof mysqli_result) || $tabla->num_rows === 0) {
+                return;
+            }
+
+            $rotas = $mysqli->query(
+                "SELECT id, mensaje, creado_en FROM notificaciones
+                  WHERE tipo = 'comentario_nuevo' AND mensaje <> '' AND url NOT LIKE '%#comentario-%'"
+            );
+            if (!($rotas instanceof mysqli_result) || $rotas->num_rows === 0) {
+                return;
+            }
+            $pendientes = $rotas->fetch_all(MYSQLI_ASSOC);
+
+            // Todas las reseñas con los datos que componen el mensaje.
+            $resenas = $mysqli->query(
+                'SELECT c.id, c.estrellas, c.texto, c.creado_en, c.pedido_id,
+                        p.juego_nombre, p.paquete_nombre
+                   FROM comentarios_clientes c
+                   LEFT JOIN pedidos p ON p.id = c.pedido_id'
+            );
+            if (!($resenas instanceof mysqli_result)) {
+                return;
+            }
+
+            $porMensaje = [];
+            while ($r = $resenas->fetch_assoc()) {
+                $texto = (string) $r['texto'];
+                $resumen = mb_strlen($texto, 'UTF-8') > 80
+                    ? mb_substr($texto, 0, 80, 'UTF-8') . '…'
+                    : $texto;
+                $etiqueta = comentarios_etiqueta_pedido($r);
+                $mensaje = str_repeat('★', max(0, min(5, (int) $r['estrellas'])))
+                    . ($etiqueta !== '' ? ' — ' . $etiqueta : '')
+                    . ': "' . $resumen . '"';
+                $mensaje = mb_substr(trim($mensaje), 0, 600, 'UTF-8');
+                $porMensaje[$mensaje][] = [
+                    'id' => (int) $r['id'],
+                    'pedido_id' => (int) $r['pedido_id'],
+                    'ts' => strtotime((string) $r['creado_en']) ?: 0,
+                ];
+            }
+
+            $juegoPorPedido = [];
+            $upd = $mysqli->prepare('UPDATE notificaciones SET url = ? WHERE id = ?');
+            if (!$upd) {
+                return;
+            }
+            foreach ($pendientes as $n) {
+                $candidatos = $porMensaje[(string) $n['mensaje']] ?? [];
+                if (!$candidatos) {
+                    continue;
+                }
+                if (count($candidatos) > 1) {
+                    // Desempate por cercanía temporal (la notificación se crea
+                    // justo después de la reseña).
+                    $refTs = strtotime((string) $n['creado_en']) ?: 0;
+                    usort($candidatos, static function ($a, $b) use ($refTs) {
+                        return abs($a['ts'] - $refTs) <=> abs($b['ts'] - $refTs);
+                    });
+                    if (abs($candidatos[0]['ts'] - $refTs) === abs($candidatos[1]['ts'] - $refTs)) {
+                        continue; // empate real: no arriesgar un destino equivocado
+                    }
+                }
+                $elegido = $candidatos[0];
+                $pedidoId = $elegido['pedido_id'];
+                if (!array_key_exists($pedidoId, $juegoPorPedido)) {
+                    $juegoPorPedido[$pedidoId] = comentarios_resolver_juego_id_pedido($mysqli, $pedidoId);
+                }
+                $url = comentarios_url_notificacion($elegido['id'], $juegoPorPedido[$pedidoId]);
+                $notifId = (int) $n['id'];
+                $upd->bind_param('si', $url, $notifId);
+                $upd->execute();
+            }
+            $upd->close();
+        } catch (Throwable $e) {
+            error_log('TVG comentarios: no se pudieron reparar las URLs de notificaciones: ' . $e->getMessage());
+        }
     }
 }
 
@@ -892,6 +990,70 @@ if (!function_exists('comentarios_pedido_sugerido')) {
     }
 }
 
+// Resuelve el juego de un pedido para armar el link de la notificación.
+//
+// BUG REAL (2026-08-30): esto antes leía SOLO `pedidos.juego_id`, y en la
+// práctica ese campo viene en 0 en los pedidos que la gente comenta (el
+// nombre sí está: 'FREE FIRE', 'MOBILE LEGENDS'…, pero el id no se llenó).
+// Con juego_id=0 la URL caía al genérico '/admin/comentarios' SIN el ancla
+// #comentario-N — y como el panel de notificaciones saca el id del comentario
+// justamente de ese ancla, se perdían LAS DOS COSAS a la vez: el link directo
+// a la reseña Y todos los botones de moderación. Por eso el cliente reportaba
+// "no tiene las opciones" y "te envía a la configuración" como si fueran dos
+// fallos: era el mismo. Ahora, si juego_id no sirve, se resuelve por NOMBRE
+// contra la tabla `juegos` antes de rendirse.
+if (!function_exists('comentarios_resolver_juego_id_pedido')) {
+    function comentarios_resolver_juego_id_pedido(mysqli $mysqli, int $pedidoId): int {
+        if ($pedidoId <= 0) {
+            return 0;
+        }
+        try {
+            $stmt = $mysqli->prepare('SELECT juego_id, juego_nombre FROM pedidos WHERE id = ? LIMIT 1');
+            if (!$stmt) {
+                return 0;
+            }
+            $stmt->bind_param('i', $pedidoId);
+            $stmt->execute();
+            $fila = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if (!$fila) {
+                return 0;
+            }
+            $juegoId = (int) ($fila['juego_id'] ?? 0);
+            if ($juegoId > 0) {
+                return $juegoId;
+            }
+            $nombre = trim((string) ($fila['juego_nombre'] ?? ''));
+            if ($nombre === '') {
+                return 0;
+            }
+            $q = $mysqli->prepare('SELECT id FROM juegos WHERE UPPER(TRIM(nombre)) = UPPER(TRIM(?)) LIMIT 1');
+            if (!$q) {
+                return 0;
+            }
+            $q->bind_param('s', $nombre);
+            $q->execute();
+            $encontrado = (int) ($q->get_result()->fetch_assoc()['id'] ?? 0);
+            $q->close();
+            return $encontrado;
+        } catch (Throwable $e) {
+            return 0;
+        }
+    }
+}
+
+// URL de una notificación de reseña. El ancla #comentario-N va SIEMPRE, se
+// haya podido resolver el juego o no: de ese ancla salen los botones de
+// moderación del panel de notificaciones, así que perderlo deja la tarjeta
+// sin acciones (ver el bug de arriba). Si no hay juego, al menos lleva a la
+// pantalla de comentarios en vez de a ningún lado.
+if (!function_exists('comentarios_url_notificacion')) {
+    function comentarios_url_notificacion(int $comentarioId, int $juegoId): string {
+        $base = $juegoId > 0 ? ('/game.php?id=' . $juegoId) : '/admin/comentarios';
+        return $base . '#comentario-' . $comentarioId;
+    }
+}
+
 // Avisa a todos los admin/root (menos al autor, por si un admin comenta su
 // propia compra) de que llegó una reseña nueva — pedido explícito del
 // cliente: antes solo se notificaba al AUTOR cuando se destacaba su
@@ -908,10 +1070,9 @@ if (!function_exists('comentarios_notificar_admins_nuevo')) {
         $resumenTexto = mb_strlen($texto, 'UTF-8') > 80 ? mb_substr($texto, 0, 80, 'UTF-8') . '…' : $texto;
         $mensaje = str_repeat('★', max(0, min(5, $estrellas))) . ($etiquetaPedido !== '' ? ' — ' . $etiquetaPedido : '') . ': "' . $resumenTexto . '"';
         // Link directo al comentario en la ficha del juego (mismo ancla #comentario-{id} que ya usa
-        // el slider de destacados del home) — antes iba a '/admin/comentarios' sin identificar CUÁL
-        // reseña, así que tocar la notificación no llevaba a ningún lado útil. Si por algo no hay
-        // juego_id (pedido legado sin ese dato), cae al link genérico de antes, nunca se rompe.
-        $url = $juegoId > 0 ? ('/game.php?id=' . $juegoId . '#comentario-' . $comentarioId) : '/admin/comentarios';
+        // el slider de destacados del home). El ancla va SIEMPRE, aunque no se resuelva el juego:
+        // el panel de notificaciones saca de ahí el id para pintar los botones de moderación.
+        $url = comentarios_url_notificacion($comentarioId, $juegoId);
         while ($fila = $admins->fetch_assoc()) {
             $adminId = (int) $fila['id'];
             if ($adminId <= 0 || $adminId === $autorId) {
@@ -1011,16 +1172,9 @@ if (!function_exists('comentarios_publicar')) {
             // Notificación al/los admin(s). Va DESPUÉS del commit a
             // propósito (mismo criterio que comentarios_admin_destacar()):
             // si fallara, no debe deshacer la reseña ya publicada.
-            $juegoIdNotif = 0;
-            try {
-                $qJuego = $mysqli->prepare('SELECT juego_id FROM pedidos WHERE id = ? LIMIT 1');
-                if ($qJuego) {
-                    $qJuego->bind_param('i', $pedidoId);
-                    $qJuego->execute();
-                    $juegoIdNotif = (int) ($qJuego->get_result()->fetch_assoc()['juego_id'] ?? 0);
-                    $qJuego->close();
-                }
-            } catch (Throwable $e) {}
+            // Resolver robusto (juego_id y, si viene en 0, por nombre): ver
+            // comentarios_resolver_juego_id_pedido() y el bug que documenta.
+            $juegoIdNotif = comentarios_resolver_juego_id_pedido($mysqli, $pedidoId);
             comentarios_notificar_admins_nuevo($mysqli, $comentarioId, $usuarioId, $estrellas, $texto, (string) ($pedidoResuelto['etiqueta'] ?? ''), $juegoIdNotif);
 
             return [
