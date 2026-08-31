@@ -42,12 +42,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // acredita al instante. Si no casa, queda pendiente (aprobación manual). El monto en $ es lo
             // que se acredita; si el método se paga en Bs (VES), el pago real (y el movimiento) van en Bs,
             // así que se pasa el monto EN BS para casarlo (monto en $ × tasa).
+            //
+            // BUG CORREGIDO (2026-08-30): antes esto buscaba una fila de payment_methods cuyo NOMBRE
+            // coincidiera EXACTO con $metodo. Nunca coincidía: el <select> de más abajo tiene una lista
+            // de RESPALDO con el valor fijo "Pago Móvil" (sin banco) para cuando no hay métodos activos
+            // configurados, pero la fila real en payment_methods se llama "Pago Móvil Mercantil" (con
+            // el banco) — nunca son el mismo string. Sin coincidencia, $montoMatch se quedaba en null,
+            // y sbr_bank_verify_and_credit() terminaba comparando el monto EN DÓLARES (ej. $20) contra
+            // movimientos que están en MILES DE BOLÍVARES → nunca encontraba nada, SIEMPRE quedaba
+            // pendiente de aprobación manual aunque el pago fuera perfecto. Ahora se usa el MISMO
+            // clasificador por contenido (sbr_metodo_slug) que ya usa el resto del motor más abajo —
+            // reconoce "Pago Móvil"/"BNC" venga como venga escrito, sin depender de una fila exacta.
             $montoMatch = null;
             try {
-                $mc = $pdo->prepare("SELECT UPPER(COALESCE(mo.clave,'')) FROM payment_methods pm LEFT JOIN monedas mo ON mo.id=pm.moneda_id WHERE pm.nombre=? AND pm.activo=1 LIMIT 1");
-                $mc->execute([$metodo]);
-                $clv = (string) ($mc->fetchColumn() ?: '');
-                if ($clv === 'BS' || $clv === 'VES') {
+                require_once __DIR__ . '/../../includes/streaming_recarga_binance.php';
+                $slugMonto = function_exists('sbr_metodo_slug') ? sbr_metodo_slug($metodo) : '';
+                if ($slugMonto === 'bnc' || $slugMonto === 'pagomovil') {
                     $tbs = (float) ($pdo->query("SELECT tasa FROM monedas WHERE UPPER(clave)='BS' AND activo=1 LIMIT 1")->fetchColumn() ?: 0);
                     if ($tbs > 0) $montoMatch = round($monto * $tbs, 2);
                 }
