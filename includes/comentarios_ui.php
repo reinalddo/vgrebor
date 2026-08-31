@@ -663,6 +663,7 @@ if (!function_exists('comentarios_render_modales')) {
           .cmt-notif-toggle:hover, .cmt-notif-toggle.abierto { border-color:var(--theme-primary); color:var(--theme-primary); }
           .cmt-notif-acciones { display:none; gap:0.5rem; flex-wrap:wrap; margin-top:0.6rem; padding-top:0.6rem; border-top:1px solid rgba(var(--theme-text-muted-rgb),0.18); }
           .cmt-notif-acciones.abierta { display:flex; }
+          .cmt-notif-respuesta { flex-basis:100%; margin-top:0.5rem; }
         </style>
 
         <script>
@@ -928,12 +929,23 @@ if (!function_exists('comentarios_render_modales')) {
                         + '<div class="cmt-notif-fecha">' + escapar(fechaCorta(n.creado_en)) + '</div>'
                         + '</' + cuerpoTag + '>';
 
+                      // Mismo set de botones que ya tiene la tarjeta pública del comentario (Me
+                      // gusta/Ocultar/Destacar/Responder/Eliminar) — el admin lo pidió completo,
+                      // no solo las 3 de moderación. "Me gusta" no trae aquí el conteo real (la
+                      // API de notificaciones no lo manda), arranca en 0/no-activo y se autocorrige
+                      // con lo que responda el servidor al primer clic, igual que ya hace "Destacar".
                       var toggle = esResena ? '<button type="button" class="cmt-notif-toggle" data-cmt-notif-toggle aria-label="Más opciones">⋯</button>' : '';
                       var acciones = esResena
                         ? '<div class="cmt-notif-acciones">'
+                          + '<button type="button" class="cmt-util" data-cmt-notif-like="' + comentarioId + '"><span aria-hidden="true">👍</span> Me gusta <span class="cmt-util-n"></span></button>'
                           + '<button type="button" class="cmt-mini-accion" data-cmt-admin-accion="ocultar" data-cmt-admin-id="' + comentarioId + '">Ocultar</button>'
                           + '<button type="button" class="cmt-mini-accion" data-cmt-admin-accion="destacar" data-cmt-admin-id="' + comentarioId + '" data-cmt-admin-destacar="1">Destacar</button>'
+                          + '<button type="button" class="cmt-mini-accion" data-cmt-notif-toggle-responder="' + comentarioId + '">Responder</button>'
                           + '<button type="button" class="cmt-mini-accion cmt-mini-accion-peligro" data-cmt-admin-accion="eliminar" data-cmt-admin-id="' + comentarioId + '">Eliminar</button>'
+                          + '<div class="cmt-notif-respuesta d-none" data-cmt-notif-respuesta="' + comentarioId + '">'
+                            + '<textarea class="cmt-textarea" rows="2" data-cmt-notif-respuesta-input placeholder="Responder oficialmente (vacío borra la respuesta)"></textarea>'
+                            + '<button type="button" class="cmt-mini-accion mt-2" data-cmt-admin-accion="responder" data-cmt-admin-id="' + comentarioId + '">Guardar respuesta</button>'
+                            + '</div>'
                           + '</div>'
                         : '';
 
@@ -1004,6 +1016,39 @@ if (!function_exists('comentarios_render_modales')) {
                 return;
               }
 
+              // "Me gusta" desde la notificación — mismo endpoint público (api/comentarios.php) que
+              // ya usa la tarjeta del comentario, no el de moderación de admin.
+              var btnLike = e.target.closest('[data-cmt-notif-like]');
+              if (btnLike) {
+                e.preventDefault();
+                btnLike.disabled = true;
+                fetch(API + '?action=like', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ comentario_id: btnLike.dataset.cmtNotifLike }),
+                })
+                  .then(function (r) { return r.json(); })
+                  .then(function (d) {
+                    if (d.ok) {
+                      btnLike.classList.toggle('activo', !!d.activo);
+                      var n = btnLike.querySelector('.cmt-util-n');
+                      if (n) n.textContent = d.likes > 0 ? '(' + d.likes + ')' : '';
+                    }
+                  })
+                  .catch(function () {})
+                  .finally(function () { btnLike.disabled = false; });
+                return;
+              }
+
+              // Despliega/oculta la cajita de "Responder oficialmente" de esta notificación.
+              var toggleResp = e.target.closest('[data-cmt-notif-toggle-responder]');
+              if (toggleResp) {
+                e.preventDefault();
+                var editor = document.querySelector('[data-cmt-notif-respuesta="' + toggleResp.dataset.cmtNotifToggleResponder + '"]');
+                if (editor) editor.classList.toggle('d-none');
+                return;
+              }
+
               var btn = e.target.closest('[data-cmt-admin-accion]');
               if (!btn) return;
               e.preventDefault();
@@ -1018,6 +1063,12 @@ if (!function_exists('comentarios_render_modales')) {
               if (accion === 'ocultar') { datos.accion = 'moderar'; datos.estado = 'oculto'; }
               else if (accion === 'destacar') { datos.accion = 'destacar'; datos.destacar = btn.dataset.cmtAdminDestacar; }
               else if (accion === 'eliminar') { datos.accion = 'eliminar'; }
+              else if (accion === 'responder') {
+                datos.accion = 'responder';
+                var editorResp = document.querySelector('[data-cmt-notif-respuesta="' + id + '"]');
+                var inputResp = editorResp ? editorResp.querySelector('[data-cmt-notif-respuesta-input]') : null;
+                datos.respuesta = inputResp ? inputResp.value : '';
+              }
               else return;
 
               btn.disabled = true;
@@ -1042,6 +1093,11 @@ if (!function_exists('comentarios_render_modales')) {
                     btn.dataset.cmtAdminDestacar = ahoraDestacado ? '0' : '1';
                     btn.textContent = ahoraDestacado ? 'Quitar destacado' : 'Destacar';
                     btn.classList.toggle('activo', ahoraDestacado);
+                  }
+                  if (accion === 'responder') {
+                    var editorResp2 = document.querySelector('[data-cmt-notif-respuesta="' + id + '"]');
+                    if (editorResp2) editorResp2.classList.add('d-none'); // se guardó: se cierra la cajita
+                    window.alert(data.respuesta ? 'Respuesta guardada.' : 'Respuesta eliminada.');
                   }
                 })
                 .catch(function () { btn.disabled = false; window.alert('No se pudo completar la acción.'); });
