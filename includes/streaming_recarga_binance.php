@@ -69,7 +69,7 @@ if (!function_exists('sbr_binance_digits')) {
     // funciona con referencias de cualquier largo. Si el admin ya configuró un número de dígitos para
     // su método Binance en payment_methods, se respeta ESE (mismo criterio que la tienda y que BNC),
     // porque es una decisión suya explícita para ese método — nunca se hereda una config ajena.
-    function sbr_binance_digits(PDO $pdo = null, string $metodoNombre = ''): int {
+    function sbr_binance_digits(?PDO $pdo = null, string $metodoNombre = ''): int {
         if ($pdo instanceof PDO) {
             $pm = sbr_payment_method_digits($pdo, 'binance', $metodoNombre);
             if ($pm !== null) return $pm;
@@ -252,6 +252,81 @@ if (!function_exists('sbr_payment_method_digits')) {
             if ($porSlug === null) $porSlug = $d;
         }
         return $porSlug;
+    }
+}
+
+if (!function_exists('sbr_monto_a_casar')) {
+    /** Monto contra el que hay que casar el movimiento, en la MONEDA REAL del método elegido.
+     *
+     *  El saldo se acredita en $, pero el pago (y por tanto el movimiento del banco) va en la moneda
+     *  del método: Bs para Pago Móvil/BNC, USD/USDT para Binance. Si se busca el movimiento por el
+     *  monto en DÓLARES cuando el pago fue en BOLÍVARES, no casa nunca y la recarga queda "pendiente"
+     *  eternamente aunque el pago sea perfecto (ese fue un bug real ya visto acá).
+     *
+     *  La tasa se toma del MÉTODO DE PAGO elegido (payment_methods.moneda_id → monedas.tasa), que es
+     *  la fuente correcta: es la misma fila que la tienda usa para cobrarle al cliente y la que se le
+     *  muestra al revendedor en pantalla ("A pagar: X Bs"). Antes se leía una fila fija buscando
+     *  UPPER(clave)='BS', que se rompe sola si mañana esa moneda se llama distinto (VES, BSD…) o se
+     *  desactiva: sin fila, no había tasa, y se terminaba buscando el movimiento por el monto en $.
+     *  Se mantiene esa búsqueda como último respaldo.
+     *
+     *  Devuelve null si no hay conversión que aplicar (el monto en $ ya sirve, p. ej. Binance/USDT).
+     */
+    function sbr_monto_a_casar(PDO $pdo, string $metodo, float $montoUsd): ?float {
+        if ($montoUsd <= 0) return null;
+        $slug = sbr_metodo_slug($metodo);
+        if ($slug !== 'bnc' && $slug !== 'pagomovil') return null;   // Binance/USDT: 1:1, sin conversión
+        $tasa = 0.0;
+        try {
+            // 1) La tasa del método exacto que eligió el revendedor.
+            $st = $pdo->prepare("SELECT mo.tasa FROM payment_methods pm
+                                   LEFT JOIN monedas mo ON mo.id = pm.moneda_id
+                                  WHERE pm.activo=1 AND LOWER(TRIM(pm.nombre)) = LOWER(TRIM(?)) LIMIT 1");
+            $st->execute([$metodo]);
+            $tasa = (float) ($st->fetchColumn() ?: 0);
+            // 2) Cualquier método activo del mismo tipo (el <select> tiene una lista de respaldo cuyos
+            //    nombres no siempre coinciden con la fila real: "Pago Móvil" vs "Pago Móvil Mercantil").
+            if ($tasa <= 0) {
+                $rows = $pdo->query("SELECT pm.nombre, mo.tasa FROM payment_methods pm
+                                       LEFT JOIN monedas mo ON mo.id = pm.moneda_id
+                                      WHERE pm.activo=1")->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($rows as $r) {
+                    if (sbr_metodo_slug((string) $r['nombre']) !== $slug) continue;
+                    $t = (float) ($r['tasa'] ?? 0);
+                    if ($t > 0) { $tasa = $t; break; }
+                }
+            }
+            // 3) Último respaldo: la moneda Bs de la tienda, como se hacía antes.
+            if ($tasa <= 0) {
+                $tasa = (float) ($pdo->query("SELECT tasa FROM monedas WHERE UPPER(clave) IN ('BS','VES','BSD','VED') AND activo=1 ORDER BY (UPPER(clave)='BS') DESC LIMIT 1")->fetchColumn() ?: 0);
+            }
+        } catch (Throwable $e) { return null; }
+        return $tasa > 0 ? round($montoUsd * $tasa, 2) : null;
+    }
+}
+
+if (!function_exists('sbr_log_sin_coincidencia')) {
+    /** Deja en el error_log POR QUÉ no casó una recarga. Sin esto, "queda pendiente" es indistinguible
+     *  entre: monto convertido mal, el movimiento aún no llegó del banco, o la referencia no coincide
+     *  — y desde fuera de producción no hay forma de saber cuál de las tres es. Nunca lanza. */
+    function sbr_log_sin_coincidencia(PDO $pdo, string $contexto, array $datos, string $filtroSql): void {
+        try {
+            $partes = [];
+            foreach ($datos as $k => $v) $partes[] = $k . '=' . (is_float($v) ? number_format($v, 2, '.', '') : (string) $v);
+            // Montos realmente disponibles ahora mismo, para ver de un vistazo si el problema es el monto.
+            $disponibles = [];
+            try {
+                $q = $pdo->query("SELECT ROUND(monto,2) m FROM movimientos
+                                   WHERE ($filtroSql)
+                                     AND COALESCE(pedido_id,0)=0 AND COALESCE(checked,0)=0 AND COALESCE(wallet_recarga_id,0)=0
+                                     AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
+                                   ORDER BY id DESC LIMIT 12");
+                $disponibles = $q->fetchAll(PDO::FETCH_COLUMN) ?: [];
+            } catch (Throwable $e) {}
+            error_log('TVG streaming recarga SIN COINCIDENCIA [' . $contexto . '] ' . implode(' ', $partes)
+                . ' | montos disponibles sin reclamar (ult. 3 dias): '
+                . ($disponibles ? implode(', ', $disponibles) : 'NINGUNO (el movimiento no ha llegado del proveedor)'));
+        } catch (Throwable $e) {}
     }
 }
 
@@ -500,6 +575,12 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "moneda='VES'")) {
             return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en un pago anterior (una compra en la tienda o otra recarga). No se puede usar dos veces.'];
         }
+        sbr_log_sin_coincidencia($pdo, 'BNC/PagoMovil', [
+            'recarga' => $recId, 'metodo' => $metodoNombre !== '' ? $metodoNombre : $slug, 'slug' => $slug,
+            'digitos' => $digits, 'ref_escrita' => $reportedRef,
+            'monto_usd' => $credit, 'monto_buscado_bs' => $match,
+            'candidatos_con_ese_monto' => $hayCandidatos ? 'SI' : 'NO',
+        ], "moneda='VES'");
         // Hay movimientos VES recientes con ESE MONTO exacto disponibles (no es demora de sincronización),
         // pero ninguno casa con la referencia escrita → dato erróneo, rechazar claro (no dejar "pendiente").
         if ($hayCandidatos) {
@@ -560,6 +641,12 @@ if (!function_exists('sbr_binance_verify_and_credit')) {
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "referencia LIKE 'BINANCE:%'")) {
             return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en un pago anterior (una compra en la tienda o otra recarga). No se puede usar dos veces.'];
         }
+        sbr_log_sin_coincidencia($pdo, 'Binance', [
+            'recarga' => $recId, 'metodo' => $metodoNombre !== '' ? $metodoNombre : 'Binance',
+            'digitos' => $digits, 'ref_escrita' => $reportedRef,
+            'monto_buscado' => $amount,
+            'candidatos_con_ese_monto' => $hayCandidatos ? 'SI' : 'NO',
+        ], "referencia LIKE 'BINANCE:%'");
         // Hay movimientos de Binance recientes con ESE MONTO exacto disponibles (no es demora de
         // sincronización: sbr_fetch_sync() ya corrió arriba), pero ninguno casa con la referencia
         // escrita → dato erróneo, rechazar claro (no dejar "pendiente" sonando a "ya va a llegar").

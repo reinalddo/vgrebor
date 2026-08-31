@@ -53,14 +53,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // pendiente de aprobación manual aunque el pago fuera perfecto. Ahora se usa el MISMO
             // clasificador por contenido (sbr_metodo_slug) que ya usa el resto del motor más abajo —
             // reconoce "Pago Móvil"/"BNC" venga como venga escrito, sin depender de una fila exacta.
+            //
+            // AJUSTE (2026-08-31): la tasa ya NO se busca con una fila fija UPPER(clave)='BS'. Se toma
+            // del MÉTODO elegido (payment_methods.moneda_id → monedas.tasa), que es la misma fila con
+            // la que se le cobra al cliente en la tienda y la que se le muestra acá en pantalla
+            // ("A pagar: X Bs"). Si esa moneda se renombra (VES/BSD…) o se desactiva, la consulta vieja
+            // devolvía vacío, $montoMatch quedaba NULL y se terminaba buscando el movimiento por el
+            // monto EN DÓLARES — que no existe en el banco → "pendiente" para siempre. Ver
+            // sbr_monto_a_casar(), que hace la cascada método → mismo tipo → moneda Bs de respaldo.
             $montoMatch = null;
             try {
                 require_once __DIR__ . '/../../includes/streaming_recarga_binance.php';
-                $slugMonto = function_exists('sbr_metodo_slug') ? sbr_metodo_slug($metodo) : '';
-                if ($slugMonto === 'bnc' || $slugMonto === 'pagomovil') {
-                    $tbs = (float) ($pdo->query("SELECT tasa FROM monedas WHERE UPPER(clave)='BS' AND activo=1 LIMIT 1")->fetchColumn() ?: 0);
-                    if ($tbs > 0) $montoMatch = round($monto * $tbs, 2);
-                }
+                $montoMatch = sbr_monto_a_casar($pdo, (string) $metodo, $monto);
             } catch (Throwable $e) {}
             if ($ref !== null && $metodo !== null) {
                 require_once __DIR__ . '/../../includes/streaming_recarga_binance.php';
