@@ -50,8 +50,25 @@ if (!function_exists('sbr_binance_enabled')) {
     }
 }
 if (!function_exists('sbr_binance_digits')) {
+    // SEGURIDAD (endurecido 2026-08-30, mismo incidente que bnc_referencia_digitos más abajo): antes
+    // esto reusaba binance_pagonorte_referencia_digitos — la config del STORE PRINCIPAL para verificar
+    // pagos de clientes normales, pensada para SU flujo, no para la billetera del revendedor. Si el
+    // admin la bajó a pocos dígitos por comodidad de sus clientes (ej. 6, lo normal para Binance), la
+    // billetera de streaming heredaba el mismo riesgo (adivinar/reusar el final de la referencia de un
+    // pago ajeno) sin que nadie lo decidiera para streaming. Se usa una clave PROPIA
+    // (binance_streaming_referencia_digitos) que NO toca ni depende de la del store.
+    //
+    // OJO — el default NO puede ser 0 (a diferencia de bnc_referencia_digitos): sbr_reference_matches()
+    // con digits=0 compara el string COMPLETO tal cual está guardado, y la referencia de Binance
+    // SIEMPRE se guarda con el prefijo "BINANCE:" (ver sbr_fetch_sync) que el revendedor nunca escribe
+    // — con digits=0 NUNCA matchea nada, ni el pago más legítimo (se probó: rompe el 100% de los casos,
+    // no solo cierra el hueco). El default seguro es un número ALTO pero MENOR que el largo real de un
+    // ID de Binance (esos IDs son ~15-19 dígitos, ver movimientos ya sincronizados en la tabla) — así
+    // la comparación por la derecha (últimos N caracteres) NUNCA llega a tocar el prefijo "BINANCE:" (que
+    // vive al principio del string), y adivinar 12 dígitos exactos + el monto exacto es, en la práctica,
+    // computacionalmente inviable (10^12 combinaciones), a diferencia de los 6 originales (10^6).
     function sbr_binance_digits(): int {
-        return max(0, min(120, (int) sbr_cfg('binance_pagonorte_referencia_digitos', '0')));
+        return max(0, min(120, (int) sbr_cfg('binance_streaming_referencia_digitos', '12')));
     }
 }
 if (!function_exists('sbr_norm_digits')) {
@@ -327,12 +344,15 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
         // $amount = lo que se acredita en $ (billetera). $match = lo que se pagó en Bs (contra el movimiento).
         $credit = round($amount, 2);
         $match  = ($amountMatch !== null && $amountMatch > 0) ? round($amountMatch, 2) : $credit;
-        // Por defecto exige la referencia COMPLETA (0) → sin falsos positivos. El admin puede bajar a
-        // "últimos N dígitos" con config bnc_referencia_digitos.
-        // Dígitos a comparar de la referencia: usa bnc_referencia_digitos; si no está, cae al MISMO que
-        // Binance (binance_pagonorte_referencia_digitos, normalmente 6) → así el revendedor puede poner
-        // los últimos 6 dígitos igual que en Binance.
-        $digits = max(0, min(120, (int) sbr_cfg('bnc_referencia_digitos', sbr_cfg('binance_pagonorte_referencia_digitos', '0'))));
+        // SEGURIDAD (endurecido 2026-08-30, reportado como incidente real: saldo acreditado sin pago
+        // verdadero): ya NO se hereda el ajuste de Binance (binance_pagonorte_referencia_digitos) como
+        // respaldo. Si un admin bajó ESE número para comodidad de Binance (ej. a 6 dígitos), BNC lo
+        // heredaba automáticamente SIN que nadie lo decidiera para BNC — cuantos menos dígitos se
+        // exigen, más fácil es que una referencia "inventada" case por pura coincidencia contra un
+        // movimiento real de otra persona que ya estaba en la tabla sin reclamar. BNC ahora exige
+        // SIEMPRE la referencia COMPLETA salvo que el admin configure bnc_referencia_digitos
+        // explícitamente (una clave propia, no compartida con Binance).
+        $digits = max(0, min(120, (int) sbr_cfg('bnc_referencia_digitos', '0')));
 
         // Fetch best-effort (INSERT IGNORE por referencia UNIQUE → nunca pisa lo que la tienda sincronizó).
         try {
