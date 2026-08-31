@@ -306,7 +306,7 @@ if (!function_exists('sbr_generic_verify_and_credit')) {
             return ['credited' => true, 'message' => '✓ Pago verificado. Saldo acreditado al instante.'];
         }
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "referencia LIKE '" . str_replace("'", "''", $prefijo) . "%'")) {
-            return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en otra recarga. No se puede usar dos veces.'];
+            return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en un pago anterior (una compra en la tienda o otra recarga). No se puede usar dos veces.'];
         }
         // Hay movimientos recientes CON ESE MONTO exacto (no es problema de sincronización/demora), pero
         // NINGUNO casa con la referencia escrita → es un dato erróneo, no algo por llegar. Rechazar claro
@@ -425,7 +425,7 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
             return ['credited' => true, 'message' => '✓ Pago verificado (BNC / Pago Móvil). Saldo acreditado al instante.'];
         }
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "moneda='VES'")) {
-            return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en otra recarga. No se puede usar dos veces.'];
+            return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en un pago anterior (una compra en la tienda o otra recarga). No se puede usar dos veces.'];
         }
         // Hay movimientos VES recientes con ESE MONTO exacto disponibles (no es demora de sincronización),
         // pero ninguno casa con la referencia escrita → dato erróneo, rechazar claro (no dejar "pendiente").
@@ -485,7 +485,7 @@ if (!function_exists('sbr_binance_verify_and_credit')) {
             return ['credited' => true, 'message' => '✓ Pago de Binance verificado. Saldo acreditado al instante.'];
         }
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "referencia LIKE 'BINANCE:%'")) {
-            return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en otra recarga. No se puede usar dos veces.'];
+            return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en un pago anterior (una compra en la tienda o otra recarga). No se puede usar dos veces.'];
         }
         // Hay movimientos de Binance recientes con ESE MONTO exacto disponibles (no es demora de
         // sincronización: sbr_fetch_sync() ya corrió arriba), pero ninguno casa con la referencia
