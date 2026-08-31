@@ -58,17 +58,23 @@ if (!function_exists('sbr_binance_digits')) {
     // pago ajeno) sin que nadie lo decidiera para streaming. Se usa una clave PROPIA
     // (binance_streaming_referencia_digitos) que NO toca ni depende de la del store.
     //
-    // OJO — el default NO puede ser 0 (a diferencia de bnc_referencia_digitos): sbr_reference_matches()
-    // con digits=0 compara el string COMPLETO tal cual está guardado, y la referencia de Binance
-    // SIEMPRE se guarda con el prefijo "BINANCE:" (ver sbr_fetch_sync) que el revendedor nunca escribe
-    // — con digits=0 NUNCA matchea nada, ni el pago más legítimo (se probó: rompe el 100% de los casos,
-    // no solo cierra el hueco). El default seguro es un número ALTO pero MENOR que el largo real de un
-    // ID de Binance (esos IDs son ~15-19 dígitos, ver movimientos ya sincronizados en la tabla) — así
-    // la comparación por la derecha (últimos N caracteres) NUNCA llega a tocar el prefijo "BINANCE:" (que
-    // vive al principio del string), y adivinar 12 dígitos exactos + el monto exacto es, en la práctica,
-    // computacionalmente inviable (10^12 combinaciones), a diferencia de los 6 originales (10^6).
-    function sbr_binance_digits(): int {
-        return max(0, min(120, (int) sbr_cfg('binance_streaming_referencia_digitos', '12')));
+    // CORREGIDO (2026-08-30, reporte real "binance ahora dice pendiente"): el default era 12, elegido
+    // para que el corte por la derecha no mordiera el prefijo "BINANCE:". Era un PARCHE con un número
+    // mágico, y rompía en silencio TODO pago de Binance cuya referencia tuviera menos de 12 dígitos
+    // (comprobado: 8, 10 y 11 dígitos quedaban rechazados aun siendo legítimos). La causa real estaba
+    // en sbr_reference_matches(), que no quitaba el prefijo antes de comparar; ya está arreglada allí.
+    //
+    // Con el prefijo bien tratado, el default correcto es 0 = exigir la referencia COMPLETA: es lo MÁS
+    // seguro (no hay sufijo corto que adivinar, que fue justo el hueco del incidente) y ahora sí
+    // funciona con referencias de cualquier largo. Si el admin ya configuró un número de dígitos para
+    // su método Binance en payment_methods, se respeta ESE (mismo criterio que la tienda y que BNC),
+    // porque es una decisión suya explícita para ese método — nunca se hereda una config ajena.
+    function sbr_binance_digits(PDO $pdo = null, string $metodoNombre = ''): int {
+        if ($pdo instanceof PDO) {
+            $pm = sbr_payment_method_digits($pdo, 'binance', $metodoNombre);
+            if ($pm !== null) return $pm;
+        }
+        return max(0, min(120, (int) sbr_cfg('binance_streaming_referencia_digitos', '0')));
     }
 }
 if (!function_exists('sbr_norm_digits')) {
@@ -78,15 +84,42 @@ if (!function_exists('sbr_norm_digits')) {
 if (!function_exists('sbr_reference_matches')) {
     // Igual que movement_reference_matches() de la tienda. $fullRef es la referencia GUARDADA
     // ("BINANCE:xxxxx"); $reported es lo que escribió el revendedor.
+    //
+    // BUG CORREGIDO (2026-08-30): la referencia guardada puede traer un PREFIJO de método
+    // ("BINANCE:1234…", ver sbr_fetch_sync) que el revendedor NUNCA escribe, y aquí no se quitaba
+    // nunca. Eso rompía las dos formas de comparar:
+    //   · con $digits = 0 (referencia completa) "BINANCE:123" !== "123" → NO casaba jamás, ni el
+    //     pago más legítimo;
+    //   · con $digits > 0, el corte por la derecha MUERDE el prefijo en cuanto la referencia real
+    //     es más corta que $digits (substr('BINANCE:12345678', -12) = 'NCE:12345678') → tampoco
+    //     casaba. Por eso un default alto "seguro" (12) rechazaba en silencio todo pago de Binance
+    //     con referencia de menos de 12 dígitos.
+    // La solución correcta NO es elegir un número de dígitos que esquive el prefijo (eso solo mueve
+    // el problema de sitio): es QUITAR el prefijo antes de comparar. Así funciona con referencias de
+    // cualquier largo y, además, permite exigir la referencia COMPLETA ($digits=0), que es lo más
+    // seguro posible porque no hay nada que adivinar.
     function sbr_reference_matches(string $fullRef, string $reported, int $digits): bool {
         $reported = trim($reported);
         if ($reported === '') return false;
-        if ($digits > 0) {
-            $nr = strlen($reported) > $digits ? substr($reported, -$digits) : $reported;
-            $bs = substr($fullRef, -$digits);
-            return $fullRef === $reported || $bs === $nr || sbr_norm_digits($bs) === sbr_norm_digits($nr);
+        // Candidatos: la referencia tal cual está guardada y, si trae prefijo, sin él.
+        // (Las de banco/BNC se guardan sin prefijo → no hay segundo candidato, nada cambia para ellas.)
+        $candidatos = [$fullRef];
+        $sep = strpos($fullRef, ':');
+        if ($sep !== false && $sep < strlen($fullRef) - 1) {
+            $candidatos[] = substr($fullRef, $sep + 1);
         }
-        return $fullRef === $reported || sbr_norm_digits($fullRef) === sbr_norm_digits($reported);
+        foreach ($candidatos as $ref) {
+            if ($digits > 0) {
+                $nr = strlen($reported) > $digits ? substr($reported, -$digits) : $reported;
+                $bs = strlen($ref) > $digits ? substr($ref, -$digits) : $ref;
+                if ($ref === $reported || $bs === $nr || sbr_norm_digits($bs) === sbr_norm_digits($nr)) {
+                    return true;
+                }
+            } elseif ($ref === $reported || sbr_norm_digits($ref) === sbr_norm_digits($reported)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
 if (!function_exists('sbr_norm_amount')) {
@@ -244,7 +277,7 @@ if (!function_exists('sbr_verify_recarga')) {
         $slug = sbr_metodo_slug($metodo);
         $mm = ($amountMatch !== null && $amountMatch > 0) ? $amountMatch : $amount;
         if ($slug === 'binance') {
-            return sbr_binance_verify_and_credit($pdo, $uid, $recId, $reportedRef, $amount, $mm);
+            return sbr_binance_verify_and_credit($pdo, $uid, $recId, $reportedRef, $amount, $mm, $metodo);
         }
         // BNC / Pago Móvil (Bs/VES): reusa la MISMA conexión bancaria (ff_bank_*) que la tienda YA
         // usa para verificar los pedidos ("el BNC que ya está en la página"). Si no está configurada,
@@ -477,7 +510,7 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
 }
 
 if (!function_exists('sbr_binance_verify_and_credit')) {
-    function sbr_binance_verify_and_credit(PDO $pdo, int $uid, int $recId, string $reportedRef, float $amount, ?float $amountMatch = null): array {
+    function sbr_binance_verify_and_credit(PDO $pdo, int $uid, int $recId, string $reportedRef, float $amount, ?float $amountMatch = null, string $metodoNombre = ''): array {
         $reportedRef = trim($reportedRef);
         if (!sbr_binance_enabled()) return ['credited' => false, 'message' => 'Binance no está configurado.'];
         if ($reportedRef === '' || $amount <= 0) return ['credited' => false, 'message' => 'Falta la referencia o el monto.'];
@@ -485,7 +518,7 @@ if (!function_exists('sbr_binance_verify_and_credit')) {
         sbr_ensure_columns($pdo);
         try { sbr_fetch_sync($pdo); } catch (Throwable $e) {}   // best-effort
 
-        $digits = sbr_binance_digits();
+        $digits = sbr_binance_digits($pdo, $metodoNombre);
         // $amount = a acreditar en $. Binance cobra en USDT ≈ $ (1:1) → el match usa el mismo monto,
         // salvo que se pase $amountMatch (moneda distinta).
         $credit = round($amount, 2);

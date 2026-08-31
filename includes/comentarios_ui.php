@@ -664,6 +664,27 @@ if (!function_exists('comentarios_render_modales')) {
           .cmt-notif-acciones { display:none; gap:0.5rem; flex-wrap:wrap; margin-top:0.6rem; padding-top:0.6rem; border-top:1px solid rgba(var(--theme-text-muted-rgb),0.18); }
           .cmt-notif-acciones.abierta { display:flex; }
           .cmt-notif-respuesta { flex-basis:100%; margin-top:0.5rem; }
+          /* Botones de moderación DENTRO de la notificación (Me gusta / Ocultar / Destacar /
+             Responder / Eliminar). Las clases .cmt-util y .cmt-mini-accion existen, pero su CSS
+             vive en el <style> de comentarios_render_seccion() — que solo se imprime en la ficha
+             del juego. El modal de notificaciones se renderiza desde comentarios_render_modales(),
+             así que en cualquier otra página (Mi cuenta) los botones salían SIN estilo, con la
+             pinta gris por defecto del navegador. Se re-declaran acá, acotados al panel, para que
+             se vean igual en las dos partes sin depender de que la otra función esté en la página. */
+          .cmt-notif-acciones .cmt-util,
+          .cmt-notif-acciones .cmt-mini-accion { background:transparent; border:1px solid rgba(var(--theme-text-muted-rgb),0.3); border-radius:999px; color:var(--theme-text-muted); font-size:0.78rem; font-weight:600; padding:0.32rem 0.85rem; cursor:pointer; line-height:1.2; transition:border-color 0.15s, color 0.15s, background-color 0.15s; }
+          .cmt-notif-acciones .cmt-util:hover,
+          .cmt-notif-acciones .cmt-mini-accion:hover { border-color:var(--theme-primary); color:var(--theme-primary); background:rgba(var(--theme-primary-rgb),0.08); }
+          .cmt-notif-acciones .cmt-util.activo { border-color:var(--theme-primary); color:var(--theme-primary); background:rgba(var(--theme-primary-rgb),0.12); }
+          .cmt-notif-acciones .cmt-mini-accion.activo { border-color:var(--theme-warning); color:var(--theme-warning); background:rgba(var(--theme-warning-rgb),0.12); }
+          .cmt-notif-acciones .cmt-mini-accion-peligro { border-color:rgba(var(--theme-danger-rgb),0.4); color:var(--theme-danger); }
+          .cmt-notif-acciones .cmt-mini-accion-peligro:hover { border-color:var(--theme-danger); color:var(--theme-danger); background:rgba(var(--theme-danger-rgb),0.1); }
+          .cmt-notif-acciones .cmt-util:disabled,
+          .cmt-notif-acciones .cmt-mini-accion:disabled { opacity:0.5; cursor:default; }
+          .cmt-notif-acciones .cmt-util-n { opacity:0.85; font-weight:700; }
+          /* Caja de respuesta desplegable, para que el textarea no herede el look del navegador. */
+          .cmt-notif-respuesta .cmt-textarea { width:100%; background:rgba(var(--theme-bg-main-rgb),0.6); border:1px solid rgba(var(--theme-text-muted-rgb),0.3); border-radius:9px; color:var(--theme-text); font-size:0.82rem; padding:0.5rem 0.65rem; resize:vertical; }
+          .cmt-notif-respuesta .cmt-textarea:focus { outline:none; border-color:var(--theme-primary); }
         </style>
 
         <script>
