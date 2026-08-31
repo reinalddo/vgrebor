@@ -289,7 +289,9 @@ if (!function_exists('sbr_generic_verify_and_credit')) {
                 AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
               ORDER BY id DESC LIMIT 100");
         $q->execute([$prefijo . '%', $matchAmt]);
+        $hayCandidatos = false;
         foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $m) {
+            $hayCandidatos = true;
             if (!sbr_reference_matches((string) $m['referencia'], $reportedRef, $digits)) continue;
             $claim = $pdo->prepare("UPDATE movimientos SET checked=1, wallet_recarga_id=? WHERE id=? AND COALESCE(pedido_id,0)=0 AND COALESCE(checked,0)=0 AND COALESCE(wallet_recarga_id,0)=0");
             $claim->execute([$recId, (int) $m['id']]);
@@ -305,6 +307,12 @@ if (!function_exists('sbr_generic_verify_and_credit')) {
         }
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "referencia LIKE '" . str_replace("'", "''", $prefijo) . "%'")) {
             return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en otra recarga. No se puede usar dos veces.'];
+        }
+        // Hay movimientos recientes CON ESE MONTO exacto (no es problema de sincronización/demora), pero
+        // NINGUNO casa con la referencia escrita → es un dato erróneo, no algo por llegar. Rechazar claro
+        // en vez de dejarlo "pendiente" (que sonaba a "espera, ya llega" cuando en realidad no va a llegar).
+        if ($hayCandidatos) {
+            return ['credited' => false, 'rejected' => true, 'message' => '✗ La referencia no coincide con ningún pago recibido por ese monto. Verifica el número de referencia e intenta de nuevo.'];
         }
         return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; el admin también puede aprobarlo.'];
     }
@@ -400,7 +408,9 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
                 AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
               ORDER BY id DESC LIMIT 200");
         $q->execute([$match]);
+        $hayCandidatos = false;
         foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $m) {
+            $hayCandidatos = true;
             if (!sbr_reference_matches((string) $m['referencia'], $reportedRef, $digits)) continue;
             $claim = $pdo->prepare("UPDATE movimientos SET checked=1, wallet_recarga_id=? WHERE id=? AND COALESCE(pedido_id,0)=0 AND COALESCE(checked,0)=0 AND COALESCE(wallet_recarga_id,0)=0");
             $claim->execute([$recId, (int) $m['id']]);
@@ -416,6 +426,11 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
         }
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "moneda='VES'")) {
             return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en otra recarga. No se puede usar dos veces.'];
+        }
+        // Hay movimientos VES recientes con ESE MONTO exacto disponibles (no es demora de sincronización),
+        // pero ninguno casa con la referencia escrita → dato erróneo, rechazar claro (no dejar "pendiente").
+        if ($hayCandidatos) {
+            return ['credited' => false, 'rejected' => true, 'message' => '✗ La referencia no coincide con ningún pago recibido por ese monto. Verifica el número de referencia e intenta de nuevo.'];
         }
         return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; el admin también puede aprobarlo.'];
     }
@@ -449,8 +464,10 @@ if (!function_exists('sbr_binance_verify_and_credit')) {
         );
         $q->execute([$amount]);
         $rows = $q->fetchAll(PDO::FETCH_ASSOC);
+        $hayCandidatos = false;
 
         foreach ($rows as $m) {
+            $hayCandidatos = true;
             if (!sbr_reference_matches((string) $m['referencia'], $reportedRef, $digits)) continue;
             // Claim ATÓMICO: solo si sigue disponible. Si dos envían a la vez, solo uno hace rowCount=1.
             $claim = $pdo->prepare("UPDATE movimientos SET checked=1, wallet_recarga_id=? WHERE id=? AND COALESCE(pedido_id,0)=0 AND COALESCE(checked,0)=0 AND COALESCE(wallet_recarga_id,0)=0");
@@ -469,6 +486,12 @@ if (!function_exists('sbr_binance_verify_and_credit')) {
         }
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "referencia LIKE 'BINANCE:%'")) {
             return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en otra recarga. No se puede usar dos veces.'];
+        }
+        // Hay movimientos de Binance recientes con ESE MONTO exacto disponibles (no es demora de
+        // sincronización: sbr_fetch_sync() ya corrió arriba), pero ninguno casa con la referencia
+        // escrita → dato erróneo, rechazar claro (no dejar "pendiente" sonando a "ya va a llegar").
+        if ($hayCandidatos) {
+            return ['credited' => false, 'rejected' => true, 'message' => '✗ La referencia no coincide con ningún pago recibido por ese monto. Verifica el ID de transacción de Binance e intenta de nuevo.'];
         }
         return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; vuelve a intentar o el admin lo aprueba manual.'];
     }

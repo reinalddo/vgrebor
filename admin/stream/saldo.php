@@ -65,8 +65,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($ref !== null && $metodo !== null) {
                 require_once __DIR__ . '/../../includes/streaming_recarga_binance.php';
                 $vr = sbr_verify_recarga($pdo, $uid, $recId, $ref, $monto, $metodo, $montoMatch);
-                if (!empty($vr['reused'])) {
-                    // Referencia REPETIDA → se RECHAZA (no queda pendiente) para que el admin no la apruebe por error.
+                if (!empty($vr['reused']) || !empty($vr['rejected'])) {
+                    // Referencia REPETIDA o que NO coincide con ningún pago recibido por ese monto → se
+                    // RECHAZA (no queda "pendiente" dando a entender que ya va a llegar sola).
                     try { $pdo->prepare("UPDATE wallet_recargas SET estado='rechazada' WHERE id=? AND usuario_id=?")->execute([$recId, $uid]); } catch (Throwable $e) {}
                     $msg = $vr['message'];
                 } else {
@@ -88,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 require_once __DIR__ . '/../../api/_rev_avisos.php';
                 $acreditada = isset($vr) && !empty($vr['credited']);
-                $repetida   = isset($vr) && !empty($vr['reused']);
+                $repetida   = isset($vr) && (!empty($vr['reused']) || !empty($vr['rejected']));
                 if (!$repetida) {
                     stream_notif_crear($pdo, 0, 'recarga',
                         'Recarga de saldo · $' . number_format($monto, 2) . ($acreditada ? ' (acreditada automáticamente)' : ' (por aprobar)'),
