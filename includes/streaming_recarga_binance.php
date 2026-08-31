@@ -194,6 +194,34 @@ if (!function_exists('sbr_metodo_slug')) {
     }
 }
 
+if (!function_exists('sbr_payment_method_digits')) {
+    /** Dígitos de referencia YA configurados por el admin para el método de pago real elegido (tabla
+     *  payment_methods, columna referencia_digitos) — el MISMO valor que usa el checkout de la tienda
+     *  (ver $method['referencia_digitos'] en api/pedidos.php) para verificar pagos de clientes con ESE
+     *  banco. No es un número inventado aparte: si el admin la dejó en 0 (default), exige referencia
+     *  completa igual que la tienda; si la puso en 6 (típico, porque su banco solo le muestra al pagador
+     *  los últimos dígitos), la billetera de streaming ahora respeta EXACTAMENTE ese mismo criterio en
+     *  vez de uno propio desalineado. Prioriza el método con el nombre EXACTO elegido; si no hay
+     *  coincidencia exacta, cualquier método activo del mismo slug (bnc/pagomovil); si ninguno, null
+     *  (el llamador usa su propio fallback, nunca el de otro método). */
+    function sbr_payment_method_digits(PDO $pdo, string $slug, string $metodoNombre = ''): ?int {
+        try {
+            $rows = $pdo->query("SELECT nombre, referencia_digitos FROM payment_methods WHERE activo=1")->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) { return null; }
+        $nombreNorm = mb_strtolower(trim($metodoNombre));
+        $porSlug = null;
+        foreach ($rows as $r) {
+            if (sbr_metodo_slug((string) $r['nombre']) !== $slug) continue;
+            $d = $r['referencia_digitos'];
+            if ($d === null || $d === '') continue;
+            $d = max(0, min(120, (int) $d));
+            if ($nombreNorm !== '' && mb_strtolower(trim((string) $r['nombre'])) === $nombreNorm) return $d;
+            if ($porSlug === null) $porSlug = $d;
+        }
+        return $porSlug;
+    }
+}
+
 if (!function_exists('sbr_verify_recarga')) {
     /**
      * Punto de entrada ÚNICO de la verificación automática de una recarga.
@@ -222,7 +250,7 @@ if (!function_exists('sbr_verify_recarga')) {
         // usa para verificar los pedidos ("el BNC que ya está en la página"). Si no está configurada,
         // cae al genérico (por si el admin puso <slug>_movimientos_url a mano).
         if (($slug === 'bnc' || $slug === 'pagomovil') && sbr_bank_enabled()) {
-            return sbr_bank_verify_and_credit($pdo, $uid, $recId, $reportedRef, $amount, $slug, $mm);
+            return sbr_bank_verify_and_credit($pdo, $uid, $recId, $reportedRef, $amount, $slug, $mm, $metodo);
         }
         if ($slug === '') return ['credited' => false, 'message' => 'Tu recarga quedó registrada; el admin la aprueba enseguida.'];
         $url = sbr_cfg($slug . '_movimientos_url', '');
@@ -344,10 +372,10 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
      *  movimientos VES recientes y DISPONIBLES (no usados por un pedido ni otra recarga), con claim
      *  atómico anti-doble-cobro. El fetch es best-effort con INSERT IGNORE (no corrompe la data de la
      *  tienda). Si nada casa, NO acredita (queda pendiente de aprobación manual). Nunca acredita de más. */
-    function sbr_bank_verify_and_credit(PDO $pdo, int $uid, int $recId, string $reportedRef, float $amount, string $slug = 'bnc', ?float $amountMatch = null): array {
+    function sbr_bank_verify_and_credit(PDO $pdo, int $uid, int $recId, string $reportedRef, float $amount, string $slug = 'bnc', ?float $amountMatch = null, string $metodoNombre = ''): array {
         $reportedRef = trim($reportedRef);
         if ($reportedRef === '' || $amount <= 0) return ['credited' => false, 'message' => 'Falta la referencia o el monto.'];
-        if (!sbr_bank_enabled())               return ['credited' => false, 'message' => 'Tu recarga quedó registrada; el admin la aprueba enseguida.'];
+        if (!sbr_bank_enabled())               return ['credited' => false, 'message' => 'Tu recarga quedó registrada; el admin la aprueba enseguida. (La verificación automática por banco no está configurada.)'];
         sbr_ensure_columns($pdo);
         // $amount = lo que se acredita en $ (billetera). $match = lo que se pagó en Bs (contra el movimiento).
         $credit = round($amount, 2);
@@ -357,10 +385,22 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
         // respaldo. Si un admin bajó ESE número para comodidad de Binance (ej. a 6 dígitos), BNC lo
         // heredaba automáticamente SIN que nadie lo decidiera para BNC — cuantos menos dígitos se
         // exigen, más fácil es que una referencia "inventada" case por pura coincidencia contra un
-        // movimiento real de otra persona que ya estaba en la tabla sin reclamar. BNC ahora exige
-        // SIEMPRE la referencia COMPLETA salvo que el admin configure bnc_referencia_digitos
-        // explícitamente (una clave propia, no compartida con Binance).
-        $digits = max(0, min(120, (int) sbr_cfg('bnc_referencia_digitos', '0')));
+        // movimiento real de otra persona que ya estaba en la tabla sin reclamar.
+        //
+        // AJUSTE (2026-08-30, reporte "la de Pago Móvil sigue quedando pendiente"): el default seguro
+        // NO puede ser un número inventado aparte (bnc_referencia_digitos=0 fijo) — la TIENDA misma
+        // (api/pedidos.php, $method['referencia_digitos']) ya verifica sus propios pagos BNC/Pago Móvil
+        // usando el dígito configurado POR CADA MÉTODO en payment_methods (0 = completa por defecto,
+        // pero muchos admins lo bajan a 6 porque su banco solo le muestra al pagador los últimos
+        // dígitos). Si streaming exige SIEMPRE la referencia completa mientras la tienda acepta 6
+        // dígitos para ese mismo banco, una referencia perfectamente legítima (y ya aceptada por la
+        // tienda para pagos normales) nunca casa aquí → queda "pendiente" para siempre, no por demora,
+        // sino porque el criterio es más estricto que el de la propia tienda para el MISMO método.
+        // Se usa el valor YA configurado por el admin para ese método exacto (sbr_payment_method_digits);
+        // solo si no hay ninguno configurado se cae al valor propio bnc_referencia_digitos (default 0,
+        // igual de estricto que el default de la tienda) — nunca al de Binance.
+        $pmDigits = sbr_payment_method_digits($pdo, $slug, $metodoNombre);
+        $digits = $pmDigits !== null ? $pmDigits : max(0, min(120, (int) sbr_cfg('bnc_referencia_digitos', '0')));
 
         // Fetch best-effort (INSERT IGNORE por referencia UNIQUE → nunca pisa lo que la tienda sincronizó).
         try {
