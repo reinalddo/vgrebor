@@ -688,7 +688,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       } catch (Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
     }
   } catch (Throwable $e) { $msg = '⚠ ' . $e->getMessage(); }
-  header('Location: ventas.php?f=' . urlencode($_POST['f'] ?? 'todas') . '&msg=' . urlencode($msg));
+  // Tras RENOVAR desde la vista "Vencidas", la venta deja de estar vencida → saldría de esa vista y
+  // PARECERÍA borrada (queja del cliente: "al renovar se elimina de ventas"). Se redirige a "Todas"
+  // para que la siga viendo con su nueva fecha. (No se borró nada: solo cambió de filtro.)
+  $redirF = (string) ($_POST['f'] ?? 'todas');
+  if ($redirF === 'vencidas' && ($a === 'renovar' || ($a === 'lote_ventas' && ($_POST['op'] ?? '') === 'renovar'))) { $redirF = 'todas'; }
+  header('Location: ventas.php?f=' . urlencode($redirF) . '&msg=' . urlencode($msg));
   exit;
 }
 $flash = (string) ($_GET['msg'] ?? '');

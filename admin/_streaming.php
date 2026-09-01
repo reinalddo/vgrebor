@@ -259,6 +259,33 @@ function stream_cod_pedido($id): string {
   return $n > 0 ? 'RBX-' . str_pad((string) $n, 6, '0', STR_PAD_LEFT) : '—';
 }
 
+/** Precio que la TIENDA le cobra a un REVENDEDOR por renovar (de su saldo): 1º el de renovación de la
+ *  plataforma (reventa); si no, el de compra (precio_distribuidor, lo mismo que pagó al comprar); y como
+ *  último recurso el precio de la propia venta (para no renovar NUNCA gratis). Devuelve 0 si no hay precio. */
+function st_renov_precio_rev(PDO $pdo, string $platName, $ventaPrecioRenov = null, $ventaPrecio = null): float {
+  $c = null;
+  try {
+    $qc = $pdo->prepare("SELECT COALESCE(
+        (SELECT precio_renovacion FROM streaming_plataformas WHERE nombre=? AND owner_id=0 AND precio_renovacion IS NOT NULL AND precio_renovacion>0 ORDER BY id LIMIT 1),
+        (SELECT precio_distribuidor FROM streaming_plataformas WHERE nombre=? AND owner_id=0 AND precio_distribuidor IS NOT NULL AND precio_distribuidor>0 ORDER BY id LIMIT 1)
+      )");
+    $qc->execute([$platName, $platName]); $c = $qc->fetchColumn();
+  } catch (Throwable $e) {}
+  $c = ($c !== null && $c !== false) ? (float) $c : 0.0;
+  if ($c <= 0) { $c = ((float) ($ventaPrecioRenov ?? 0)) ?: (float) ($ventaPrecio ?? 0); }
+  return round($c, 2);
+}
+
+/** Cobra al REVENDEDOR la renovación de su saldo (usando st_renov_precio_rev). Devuelve true si cobró (o si
+ *  no había precio que cobrar); false si NO alcanzó el saldo. NUNCA lanza. El costo cobrado va en $costoOut. */
+function st_cobrar_renov_rev(PDO $pdo, int $uid, string $platName, &$costoOut = 0.0, $vPrecioRenov = null, $vPrecio = null): bool {
+  $costoOut = st_renov_precio_rev($pdo, $platName, $vPrecioRenov, $vPrecio);
+  if ($costoOut <= 0) return true;   // sin precio configurado → no se cobra (no bloquea)
+  require_once __DIR__ . '/../api/wallet/_helpers.php';
+  if (!function_exists('wallet_debitar')) return true;
+  return wallet_debitar($pdo, $uid, $costoOut, 'renovacion_streaming', 'Renovación ' . ($platName ?: 'streaming'));
+}
+
 function st_kpis(PDO $pdo): array {
   $o = (int) stream_owner_id();
   $hoy = date('Y-m-d');

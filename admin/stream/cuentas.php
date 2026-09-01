@@ -283,6 +283,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $base = ($f && strtotime($f) > time()) ? $f : date('Y-m-d');
         $nueva = date('Y-m-d', strtotime($base . " +$meses months"));
       }
+      // COBRO AL REVENDEDOR (loophole: "en Cuentas renovaba sin dinero"). Si quien renueva es un REVENDEDOR,
+      // la tienda le cobra la renovación de su saldo. Si no alcanza, NO se renueva. El ADMIN renueva sin cobro.
+      if ($esRev && function_exists('st_cobrar_renov_rev')) {
+        $platC = (string) ($pdo->query("SELECT plataforma FROM streaming_cuentas WHERE id=$cid")->fetchColumn() ?: '');
+        $costoR = 0.0;
+        if (!st_cobrar_renov_rev($pdo, (int) current_user_id(), $platC, $costoR)) {
+          $sal = function_exists('wallet_saldo') ? wallet_saldo($pdo, (int) current_user_id()) : 0.0;
+          throw new Exception('⚠ Saldo insuficiente para renovar: cuesta $' . number_format($costoR, 2) . ' y tu saldo es $' . number_format($sal, 2) . '. Recarga tu saldo.');
+        }
+      }
       $pdo->prepare("UPDATE streaming_cuentas SET vencimiento=? WHERE id=? AND owner_id=?")->execute([$nueva, $cid, $OWNER]);
       // Propaga la nueva fecha a las cuentas ESPEJO de los revendedores (que a ellos también se les renueve
       // y no se les borre por vencidas al pasar el barrido).
@@ -305,8 +315,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if (count($ids) > 200) throw new Exception('Máximo 200 cuentas por lote (seleccionaste ' . count($ids) . ').');
       $in = implode(',', $ids);
       $hasta = trim((string) ($_POST['hasta'] ?? ''));
+      $sinSaldo = 0;
       $pdo->beginTransaction();
       try {
+        // COBRO AL REVENDEDOR: cobra cada cuenta; las que no alcancen el saldo SALEN del lote (no se renuevan).
+        if ($esRev && function_exists('st_cobrar_renov_rev')) {
+          $pagadas = [];
+          foreach ($ids as $cidR) {
+            $platR = (string) ($pdo->query("SELECT plataforma FROM streaming_cuentas WHERE id=" . (int) $cidR . " AND owner_id=$OWNER")->fetchColumn() ?: '');
+            $cR = 0.0;
+            if (st_cobrar_renov_rev($pdo, (int) current_user_id(), $platR, $cR)) { $pagadas[] = (int) $cidR; } else { $sinSaldo++; }
+          }
+          $ids = $pagadas;
+          if (!$ids) { throw new Exception('⚠ Saldo insuficiente: no se pudo renovar ninguna cuenta.'); }
+          $in = implode(',', $ids);
+        }
         if ($hasta !== '' && strtotime($hasta)) {
           $fFija = date('Y-m-d', strtotime($hasta));
           $st = $pdo->prepare("UPDATE streaming_cuentas SET vencimiento=? WHERE id IN ($in) AND owner_id=$OWNER");
@@ -331,7 +354,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $pdo->commit();
       } catch (Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
-      $msg = "✓ $n cuenta(s) renovadas. Ojo: esto renueva TU pago al PROVEEDOR, no el vencimiento de tus clientes.";
+      $msg = "✓ $n cuenta(s) renovadas." . ($sinSaldo > 0 ? " ⚠ $sinSaldo NO se renovaron por saldo insuficiente." : '') . " Ojo: esto renueva TU pago al PROVEEDOR, no el vencimiento de tus clientes.";
     }
     // ── LOTE: eliminar varias cuentas ─────────────────────────────────────────────────────────
     elseif ($a === 'eliminar_cuentas_masivo') {

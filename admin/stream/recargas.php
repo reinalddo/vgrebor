@@ -23,14 +23,16 @@ $saldo = wallet_saldo($pdo, $uid);
 $juegos = [];
 try {
     $rows = $pdo->query("SELECT p.id, p.juego_id, p.nombre, p.cantidad, p.precio_revendedor, p.imagen_icono,
-            j.nombre AS juego_nombre, j.sticker_imagen AS juego_img, j.sticker_icono AS juego_icono, j.sticker_color_fondo AS juego_color
+            j.nombre AS juego_nombre, j.sticker_imagen AS juego_img, j.sticker_icono AS juego_icono, j.imagen AS juego_imagen, j.sticker_color_fondo AS juego_color
         FROM juego_paquetes p JOIN juegos j ON j.id = p.juego_id
         WHERE p.activo = 1 AND j.activo = 1 AND p.precio_revendedor IS NOT NULL AND p.precio_revendedor > 0
         ORDER BY j.nombre, p.orden, p.id")->fetchAll(PDO::FETCH_ASSOC);
     // Guarda la imagen/color del juego junto al grupo (para el icono tipo app antes del título).
+    // El iconito usa: sticker_imagen → sticker_icono → IMAGEN del juego (la principal, fácil de subir en
+    // Juegos). Así el admin solo pone "Imagen del juego" y ya sale, sin buscar el campo del sticker.
     foreach ($rows as $r) {
         $jn = $r['juego_nombre'];
-        if (!isset($juegos[$jn])) $juegos[$jn] = ['img' => $r['juego_img'] ?? '', 'icono' => $r['juego_icono'] ?? '', 'color' => $r['juego_color'] ?? '', 'paquetes' => []];
+        if (!isset($juegos[$jn])) $juegos[$jn] = ['img' => $r['juego_img'] ?? '', 'icono' => $r['juego_icono'] ?? '', 'imgppal' => $r['juego_imagen'] ?? '', 'color' => $r['juego_color'] ?? '', 'paquetes' => []];
         $juegos[$jn]['paquetes'][] = $r;
     }
 } catch (Throwable $e) {}
@@ -54,8 +56,8 @@ stream_head('Recargas', 'recargas');
 <?php else: ?>
   <?php foreach ($juegos as $juegoNombre => $g):
     $paquetes = $g['paquetes'];
-    // Imagen del juego (tipo app) para el círculo antes del título.
-    $jImg = trim((string) ($g['img'] ?? '')) ?: trim((string) ($g['icono'] ?? ''));
+    // Imagen del juego (tipo app) para el círculo antes del título: sticker → icono → IMAGEN principal.
+    $jImg = trim((string) ($g['img'] ?? '')) ?: trim((string) ($g['icono'] ?? '')) ?: trim((string) ($g['imgppal'] ?? ''));
     $jColor = trim((string) ($g['color'] ?? '')) ?: '#3f4fb5';
     $jIni = mb_strtoupper(mb_substr($juegoNombre, 0, 1)); ?>
     <div class="card" style="margin-bottom:14px;padding:0;overflow:hidden">

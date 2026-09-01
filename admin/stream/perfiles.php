@@ -285,8 +285,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $pid = (int) ($_POST['pid'] ?? 0);
       $meses = max(1, min(24, (int) ($_POST['meses'] ?? 1)));
       if ($pid <= 0) throw new Exception('Perfil inválido.');
-      $row = $pdo->query("SELECT p.venta_id, p.cuenta_id, c.vencimiento FROM streaming_perfiles p JOIN streaming_cuentas c ON c.id=p.cuenta_id WHERE p.id=$pid AND c.owner_id=$OWNER")->fetch(PDO::FETCH_ASSOC);
+      $row = $pdo->query("SELECT p.venta_id, p.cuenta_id, c.plataforma, c.vencimiento FROM streaming_perfiles p JOIN streaming_cuentas c ON c.id=p.cuenta_id WHERE p.id=$pid AND c.owner_id=$OWNER")->fetch(PDO::FETCH_ASSOC);
       if (!$row) throw new Exception('Perfil no encontrado.');
+      // COBRO AL REVENDEDOR (loophole: "en Perfiles renovaba sin dinero"). Si renueva un REVENDEDOR, la tienda
+      // le cobra de su saldo; si no alcanza, NO se renueva. El ADMIN renueva sin cobro.
+      if ($esRevCtx && function_exists('st_cobrar_renov_rev')) {
+        $costoP = 0.0;
+        if (!st_cobrar_renov_rev($pdo, (int) current_user_id(), (string) ($row['plataforma'] ?? ''), $costoP)) {
+          $sal = function_exists('wallet_saldo') ? wallet_saldo($pdo, (int) current_user_id()) : 0.0;
+          throw new Exception('⚠ Saldo insuficiente para renovar: cuesta $' . number_format($costoP, 2) . ' y tu saldo es $' . number_format($sal, 2) . '. Recarga tu saldo.');
+        }
+      }
       // Al RENOVAR se reinician los cambios de nombre/PIN permitidos (vuelve a 0/2).
       try { $pdo->prepare("UPDATE streaming_perfiles SET cambios_np=0 WHERE id=?")->execute([$pid]); } catch (Throwable $e) {}
       $vid = (int) ($row['venta_id'] ?? 0);
@@ -571,7 +580,7 @@ stream_head('Perfiles', 'perfiles');
     <table class="dtable">
       <thead><tr>
         <th style="width:34px"><input type="checkbox" id="ck-all" onclick="ckTodo(this)" title="Seleccionar los visibles (libres)" style="width:15px;height:15px;accent-color:var(--acc)"></th>
-        <th>Plataforma</th><th>Correo</th><th>Perfil</th><th>PIN</th><th>Estado</th><th>Precios</th><?php if ($verCostos): ?><th>Proveedor</th><?php endif; ?><th>Asignado a</th><th>Vence</th><th style="text-align:center">Acciones</th>
+        <th>Plataforma</th><th>Correo</th><th>Perfil</th><th>PIN</th><th>Estado</th><th>Precios</th><?php if ($verCostos): ?><th>Proveedor</th><?php endif; ?><th>Asignado a</th><th>Vence</th><th style="text-align:center;position:sticky;right:0;background:var(--surface-2);z-index:3">Acciones</th>
       </tr></thead>
       <tbody id="tbody">
       <?php foreach ($renderItems as $it): ?>
@@ -597,7 +606,7 @@ stream_head('Perfiles', 'perfiles');
           <?php if ($verCostos): ?><td style="color:var(--muted);font-size:11.5px"><?= !empty($it['prov_nombre']) ? h($it['prov_nombre']) : '<span style="color:var(--faint)">—</span>' ?></td><?php endif; ?>
           <td style="color:var(--muted);font-size:12.5px"><?= $asignado ? h($asignado) : '<span style="color:var(--faint)">—</span>' ?></td>
           <td><span class="<?= $pill ?>"><?= h($txt) ?></span></td>
-          <td style="text-align:center;white-space:nowrap">
+          <td style="text-align:center;white-space:nowrap;position:sticky;right:0;background:var(--surface);z-index:1">
             <?php if (!($esRevCtx && $it['rev_editable'] !== 1)): ?>
               <button type="button" class="iconbtn" style="width:30px;height:30px" title="Editar cuenta (clave, cliente, fecha, precios)" onclick='editarPerfil(<?= json_encode(["id"=>(int)$it["first_id"],"etiqueta"=>"","pin"=>"","costo"=>$it["costo"],"venta"=>$it["precio_venta"],"reventa"=>$it["precio_reventa"],"cliente"=>(string)($it["cliente_nombre"]??""),"wa"=>(string)($it["cliente_wa"]??""),"vencCli"=>substr((string)($it["venta_venc"]??""),0,10),"puedeNombre"=>(!$esRevCtx || (int)$it["rev_editable"]===1),"puedeClave"=>(!$esRevCtx || (int)$it["rev_editable"]===1),"clave"=>(string)($it["clave"]??""),"vendido"=>($it["vendidos"]>0),"origenCuenta"=>(int)($it["origen_cuenta_id"]??0)], JSON_UNESCAPED_UNICODE | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE) ?: 'null' ?>)'><i data-lucide="pencil" style="width:14px;height:14px"></i></button>
             <?php endif; ?>
@@ -631,7 +640,7 @@ stream_head('Perfiles', 'perfiles');
               <div style="font-size:10px;color:var(--faint);margin-top:2px" title="Tu fecha de corte, desde que la compraste (no editable)">🛒 tu corte: <?= h(date('d/m/Y', strtotime((string) $p['vencimiento']))) ?></div>
             <?php endif; ?>
           </td>
-          <td style="text-align:center;white-space:nowrap">
+          <td style="text-align:center;white-space:nowrap;position:sticky;right:0;background:var(--surface);z-index:1">
             <?php $esCompl = (int) ($p['rev_editable'] ?? 0) === 1; $limitado = $esRevCtx && !$esCompl; ?>
             <button type="button" class="iconbtn" style="width:30px;height:30px" title="Editar (nombre, PIN, cliente, fecha, precios)" onclick='editarPerfil(<?= json_encode(["id"=>(int)$p["id"],"etiqueta"=>(string)($p["etiqueta"]??""),"pin"=>(string)($p["pin"]??""),"costo"=>$p["costo"],"venta"=>$p["precio_venta"],"reventa"=>$p["precio_reventa"],"cliente"=>(string)($p["cliente_nombre"]??""),"wa"=>(string)($p["cliente_wa"]??""),"vencCli"=>substr((string)($p["venta_venc"]??""),0,10),"puedeNombre"=>true,"puedeClave"=>(!$esRevCtx || $esCompl),"clave"=>(!$esRevCtx || $esCompl)?(string)($p["clave"]??""):"","vendido"=>($p["estado"]==="vendido"),"cambiosNp"=>(int)($p["cambios_np"]??0),"limitado"=>$limitado,"origenCuenta"=>(int)($p["origen_cuenta_id"]??0)], JSON_UNESCAPED_UNICODE | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE) ?: 'null' ?>)'><i data-lucide="pencil" style="width:14px;height:14px"></i></button>
             <?php if ($esRevCtx && (int) ($p['rev_editable'] ?? 0) !== 1): ?>
