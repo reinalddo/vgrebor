@@ -198,24 +198,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     elseif ($a === 'renovar') {
       $hasta = trim((string) ($_POST['hasta'] ?? ''));
-      if ($hasta !== '' && strtotime($hasta)) { $nueva = date('Y-m-d', strtotime($hasta)); $meses = null; }
-      else {
+      $fvAnt = $pdo->query("SELECT fecha_vencimiento FROM streaming_ventas WHERE id=$vid")->fetchColumn();
+      if ($hasta !== '' && strtotime($hasta)) {
+        if (strtotime($hasta) < strtotime('today')) throw new Exception('La fecha debe ser de hoy en adelante.');
+        $nueva = date('Y-m-d', strtotime($hasta)); $meses = null;
+      } else {
         $meses = max(1, min(24, (int) ($_POST['meses'] ?? 1)));
-        $f = $pdo->query("SELECT fecha_vencimiento FROM streaming_ventas WHERE id=$vid")->fetchColumn();
-        $base = ($f && strtotime($f) > time()) ? $f : date('Y-m-d');
+        $base = ($fvAnt && strtotime($fvAnt) > time()) ? $fvAnt : date('Y-m-d');
         $nueva = date('Y-m-d', strtotime($base . " +$meses months"));
       }
+      // Meses a COBRAR: en modo "meses" = $meses; en modo fecha fija = la extensión (para no cobrar 1 mes
+      // por una renovación de un año). Se multiplica por el precio unitario de renovación.
+      $baseCobro = ($fvAnt && strtotime($fvAnt) > time()) ? $fvAnt : date('Y-m-d');
+      $mesesCobro = ($meses !== null) ? $meses : (function_exists('st_meses_cobro') ? st_meses_cobro($baseCobro, $nueva) : 1);
       // COBRO AL REVENDEDOR (bug reportado: "renovaba sin saldo"). Si quien renueva es un REVENDEDOR, la
-      // tienda le cobra el precio de renovación de SU saldo — igual que al comprar. Si no le alcanza, NO se
-      // renueva (se aborta ANTES de tocar la fecha). El ADMIN sigue renovando sin cobro (es su inventario).
+      // tienda le cobra el precio de renovación × meses de SU saldo. Si no le alcanza, NO se renueva (se
+      // aborta ANTES de tocar la fecha). El ADMIN sigue renovando sin cobro (es su inventario).
       if ($esRevCtx) {
         $vr = $pdo->query("SELECT plataforma, precio_renovacion, precio FROM streaming_ventas WHERE id=$vid")->fetch(PDO::FETCH_ASSOC) ?: [];
         $platName = (string) ($vr['plataforma'] ?? '');
-        $costoRenov = $costoRenovRev($platName, $vr['precio_renovacion'] ?? null, $vr['precio'] ?? null);
+        $costoRenov = round($costoRenovRev($platName, $vr['precio_renovacion'] ?? null, $vr['precio'] ?? null) * max(1, (int) $mesesCobro), 2);
         if ($costoRenov > 0) {
           require_once __DIR__ . '/../../api/wallet/_helpers.php';
           $mio = (int) current_user_id();
-          if (!function_exists('wallet_debitar') || !wallet_debitar($pdo, $mio, $costoRenov, 'renovacion_streaming', 'Renovación ' . ($platName ?: 'streaming'))) {
+          if (!function_exists('wallet_debitar') || !wallet_debitar($pdo, $mio, $costoRenov, 'renovacion_streaming', 'Renovación ' . ($platName ?: 'streaming') . ($mesesCobro > 1 ? " x{$mesesCobro} meses" : ''))) {
             $sal = function_exists('wallet_saldo') ? wallet_saldo($pdo, $mio) : 0.0;
             throw new Exception('⚠ Saldo insuficiente para renovar: cuesta $' . number_format($costoRenov, 2) . ' y tu saldo es $' . number_format($sal, 2) . '. Recarga tu saldo y vuelve a intentar.');
           }
@@ -544,11 +550,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           $sinSaldo = 0;   // renovaciones de revendedor que NO se hicieron por falta de saldo
           if ($esRevCtx) { require_once __DIR__ . '/../../api/wallet/_helpers.php'; }
           foreach ($rows as $r) {
-            // COBRO AL REVENDEDOR también en lote (si no, se salta el cobro renovando varias). Si no le
-            // alcanza el saldo para ESTA, se salta sin renovarla (las demás sí). El admin no paga.
+            // Meses a cobrar de ESTA venta: modo meses = $meses; modo fecha fija = la extensión desde su
+            // propio vencimiento (para no cobrar 1 mes por renovar un año).
+            if ($hasta !== '') {
+              $baseR = ($r['fecha_vencimiento'] && strtotime($r['fecha_vencimiento']) > time()) ? $r['fecha_vencimiento'] : date('Y-m-d');
+              $mesesCobroR = function_exists('st_meses_cobro') ? st_meses_cobro($baseR, date('Y-m-d', strtotime($hasta))) : 1;
+            } else { $mesesCobroR = $meses; }
+            // COBRO AL REVENDEDOR también en lote (si no, se salta el cobro renovando varias). Cobra
+            // precio × meses. Si no le alcanza el saldo para ESTA, se salta sin renovarla (las demás sí).
             if ($esRevCtx) {
-              $costoR = $costoRenovRev((string) ($r['plataforma'] ?? ''), $r['precio_renovacion'] ?? null, $r['precio'] ?? null);
-              if ($costoR > 0 && (!function_exists('wallet_debitar') || !wallet_debitar($pdo, (int) current_user_id(), $costoR, 'renovacion_streaming', 'Renovación ' . ((string) ($r['plataforma'] ?? '') ?: 'streaming')))) { $sinSaldo++; continue; }
+              $costoR = round($costoRenovRev((string) ($r['plataforma'] ?? ''), $r['precio_renovacion'] ?? null, $r['precio'] ?? null) * max(1, (int) $mesesCobroR), 2);
+              if ($costoR > 0 && (!function_exists('wallet_debitar') || !wallet_debitar($pdo, (int) current_user_id(), $costoR, 'renovacion_streaming', 'Renovación ' . ((string) ($r['plataforma'] ?? '') ?: 'streaming') . ($mesesCobroR > 1 ? " x{$mesesCobroR} meses" : '')))) { $sinSaldo++; continue; }
             }
             // fecha_inicio SÍ se avanza: el renovar individual NO lo hace y eso REGALA días. La
             // auto-renovación calcula la duración como (vencimiento − inicio) y cobra el precio
@@ -806,7 +818,7 @@ stream_head('Ventas', 'ventas');
 </div>
 
 <!-- Toggle Ventas / Recargas -->
-<div style="display:flex;gap:8px;margin-bottom:12px">
+<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
   <button class="btn primary"><i data-lucide="list"></i> Ventas</button>
   <?php if (function_exists('stream_ctx') && stream_ctx() === 'revendedor'): ?>
     <a href="recargas.php" class="btn ghost" title="Vender recargas de juegos"><i data-lucide="zap"></i> Recargas</a>

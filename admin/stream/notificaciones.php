@@ -125,7 +125,7 @@ stream_head('Notificaciones', 'notificaciones');
     ?>
       <div style="display:flex;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border);<?= $leido ? '' : 'background:var(--surface-2)' ?>">
         <div style="flex:0 0 34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;background:<?= h($e[1]) ?>1a"><?= $e[0] ?></div>
-        <div style="flex:1;min-width:0">
+        <div style="flex:1;min-width:0;overflow-wrap:anywhere">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <b style="font-size:13.5px"><?= h((string) $n['titulo']) ?></b>
             <?php if (!$leido): ?><span style="font-size:10px;font-weight:700;color:#fff;background:var(--accent);padding:1px 7px;border-radius:20px">NUEVO</span><?php endif; ?>

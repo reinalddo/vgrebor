@@ -69,13 +69,13 @@ stream_head('Recargas', 'recargas');
         <?php endif; ?>
         <h2 style="margin:0"><?= h($juegoNombre) ?></h2><span class="pill-count"><?= count($paquetes) ?></span>
       </div>
-      <div style="padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
+      <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3" style="padding:12px">
         <?php foreach ($paquetes as $p): $pImg = trim((string) ($p['imagen_icono'] ?? '')); ?>
           <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
               <?php if ($pImg !== ''): ?><img src="<?= h($pImg) ?>" alt="" style="width:26px;height:26px;border-radius:7px;object-fit:cover;background:var(--surface-2);flex:0 0 auto">
               <?php elseif ($jImg !== ''): ?><img src="<?= h($jImg) ?>" alt="" style="width:26px;height:26px;border-radius:7px;object-fit:cover;background:var(--surface-2);flex:0 0 auto"><?php endif; ?>
-              <div style="font-weight:800"><?= h($p['nombre']) ?></div>
+              <div style="font-weight:800;min-width:0;overflow-wrap:anywhere"><?= h($p['nombre']) ?></div>
             </div>
             <div class="muted" style="font-size:12px"><?= h($p['cantidad'] ?: '') ?></div>
             <div class="tnum" style="font-size:18px;font-weight:800">$<?= number_format((float) $p['precio_revendedor'], 2) ?></div>

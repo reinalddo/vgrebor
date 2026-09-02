@@ -276,19 +276,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $ownCu = $pdo->query("SELECT owner_id FROM streaming_cuentas WHERE id=$cid")->fetchColumn();
       if ($ownCu === false || (int) $ownCu !== $OWNER) throw new Exception('Cuenta no encontrada.');
       $hasta = trim((string) ($_POST['hasta'] ?? ''));
-      if ($hasta !== '' && strtotime($hasta)) { $nueva = date('Y-m-d', strtotime($hasta)); }
-      else {
+      $fCta = $pdo->query("SELECT vencimiento FROM streaming_cuentas WHERE id=$cid")->fetchColumn();
+      $baseCta = ($fCta && strtotime($fCta) > time()) ? $fCta : date('Y-m-d');
+      if ($hasta !== '' && strtotime($hasta)) {
+        if (strtotime($hasta) < strtotime('today')) throw new Exception('La fecha debe ser de hoy en adelante.');
+        $nueva = date('Y-m-d', strtotime($hasta));
+        $mesesCobro = function_exists('st_meses_cobro') ? st_meses_cobro($baseCta, $nueva) : 1;
+      } else {
         $meses = max(1, min(24, (int) ($_POST['meses'] ?? 1)));
-        $f = $pdo->query("SELECT vencimiento FROM streaming_cuentas WHERE id=$cid")->fetchColumn();
-        $base = ($f && strtotime($f) > time()) ? $f : date('Y-m-d');
-        $nueva = date('Y-m-d', strtotime($base . " +$meses months"));
+        $nueva = date('Y-m-d', strtotime($baseCta . " +$meses months"));
+        $mesesCobro = $meses;
       }
       // COBRO AL REVENDEDOR (loophole: "en Cuentas renovaba sin dinero"). Si quien renueva es un REVENDEDOR,
-      // la tienda le cobra la renovación de su saldo. Si no alcanza, NO se renueva. El ADMIN renueva sin cobro.
+      // la tienda le cobra la renovación × meses de su saldo. Si no alcanza, NO se renueva. El ADMIN sin cobro.
       if ($esRev && function_exists('st_cobrar_renov_rev')) {
         $platC = (string) ($pdo->query("SELECT plataforma FROM streaming_cuentas WHERE id=$cid")->fetchColumn() ?: '');
         $costoR = 0.0;
-        if (!st_cobrar_renov_rev($pdo, (int) current_user_id(), $platC, $costoR)) {
+        if (!st_cobrar_renov_rev($pdo, (int) current_user_id(), $platC, $costoR, null, null, $mesesCobro)) {
           $sal = function_exists('wallet_saldo') ? wallet_saldo($pdo, (int) current_user_id()) : 0.0;
           throw new Exception('⚠ Saldo insuficiente para renovar: cuesta $' . number_format($costoR, 2) . ' y tu saldo es $' . number_format($sal, 2) . '. Recarga tu saldo.');
         }
@@ -318,13 +322,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $sinSaldo = 0;
       $pdo->beginTransaction();
       try {
-        // COBRO AL REVENDEDOR: cobra cada cuenta; las que no alcancen el saldo SALEN del lote (no se renuevan).
+        // COBRO AL REVENDEDOR: cobra cada cuenta × meses; las que no alcancen el saldo SALEN del lote.
         if ($esRev && function_exists('st_cobrar_renov_rev')) {
+          $mesesLote = ($hasta !== '') ? null : max(1, min(24, (int) ($_POST['meses'] ?? 1)));
           $pagadas = [];
           foreach ($ids as $cidR) {
-            $platR = (string) ($pdo->query("SELECT plataforma FROM streaming_cuentas WHERE id=" . (int) $cidR . " AND owner_id=$OWNER")->fetchColumn() ?: '');
+            $cRow = $pdo->query("SELECT plataforma, vencimiento FROM streaming_cuentas WHERE id=" . (int) $cidR . " AND owner_id=$OWNER")->fetch(PDO::FETCH_ASSOC) ?: [];
+            $platR = (string) ($cRow['plataforma'] ?? '');
+            if ($mesesLote !== null) { $mc = $mesesLote; }
+            else { $baseR = (!empty($cRow['vencimiento']) && strtotime($cRow['vencimiento']) > time()) ? $cRow['vencimiento'] : date('Y-m-d'); $mc = function_exists('st_meses_cobro') ? st_meses_cobro($baseR, date('Y-m-d', strtotime($hasta))) : 1; }
             $cR = 0.0;
-            if (st_cobrar_renov_rev($pdo, (int) current_user_id(), $platR, $cR)) { $pagadas[] = (int) $cidR; } else { $sinSaldo++; }
+            if (st_cobrar_renov_rev($pdo, (int) current_user_id(), $platR, $cR, null, null, $mc)) { $pagadas[] = (int) $cidR; } else { $sinSaldo++; }
           }
           $ids = $pagadas;
           if (!$ids) { throw new Exception('⚠ Saldo insuficiente: no se pudo renovar ninguna cuenta.'); }
@@ -925,7 +933,7 @@ stream_head('Cuentas', 'cuentas');
 
 <!-- Tabla -->
 <div class="card">
-  <div class="card-hd">
+  <div class="card-hd flex-wrap">
     <i data-lucide="list"></i><h2>Cuentas</h2><span class="pill-count"><?= $kTotal ?></span>
     <button type="button" onclick="selTodos()" class="btn ghost" style="margin-left:auto;padding:6px 11px;font-size:12px"><i data-lucide="check-square" style="width:14px;height:14px"></i> Seleccionar todos</button>
     <input id="buscar" type="text" placeholder="Buscar rápido…" class="input" style="max-width:240px">
@@ -1111,7 +1119,7 @@ stream_head('Cuentas', 'cuentas');
           <select name="revendedor_id" class="input"><option value="">— Elige —</option><?php foreach ($revList as $rv): ?><option value="<?= (int) $rv['id'] ?>"><?= h($rv['nombre']) ?></option><?php endforeach; ?></select>
         </div>
       </div>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div class="field"><label class="flbl">Precio para TODAS (opcional)</label><input id="bv-precio-all" type="number" step="0.01" min="0" class="input" placeholder="$" oninput="bvPrecioAll(this.value)"></div>
         <div class="field"><label class="flbl">Vence (opcional)</label><input name="vencimiento" type="date" class="input"></div>
       </div>
@@ -1143,7 +1151,7 @@ stream_head('Cuentas', 'cuentas');
     <form method="post" class="p-5 space-y-4"><input type="hidden" name="_csrf" value="<?= h($csrf) ?>"><input type="hidden" name="accion" value="cambiar_costo_masivo"><input type="hidden" name="ids" id="bc-ids">
       <p style="color:var(--muted)">A <strong id="bc-n" style="color:var(--text)">0</strong> cuenta(s). Deja vacío lo que no quieras cambiar.</p>
       <div class="field"><label class="flbl">Costo por cuenta <span style="color:var(--faint);font-weight:400"><?= $esRev ? '(solo en tus cuentas propias; el stock comprado a la tienda es automático)' : '(lo que pagas al proveedor)' ?></span></label><input name="costo" type="number" step="0.01" min="0" class="input" placeholder="$"></div>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div class="field"><label class="flbl">Precio venta <span style="color:var(--faint);font-weight:400">(al cliente)</span></label><input name="precio_venta" type="number" step="0.01" min="0" class="input" placeholder="$"></div>
         <div class="field"><label class="flbl">Precio reventa <span style="color:var(--faint);font-weight:400">(al revendedor)</span></label><input name="precio_reventa" type="number" step="0.01" min="0" class="input" placeholder="$"></div>
       </div>

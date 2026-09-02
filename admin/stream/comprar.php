@@ -406,7 +406,7 @@ stream_head('Comprar del stock', 'comprar');
     <h1>Comprar del <span class="nm">stock de la tienda</span></h1>
     <p>Compra un perfil disponible del inventario de la tienda a tu precio de revendedor. Se descuenta de tu saldo.</p>
   </div>
-  <div style="display:flex;align-items:center;gap:10px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <div class="card" style="padding:10px 16px"><div style="font-size:11px;color:var(--faint);font-weight:700;text-transform:uppercase">Tu saldo</div>
       <div class="tnum" style="font-size:20px;font-weight:800;color:var(--accent)">$<?= number_format($saldo, 2) ?></div></div>
     <a href="saldo.php" class="btn primary"><i data-lucide="wallet"></i> Recargar saldo</a>
@@ -419,7 +419,7 @@ stream_head('Comprar del stock', 'comprar');
     La tienda aún no tiene plataformas disponibles para revendedores (con precio de revendedor y stock).
   </div>
 <?php else: ?>
-  <div class="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">
+  <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
     <?php foreach ($stock as $s):
       $esManual = in_array($s['modo'], ['invitacion', 'activacion', 'email_manual'], true);
       $agotadoManual = $esManual && (int) ($s['disponible'] ?? 1) === 0;   // agotado marcado a mano
@@ -477,8 +477,8 @@ stream_head('Comprar del stock', 'comprar');
       <input list="mcClientesList" name="cliente_nombre" id="mc-clinombre" oninput="mcCliSel(this.value)" placeholder="Nombre del cliente…" autocomplete="off" style="width:100%;margin-bottom:8px;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
       <datalist id="mcClientesList"><?php foreach ($misClientes as $c): ?><option value="<?= h($c['nombre']) ?>"><?php endforeach; ?></datalist>
       <div style="display:flex;gap:8px;margin-bottom:12px">
-        <input name="cliente_wa" id="mc-cliwa" placeholder="WhatsApp (opcional)" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
-        <input name="cliente_email" id="mc-cliemail" placeholder="Correo (opcional)" style="flex:1;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
+        <input name="cliente_wa" id="mc-cliwa" placeholder="WhatsApp (opcional)" style="flex:1;min-width:0;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
+        <input name="cliente_email" id="mc-cliemail" placeholder="Correo (opcional)" style="flex:1;min-width:0;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
       </div>
       <script>
         var MC_CLIENTES = <?= json_encode(array_map(static fn($c) => ['n' => (string) ($c['nombre'] ?? ''), 'wa' => (string) ($c['wa'] ?? ''), 'em' => (string) ($c['email'] ?? '')], $misClientes), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG) ?>;
@@ -499,12 +499,12 @@ stream_head('Comprar del stock', 'comprar');
           <div style="font-size:11px;color:var(--faint);margin-top:4px">Al aprobar la tienda, esta cuenta <b>completa</b> caerá en tu stock con estos cupos.</div>
         </div>
       </div>
-      <div id="mc-stockrow" style="display:flex;gap:8px;margin-bottom:10px">
-        <div style="flex:1">
+      <div id="mc-stockrow" style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:0">
           <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px">Cantidad</label>
           <input type="number" min="1" max="100" step="1" name="cantidad" id="mc-cant" value="1" oninput="mcCalcGan(document.getElementById('mc-pvc').value)" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
         </div>
-        <div style="flex:1.4">
+        <div style="flex:1.4;min-width:0">
           <label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px">¿Qué compras?</label>
           <select name="unidad" id="mc-unidad" onchange="mcCalcGan(document.getElementById('mc-pvc').value)" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
             <option value="perfil">Perfil(es) sueltos</option>

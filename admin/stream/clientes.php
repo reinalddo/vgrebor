@@ -226,7 +226,7 @@ stream_head('Clientes', 'clientes');
 </div>
 
 <div class="card">
-  <div class="card-hd">
+  <div class="card-hd" style="flex-wrap:wrap">
     <i data-lucide="users"></i>
     <h2><?= count($clientes) ?> clientes</h2>
     <div class="search-wrap">

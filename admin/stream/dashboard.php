@@ -88,7 +88,7 @@ stream_head('Dashboard', 'dashboard');
     <h1><?= h($saludo) ?>, <span class="nm"><?= h($primer ?: 'Conec') ?></span> 👋</h1>
     <p>Resumen de ingresos, perfiles y salud de las ventas de streaming.</p>
   </div>
-  <div style="display:flex;gap:10px;align-items:center">
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <span class="datechip"><i data-lucide="calendar"></i> <?= h($diasSem[(int) date('w')]) ?>, <?= date('d/m/Y') ?></span>
     <a href="dashboard.php" class="btn primary"><i data-lucide="refresh-cw"></i> Actualizar</a>
   </div>
@@ -160,7 +160,7 @@ stream_head('Dashboard', 'dashboard');
 
 <!-- Centro de Alertas -->
 <div class="card">
-  <div class="card-hd"><i data-lucide="bell"></i><h2>Centro de alertas</h2>
+  <div class="card-hd" style="flex-wrap:wrap"><i data-lucide="bell"></i><h2 style="white-space:nowrap">Centro de alertas</h2>
     <div style="margin-left:auto;display:flex;gap:8px">
       <span class="pill wait">Cobros: <?= (int) $k['vencidas'] ?></span>
       <span class="pill err">Stock: <?= count($stockBajo) ?></span>

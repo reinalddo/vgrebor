@@ -148,9 +148,11 @@ if (!function_exists('sbr_ensure_columns')) {
 if (!function_exists('sbr_fetch_sync')) {
     // Best-effort: trae los movimientos de la API y agrega SOLO los NUEVOS (INSERT IGNORE) para no
     // pisar montos que la tienda ya guardó. Si falla, seguimos con lo que ya haya sincronizado.
-    function sbr_fetch_sync(PDO $pdo): void {
+    // Devuelve cuántos movimientos DEVOLVIÓ la API en esta corrida (0 = no respondió / vacío). Sirve como
+    // señal "apiRespondio" para rechazar referencias inventadas solo cuando la pasarela está VIVA.
+    function sbr_fetch_sync(PDO $pdo): int {
         $token = sbr_cfg('binance_pagonorte_token', '');
-        if ($token === '') return;
+        if ($token === '') return 0;
         $url = function_exists('store_config_build_binance_pagonorte_movements_url')
             ? store_config_build_binance_pagonorte_movements_url($token)
             : ('https://apicentral.pro/apis/movimientos_binance.jsp?token=' . rawurlencode($token));
@@ -164,9 +166,9 @@ if (!function_exists('sbr_fetch_sync')) {
                 $body = @file_get_contents($url, false, stream_context_create(['http' => ['timeout' => 15, 'ignore_errors' => true], 'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]]));
             }
         } catch (Throwable $e) { $body = null; }
-        if (!is_string($body) || $body === '') return;
+        if (!is_string($body) || $body === '') return 0;
         $data = json_decode($body, true);
-        if (!is_array($data) || !isset($data['movimientos']) || !is_array($data['movimientos'])) return;
+        if (!is_array($data) || !isset($data['movimientos']) || !is_array($data['movimientos'])) return 0;
         // INSERT IGNORE → nunca sobrescribe un movimiento existente (no corrompe la data de la tienda).
         $ins = $pdo->prepare("INSERT IGNORE INTO movimientos (referencia, descripcion, fecha_raw, fecha_movimiento, tipo, monto, moneda, payload_json) VALUES (?,?,?,?,?,?, 'USDT', ?)");
         foreach ($data['movimientos'] as $m) {
@@ -186,6 +188,7 @@ if (!function_exists('sbr_fetch_sync')) {
                 ]);
             } catch (Throwable $e) {}
         }
+        return count($data['movimientos']);
     }
 }
 
@@ -382,6 +385,7 @@ if (!function_exists('sbr_generic_verify_and_credit')) {
         $digits  = max(0, min(120, (int) sbr_cfg($slug . '_referencia_digitos', '0')));
 
         // Traer movimientos (best-effort, INSERT IGNORE: nunca pisa lo que ya haya).
+        $apiRespondio = false;   // ¿la API devolvió movimientos EN ESTA corrida? (para rechazar seguro)
         try {
             $token = sbr_cfg($slug . '_movimientos_token', '');
             $full = $url . ((mb_strpos($url, '?') !== false) ? '&' : '?') . ($token !== '' ? 'token=' . rawurlencode($token) : '');
@@ -396,6 +400,7 @@ if (!function_exists('sbr_generic_verify_and_credit')) {
             if (is_string($body) && $body !== '') {
                 $data = json_decode($body, true);
                 $lista = is_array($data) ? ($data['movimientos'] ?? $data['data'] ?? (array_is_list($data) ? $data : [])) : [];
+                if (is_array($lista) && count($lista) > 0) $apiRespondio = true;
                 if (is_array($lista)) {
                     $ins = $pdo->prepare("INSERT IGNORE INTO movimientos (referencia, descripcion, fecha_raw, fecha_movimiento, tipo, monto, moneda) VALUES (?,?,?,?,?,?,?)");
                     foreach ($lista as $m) {
@@ -449,6 +454,25 @@ if (!function_exists('sbr_generic_verify_and_credit')) {
         // en vez de dejarlo "pendiente" (que sonaba a "espera, ya llega" cuando en realidad no va a llegar).
         if ($hayCandidatos) {
             return ['credited' => false, 'rejected' => true, 'message' => '✗ La referencia no coincide con ningún pago recibido por ese monto. Verifica el número de referencia e intenta de nuevo.'];
+        }
+        // AMPLIACIÓN (pedido del cliente 30-ago): referencia INVENTADA que ni siquiera casa por monto.
+        // Si la API está VIVA (trajo movimientos recientes de ESTE método) pero la referencia NO aparece
+        // en NINGUNO de ellos → no es un pago que "va a llegar", es un dato falso → RECHAZAR. Si la API no
+        // trajo nada reciente (caída/retraso), NO se rechaza: queda pendiente para no tumbar por error un
+        // pago válido que aún no sincronizó. (Balance seguro: solo rechaza con evidencia de que la API sí
+        // está devolviendo movimientos y la referencia simplemente no existe.)
+        if ($apiRespondio) {
+            try {
+                $rr = $pdo->prepare("SELECT referencia FROM movimientos
+                      WHERE referencia LIKE ? AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
+                      ORDER BY id DESC LIMIT 300");
+                $rr->execute([$prefijo . '%']);
+                $refAparece = false;
+                foreach ($rr->fetchAll(PDO::FETCH_COLUMN) as $fullRef) { if (sbr_reference_matches((string) $fullRef, $reportedRef, $digits)) { $refAparece = true; break; } }
+                if (!$refAparece) {
+                    return ['credited' => false, 'rejected' => true, 'message' => '✗ Esa referencia no aparece en los pagos recibidos. Verifícala; si es correcta, espera 1-2 min y vuelve a intentar.'];
+                }
+            } catch (Throwable $e) {}
         }
         return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; el admin también puede aprobarlo.'];
     }
@@ -511,6 +535,7 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
         $digits = $pmDigits !== null ? $pmDigits : max(0, min(120, (int) sbr_cfg('bnc_referencia_digitos', '0')));
 
         // Fetch best-effort (INSERT IGNORE por referencia UNIQUE → nunca pisa lo que la tienda sincronizó).
+        $apiRespondio = false;   // ¿el banco devolvió movimientos EN ESTA corrida? (para rechazar seguro)
         try {
             $c = sbr_bank_config();
             if (function_exists('store_config_build_bank_movements_url')) {
@@ -527,6 +552,7 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
                 if (is_string($body) && $body !== '') {
                     $data = json_decode($body, true);
                     $lista = (is_array($data) && isset($data['movimientos']) && is_array($data['movimientos'])) ? $data['movimientos'] : [];
+                    if (count($lista) > 0) $apiRespondio = true;
                     // Los movimientos del banco se guardan SIN prefijo y moneda VES (igual que la tienda).
                     $ins = $pdo->prepare("INSERT IGNORE INTO movimientos (referencia, descripcion, fecha_raw, fecha_movimiento, tipo, monto, moneda) VALUES (?,?,?,?,?,?, 'VES')");
                     foreach ($lista as $m) {
@@ -586,6 +612,23 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
         if ($hayCandidatos) {
             return ['credited' => false, 'rejected' => true, 'message' => '✗ La referencia no coincide con ningún pago recibido por ese monto. Verifica el número de referencia e intenta de nuevo.'];
         }
+        // AMPLIACIÓN (pedido del cliente 30-ago): referencia INVENTADA que no casa ni por monto. Si el
+        // banco RESPONDIÓ con movimientos en esta corrida (API viva) pero la referencia NO aparece en
+        // ninguno reciente → dato falso → RECHAZAR. Si el banco no respondió (caída/retraso), queda
+        // pendiente para no tumbar un pago válido que aún no sincroniza.
+        if ($apiRespondio) {
+            try {
+                $rr = $pdo->prepare("SELECT referencia FROM movimientos
+                      WHERE moneda='VES' AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
+                      ORDER BY id DESC LIMIT 300");
+                $rr->execute();
+                $refAparece = false;
+                foreach ($rr->fetchAll(PDO::FETCH_COLUMN) as $fullRef) { if (sbr_reference_matches((string) $fullRef, $reportedRef, $digits)) { $refAparece = true; break; } }
+                if (!$refAparece) {
+                    return ['credited' => false, 'rejected' => true, 'message' => '✗ Esa referencia no aparece en los pagos recibidos. Verifícala; si es correcta, espera 1-2 min y vuelve a intentar.'];
+                }
+            } catch (Throwable $e) {}
+        }
         return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; el admin también puede aprobarlo.'];
     }
 }
@@ -597,7 +640,8 @@ if (!function_exists('sbr_binance_verify_and_credit')) {
         if ($reportedRef === '' || $amount <= 0) return ['credited' => false, 'message' => 'Falta la referencia o el monto.'];
 
         sbr_ensure_columns($pdo);
-        try { sbr_fetch_sync($pdo); } catch (Throwable $e) {}   // best-effort
+        $apiRespondio = false;   // ¿la API de Binance devolvió movimientos en esta corrida? (rechazo seguro)
+        try { $apiRespondio = (sbr_fetch_sync($pdo) > 0); } catch (Throwable $e) {}   // best-effort
 
         $digits = sbr_binance_digits($pdo, $metodoNombre);
         // $amount = a acreditar en $. Binance cobra en USDT ≈ $ (1:1) → el match usa el mismo monto,
@@ -652,6 +696,23 @@ if (!function_exists('sbr_binance_verify_and_credit')) {
         // escrita → dato erróneo, rechazar claro (no dejar "pendiente" sonando a "ya va a llegar").
         if ($hayCandidatos) {
             return ['credited' => false, 'rejected' => true, 'message' => '✗ La referencia no coincide con ningún pago recibido por ese monto. Verifica el ID de transacción de Binance e intenta de nuevo.'];
+        }
+        // AMPLIACIÓN (pedido del cliente 30-ago): referencia INVENTADA que no casa ni por monto. Si la API
+        // de Binance RESPONDIÓ con movimientos en esta corrida (viva) pero la referencia NO aparece en
+        // ninguno reciente → dato falso → RECHAZAR. Si la API no respondió (caída/retraso), queda pendiente
+        // (no rechaza un pago válido que aún no sincroniza).
+        if ($apiRespondio) {
+            try {
+                $rr = $pdo->prepare("SELECT referencia FROM movimientos
+                      WHERE referencia LIKE 'BINANCE:%' AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
+                      ORDER BY id DESC LIMIT 300");
+                $rr->execute();
+                $refAparece = false;
+                foreach ($rr->fetchAll(PDO::FETCH_COLUMN) as $fullRef) { if (sbr_reference_matches((string) $fullRef, $reportedRef, $digits)) { $refAparece = true; break; } }
+                if (!$refAparece) {
+                    return ['credited' => false, 'rejected' => true, 'message' => '✗ Ese ID de transacción no aparece en los pagos de Binance recibidos. Verifícalo; si es correcto, espera 1-2 min y vuelve a intentar.'];
+                }
+            } catch (Throwable $e) {}
         }
         return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; vuelve a intentar o el admin lo aprueba manual.'];
     }

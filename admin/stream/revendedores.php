@@ -274,7 +274,7 @@ stream_head('Revendedores', 'revendedores');
   <form method="post" style="padding:0 16px 16px">
     <input type="hidden" name="_csrf" value="<?= h(csrf_token()) ?>"><input type="hidden" name="accion" value="guardar_bot_codigos">
     <p style="font-size:11.5px;color:var(--faint);margin:0 0 10px">Cuando le entregas/vendes una cuenta a un revendedor, se <b>asigna</b> el correo de esa cuenta al correo del revendedor en la página de códigos; al eliminársela, se <b>desasigna</b>. Deja la URL vacía para desactivar.<br>
-    URL (según la propuesta de prycorreos): <code>https://streaming.reborxstore.com/api/external/asignaciones.php</code> · POST JSON <code>{action, account_email, reseller_email}</code> · el <b>token va en el header</b> <code>Authorization: Bearer</code>. <b>Ojo:</b> ese endpoint lo debe crear primero el programador de la página de códigos.</p>
+    URL (según la propuesta de prycorreos): <code style="word-break:break-all">https://streaming.reborxstore.com/api/external/asignaciones.php</code> · POST JSON <code>{action, account_email, reseller_email}</code> · el <b>token va en el header</b> <code>Authorization: Bearer</code>. <b>Ojo:</b> ese endpoint lo debe crear primero el programador de la página de códigos.</p>
     <div class="grid md:grid-cols-2 gap-3">
       <div class="field" style="margin:0"><label class="flbl">URL del bot (endpoint)</label><input name="bot_url" class="input" value="<?= h($botUrl) ?>" placeholder="https://tu-bot.com/api/asignar"></div>
       <div class="field" style="margin:0"><label class="flbl">Token / clave (opcional)</label><input name="bot_token" class="input" value="<?= h($botTok) ?>" placeholder="Token de seguridad"></div>
@@ -338,7 +338,7 @@ stream_head('Revendedores', 'revendedores');
 <?php endif; ?>
 
 <div class="card">
-  <div class="card-hd"><i data-lucide="users"></i><h2>Revendedores</h2><span class="pill-count"><?= count($revs) ?></span>
+  <div class="card-hd flex-wrap"><i data-lucide="users"></i><h2>Revendedores</h2><span class="pill-count"><?= count($revs) ?></span>
     <div style="margin-left:auto;position:relative">
       <i data-lucide="search" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--faint)"></i>
       <input id="revBuscar" type="search" placeholder="Buscar por nombre o correo…" oninput="filtrarRevs(this.value)" autocomplete="off"

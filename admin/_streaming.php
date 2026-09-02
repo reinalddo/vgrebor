@@ -276,14 +276,25 @@ function st_renov_precio_rev(PDO $pdo, string $platName, $ventaPrecioRenov = nul
   return round($c, 2);
 }
 
-/** Cobra al REVENDEDOR la renovación de su saldo (usando st_renov_precio_rev). Devuelve true si cobró (o si
- *  no había precio que cobrar); false si NO alcanzó el saldo. NUNCA lanza. El costo cobrado va en $costoOut. */
-function st_cobrar_renov_rev(PDO $pdo, int $uid, string $platName, &$costoOut = 0.0, $vPrecioRenov = null, $vPrecio = null): bool {
-  $costoOut = st_renov_precio_rev($pdo, $platName, $vPrecioRenov, $vPrecio);
+/** Meses a COBRAR entre dos fechas (modo "hasta"/fecha fija): la extensión / 30 días, mínimo 1. Para que
+ *  renovar a una fecha lejana NO cueste lo mismo que renovar 1 mes (bug: extensión larga, cobro plano). */
+function st_meses_cobro($baseDate, $nuevaDate): int {
+  $b = strtotime((string) $baseDate); $n = strtotime((string) $nuevaDate);
+  if (!$b || !$n || $n <= $b) return 1;
+  return max(1, (int) ceil(($n - $b) / (30 * 86400)));
+}
+
+/** Cobra al REVENDEDOR la renovación de su saldo (usando st_renov_precio_rev). Cobra precio × $meses (una
+ *  renovación de 12 meses cuesta 12×, no 1× — antes cobraba plano = hueco de dinero). Devuelve true si cobró
+ *  (o si no había precio que cobrar); false si NO alcanzó el saldo. NUNCA lanza. El costo va en $costoOut. */
+function st_cobrar_renov_rev(PDO $pdo, int $uid, string $platName, &$costoOut = 0.0, $vPrecioRenov = null, $vPrecio = null, $meses = 1): bool {
+  $unit = st_renov_precio_rev($pdo, $platName, $vPrecioRenov, $vPrecio);
+  $meses = max(1, (int) $meses);
+  $costoOut = round($unit * $meses, 2);
   if ($costoOut <= 0) return true;   // sin precio configurado → no se cobra (no bloquea)
   require_once __DIR__ . '/../api/wallet/_helpers.php';
   if (!function_exists('wallet_debitar')) return true;
-  return wallet_debitar($pdo, $uid, $costoOut, 'renovacion_streaming', 'Renovación ' . ($platName ?: 'streaming'));
+  return wallet_debitar($pdo, $uid, $costoOut, 'renovacion_streaming', 'Renovación ' . ($platName ?: 'streaming') . ($meses > 1 ? " x{$meses} meses" : ''));
 }
 
 function st_kpis(PDO $pdo): array {

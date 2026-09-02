@@ -291,7 +291,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       // le cobra de su saldo; si no alcanza, NO se renueva. El ADMIN renueva sin cobro.
       if ($esRevCtx && function_exists('st_cobrar_renov_rev')) {
         $costoP = 0.0;
-        if (!st_cobrar_renov_rev($pdo, (int) current_user_id(), (string) ($row['plataforma'] ?? ''), $costoP)) {
+        if (!st_cobrar_renov_rev($pdo, (int) current_user_id(), (string) ($row['plataforma'] ?? ''), $costoP, null, null, $meses)) {
           $sal = function_exists('wallet_saldo') ? wallet_saldo($pdo, (int) current_user_id()) : 0.0;
           throw new Exception('⚠ Saldo insuficiente para renovar: cuesta $' . number_format($costoP, 2) . ' y tu saldo es $' . number_format($sal, 2) . '. Recarga tu saldo.');
         }
@@ -516,6 +516,17 @@ $precioCell = function ($costo, $venta, $reventa) {
 
 stream_head('Perfiles', 'perfiles');
 ?>
+<style>
+  /* Estilos de modales/etiquetas (portados idénticos de cuentas.php: perfiles.php los usaba sin definirlos
+     → en móvil los modales salían sin tarjeta y las etiquetas como texto normal). */
+  .flbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);display:block;margin-bottom:5px}
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+  .modal-hd{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
+  .modal-hd h3{margin:0;flex:1;display:flex;align-items:center;gap:8px;font-size:15px;font-weight:720;color:var(--text)}
+  .modal-hd h3 [data-lucide]{width:18px;height:18px;color:var(--accent)}
+  .modal-x{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--muted);display:grid;place-items:center;cursor:pointer}
+  .modal-x:hover{border-color:var(--border-strong);color:var(--text)}
+</style>
 <div class="pagehd">
   <div>
     <h1>Gestión de <span class="nm">Perfiles</span></h1>
@@ -537,7 +548,7 @@ stream_head('Perfiles', 'perfiles');
     if (count($pz) === 2 && $pz[0] !== '') { $waLink = 'https://wa.me/' . preg_replace('/\D+/', '', $pz[0]) . '?text=' . $pz[1]; }
     $flashTxt = trim($flashTxt);
   }
-?><div class="banner" style="margin-bottom:16px<?= $flashMal ? ';background:var(--bad-soft);color:var(--bad);border-color:var(--bad)' : '' ?>"><i data-lucide="<?= $flashMal ? 'alert-triangle' : 'check-circle' ?>"></i><span><?= h($flashTxt) ?></span>
+?><div class="banner" style="margin-bottom:16px;flex-wrap:wrap<?= $flashMal ? ';background:var(--bad-soft);color:var(--bad);border-color:var(--bad)' : '' ?>"><i data-lucide="<?= $flashMal ? 'alert-triangle' : 'check-circle' ?>"></i><span><?= h($flashTxt) ?></span>
   <?php if ($waLink !== ''): ?><a href="<?= h($waLink) ?>" target="_blank" rel="noopener" class="btn ghost" style="margin-left:10px;padding:5px 11px;font-size:12.5px"><i data-lucide="message-circle"></i> Avisar por WhatsApp</a><?php endif; ?>
 </div><?php endif; ?>
 
@@ -710,7 +721,7 @@ stream_head('Perfiles', 'perfiles');
       <!-- Clave de la cuenta — solo cuenta completa (se sincroniza y notifica). -->
       <div id="e-clave-box" class="field" style="display:none;margin-bottom:0"><label class="flbl">Clave de la cuenta completa</label><input name="clave" id="e-clave" class="input" placeholder="Nueva clave"><p style="font-size:11px;color:var(--faint);margin:3px 0 0">Al cambiarla se actualiza en la tienda y les llega aviso.</p></div>
       <p style="font-size:11px;color:var(--faint);margin:0">Precios de <b>la cuenta</b> (aplican a todos sus perfiles). Útil si lo vendes más caro/económico. Deja vacío lo que no quieras cambiar.</p>
-      <div class="grid grid-cols-<?= $verCostos ? '3' : ($esRevCtx ? '2' : '1') ?> gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-<?= $verCostos ? '3' : ($esRevCtx ? '2' : '1') ?> gap-3">
         <?php if ($verCostos || $esRevCtx): ?><div class="field"><label class="flbl">Costo</label><input name="costo" id="e-costo" type="number" step="0.01" min="0" class="input" placeholder="$"><?php if ($esRevCtx): ?><p id="e-costo-nota" style="font-size:10px;color:var(--faint);margin-top:3px"></p><?php endif; ?></div><?php endif; ?>
         <div class="field"><label class="flbl">Venta</label><input name="precio_venta" id="e-venta" type="number" step="0.01" min="0" class="input" placeholder="$"></div>
         <?php if ($verCostos): ?><div class="field"><label class="flbl">Reventa</label><input name="precio_reventa" id="e-reventa" type="number" step="0.01" min="0" class="input" placeholder="$"></div><?php endif; ?>

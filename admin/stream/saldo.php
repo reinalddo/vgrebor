@@ -211,7 +211,7 @@ stream_head('Mi saldo', 'saldo');
       </div>
       <?php if ($metodosPago): ?>
       <div id="rcMetodoBox" style="margin-top:10px;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);font-size:13px;display:none">
-        <div id="rcMetodoDatos" style="white-space:pre-line;color:var(--text)"></div>
+        <div id="rcMetodoDatos" style="white-space:pre-line;overflow-wrap:anywhere;color:var(--text)"></div>
         <img id="rcMetodoQr" src="" alt="QR" style="display:none;max-width:150px;margin-top:8px;border-radius:8px">
       </div>
       <?php endif; ?>
@@ -273,7 +273,7 @@ stream_head('Mi saldo', 'saldo');
     </tbody>
   </table></div>
 </div>
-<style>@media(max-width:640px){.saldo-grid{grid-template-columns:1fr!important}}</style>
+<style>@media(max-width:640px){.saldo-grid{grid-template-columns:1fr!important}}@media(max-width:400px){.row2{grid-template-columns:1fr!important}}</style>
 <script>
 const RC_RATE = <?= json_encode($bsRate) ?>;
 const RC_DEC = <?= json_encode($bsDec) ?>;
