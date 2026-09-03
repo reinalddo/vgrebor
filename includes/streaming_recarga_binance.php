@@ -449,31 +449,11 @@ if (!function_exists('sbr_generic_verify_and_credit')) {
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "referencia LIKE '" . str_replace("'", "''", $prefijo) . "%'")) {
             return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en un pago anterior (una compra en la tienda o otra recarga). No se puede usar dos veces.'];
         }
-        // Hay movimientos recientes CON ESE MONTO exacto (no es problema de sincronización/demora), pero
-        // NINGUNO casa con la referencia escrita → es un dato erróneo, no algo por llegar. Rechazar claro
-        // en vez de dejarlo "pendiente" (que sonaba a "espera, ya llega" cuando en realidad no va a llegar).
-        if ($hayCandidatos) {
-            return ['credited' => false, 'rejected' => true, 'message' => '✗ La referencia no coincide con ningún pago recibido por ese monto. Verifica el número de referencia e intenta de nuevo.'];
-        }
-        // AMPLIACIÓN (pedido del cliente 30-ago): referencia INVENTADA que ni siquiera casa por monto.
-        // Si la API está VIVA (trajo movimientos recientes de ESTE método) pero la referencia NO aparece
-        // en NINGUNO de ellos → no es un pago que "va a llegar", es un dato falso → RECHAZAR. Si la API no
-        // trajo nada reciente (caída/retraso), NO se rechaza: queda pendiente para no tumbar por error un
-        // pago válido que aún no sincronizó. (Balance seguro: solo rechaza con evidencia de que la API sí
-        // está devolviendo movimientos y la referencia simplemente no existe.)
-        if ($apiRespondio) {
-            try {
-                $rr = $pdo->prepare("SELECT referencia FROM movimientos
-                      WHERE referencia LIKE ? AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
-                      ORDER BY id DESC LIMIT 300");
-                $rr->execute([$prefijo . '%']);
-                $refAparece = false;
-                foreach ($rr->fetchAll(PDO::FETCH_COLUMN) as $fullRef) { if (sbr_reference_matches((string) $fullRef, $reportedRef, $digits)) { $refAparece = true; break; } }
-                if (!$refAparece) {
-                    return ['credited' => false, 'rejected' => true, 'message' => '✗ Esa referencia no aparece en los pagos recibidos. Verifícala; si es correcta, espera 1-2 min y vuelve a intentar.'];
-                }
-            } catch (Throwable $e) {}
-        }
+        // HOTFIX 2026-09-03 (BUG DE PRODUCCIÓN: "se rechazan TODAS las recargas"): se DESACTIVA el
+        // auto-rechazo (rechazaba pagos REALES cuyo monto coincide con el de otro usuario, o que aún no
+        // sincronizan / el match por dígitos falla). Todo lo no-casado queda PENDIENTE para aprobación
+        // manual (el duplicado/reused SÍ se sigue rechazando arriba). Mejor pendiente que rechazar un pago real.
+        unset($apiRespondio);
         return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; el admin también puede aprobarlo.'];
     }
 }
@@ -607,28 +587,13 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
             'monto_usd' => $credit, 'monto_buscado_bs' => $match,
             'candidatos_con_ese_monto' => $hayCandidatos ? 'SI' : 'NO',
         ], "moneda='VES'");
-        // Hay movimientos VES recientes con ESE MONTO exacto disponibles (no es demora de sincronización),
-        // pero ninguno casa con la referencia escrita → dato erróneo, rechazar claro (no dejar "pendiente").
-        if ($hayCandidatos) {
-            return ['credited' => false, 'rejected' => true, 'message' => '✗ La referencia no coincide con ningún pago recibido por ese monto. Verifica el número de referencia e intenta de nuevo.'];
-        }
-        // AMPLIACIÓN (pedido del cliente 30-ago): referencia INVENTADA que no casa ni por monto. Si el
-        // banco RESPONDIÓ con movimientos en esta corrida (API viva) pero la referencia NO aparece en
-        // ninguno reciente → dato falso → RECHAZAR. Si el banco no respondió (caída/retraso), queda
-        // pendiente para no tumbar un pago válido que aún no sincroniza.
-        if ($apiRespondio) {
-            try {
-                $rr = $pdo->prepare("SELECT referencia FROM movimientos
-                      WHERE moneda='VES' AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
-                      ORDER BY id DESC LIMIT 300");
-                $rr->execute();
-                $refAparece = false;
-                foreach ($rr->fetchAll(PDO::FETCH_COLUMN) as $fullRef) { if (sbr_reference_matches((string) $fullRef, $reportedRef, $digits)) { $refAparece = true; break; } }
-                if (!$refAparece) {
-                    return ['credited' => false, 'rejected' => true, 'message' => '✗ Esa referencia no aparece en los pagos recibidos. Verifícala; si es correcta, espera 1-2 min y vuelve a intentar.'];
-                }
-            } catch (Throwable $e) {}
-        }
+        // HOTFIX 2026-09-03 (BUG DE PRODUCCIÓN: "se rechazan TODAS las recargas"): se DESACTIVA el
+        // auto-rechazo. Rechazaba pagos REALES de Pago Móvil/BNC — con montos que se repiten mucho
+        // ($hayCandidatos casaba contra el pago de OTRO usuario) o que aún no sincronizaban / cuyo match
+        // por dígitos fallaba ($apiRespondio). Ahora TODO lo no-casado queda PENDIENTE para aprobación
+        // manual del admin (el duplicado/reused SÍ se sigue rechazando arriba). Conducta segura: mejor
+        // pendiente que rechazar un pago legítimo. ($hayCandidatos/$apiRespondio se dejan solo para el log.)
+        unset($apiRespondio); // ya no se usa para rechazar
         return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; el admin también puede aprobarlo.'];
     }
 }
@@ -691,29 +656,11 @@ if (!function_exists('sbr_binance_verify_and_credit')) {
             'monto_buscado' => $amount,
             'candidatos_con_ese_monto' => $hayCandidatos ? 'SI' : 'NO',
         ], "referencia LIKE 'BINANCE:%'");
-        // Hay movimientos de Binance recientes con ESE MONTO exacto disponibles (no es demora de
-        // sincronización: sbr_fetch_sync() ya corrió arriba), pero ninguno casa con la referencia
-        // escrita → dato erróneo, rechazar claro (no dejar "pendiente" sonando a "ya va a llegar").
-        if ($hayCandidatos) {
-            return ['credited' => false, 'rejected' => true, 'message' => '✗ La referencia no coincide con ningún pago recibido por ese monto. Verifica el ID de transacción de Binance e intenta de nuevo.'];
-        }
-        // AMPLIACIÓN (pedido del cliente 30-ago): referencia INVENTADA que no casa ni por monto. Si la API
-        // de Binance RESPONDIÓ con movimientos en esta corrida (viva) pero la referencia NO aparece en
-        // ninguno reciente → dato falso → RECHAZAR. Si la API no respondió (caída/retraso), queda pendiente
-        // (no rechaza un pago válido que aún no sincroniza).
-        if ($apiRespondio) {
-            try {
-                $rr = $pdo->prepare("SELECT referencia FROM movimientos
-                      WHERE referencia LIKE 'BINANCE:%' AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
-                      ORDER BY id DESC LIMIT 300");
-                $rr->execute();
-                $refAparece = false;
-                foreach ($rr->fetchAll(PDO::FETCH_COLUMN) as $fullRef) { if (sbr_reference_matches((string) $fullRef, $reportedRef, $digits)) { $refAparece = true; break; } }
-                if (!$refAparece) {
-                    return ['credited' => false, 'rejected' => true, 'message' => '✗ Ese ID de transacción no aparece en los pagos de Binance recibidos. Verifícalo; si es correcto, espera 1-2 min y vuelve a intentar.'];
-                }
-            } catch (Throwable $e) {}
-        }
+        // HOTFIX 2026-09-03 (BUG DE PRODUCCIÓN: "se rechazan TODAS las recargas"): se DESACTIVA el
+        // auto-rechazo (rechazaba pagos REALES cuyo monto coincide con el de otro pago, o que aún no
+        // sincronizan / el match por dígitos falla). Todo lo no-casado queda PENDIENTE para aprobación
+        // manual (el duplicado/reused SÍ se sigue rechazando arriba). Mejor pendiente que rechazar un pago real.
+        unset($apiRespondio);
         return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; vuelve a intentar o el admin lo aprueba manual.'];
     }
 }

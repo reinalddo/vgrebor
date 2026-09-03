@@ -202,6 +202,21 @@ function ensure_juegos_precio_markup_pct_recargasamerica_column(mysqli $mysqli):
     }
 }
 
+// CONEC (coneclatam.com): igual que RecargasAmérica, un catálogo mayorista ÚNICO. Estos 3 slots guardan
+// una PALABRA CLAVE de texto libre (ej. "Free Fire") para pre-filtrar el catálogo de CONEC en paquetes.php,
+// + un margen propio. Se guardan con un UPDATE aparte (no en el bind_param grande) para no arriesgar el save.
+function ensure_juegos_categoria_api_conec_columns(mysqli $mysqli): void {
+    foreach ([
+        'categoria_api_conec'    => "ALTER TABLE juegos ADD COLUMN categoria_api_conec VARCHAR(120) NULL",
+        'categoria_api_conec_2'  => "ALTER TABLE juegos ADD COLUMN categoria_api_conec_2 VARCHAR(120) NULL",
+        'categoria_api_conec_3'  => "ALTER TABLE juegos ADD COLUMN categoria_api_conec_3 VARCHAR(120) NULL",
+        'precio_markup_pct_conec'=> "ALTER TABLE juegos ADD COLUMN precio_markup_pct_conec DECIMAL(8,4) NOT NULL DEFAULT 0",
+    ] as $col => $sql) {
+        $r = $mysqli->query("SHOW COLUMNS FROM juegos LIKE '" . $mysqli->real_escape_string($col) . "'");
+        if (!($r instanceof mysqli_result) || $r->num_rows === 0) { @$mysqli->query($sql); }
+    }
+}
+
 function admin_game_normalize_api_selection(array $payload, string $giftVenKey, string $discordKey, bool $allowCombined = false): array {
     $giftVenCategory  = trim((string) ($payload[$giftVenKey] ?? ''));
     $giftVenCategory2 = trim((string) ($payload[$giftVenKey . '_2'] ?? ''));
@@ -301,6 +316,7 @@ ensure_juegos_categoria_api_recargasamerica_2_column($mysqli);
 ensure_juegos_categoria_api_recargasamerica_3_column($mysqli);
 ensure_juegos_precio_markup_pct_column($mysqli);
 ensure_juegos_precio_markup_pct_recargasamerica_column($mysqli);
+ensure_juegos_categoria_api_conec_columns($mysqli);
 ensure_juegos_orden_column($mysqli);
 ensure_juegos_orden_catbar_column($mysqli);
 ensure_juegos_slug_column($mysqli);
@@ -478,6 +494,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
     $edit_categoria_api_recargasamerica = substr(trim((string) ($_POST['edit_categoria_api_recargasamerica'] ?? '')), 0, 120);
     $edit_categoria_api_recargasamerica_2 = substr(trim((string) ($_POST['edit_categoria_api_recargasamerica_2'] ?? '')), 0, 120);
     $edit_categoria_api_recargasamerica_3 = substr(trim((string) ($_POST['edit_categoria_api_recargasamerica_3'] ?? '')), 0, 120);
+    // CONEC: 3 palabras clave + margen (se guardan con UPDATE aparte, ver más abajo).
+    $edit_categoria_api_conec   = substr(trim((string) ($_POST['edit_categoria_api_conec'] ?? '')), 0, 120);
+    $edit_categoria_api_conec_2 = substr(trim((string) ($_POST['edit_categoria_api_conec_2'] ?? '')), 0, 120);
+    $edit_categoria_api_conec_3 = substr(trim((string) ($_POST['edit_categoria_api_conec_3'] ?? '')), 0, 120);
+    $edit_precio_markup_pct_conec = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['edit_precio_markup_pct_conec'] ?? '0'))))));
     $edit_api_free_fire = $apiSelection['api_free_fire'];
     $edit_activo = isset($_POST['edit_activo']) ? 1 : 0;
     $edit_moneda_fija_id = isset($_POST['edit_moneda_fija_id']) && $_POST['edit_moneda_fija_id'] !== '' ? intval($_POST['edit_moneda_fija_id']) : null;
@@ -568,6 +589,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
     // Types: 7s + 2i + 6s(cat_api..cat_discord3) + 3s(recargasamerica slots) + 2i(activo,moneda) + 4s(stickers) + 4s(badge2) + 2d(markup giftven+recargasamerica) + 1i(WHERE id) = 31
     $stmt->bind_param('sssssss'.'ii'.'ssssss'.'sss'.'ii'.'ssss'.'ssss'.'ddi', $edit_nombre, $edit_descripcion, $edit_slug, $nextImage, $nextHeroImage, $nextPackageImage, $nextCatbarImage, $edit_popular, $edit_api_free_fire, $edit_categoria_api, $edit_categoria_api_2, $edit_categoria_api_3, $edit_categoria_api_discord, $edit_categoria_api_discord_2, $edit_categoria_api_discord_3, $edit_categoria_api_recargasamerica, $edit_categoria_api_recargasamerica_2, $edit_categoria_api_recargasamerica_3, $edit_activo, $edit_moneda_fija_id, $edit_sticker_texto, $edit_sticker_icono, $edit_sticker_color_fondo, $edit_sticker_imagen, $edit_badge2_texto, $edit_badge2_icono, $edit_badge2_color_fondo, $edit_badge2_imagen, $edit_precio_markup_pct, $edit_precio_markup_pct_recargasamerica, $edit_id);
     $stmt->execute();
+    // CONEC: UPDATE aparte (no se metió en el bind_param grande para no arriesgar el guardado del juego).
+    if ($cs = $mysqli->prepare("UPDATE juegos SET categoria_api_conec=NULLIF(?, ''), categoria_api_conec_2=NULLIF(?, ''), categoria_api_conec_3=NULLIF(?, ''), precio_markup_pct_conec=? WHERE id=?")) {
+        $cs->bind_param('sssdi', $edit_categoria_api_conec, $edit_categoria_api_conec_2, $edit_categoria_api_conec_3, $edit_precio_markup_pct_conec, $edit_id);
+        $cs->execute();
+    }
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
     game_set_categories($mysqli, $edit_id, $catIds);
     admin_games_redirect($adminGamesUrl);
@@ -596,6 +622,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $api_free_fire = $apiSelection['api_free_fire'];
     $precio_markup_pct = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['precio_markup_pct'] ?? '0'))))));
     $precio_markup_pct_recargasamerica = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['precio_markup_pct_recargasamerica'] ?? '0'))))));
+    // CONEC (se guardan con UPDATE aparte tras el INSERT).
+    $categoria_api_conec   = substr(trim((string) ($_POST['categoria_api_conec'] ?? '')), 0, 120);
+    $categoria_api_conec_2 = substr(trim((string) ($_POST['categoria_api_conec_2'] ?? '')), 0, 120);
+    $categoria_api_conec_3 = substr(trim((string) ($_POST['categoria_api_conec_3'] ?? '')), 0, 120);
+    $precio_markup_pct_conec = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['precio_markup_pct_conec'] ?? '0'))))));
     $activo = isset($_POST['activo']) ? 1 : 0;
     $orden = admin_game_next_order($mysqli);
     $imagen = admin_game_store_upload($_FILES['imagen'] ?? [], 'juego_');
@@ -623,6 +654,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $stmt->bind_param('sssssss'.'iii'.'ssssss'.'sss'.'ii'.'ssss'.'ssss'.'dd', $nombre, $imagen, $imagen_hero, $imagen_paquete, $imagen_catbar, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_2, $categoria_api_3, $categoria_api_discord, $categoria_api_discord_2, $categoria_api_discord_3, $categoria_api_recargasamerica, $categoria_api_recargasamerica_2, $categoria_api_recargasamerica_3, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen, $badge2_texto, $badge2_icono, $badge2_color_fondo, $badge2_imagen, $precio_markup_pct, $precio_markup_pct_recargasamerica);
     $stmt->execute();
     $juego_id = $mysqli->insert_id;
+    // CONEC: UPDATE aparte (mismo motivo que en edición: no arriesgar el INSERT grande del juego).
+    if ($juego_id && ($cs = $mysqli->prepare("UPDATE juegos SET categoria_api_conec=NULLIF(?, ''), categoria_api_conec_2=NULLIF(?, ''), categoria_api_conec_3=NULLIF(?, ''), precio_markup_pct_conec=? WHERE id=?"))) {
+        $cs->bind_param('sssdi', $categoria_api_conec, $categoria_api_conec_2, $categoria_api_conec_3, $precio_markup_pct_conec, $juego_id);
+        $cs->execute();
+    }
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
     game_set_categories($mysqli, (int) $juego_id, $catIds);
     // Características seleccionadas del select múltiple
@@ -779,6 +815,20 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 <div class="form-text mt-2" style="color:#8be9fd;">Tercera palabra clave opcional de RecargasAmérica.</div>
             </div>
             <?php endif; ?>
+            <?php /* CONEC (coneclatam): catálogo mayorista único; 3 palabras clave que filtran su catálogo, igual que RecargasAmérica. Siempre visible (inofensivo si CONEC no está activo). */ ?>
+            <div class="form-check mb-3">
+                <label class="form-label text-neon" for="editCategoriaApiConec">Juegos API CONEC (Slot 1)</label>
+                <input type="text" name="edit_categoria_api_conec" id="editCategoriaApiConec" value="<?= htmlspecialchars((string) ($juego_edit['categoria_api_conec'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="Ej: Free Fire" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                <div class="form-text mt-2" style="color:#8be9fd;">Palabra clave para filtrar el catálogo de CONEC por este juego (busca dentro del nombre del producto).</div>
+            </div>
+            <div class="form-check mb-3">
+                <label class="form-label text-neon" for="editCategoriaApiConec2">Juegos API CONEC (Slot 2 — opcional)</label>
+                <input type="text" name="edit_categoria_api_conec_2" id="editCategoriaApiConec2" value="<?= htmlspecialchars((string) ($juego_edit['categoria_api_conec_2'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="— Sin segundo slot —" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+            </div>
+            <div class="form-check mb-3">
+                <label class="form-label text-neon" for="editCategoriaApiConec3">Juegos API CONEC (Slot 3 — opcional)</label>
+                <input type="text" name="edit_categoria_api_conec_3" id="editCategoriaApiConec3" value="<?= htmlspecialchars((string) ($juego_edit['categoria_api_conec_3'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="— Sin tercer slot —" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+            </div>
             <?php if ($discordApiEnabled): ?>
             <div class="form-check mb-3">
                 <label class="form-label text-neon" for="editDiscordApiInput">Juegos API Discord (Slot 1)</label>
@@ -835,6 +885,14 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">%</span>
                 </div>
                 <div class="form-text mt-2" style="color:#8be9fd;">Porcentaje de ganancia sobre el precio de RecargasAmérica — independiente del margen de GiftVen. Ej: 50 → precio API x1.5.</div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label text-neon">Margen de ganancia CONEC (%)</label>
+                <div class="input-group">
+                    <input type="number" name="edit_precio_markup_pct_conec" step="0.01" min="0" max="10000" value="<?= htmlspecialchars(number_format((float) ($juego_edit['precio_markup_pct_conec'] ?? 0), 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                    <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">%</span>
+                </div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Ganancia sobre el precio de CONEC. Ej: 15 → precio CONEC x1.15.</div>
             </div>
             <div class="form-check mb-3">
                 <input type="checkbox" name="edit_activo" class="form-check-input" id="editActivoCheck" <?= !isset($juego_edit['activo']) || !empty($juego_edit['activo']) ? 'checked' : '' ?>>
@@ -1248,6 +1306,20 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 <div class="form-text mt-2" style="color:#8be9fd;">Tercera palabra clave opcional de RecargasAmérica.</div>
             </div>
             <?php endif; ?>
+            <?php /* CONEC: 3 palabras clave para filtrar su catálogo (igual que RecargasAmérica). */ ?>
+            <div class="form-check mt-3">
+                <label class="form-label" for="categoriaApiConec" style="color:#00fff7;">Juegos API CONEC (Slot 1)</label>
+                <input type="text" name="categoria_api_conec" id="categoriaApiConec" placeholder="Ej: Free Fire" class="form-control" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;">
+                <div class="form-text mt-2" style="color:#8be9fd;">Palabra clave para filtrar el catálogo de CONEC por este juego.</div>
+            </div>
+            <div class="form-check mt-3">
+                <label class="form-label" for="categoriaApiConec2" style="color:#00fff7;">Juegos API CONEC (Slot 2 — opcional)</label>
+                <input type="text" name="categoria_api_conec_2" id="categoriaApiConec2" placeholder="— Sin segundo slot —" class="form-control" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;">
+            </div>
+            <div class="form-check mt-3">
+                <label class="form-label" for="categoriaApiConec3" style="color:#00fff7;">Juegos API CONEC (Slot 3 — opcional)</label>
+                <input type="text" name="categoria_api_conec_3" id="categoriaApiConec3" placeholder="— Sin tercer slot —" class="form-control" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;">
+            </div>
             <?php if ($discordApiEnabled): ?>
             <div class="form-check mt-3">
                 <label class="form-label" for="categoriaDiscordApiInput" style="color:#00fff7;">Juegos API Discord (Slot 1)</label>
@@ -1304,6 +1376,14 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">%</span>
                 </div>
                 <div class="form-text mt-2" style="color:#8be9fd;">Porcentaje de ganancia sobre el precio de RecargasAmérica — independiente del margen de GiftVen. 0 = precio directo de la API.</div>
+            </div>
+            <div class="mt-3">
+                <label class="form-label" style="color:#00fff7;">Margen de ganancia CONEC (%)</label>
+                <div class="input-group">
+                    <input type="number" name="precio_markup_pct_conec" step="0.01" min="0" max="10000" value="0" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                    <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">%</span>
+                </div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Ganancia sobre el precio de CONEC. 0 = precio directo de la API.</div>
             </div>
             <div class="form-check mt-3">
                 <input type="checkbox" name="activo" class="form-check-input" id="activoCheck" checked>
@@ -1760,6 +1840,12 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 <span class="ml-2 text-slate-300 whitespace-nowrap">%</span>
             </div>
             <div class="text-xs text-slate-400 mb-2">Independiente del margen de GiftVen.</div>
+            <label class="block text-slate-300 font-medium mb-1">Margen de ganancia CONEC (%):</label>
+            <div class="flex items-center mb-2">
+                <input type="number" name="edit_precio_markup_pct_conec" step="0.01" min="0" max="10000" value="<?= htmlspecialchars(number_format((float) ($juego_edit['precio_markup_pct_conec'] ?? 0), 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>" class="w-full rounded-lg px-3 py-2 bg-slate-800 text-white" style="border:1px solid #22d3ee;">
+                <span class="ml-2 text-slate-300 whitespace-nowrap">%</span>
+            </div>
+            <div class="text-xs text-slate-400 mb-2">Ganancia sobre el precio de CONEC.</div>
             <label class="block text-slate-300 mb-1">Imagen actual:</label>
             <?php if ($juego_edit['imagen']): ?>
                 <img src="/<?= htmlspecialchars($juego_edit['imagen']) ?>" alt="Imagen actual" class="mb-2 rounded-lg max-h-32">

@@ -259,3 +259,111 @@ if (!function_exists('conec_order_status')) {
         return ['ok' => true, 'error' => null, 'norm' => conec_normalize($r['data'])];
     }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * ADAPTADORES para el motor de la tienda (admin/paquetes.php + api/pedidos.php).
+ * El UI de paquetes espera productos PLANOS [{id,name,price,...}] (como RecargasAmérica);
+ * CONEC los da anidados (games→variants) → los aplanamos aquí. El motor solo debe llamar
+ * a conec_dispatch_or_recover() y guardar el resultado en las columnas recargas_api_*.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+if (!function_exists('conec_api_fetch_products')) {
+    /** Catálogo APLANADO a [{id(variant_id int), name, price, product_id, requires_game_id, fields[]}]. Cacheado por request. */
+    function conec_api_fetch_products(PDO $pdo, bool $refresh = false): array {
+        static $cache = null;
+        if ($cache !== null && !$refresh) { return $cache; }
+        $cat = conec_catalog($pdo);
+        $out = [];
+        if (!empty($cat['ok'])) {
+            foreach ($cat['games'] as $g) {
+                $gid   = (string) ($g['product_id'] ?? '');
+                $gname = (string) ($g['name'] ?? $gid);
+                $reqId = !empty($g['requires_game_id']);
+                foreach (($g['variants'] ?? []) as $v) {
+                    $vid = (int) ($v['variant_id'] ?? 0);
+                    if ($vid <= 0) { continue; }
+                    $out[] = [
+                        'id'               => $vid,
+                        'name'             => trim($gname . ' — ' . (string) ($v['name'] ?? '')),
+                        'price'            => (float) ($v['your_price'] ?? $v['price'] ?? 0),
+                        'product_id'       => $gid,
+                        'requires_game_id' => $reqId,
+                        'fields'           => is_array($v['fields'] ?? null) ? $v['fields'] : [],
+                    ];
+                }
+            }
+        }
+        $cache = $out;
+        return $out;
+    }
+}
+
+if (!function_exists('conec_api_product_by_id')) {
+    function conec_api_product_by_id(PDO $pdo, int $variantId): ?array {
+        foreach (conec_api_fetch_products($pdo) as $p) {
+            if ((int) $p['id'] === $variantId) { return $p; }
+        }
+        return null;
+    }
+}
+
+if (!function_exists('conec_api_product_label')) {
+    function conec_api_product_label(array $p): string {
+        return (string) ($p['name'] ?? ('#' . ($p['id'] ?? ''))) . ' ($' . number_format((float) ($p['price'] ?? 0), 4) . ')';
+    }
+}
+
+if (!function_exists('conec_api_filter_products')) {
+    /** Pre-filtra por palabra clave (para los slots de catálogo por juego). Vacío = todo. */
+    function conec_api_filter_products(array $products, string $keyword): array {
+        $kw = trim(mb_strtolower($keyword));
+        if ($kw === '') { return $products; }
+        return array_values(array_filter($products, static function ($p) use ($kw) {
+            return mb_strpos(mb_strtolower((string) ($p['name'] ?? '')), $kw) !== false;
+        }));
+    }
+}
+
+if (!function_exists('conec_dispatch_or_recover')) {
+    /**
+     * DESPACHO para el motor (api/pedidos.php). Espejo de recargasamerica_dispatch_or_recover().
+     * Si $savedReference viene (ya se despachó antes) → reconsulta estado (polling). Si no → compra (idempotente).
+     * Devuelve la MISMA forma que espera el motor de RecargasAmérica:
+     *   ['success'=>bool, 'accepted'=>bool, 'needs_manual_review'=>bool, 'message'=>str,
+     *    'reference'=>str, 'codigos'=>array, 'confirmacion'=>str, 'payload'=>array, 'error_code'=>str]
+     *  - success=true            → entregado (guarda estado 'enviado', codigos en recargas_api_codigo_entregado)
+     *  - accepted=true           → en proceso (deja 'pagado', reconsultar luego con la misma referencia)
+     *  - needs_manual_review     → falló/dudoso → revisión manual (NO cobra de más: idempotente por merchant_ref)
+     */
+    function conec_dispatch_or_recover(PDO $pdo, int $orderId, string $variantId, string $gameId = '', int $quantity = 1, array $extraFields = [], string $savedReference = ''): array {
+        $ref = conec_merchant_ref($orderId);
+        if (trim($savedReference) !== '') {
+            $st   = conec_order_status($pdo, $ref);
+            $norm = $st['norm'];
+        } else {
+            $res  = conec_recharge($pdo, $variantId, $gameId, $ref, $quantity, $extraFields);
+            $norm = $res['norm'];
+            if (!$res['ok'] && !empty($res['duro'])) {
+                return ['success' => false, 'accepted' => false, 'needs_manual_review' => true,
+                        'message' => 'CONEC: ' . ($res['error'] ?: 'error'), 'reference' => $ref,
+                        'codigos' => [], 'confirmacion' => '', 'payload' => $norm, 'error_code' => (string) ($res['error_code'] ?? '')];
+            }
+        }
+        $reference = (string) ($norm['order_id'] ?: $ref);
+        switch ($norm['clase']) {
+            case 'entregado':
+                return ['success' => true, 'accepted' => false, 'needs_manual_review' => false,
+                        'message' => 'CONEC: recarga entregada' . (!empty($norm['duplicado']) ? ' (idempotente, no se cobró dos veces)' : ''),
+                        'reference' => $reference, 'codigos' => $norm['codigos'], 'confirmacion' => (string) $norm['confirmacion'],
+                        'payload' => $norm, 'error_code' => ''];
+            case 'en_curso':
+                return ['success' => false, 'accepted' => true, 'needs_manual_review' => false,
+                        'message' => 'CONEC: en proceso con el proveedor', 'reference' => $reference,
+                        'codigos' => [], 'confirmacion' => '', 'payload' => $norm, 'error_code' => ''];
+            default: // fallido / desconocido
+                return ['success' => false, 'accepted' => false, 'needs_manual_review' => true,
+                        'message' => 'CONEC: ' . ($norm['error'] ?: ($norm['estado'] ?: 'sin confirmar')),
+                        'reference' => $reference, 'codigos' => [], 'confirmacion' => '', 'payload' => $norm, 'error_code' => ''];
+        }
+    }
+}

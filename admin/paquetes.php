@@ -22,6 +22,19 @@ require_once '../includes/package_categories.php';
 require_once '../includes/levelpass_api.php';
 require_once '../includes/fullimpulso_api.php';
 require_once '../includes/recargasamerica_api.php';
+require_once '../includes/conec_recargas.php';
+
+// CONEC usa un cliente PDO propio; la tienda es mysqli → creamos un PDO al mismo tenant (solo para CONEC).
+$conecPdo = null;
+try {
+    $tdb = function_exists('tenant_database_config') ? tenant_database_config() : [];
+    $conecPdo = new PDO(
+        'mysql:host=' . ($tdb['host'] ?? 'localhost') . ';dbname=' . ($tdb['name'] ?? '') . ';charset=' . ($tdb['charset'] ?? 'utf8mb4'),
+        (string) ($tdb['user'] ?? 'root'), (string) ($tdb['password'] ?? ''),
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT]
+    );
+} catch (Throwable $e) { $conecPdo = null; }
+$conecApiAvailableGlobal = ($conecPdo !== null && function_exists('conec_enabled')) ? conec_enabled($conecPdo) : false;
 
 function admin_packages_is_ajax_request(): bool {
     if (isset($_REQUEST['ajax']) && (string) $_REQUEST['ajax'] === '1') {
@@ -326,7 +339,7 @@ function admin_package_save_discord_catalog(mysqli $mysqli, int $gameId, array $
 
 function admin_package_normalize_provider_value($value): string {
     $normalized = strtolower(trim((string) $value));
-    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica'], true) ? $normalized : '';
+    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica', 'conec'], true) ? $normalized : '';
 }
 
 function admin_package_resolve_provider(array $package, array $game, bool $discordFeatureEnabled): string {
@@ -361,6 +374,7 @@ function admin_package_provider_label(string $provider): string {
         'free_fire' => 'Free Fire API',
         'fullimpulso' => 'FullImpulso (Seguidores)',
         'recargasamerica' => 'RecargasAmérica',
+        'conec' => 'CONEC',
         default => 'Manual',
     };
 }
@@ -398,6 +412,11 @@ function admin_package_provider_reference_text(string $provider, array $package,
         }
         $tipo = trim((string) ($package['recargasamerica_tipo'] ?? '')) === 'pin' ? 'PIN' : 'Recarga';
         return 'ID ' . $apiProductId . ' · ' . $tipo;
+    }
+
+    if ($provider === 'conec') {
+        $apiProductId = (int) ($package['paquete_api'] ?? 0);
+        return $apiProductId > 0 ? 'CONEC · ID ' . $apiProductId : '—';
     }
 
     return '—';
@@ -714,21 +733,26 @@ $res_juego->execute();
 $juego = $res_juego->get_result()->fetch_assoc();
 $adminPackageMarkupPct = floatval($juego['precio_markup_pct'] ?? 0);
 $adminPackageMarkupPctRecargasamerica = floatval($juego['precio_markup_pct_recargasamerica'] ?? 0);
+$adminPackageMarkupPctConec = floatval($juego['precio_markup_pct_conec'] ?? 0);
 
 // Precio API + margen correcto para un paquete, sin importar el proveedor —
 // mismo criterio que game.php: se distingue por api_provider ANTES de
 // mirar los catálogos (IDs de GiftVen y RecargasAmérica son de sistemas
 // independientes y pueden coincidir por coincidencia), y cada proveedor usa
 // su propio margen de ganancia (no pueden compartir el mismo %).
-function admin_package_raw_price_and_markup(array $package, array $apiProductsById, array $recargasAmericaProductsById, float $markupGiftven, float $markupRecargasamerica): array {
+function admin_package_raw_price_and_markup(array $package, array $apiProductsById, array $recargasAmericaProductsById, float $markupGiftven, float $markupRecargasamerica, array $conecProductsById = [], float $markupConec = 0.0): array {
     $apiId = (int) ($package['paquete_api'] ?? 0);
     $provider = trim((string) ($package['api_provider'] ?? ''));
+
+    if ($apiId > 0 && $provider === 'conec' && isset($conecProductsById[$apiId])) {
+        return [floatval($conecProductsById[$apiId]['price'] ?? 0), $markupConec];
+    }
 
     if ($apiId > 0 && $provider === 'recargasamerica' && isset($recargasAmericaProductsById[$apiId])) {
         return [floatval($recargasAmericaProductsById[$apiId]['price'] ?? 0), $markupRecargasamerica];
     }
 
-    if ($apiId > 0 && $provider !== 'recargasamerica' && isset($apiProductsById[$apiId])) {
+    if ($apiId > 0 && $provider !== 'recargasamerica' && $provider !== 'conec' && isset($apiProductsById[$apiId])) {
         return [floatval($apiProductsById[$apiId]['precio']), $markupGiftven];
     }
 
@@ -791,6 +815,13 @@ $recargasAmericaApiAvailableGlobal = function_exists('recargasamerica_api_is_con
 $hasRecargasAmericaCatalog  = $juegoCategoriaApiRecargasAmerica !== '' && $recargasAmericaApiAvailableGlobal;
 $hasRecargasAmericaCatalog2 = $juegoCategoriaApiRecargasAmerica2 !== '' && $recargasAmericaApiAvailableGlobal;
 $hasRecargasAmericaCatalog3 = $juegoCategoriaApiRecargasAmerica3 !== '' && $recargasAmericaApiAvailableGlobal;
+// CONEC (coneclatam): igual patrón que RecargasAmérica — 3 palabras clave que filtran su catálogo único.
+$juegoCategoriaApiConec  = trim((string) ($juego['categoria_api_conec'] ?? ''));
+$juegoCategoriaApiConec2 = trim((string) ($juego['categoria_api_conec_2'] ?? ''));
+$juegoCategoriaApiConec3 = trim((string) ($juego['categoria_api_conec_3'] ?? ''));
+$hasConecCatalog  = $juegoCategoriaApiConec !== '' && $conecApiAvailableGlobal;
+$hasConecCatalog2 = $juegoCategoriaApiConec2 !== '' && $conecApiAvailableGlobal;
+$hasConecCatalog3 = $juegoCategoriaApiConec3 !== '' && $conecApiAvailableGlobal;
 $usesApiCatalog     = $hasGiftVenCatalog;
 $usesLegacyFreeFire = !$hasGiftVenCatalog && !$hasDiscordCatalog && !empty($juego['api_free_fire']);
 
@@ -840,6 +871,15 @@ if ($recargasAmericaActiveSlots > 1) {
     if ($hasRecargasAmericaCatalog3) $packageSourceItems[] = ['value' => 'recargasamerica_3', 'provider' => 'recargasamerica', 'source_key' => $juegoCategoriaApiRecargasAmerica3, 'label' => 'RecargasAmérica: ' . $juegoCategoriaApiRecargasAmerica3];
 } elseif ($hasRecargasAmericaCatalog) {
     $packageSourceItems[] = ['value' => 'recargasamerica', 'provider' => 'recargasamerica', 'source_key' => $juegoCategoriaApiRecargasAmerica, 'label' => admin_package_provider_label('recargasamerica')];
+}
+// CONEC: mismo patrón de slots que RecargasAmérica (palabras clave sobre un catálogo único).
+$conecActiveSlots = ($hasConecCatalog ? 1 : 0) + ($hasConecCatalog2 ? 1 : 0) + ($hasConecCatalog3 ? 1 : 0);
+if ($conecActiveSlots > 1) {
+    if ($hasConecCatalog)  $packageSourceItems[] = ['value' => 'conec_1', 'provider' => 'conec', 'source_key' => $juegoCategoriaApiConec,  'label' => 'CONEC: ' . $juegoCategoriaApiConec];
+    if ($hasConecCatalog2) $packageSourceItems[] = ['value' => 'conec_2', 'provider' => 'conec', 'source_key' => $juegoCategoriaApiConec2, 'label' => 'CONEC: ' . $juegoCategoriaApiConec2];
+    if ($hasConecCatalog3) $packageSourceItems[] = ['value' => 'conec_3', 'provider' => 'conec', 'source_key' => $juegoCategoriaApiConec3, 'label' => 'CONEC: ' . $juegoCategoriaApiConec3];
+} elseif ($hasConecCatalog) {
+    $packageSourceItems[] = ['value' => 'conec', 'provider' => 'conec', 'source_key' => $juegoCategoriaApiConec, 'label' => admin_package_provider_label('conec')];
 }
 foreach ($packageSourceItems as $item) {
     $packageSourceValueMap[$item['value']] = ['provider' => $item['provider'], 'source_key' => $item['source_key']];
@@ -946,6 +986,20 @@ function admin_package_filter_recargasamerica_products(array $products, string $
 $recargasAmericaProducts1 = $hasRecargasAmericaCatalog  ? admin_package_filter_recargasamerica_products($recargasAmericaProducts, $juegoCategoriaApiRecargasAmerica)  : [];
 $recargasAmericaProducts2 = $hasRecargasAmericaCatalog2 ? admin_package_filter_recargasamerica_products($recargasAmericaProducts, $juegoCategoriaApiRecargasAmerica2) : [];
 $recargasAmericaProducts3 = $hasRecargasAmericaCatalog3 ? admin_package_filter_recargasamerica_products($recargasAmericaProducts, $juegoCategoriaApiRecargasAmerica3) : [];
+
+// CONEC: catálogo aplanado (games→variants a [{id,name,price,...}]) + filtrado por palabra clave por slot.
+$conecProducts = [];
+$conecProductsById = [];
+$conecProductsError = null;
+if ($conecApiAvailableGlobal && $conecPdo) {
+    try {
+        $conecProducts = conec_api_fetch_products($conecPdo);
+        foreach ($conecProducts as $cp) { $conecProductsById[(int) ($cp['id'] ?? 0)] = $cp; }
+    } catch (Throwable $e) { $conecProductsError = $e->getMessage(); }
+}
+$conecProducts1 = $hasConecCatalog  ? conec_api_filter_products($conecProducts, $juegoCategoriaApiConec)  : [];
+$conecProducts2 = $hasConecCatalog2 ? conec_api_filter_products($conecProducts, $juegoCategoriaApiConec2) : [];
+$conecProducts3 = $hasConecCatalog3 ? conec_api_filter_products($conecProducts, $juegoCategoriaApiConec3) : [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['sync_discord_catalog'])) {
     if (!$hasDiscordCatalog) {
@@ -1214,7 +1268,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $edit_provider      = $packageSourceValueMap[$rawEditSourceValue]['provider'] ?? admin_package_normalize_provider_value($rawEditSourceValue);
     $edit_api_source_key = $packageSourceValueMap[$rawEditSourceValue]['source_key'] ?? '';
     $edit_monto_ff = $edit_provider === 'free_fire' ? trim((string) ($_POST['edit_monto_ff'] ?? '')) : '';
-    $edit_paquete_api = in_array($edit_provider, ['giftven', 'recargasamerica'], true) ? trim((string) ($_POST['edit_paquete_api'] ?? '')) : '';
+    $edit_paquete_api = in_array($edit_provider, ['giftven', 'recargasamerica', 'conec'], true) ? trim((string) ($_POST['edit_paquete_api'] ?? '')) : '';
     $edit_recargasamerica_tipo = '';
     if ($edit_provider === 'recargasamerica' && $edit_paquete_api !== '') {
         $raEditSelectedProduct = $recargasAmericaProductsById[(int) $edit_paquete_api] ?? null;
@@ -1266,6 +1320,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     }
     if ($edit_provider === 'recargasamerica' && ($edit_paquete_api === '' || $edit_recargasamerica_tipo === '')) {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el producto de RecargasAmérica para este paquete.']);
+    }
+    if ($edit_provider === 'conec' && $edit_paquete_api === '') {
+        admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el producto de CONEC para este paquete.']);
     }
     if ($edit_provider === 'free_fire' && $edit_monto_ff === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el monto de Free Fire para este paquete.']);
@@ -1352,7 +1409,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $provider      = $packageSourceValueMap[$rawSourceValue]['provider'] ?? admin_package_normalize_provider_value($rawSourceValue);
     $api_source_key = $packageSourceValueMap[$rawSourceValue]['source_key'] ?? '';
     $monto_ff = $provider === 'free_fire' ? trim((string) ($_POST['monto_ff'] ?? '')) : '';
-    $paquete_api = in_array($provider, ['giftven', 'recargasamerica'], true) ? trim((string) ($_POST['paquete_api'] ?? '')) : '';
+    $paquete_api = in_array($provider, ['giftven', 'recargasamerica', 'conec'], true) ? trim((string) ($_POST['paquete_api'] ?? '')) : '';
     // El "tipo" (pin/recharge) NUNCA se confía del formulario — se resuelve
     // en vivo contra el catálogo de RecargasAmérica por el ID elegido, para
     // que no se pueda desincronizar con lo que la API realmente tiene.
@@ -1403,6 +1460,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     }
     if ($provider === 'recargasamerica' && ($paquete_api === '' || $recargasamerica_tipo === '')) {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el producto de RecargasAmérica para este paquete.']);
+    }
+    if ($provider === 'conec' && $paquete_api === '') {
+        admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el producto de CONEC para este paquete.']);
     }
     if ($provider === 'free_fire' && $monto_ff === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el monto de Free Fire para este paquete.']);
@@ -1844,6 +1904,60 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                     <div class="form-text mt-2 text-danger">No se pudo cargar el catálogo de RecargasAmérica: <?= htmlspecialchars($recargasAmericaProductsError, ENT_QUOTES, 'UTF-8') ?></div>
                 <?php else: ?>
                     <div class="form-text mt-2" style="color:#8be9fd;">Filtrado por: "<?= htmlspecialchars($juegoCategoriaApiRecargasAmerica, ENT_QUOTES, 'UTF-8') ?>" (<?= count($recargasAmericaProducts1) ?> productos).</div>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+        <?php /* CONEC — paneles de producto (mismo patrón que RecargasAmérica). */ ?>
+        <?php if ($conecActiveSlots > 1): ?>
+            <?php if ($hasConecCatalog): ?>
+            <div class="col-md-6" data-package-source-panel="conec_1">
+                <label class="form-label text-neon">Producto CONEC — <?= htmlspecialchars($juegoCategoriaApiConec, ENT_QUOTES, 'UTF-8') ?></label>
+                <select name="paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($conecProducts1 as $cp): ?>
+                        <option value="<?= (int) ($cp['id'] ?? 0) ?>"><?= htmlspecialchars(conec_api_product_label($cp), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-text mt-2" style="color:#8be9fd;">Filtrado por: "<?= htmlspecialchars($juegoCategoriaApiConec, ENT_QUOTES, 'UTF-8') ?>" (<?= count($conecProducts1) ?> productos).</div>
+            </div>
+            <?php endif; ?>
+            <?php if ($hasConecCatalog2): ?>
+            <div class="col-md-6" data-package-source-panel="conec_2">
+                <label class="form-label text-neon">Producto CONEC — <?= htmlspecialchars($juegoCategoriaApiConec2, ENT_QUOTES, 'UTF-8') ?></label>
+                <select name="paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($conecProducts2 as $cp): ?>
+                        <option value="<?= (int) ($cp['id'] ?? 0) ?>"><?= htmlspecialchars(conec_api_product_label($cp), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-text mt-2" style="color:#8be9fd;">Filtrado por: "<?= htmlspecialchars($juegoCategoriaApiConec2, ENT_QUOTES, 'UTF-8') ?>" (<?= count($conecProducts2) ?> productos).</div>
+            </div>
+            <?php endif; ?>
+            <?php if ($hasConecCatalog3): ?>
+            <div class="col-md-6" data-package-source-panel="conec_3">
+                <label class="form-label text-neon">Producto CONEC — <?= htmlspecialchars($juegoCategoriaApiConec3, ENT_QUOTES, 'UTF-8') ?></label>
+                <select name="paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($conecProducts3 as $cp): ?>
+                        <option value="<?= (int) ($cp['id'] ?? 0) ?>"><?= htmlspecialchars(conec_api_product_label($cp), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-text mt-2" style="color:#8be9fd;">Filtrado por: "<?= htmlspecialchars($juegoCategoriaApiConec3, ENT_QUOTES, 'UTF-8') ?>" (<?= count($conecProducts3) ?> productos).</div>
+            </div>
+            <?php endif; ?>
+        <?php elseif ($hasConecCatalog): ?>
+            <div class="col-md-6" data-package-source-panel="conec">
+                <label class="form-label text-neon">Producto CONEC</label>
+                <select name="paquete_api" <?= $packageSourceSelectionEnabled ? 'data-package-source-required="1"' : 'required' ?> class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($conecProducts1 as $cp): ?>
+                        <option value="<?= (int) ($cp['id'] ?? 0) ?>"><?= htmlspecialchars(conec_api_product_label($cp), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <?php if ($conecProductsError !== null): ?>
+                    <div class="form-text mt-2 text-danger">No se pudo cargar el catálogo de CONEC: <?= htmlspecialchars($conecProductsError, ENT_QUOTES, 'UTF-8') ?></div>
+                <?php else: ?>
+                    <div class="form-text mt-2" style="color:#8be9fd;">Filtrado por: "<?= htmlspecialchars($juegoCategoriaApiConec, ENT_QUOTES, 'UTF-8') ?>" (<?= count($conecProducts1) ?> productos).</div>
                 <?php endif; ?>
             </div>
         <?php endif; ?>
@@ -2340,7 +2454,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                     </td>
                     <td class="text-neon" style="background:#181f2a; color:#22d3ee;">
                         <?php
-                        [$pAdminApiRaw, $pAdminMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica);
+                        [$pAdminApiRaw, $pAdminMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec);
                         $pAdminManualOverride = !empty($p['precio_manual_override']);
                         $pAdminDisplayPrice = (!$pAdminManualOverride && $pAdminApiRaw !== null)
                             ? max(0.0, round($pAdminApiRaw * (1 + $pAdminMarkupPct / 100), 2))
@@ -2432,7 +2546,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                         <div style="color:#fff;"><span class="fw-semibold">Monto FF:</span> <?= htmlspecialchars($packageProviderReference, ENT_QUOTES, 'UTF-8') ?></div>
                     <?php endif; ?>
                     <?php
-                    [$pCardApiRaw, $pCardMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica);
+                    [$pCardApiRaw, $pCardMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec);
                     $pCardManualOverride = !empty($p['precio_manual_override']);
                     $pCardDisplayPrice = (!$pCardManualOverride && $pCardApiRaw !== null)
                         ? max(0.0, round($pCardApiRaw * (1 + $pCardMarkupPct / 100), 2))
@@ -2652,6 +2766,55 @@ if (isset($_GET['editar'])) {
                 <?php endif; ?>
             </div>
         <?php endif; ?>
+        <?php /* CONEC — paneles de producto (edición). */ ?>
+        <?php if ($conecActiveSlots > 1): ?>
+            <?php if ($hasConecCatalog): ?>
+            <div class="mb-3" data-package-source-panel="conec_1">
+                <label class="form-label text-neon">Producto CONEC — <?= htmlspecialchars($juegoCategoriaApiConec, ENT_QUOTES, 'UTF-8') ?></label>
+                <select name="edit_paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($conecProducts1 as $cp): ?>
+                        <option value="<?= (int) ($cp['id'] ?? 0) ?>" <?= ($paqEditSelectedSource === 'conec_1' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($cp['id'] ?? 0)) ? 'selected' : '' ?>><?= htmlspecialchars(conec_api_product_label($cp), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
+            <?php if ($hasConecCatalog2): ?>
+            <div class="mb-3" data-package-source-panel="conec_2">
+                <label class="form-label text-neon">Producto CONEC — <?= htmlspecialchars($juegoCategoriaApiConec2, ENT_QUOTES, 'UTF-8') ?></label>
+                <select name="edit_paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($conecProducts2 as $cp): ?>
+                        <option value="<?= (int) ($cp['id'] ?? 0) ?>" <?= ($paqEditSelectedSource === 'conec_2' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($cp['id'] ?? 0)) ? 'selected' : '' ?>><?= htmlspecialchars(conec_api_product_label($cp), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
+            <?php if ($hasConecCatalog3): ?>
+            <div class="mb-3" data-package-source-panel="conec_3">
+                <label class="form-label text-neon">Producto CONEC — <?= htmlspecialchars($juegoCategoriaApiConec3, ENT_QUOTES, 'UTF-8') ?></label>
+                <select name="edit_paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($conecProducts3 as $cp): ?>
+                        <option value="<?= (int) ($cp['id'] ?? 0) ?>" <?= ($paqEditSelectedSource === 'conec_3' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($cp['id'] ?? 0)) ? 'selected' : '' ?>><?= htmlspecialchars(conec_api_product_label($cp), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
+        <?php elseif ($hasConecCatalog): ?>
+            <div class="mb-3" data-package-source-panel="conec">
+                <label class="form-label text-neon">Producto CONEC</label>
+                <select name="edit_paquete_api" <?= $packageSourceSelectionEnabled ? 'data-package-source-required="1"' : 'required' ?> class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                    <option value="">Selecciona un producto</option>
+                    <?php foreach ($conecProducts1 as $cp): ?>
+                        <option value="<?= (int) ($cp['id'] ?? 0) ?>" <?= (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($cp['id'] ?? 0) ? 'selected' : '' ?>><?= htmlspecialchars(conec_api_product_label($cp), ENT_QUOTES, 'UTF-8') ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <?php if ($conecProductsError !== null): ?>
+                    <div class="form-text mt-2 text-danger">No se pudo cargar el catálogo de CONEC: <?= htmlspecialchars($conecProductsError, ENT_QUOTES, 'UTF-8') ?></div>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
         <?php if ($discordActiveSlots > 1): ?>
             <?php if ($hasDiscordCatalog): ?>
             <div class="mb-3" data-package-source-panel="discord_1">
@@ -2732,7 +2895,7 @@ if (isset($_GET['editar'])) {
             <input type="number" step="0.01" name="edit_precio" value="<?= htmlspecialchars($paq_edit['precio']) ?>" required class="form-control" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;" data-discord-catalog-field="price">
             <?php if ($paqEditProvider === 'giftven' || $paqEditProvider === 'recargasamerica'): ?>
                 <?php
-                [$paqEditApiRaw, $paqEditMarkupPct] = admin_package_raw_price_and_markup($paq_edit, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica);
+                [$paqEditApiRaw, $paqEditMarkupPct] = admin_package_raw_price_and_markup($paq_edit, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec);
                 $paqEditComputedPrice = $paqEditApiRaw !== null ? max(0.0, round($paqEditApiRaw * (1 + $paqEditMarkupPct / 100), 2)) : null;
                 $paqEditManualOverride = !empty($paq_edit['precio_manual_override']);
                 $paqEditProviderLabel = admin_package_provider_label($paqEditProvider);

@@ -34,6 +34,7 @@ require_once __DIR__ . '/../includes/payment_difference.php';
 require_once __DIR__ . '/../includes/blocked_players.php';
 require_once __DIR__ . '/../includes/fullimpulso_api.php';
 require_once __DIR__ . '/../includes/player_verification.php';
+require_once __DIR__ . '/../includes/conec_recargas.php';
 
 if (!function_exists('create_app_mysqli_connection')) {
     function create_app_mysqli_connection(): mysqli {
@@ -513,6 +514,22 @@ function resolve_order_unit_cost_base(mysqli $mysqli, int $packageId, int $paque
         $manualCostRA = costos_manuales_get_current($mysqli, $packageId);
         if ($manualCostRA !== null) {
             return [$manualCostRA, 'manual'];
+        }
+        return [null, null];
+    }
+
+    // CONEC: el costo base = precio del catálogo de CONEC (para las estadísticas de ganancia).
+    if ($provider === 'conec') {
+        $pdoCn = function_exists('conec_pdo') ? conec_pdo() : null;
+        if ($pdoCn instanceof PDO && $paqueteApiId > 0 && function_exists('conec_api_product_by_id')) {
+            $cnProd = conec_api_product_by_id($pdoCn, $paqueteApiId);
+            if ($cnProd !== null && isset($cnProd['price'])) {
+                return [(float) $cnProd['price'], 'conec_api'];
+            }
+        }
+        $manualCostCN = costos_manuales_get_current($mysqli, $packageId);
+        if ($manualCostCN !== null) {
+            return [$manualCostCN, 'manual'];
         }
         return [null, null];
     }
@@ -5072,7 +5089,7 @@ function game_uses_discord_api(mysqli $mysqli, int $gameId): bool {
 
 function normalize_api_provider_value($value): string {
     $normalized = strtolower(trim((string) $value));
-    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica'], true) ? $normalized : '';
+    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica', 'conec'], true) ? $normalized : '';
 }
 
 function package_api_provider_from_row(array $package, array $game = []): string {
@@ -5139,6 +5156,44 @@ function order_uses_fullimpulso_api_provider(array $order): bool {
 
 function order_uses_recargasamerica_api_provider(array $order): bool {
     return order_api_provider($order) === 'recargasamerica';
+}
+
+// ── CONEC (coneclatam) ────────────────────────────────────────────────────
+// El cliente CONEC (includes/conec_recargas.php) es PDO; el motor es mysqli →
+// PDO propio memoizado al mismo tenant, solo para CONEC. Todo aislado: nada de
+// esto corre salvo que un pedido tenga api_provider='conec'.
+if (!function_exists('conec_pdo')) {
+    function conec_pdo(): ?PDO {
+        static $pdo = null; static $tried = false;
+        if ($tried) { return $pdo; }
+        $tried = true;
+        try {
+            $t = tenant_database_config();
+            $pdo = new PDO(
+                'mysql:host=' . ($t['host'] ?? 'localhost') . ';dbname=' . ($t['name'] ?? '') . ';charset=' . ($t['charset'] ?? 'utf8mb4'),
+                (string) ($t['user'] ?? 'root'), (string) ($t['password'] ?? ''),
+                [PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT]
+            );
+        } catch (Throwable $e) { $pdo = null; }
+        return $pdo;
+    }
+}
+function order_uses_conec_api_provider(array $order): bool {
+    return order_api_provider($order) === 'conec';
+}
+// Wrapper $order → conec_dispatch_or_recover() (que vive en conec_recargas.php, probado en sandbox).
+// Devuelve la MISMA forma que recargasamerica_dispatch_or_recover(): success/accepted/needs_manual_review/message/reference/payload.
+function conec_dispatch_order(array $order): array {
+    $pdo = conec_pdo();
+    if (!($pdo instanceof PDO) || !function_exists('conec_dispatch_or_recover')) {
+        return ['success' => false, 'accepted' => false, 'needs_manual_review' => true, 'message' => 'CONEC no disponible.', 'reference' => '', 'payload' => [], 'codigos' => []];
+    }
+    $orderId   = (int) ($order['id'] ?? 0);
+    $variantId = (string) (int) ($order['paquete_api'] ?? 0);
+    $gameId    = (string) ($order['user_identifier'] ?? '');
+    $qty       = function_exists('order_purchase_quantity') ? (int) order_purchase_quantity($order) : 1;
+    $savedRef  = trim((string) ($order['recargas_api_pedido_id'] ?? ''));
+    return conec_dispatch_or_recover($pdo, $orderId, $variantId, $gameId, max(1, $qty), [], $savedRef);
 }
 
 function fetch_game_package(mysqli $mysqli, int $packageId, int $gameId): ?array {
@@ -10181,6 +10236,7 @@ if ($action === 'submit_payment') {
     $brandingImages = email_branding_embedded_images();
     $usesCatalogApi = order_uses_catalog_api_provider($updatedOrder);
     $usesRecargasAmericaApi = order_uses_recargasamerica_api_provider($updatedOrder);
+    $usesConecApi = order_uses_conec_api_provider($updatedOrder);
 
     if ($usesBankValidation || $usesBinancePagonorteValidation) {
         $matchingMovement = $preselectedMatchingMovement;
@@ -10386,7 +10442,7 @@ if ($action === 'submit_payment') {
                 }
             }
 
-            if (!$usesCatalogApi && !$usesRecargasAmericaApi) {
+            if (!$usesCatalogApi && !$usesRecargasAmericaApi && !$usesConecApi) {
                 $paidStatus = 'pagado';
                 $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, estado = ? WHERE id = ? AND estado = 'pendiente'");
                 if (!$paidStmt) {
@@ -10520,6 +10576,106 @@ if ($action === 'submit_payment') {
                     'estado' => 'pagado',
                     'verified' => true,
                     'provider_message' => $raMsgSingle,
+                ], $updatedOrder, $overpaymentAmount));
+            }
+
+            // ── CONEC (coneclatam) — ruta "cliente confirma pago" (aislada; espejo de RecargasAmérica). ──
+            if ($usesConecApi) {
+                $cnClaimStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, estado = 'pagado' WHERE id = ? AND estado = 'pendiente'");
+                if (!$cnClaimStmt) {
+                    json_error('No se pudo iniciar el proceso de recarga.', 500);
+                }
+                $cnClaimStmt->bind_param('ssi', $verifiedReference, $phone, $orderId);
+                $cnClaimStmt->execute();
+                $cnClaimStmt->close();
+                $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+                if (($updatedOrder['estado'] ?? '') !== 'pagado') {
+                    json_error('El pedido ya está siendo procesado o no está disponible.', 409);
+                }
+
+                $cnResSingle = conec_dispatch_order($updatedOrder);
+                $mysqli = ensure_mysqli_connection($mysqli);
+                $cnDataSingle = (array) ($cnResSingle['payload'] ?? []);
+                $cnRefSingle = (string) ($cnResSingle['reference'] ?? '');
+                $cnMsgSingle = (string) ($cnResSingle['message'] ?? '');
+                $cnPayloadSingle = json_encode($cnDataSingle, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                $cnHistEventSingle = !empty($cnResSingle['needs_manual_review']) ? 'conec_recovery_check' : 'conec_purchase';
+                $cnHistJsonSingle = append_provider_history(
+                    $updatedOrder['recargas_api_historial_json'] ?? null,
+                    build_provider_history_entry($cnHistEventSingle, 'recharge', !empty($cnResSingle['success']) ? 'enviado' : 'pagado', $cnMsgSingle, $cnRefSingle, $cnRefSingle, '')
+                );
+
+                $cnUpdAlwaysSingle = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=? WHERE id=? AND estado='pagado'");
+                if ($cnUpdAlwaysSingle) {
+                    $cnUpdAlwaysSingle->bind_param('sssssi', $cnRefSingle, $cnMsgSingle, $cnPayloadSingle, $cnRefSingle, $cnHistJsonSingle, $orderId);
+                    $cnUpdAlwaysSingle->execute();
+                    $cnUpdAlwaysSingle->close();
+                    $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+                }
+
+                if (!empty($cnResSingle['success'])) {
+                    $cnStSingle = 'enviado';
+                    $cnUpdSingle = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=?, estado=? WHERE id=? AND estado='pagado'");
+                    if ($cnUpdSingle) {
+                        $cnUpdSingle->bind_param('ssssssi', $cnRefSingle, $cnMsgSingle, $cnPayloadSingle, $cnRefSingle, $cnHistJsonSingle, $cnStSingle, $orderId);
+                        $cnUpdSingle->execute();
+                        $cnUpdSingle->close();
+                    }
+                    $cnVerifiedOrderSingle = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+                    win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+                    recharge_notifications_emit_for_order($mysqli, $cnVerifiedOrderSingle);
+                    json_response(append_payment_difference_response([
+                        'ok' => true,
+                        'message' => 'Pago verificado y recarga procesada correctamente.',
+                        'order_id' => $orderId,
+                        'estado' => 'enviado',
+                        'verified' => true,
+                        'provider_flow' => 'completed',
+                        'provider_reference' => $cnRefSingle,
+                        'provider_message' => $cnMsgSingle,
+                    ], $cnVerifiedOrderSingle, $overpaymentAmount), 200, static function () use ($mysqli, $cnVerifiedOrderSingle, $paymentMethodName, $verifiedReference, $phone, $cnRefSingle, $cnMsgSingle): void {
+                        register_influencer_coupon_sale($mysqli, $cnVerifiedOrderSingle);
+                        notify_free_fire_recharge_success($mysqli, $cnVerifiedOrderSingle, $paymentMethodName, $verifiedReference, $phone, $cnRefSingle, $cnMsgSingle !== '' ? $cnMsgSingle : 'Recarga completada por CONEC.');
+                    });
+                }
+
+                if (!empty($cnResSingle['accepted'])) {
+                    $cnUpd2Single = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=? WHERE id=? AND estado='pagado'");
+                    if ($cnUpd2Single) {
+                        $cnUpd2Single->bind_param('sssssi', $cnRefSingle, $cnMsgSingle, $cnPayloadSingle, $cnRefSingle, $cnHistJsonSingle, $orderId);
+                        $cnUpd2Single->execute();
+                        $cnUpd2Single->close();
+                    }
+                    $cnPendingOrderSingle = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+                    json_response(append_payment_difference_response([
+                        'ok' => true,
+                        'message' => 'Pago verificado. Pedido recibido y procesándose.',
+                        'order_id' => $orderId,
+                        'estado' => 'pagado',
+                        'verified' => true,
+                        'provider_flow' => 'processing',
+                        'provider_reference' => $cnRefSingle,
+                    ], $cnPendingOrderSingle, $overpaymentAmount));
+                }
+
+                if (!empty($cnResSingle['needs_manual_review'])) {
+                    json_response(append_payment_difference_response([
+                        'ok' => true,
+                        'message' => 'Pago verificado. ' . ($cnMsgSingle ?: 'No se pudo confirmar automáticamente el estado de esta recarga.') . ' Un administrador la revisará y completará manualmente si hace falta.',
+                        'order_id' => $orderId,
+                        'estado' => 'pagado',
+                        'verified' => true,
+                        'pending_review' => true,
+                    ], $updatedOrder, $overpaymentAmount));
+                }
+
+                json_response(append_payment_difference_response([
+                    'ok' => false,
+                    'message' => $cnMsgSingle ?: 'La recarga no fue procesada por CONEC.',
+                    'order_id' => $orderId,
+                    'estado' => 'pagado',
+                    'verified' => true,
+                    'provider_message' => $cnMsgSingle,
                 ], $updatedOrder, $overpaymentAmount));
             }
 
@@ -13747,6 +13903,73 @@ if ($action === 'batch_fulfill_item') {
         }
 
         json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $raMsg ?: 'La recarga no fue procesada por RecargasAmérica.', 'provider_message' => $raMsg]);
+    }
+
+    // ── CONEC (coneclatam) ───────────────────────────────────────────
+    // Rama AISLADA: solo corre si el paquete es 'conec' (dormida para giftven/RA/discord →
+    // no puede afectar sus flujos). La compra/idempotencia/estado vive en conec_recargas.php
+    // (probado en sandbox). Guarda en las MISMAS columnas recargas_api_* que RecargasAmérica.
+    if ($pkgProvider === 'conec' && $pkgApiId > 0) {
+        $cnRes = conec_dispatch_order($order);
+        $mysqli = ensure_mysqli_connection($mysqli);
+        $cnData    = (array) ($cnRes['payload'] ?? []);
+        $cnRef     = (string) ($cnRes['reference'] ?? '');
+        $cnMsg     = (string) ($cnRes['message'] ?? '');
+        $cnPayload = json_encode($cnData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $cnHistEvent = !empty($cnRes['needs_manual_review']) ? 'conec_recovery_check' : 'conec_purchase';
+        $cnHistJson = append_provider_history(
+            $order['recargas_api_historial_json'] ?? null,
+            build_provider_history_entry($cnHistEvent, 'recharge', !empty($cnRes['success']) ? 'enviado' : 'pagado', $cnMsg, $cnRef, $cnRef, '')
+        );
+
+        // Deja rastro del intento siempre que hubo respuesta (idempotente por merchant_ref → sin doble cobro).
+        $updCNAlways = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=? WHERE id=? AND estado='pagado'");
+        if ($updCNAlways) {
+            $updCNAlways->bind_param('sssssi', $cnRef, $cnMsg, $cnPayload, $cnRef, $cnHistJson, $orderId);
+            $updCNAlways->execute();
+            $updCNAlways->close();
+            $order = fetch_order_by_id($mysqli, $orderId) ?: $order;
+        }
+
+        if (!empty($cnRes['success'])) {
+            $stCN = 'enviado';
+            $updCN = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=?, estado=? WHERE id=? AND estado='pagado'");
+            if ($updCN) {
+                $updCN->bind_param('ssssssi', $cnRef, $cnMsg, $cnPayload, $cnRef, $cnHistJson, $stCN, $orderId);
+                $updCN->execute();
+                $updCN->close();
+            }
+            $updOrderCN = fetch_order_by_id($mysqli, $orderId) ?: $order;
+            win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+            recharge_notifications_emit_for_order($mysqli, $updOrderCN);
+            json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Recarga completada.', 'provider_reference' => $cnRef], 200, static function () use ($mysqli, $updOrderCN, $cnRef, $cnMsg): void {
+                notify_free_fire_recharge_success(
+                    $mysqli,
+                    $updOrderCN,
+                    trim((string) ($updOrderCN['metodo_pago'] ?? 'Método de pago')),
+                    trim((string) ($updOrderCN['numero_referencia'] ?? '')),
+                    trim((string) ($updOrderCN['telefono_contacto'] ?? '')),
+                    $cnRef,
+                    $cnMsg !== '' ? $cnMsg : 'Recarga completada por CONEC.'
+                );
+            });
+        }
+
+        if (!empty($cnRes['accepted'])) {
+            $updCN2 = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=? WHERE id=? AND estado='pagado'");
+            if ($updCN2) {
+                $updCN2->bind_param('sssssi', $cnRef, $cnMsg, $cnPayload, $cnRef, $cnHistJson, $orderId);
+                $updCN2->execute();
+                $updCN2->close();
+            }
+            json_response(['ok' => true, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Pedido recibido y procesándose.', 'provider_reference' => $cnRef, 'processing' => true]);
+        }
+
+        if (!empty($cnRes['needs_manual_review'])) {
+            json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $cnMsg ?: 'No se pudo confirmar automáticamente el estado de esta recarga. Un administrador la revisará.', 'pending_review' => true, 'provider_message' => $cnMsg]);
+        }
+
+        json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $cnMsg ?: 'La recarga no fue procesada por CONEC.', 'provider_message' => $cnMsg]);
     }
 
     // ── Discord API ──────────────────────────────────────────────────
