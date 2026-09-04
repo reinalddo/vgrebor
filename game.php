@@ -613,9 +613,9 @@ include __DIR__ . "/includes/header.php";
       <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso2') ?>" data-paso-linea<?= paso_estilo_css_inline('paso2') ?>><?= htmlspecialchars(paso_linea_partes('paso2')['badge'], ENT_QUOTES, 'UTF-8') ?></span><?php $paso2Resto = paso_linea_partes('paso2')['resto']; if ($paso2Resto !== ''): ?> <span class="<?= paso_linea_class('paso2_resto') ?>"<?= paso_estilo_css_inline('paso2_resto') ?>><?= htmlspecialchars($paso2Resto, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></h2>
       <br>
     </div>
-    <div class="col-auto">
+    <!--<div class="col-auto">
       <span class="text-uppercase text-secondary small">elige</span>
-    </div>
+    </div>-->
   </div>
   <?php
     // Obtener todas las monedas
@@ -5465,6 +5465,16 @@ include __DIR__ . "/includes/header.php";
 
     .page-step-title {
       font-size: clamp(1.35rem, 6vw, 1.8rem);
+    }
+
+    /* Título "PASO N: ..." en móvil: la insignia ("PASO 1", primer <span data-paso-linea>) y el
+       resto de la frase (2º <span>, "Ingrese su información de jugador") van uno junto al otro en
+       PC, pero en pantallas angostas quedaban partiendo la frase a mitad de palabra de forma fea.
+       Se baja el 2º span a su propia línea (queda "PASO 1" solo arriba y la frase completa abajo,
+       envolviéndose normal si no cabe en una línea) — pedido explícito del cliente. */
+    .page-step-title [data-paso-linea] + span {
+      display: block;
+      margin-top: 0.3rem;
     }
 
     .purchase-quantity-panel {
