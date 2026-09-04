@@ -913,6 +913,7 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     <div class="small mb-2" style="color:#8be9fd;">Si no cargas una imagen hero, se usará la imagen principal del juego.</div>
                 <?php endif; ?>
                 <input type="file" name="edit_imagen_hero" accept="image/*" class="form-control mt-2" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                <div class="form-text mt-2" style="color:#8be9fd;">Se recomienda subir imágenes de 1920 × 480 px para que se visualice mejor en móvil.</div>
                 <div class="form-check mt-2">
                     <input type="checkbox" name="remove_edit_imagen_hero" class="form-check-input" id="removeEditHeroImage">
                     <label class="form-check-label text-neon" for="removeEditHeroImage">Usar la imagen principal como hero</label>
@@ -1405,6 +1406,7 @@ if ($gcatAssignResult instanceof mysqli_result) {
             <label class="form-label" style="color:#00fff7;">Imagen hero del juego</label>
             <input type="file" name="imagen_hero" accept="image/*" class="form-control" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;" onchange="previewImagenHeroJuego(event)">
             <div class="form-text mt-2" style="color:#8be9fd;">Si queda vacía, al entrar al juego se mostrará la imagen principal como hero.</div>
+            <div class="form-text mt-2" style="color:#8be9fd;">Se recomienda subir imágenes de 1920 × 480 px para que se visualice mejor en móvil.</div>
             <div class="text-center mt-2">
                 <img id="preview-juego-hero-img" src="#" alt="Previsualización Hero" style="display:none;max-width:220px;max-height:140px;border-radius:0.75rem;box-shadow:0 0 0.5rem #00fff7; border:2px solid #00fff7;object-fit:cover;" />
             </div>
@@ -1861,6 +1863,7 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 <div class="text-xs text-slate-400 mb-2">Si no tiene hero, se usará la imagen principal del juego.</div>
             <?php endif; ?>
             <input type="file" name="edit_imagen_hero" accept="image/*" class="w-full rounded-lg px-3 py-2 bg-slate-800 text-white mb-2" onchange="previewEditHeroJuegoImg(event)">
+            <div class="text-xs text-slate-400 mb-2">Se recomienda subir imágenes de 1920 × 480 px para que se visualice mejor en móvil.</div>
             <label class="inline-flex items-center mb-2">
                 <input type="checkbox" name="remove_edit_imagen_hero" class="form-checkbox h-5 w-5 text-emerald-500">
                 <span class="ml-2 text-slate-300">Usar la imagen principal como hero</span>
