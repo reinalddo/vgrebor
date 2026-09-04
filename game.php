@@ -29,13 +29,25 @@ require_once __DIR__ . "/includes/referidos.php";
 // armar el HTML/CSS es cosa de esta página, mismo criterio que
 // ayuda_fab_style_attr()/ayuda_fab_icon_html() en includes/footer.php).
 if (!function_exists('paso_estilo_css_inline')) {
-    function paso_estilo_css_inline(string $zona): string {
+    // $fontSizeAsVar: los títulos "PASO N: ..." (paso1/2/3 y sus "_resto") lo pasan en true.
+    //
+    // BUG REAL (se ve bien en PC, roto en móvil): el tamaño de letra del admin es un rem FIJO,
+    // aplicado como `style="font-size:X"` inline. Un estilo inline le gana a CUALQUIER regla de
+    // hoja de estilos, incluida la media query mobile que reduce .page-step-title con clamp() —
+    // así que el texto personalizado ignoraba por completo esa reducción y se mostraba al mismo
+    // tamaño gigante de escritorio en una pantalla angosta.
+    // Fix: para los títulos, en vez de fijar `font-size` inline, se fija la variable CSS
+    // --paso-fuente-tamano con ese mismo valor; el tamaño real lo pone .paso-linea-custom en la
+    // hoja de estilos (ver más abajo), que SÍ puede tener una versión distinta bajo la media
+    // query móvil sin pelear con el inline. El campo de ID y el botón de verificar (que no
+    // reportaron el problema) siguen con `font-size` fijo de siempre, sin tocar su comportamiento.
+    function paso_estilo_css_inline(string $zona, bool $fontSizeAsVar = false): string {
         if (!paso_estilo_esta_personalizado($zona)) {
             return '';
         }
         $css = 'background:' . paso_estilo_fondo_css($zona) . ';'
              . 'color:' . paso_estilo_color_texto($zona) . ';'
-             . 'font-size:' . paso_estilo_fuente_tamano($zona) . ';';
+             . ($fontSizeAsVar ? '--paso-fuente-tamano:' : 'font-size:') . paso_estilo_fuente_tamano($zona) . ';';
         $fuenteCss = paso_estilo_fuente_familia_css($zona);
         if ($fuenteCss !== '') {
             $css .= 'font-family:' . $fuenteCss . ';';
@@ -576,7 +588,7 @@ include __DIR__ . "/includes/header.php";
 <?php endif; ?>
 
 <section id="player-step-section" class="container mt-4 mb-3" data-aos="fade-up">
-  <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso1') ?>" data-paso-linea<?= paso_estilo_css_inline('paso1') ?>><?= htmlspecialchars(paso_linea_partes('paso1')['badge'], ENT_QUOTES, 'UTF-8') ?></span><?php $paso1Resto = paso_linea_partes('paso1')['resto']; if ($paso1Resto !== ''): ?> <span class="<?= paso_linea_class('paso1_resto') ?>"<?= paso_estilo_css_inline('paso1_resto') ?>><?= htmlspecialchars($paso1Resto, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></h2>
+  <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso1') ?>" data-paso-linea<?= paso_estilo_css_inline('paso1', true) ?>><?= htmlspecialchars(paso_linea_partes('paso1')['badge'], ENT_QUOTES, 'UTF-8') ?></span><?php $paso1Resto = paso_linea_partes('paso1')['resto']; if ($paso1Resto !== ''): ?> <span class="<?= paso_linea_class('paso1_resto') ?>"<?= paso_estilo_css_inline('paso1_resto', true) ?>><?= htmlspecialchars($paso1Resto, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></h2>
 </section>
 
 
@@ -610,7 +622,7 @@ include __DIR__ . "/includes/header.php";
 <section id="game-packages-section" class="container mt-2 mt-md-4" data-aos="fade-up">
   <div class="row mb-2 align-items-center">
     <div class="col">
-      <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso2') ?>" data-paso-linea<?= paso_estilo_css_inline('paso2') ?>><?= htmlspecialchars(paso_linea_partes('paso2')['badge'], ENT_QUOTES, 'UTF-8') ?></span><?php $paso2Resto = paso_linea_partes('paso2')['resto']; if ($paso2Resto !== ''): ?> <span class="<?= paso_linea_class('paso2_resto') ?>"<?= paso_estilo_css_inline('paso2_resto') ?>><?= htmlspecialchars($paso2Resto, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></h2>
+      <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso2') ?>" data-paso-linea<?= paso_estilo_css_inline('paso2', true) ?>><?= htmlspecialchars(paso_linea_partes('paso2')['badge'], ENT_QUOTES, 'UTF-8') ?></span><?php $paso2Resto = paso_linea_partes('paso2')['resto']; if ($paso2Resto !== ''): ?> <span class="<?= paso_linea_class('paso2_resto') ?>"<?= paso_estilo_css_inline('paso2_resto', true) ?>><?= htmlspecialchars($paso2Resto, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></h2>
       <br>
     </div>
     <!--<div class="col-auto">
@@ -1130,7 +1142,7 @@ include __DIR__ . "/includes/header.php";
 </section>
 
 <section id="payment-step-section" class="container mt-3 mb-5" data-aos="fade-up">
-  <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso3') ?>" data-paso-linea<?= paso_estilo_css_inline('paso3') ?>><?= htmlspecialchars(paso_linea_partes('paso3')['badge'], ENT_QUOTES, 'UTF-8') ?></span><?php $paso3Resto = paso_linea_partes('paso3')['resto']; if ($paso3Resto !== ''): ?> <span class="<?= paso_linea_class('paso3_resto') ?>"<?= paso_estilo_css_inline('paso3_resto') ?>><?= htmlspecialchars($paso3Resto, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></h2>
+  <h2 class="page-step-title text-info mb-0"><span class="<?= paso_linea_class('paso3') ?>" data-paso-linea<?= paso_estilo_css_inline('paso3', true) ?>><?= htmlspecialchars(paso_linea_partes('paso3')['badge'], ENT_QUOTES, 'UTF-8') ?></span><?php $paso3Resto = paso_linea_partes('paso3')['resto']; if ($paso3Resto !== ''): ?> <span class="<?= paso_linea_class('paso3_resto') ?>"<?= paso_estilo_css_inline('paso3_resto', true) ?>><?= htmlspecialchars($paso3Resto, ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?></h2>
   <div class="payment-coupon-shell mt-4">
     <div class="payment-coupon-panel">
       <label class="form-label text-info mb-2">Cupón</label>
@@ -4040,6 +4052,11 @@ include __DIR__ . "/includes/header.php";
        recuadro (el "resto" de la frase), que sí usa el line-height base. */
     line-height: 1.3;
     vertical-align: middle;
+    /* --paso-fuente-tamano la fija paso_estilo_css_inline() en línea (el rem elegido en
+       /admin/diseno-pasos). Se lee acá, en la hoja de estilos, en vez de fijar `font-size`
+       directo en el inline — así la media query móvil de abajo puede recortarla con min()
+       sin pelear contra un inline style (que le gana a cualquier regla externa). */
+    font-size: var(--paso-fuente-tamano, inherit);
   }
 
   /* Botón de verificación con ícono a la izquierda del texto (opcional,
@@ -5467,14 +5484,15 @@ include __DIR__ . "/includes/header.php";
       font-size: clamp(1.35rem, 6vw, 1.8rem);
     }
 
-    /* Título "PASO N: ..." en móvil: la insignia ("PASO 1", primer <span data-paso-linea>) y el
-       resto de la frase (2º <span>, "Ingrese su información de jugador") van uno junto al otro en
-       PC, pero en pantallas angostas quedaban partiendo la frase a mitad de palabra de forma fea.
-       Se baja el 2º span a su propia línea (queda "PASO 1" solo arriba y la frase completa abajo,
-       envolviéndose normal si no cabe en una línea) — pedido explícito del cliente. */
-    .page-step-title [data-paso-linea] + span {
-      display: block;
-      margin-top: 0.3rem;
+    /* Techo responsivo para el tamaño de letra personalizado de "PASO N: ..." (ver
+       --paso-fuente-tamano en .paso-linea-custom más arriba). El admin lo eligió mirando el
+       escritorio (hasta 3rem) — sin este techo se veía gigante en el celular. La insignia y el
+       resto de la frase SIGUEN uno al lado del otro (no se apilan): min() solo achica la letra,
+       nunca cambia el layout — si el texto no cabe en una línea, se envuelve solo, normal.
+       min() usa lo que sea más chico entre el valor elegido y este tope: si el admin ya puso algo
+       pequeño, no cambia nada; si puso algo grande, se recorta solo en pantallas angostas. */
+    .paso-linea-custom {
+      font-size: min(var(--paso-fuente-tamano, 1.8rem), clamp(1.1rem, 6.5vw, 1.8rem));
     }
 
     .purchase-quantity-panel {
