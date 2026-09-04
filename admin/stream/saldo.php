@@ -215,12 +215,10 @@ stream_head('Mi saldo', 'saldo');
         <img id="rcMetodoQr" src="" alt="QR" style="display:none;max-width:150px;margin-top:8px;border-radius:8px">
       </div>
       <?php endif; ?>
-      <?php if ($bsRate > 0): ?>
       <div id="rcBsBox" style="margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:13.5px;display:none">
         A pagar: <span id="rcBs">0,00</span> Bs
-        <span style="font-weight:500;color:var(--muted);font-size:12px">· tasa <?= number_format($bsRate, 2, ',', '.') ?> Bs/$</span>
+        <span style="font-weight:500;color:var(--muted);font-size:12px">· tasa <span id="rcBsTasa"><?= number_format($bsRate, 2, ',', '.') ?></span> Bs/$</span>
       </div>
-      <?php endif; ?>
       <div style="margin-top:10px"><label style="display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px">Referencia del pago <span style="color:var(--bad)">*</span> (obligatoria)</label>
         <input name="referencia" required placeholder="Nº de referencia / ID de transacción" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text)">
         <div style="font-size:11px;color:var(--muted);margin-top:4px">La necesitamos para verificar tu pago automáticamente (BNC/Binance).</div></div>
@@ -277,24 +275,39 @@ stream_head('Mi saldo', 'saldo');
 <script>
 const RC_RATE = <?= json_encode($bsRate) ?>;
 const RC_DEC = <?= json_encode($bsDec) ?>;
-const RC_METODOS = <?= json_encode(array_map(fn($m) => ['nombre'=>$m['nombre'],'datos'=>$m['datos'],'qr'=>$m['qr_image_path']], $metodosPago), JSON_UNESCAPED_UNICODE) ?>;
+// Cada método lleva SU tasa (payment_methods.moneda_id → monedas.tasa) = la MISMA que usa el sistema para
+// CASAR el pago (sbr_monto_a_casar). Mostrar el Bs con esta tasa (no con una fila 'BS' aparte) evita que el
+// revendedor pague un monto y el sistema espere otro → esa divergencia dejaba las recargas "pendientes".
+const RC_METODOS = <?= json_encode(array_map(fn($m) => ['nombre'=>$m['nombre'],'datos'=>$m['datos'],'qr'=>$m['qr_image_path'],'tasa'=>(float)($m['moneda_tasa'] ?? 0)], $metodosPago), JSON_UNESCAPED_UNICODE) ?>;
+function rcTasaActual(){
+  const sel = document.getElementById('rcMetodo');
+  if (sel) { const m = RC_METODOS.find(x => x.nombre === sel.value); if (m && m.tasa > 0) return m.tasa; }
+  return RC_RATE; // respaldo: la tasa Bs de la tienda
+}
 function rcCalcBs(){
   const box = document.getElementById('rcBsBox'); if (!box) return;
   const inp = document.getElementById('rcMonto');
   const u = parseFloat((inp && inp.value) || '0');
-  if (!u || u <= 0 || RC_RATE <= 0) { box.style.display = 'none'; return; }
-  document.getElementById('rcBs').textContent = (u * RC_RATE).toLocaleString('es-VE', { minimumFractionDigits: RC_DEC, maximumFractionDigits: RC_DEC });
+  const tasa = rcTasaActual();
+  if (!u || u <= 0 || tasa <= 0) { box.style.display = 'none'; return; }
+  document.getElementById('rcBs').textContent = (u * tasa).toLocaleString('es-VE', { minimumFractionDigits: RC_DEC, maximumFractionDigits: RC_DEC });
+  const tl = document.getElementById('rcBsTasa'); if (tl) tl.textContent = tasa.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   box.style.display = 'block';
 }
 function rcMetodoInfo(){
-  const box = document.getElementById('rcMetodoBox'); if (!box) return;
-  const sel = document.getElementById('rcMetodo'); if (!sel) return;
-  const m = RC_METODOS.find(x => x.nombre === sel.value);
-  if (!m) { box.style.display = 'none'; return; }
-  document.getElementById('rcMetodoDatos').textContent = m.datos || '';
-  const qr = document.getElementById('rcMetodoQr');
-  if (m.qr) { qr.src = m.qr; qr.style.display = 'block'; } else { qr.style.display = 'none'; }
-  box.style.display = 'block';
+  const box = document.getElementById('rcMetodoBox');
+  const sel = document.getElementById('rcMetodo');
+  if (box && sel) {
+    const m = RC_METODOS.find(x => x.nombre === sel.value);
+    if (!m) { box.style.display = 'none'; }
+    else {
+      document.getElementById('rcMetodoDatos').textContent = m.datos || '';
+      const qr = document.getElementById('rcMetodoQr');
+      if (m.qr) { qr.src = m.qr; qr.style.display = 'block'; } else { qr.style.display = 'none'; }
+      box.style.display = 'block';
+    }
+  }
+  rcCalcBs(); // recalcular el Bs con la tasa del método elegido (display = lo que casa el sistema)
 }
 document.addEventListener('DOMContentLoaded', rcMetodoInfo);
 </script>
