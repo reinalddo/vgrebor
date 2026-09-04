@@ -3675,11 +3675,38 @@ if (typeof window.removePackageAccountGalleryRow !== 'function') {
     };
 }
 
+if (typeof window.bindPackageAccountGalleryFileInput !== 'function') {
+    // Al elegir VARIAS imágenes de una vez en un mismo input (ahora "multiple"), el backend sigue
+    // esperando UN archivo por fila: los campos van pareados por índice como imagen[]/descripcion[]
+    // (ver admin_package_normalize_uploaded_file_list() y admin_package_build_account_gallery_payload()
+    // en el PHP de este mismo archivo). Si se dejaran las 5 imágenes en el mismo input, PHP recibiría
+    // un array anidado en esa posición y rompería el emparejamiento con su descripción.
+    // Por eso: la 1ra imagen elegida se queda en ESTA fila/input (no se pierde nada de lo que el
+    // admin ya haya escrito), y por cada imagen extra se crea una fila nueva — el mismo botón
+    // "Agregar imagen" de siempre — con su propio campo de descripción vacío y opcional.
+    window.bindPackageAccountGalleryFileInput = function (input, containerId, imageField, descriptionField) {
+        input.addEventListener('change', function () {
+            const files = Array.from(input.files || []);
+            if (files.length <= 1) {
+                return;
+            }
+
+            const dtFirst = new DataTransfer();
+            dtFirst.items.add(files[0]);
+            input.files = dtFirst.files;
+
+            for (let i = 1; i < files.length; i++) {
+                window.addPackageAccountGalleryRow(containerId, imageField, descriptionField, files[i]);
+            }
+        });
+    };
+}
+
 if (typeof window.addPackageAccountGalleryRow !== 'function') {
-    window.addPackageAccountGalleryRow = function(containerId, imageField, descriptionField) {
+    window.addPackageAccountGalleryRow = function(containerId, imageField, descriptionField, presetFile = null) {
         const container = document.getElementById(containerId);
         if (!container) {
-            return;
+            return null;
         }
 
         const row = document.createElement('div');
@@ -3690,7 +3717,7 @@ if (typeof window.addPackageAccountGalleryRow !== 'function') {
             <div class="row g-2 align-items-end">
                 <div class="col-md-5">
                     <label class="form-label text-neon small mb-1">Imagen</label>
-                    <input type="file" name="${imageField}" accept="image/*" class="form-control" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                    <input type="file" name="${imageField}" accept="image/*" multiple class="form-control" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
                 </div>
                 <div class="col-md-5">
                     <label class="form-label text-neon small mb-1">Descripción</label>
@@ -3701,6 +3728,17 @@ if (typeof window.addPackageAccountGalleryRow !== 'function') {
                 </div>
             </div>`;
         container.appendChild(row);
+
+        const fileInput = row.querySelector('input[type="file"]');
+        if (fileInput) {
+            window.bindPackageAccountGalleryFileInput(fileInput, containerId, imageField, descriptionField);
+            if (presetFile) {
+                const dt = new DataTransfer();
+                dt.items.add(presetFile);
+                fileInput.files = dt.files;
+            }
+        }
+        return row;
     };
 }
 
