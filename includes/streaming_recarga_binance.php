@@ -555,9 +555,14 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
         } catch (Throwable $e) {}
 
         // Match (moneda VES, sin prefijo, contra el monto en Bs) + claim atómico + acreditar (en $).
+        // TOLERANCIA ±1 Bs (2026-09-05): el banco/Pago Móvil registra en bolívares ENTEROS (3861.00) pero el
+        // monto esperado sale con decimales ($3.94×980 = 3861.20) → con "= exacto" NO casaba y quedaba
+        // pendiente. La REFERENCIA (últimos N dígitos) sigue siendo obligatoria y es la llave real, así que
+        // aflojar solo el monto ±1 Bs NO permite falsos positivos (dos pagos con el mismo monto Y la misma
+        // referencia no existen). Esto arregla el "Pago Móvil queda pendiente" sin arriesgar dinero.
         $q = $pdo->prepare(
             "SELECT id, referencia FROM movimientos
-              WHERE moneda='VES' AND ROUND(monto,2) = ?
+              WHERE moneda='VES' AND ABS(ROUND(monto,2) - ?) <= 1
                 AND COALESCE(pedido_id,0)=0 AND COALESCE(checked,0)=0 AND COALESCE(wallet_recarga_id,0)=0
                 AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
               ORDER BY id DESC LIMIT 200");

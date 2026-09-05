@@ -62,9 +62,8 @@ $qty = max(1, min(50, (int) ($_POST['quantity'] ?? 1)));
 if ($gameId <= 0 || $packageId <= 0) {
     rr_err('Juego o paquete inválido.');
 }
-if ($userIdentifier === '') {
-    rr_err('Falta el ID del jugador.');
-}
+// El requisito del ID del jugador se valida MÁS ABAJO, cuando ya sabemos el proveedor/producto:
+// las GIFT CARDS no llevan ID (igual que en la tienda). Ver el bloque tras cargar el paquete.
 
 // Paquete + precio de revendedor (el SERVIDOR manda el precio — anti-tampering).
 // categoria_api_discord (juego) y api_source_key (paquete) pueden no existir en instalaciones viejas.
@@ -81,6 +80,26 @@ $pk->execute([$packageId, $gameId]);
 $pkg = $pk->fetch(PDO::FETCH_ASSOC);
 if (!$pkg) {
     rr_err('Paquete no disponible.');
+}
+
+// ¿Este paquete NECESITA el ID del jugador? Las GIFT CARDS no (igual que la tienda: game.php oculta el
+// paso del ID para gift cards). Se decide por proveedor/producto para no bloquear una gift card ni dejar
+// pasar sin ID un juego que sí lo pide (evita debitar saldo por una recarga que el proveedor rechazará).
+$rr_needsId = true;
+$rr_prov = trim((string) ($pkg['api_provider'] ?? ''));
+if (trim((string) ($pkg['monto_ff'] ?? '')) !== '') {
+    $rr_needsId = true;                       // Free Fire por monto: siempre pide ID.
+} elseif ($rr_prov === 'conec') {
+    // CONEC: el catálogo dice requires_game_id por producto (las gift cards vienen en false).
+    $rr_needsId = true;
+    try {
+        require_once __DIR__ . '/../../includes/conec_recargas.php';
+        $rr_cp = function_exists('conec_api_product_by_id') ? conec_api_product_by_id($pdo, (int) ($pkg['paquete_api'] ?? 0)) : null;
+        if (is_array($rr_cp)) { $rr_needsId = !empty($rr_cp['requires_game_id']); }
+    } catch (Throwable $e) {}
+}
+if ($rr_needsId && $userIdentifier === '') {
+    rr_err('Falta el ID del jugador.');
 }
 if ($pkg['precio_revendedor'] === null || (float) $pkg['precio_revendedor'] <= 0) {
     rr_err('Este paquete no tiene precio de revendedor. Pídeselo al administrador.');

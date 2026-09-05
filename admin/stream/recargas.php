@@ -39,6 +39,15 @@ try {
 
 $recargarUrl = function_exists('app_path') ? app_path('/api/revendedor/recargar.php') : '/api/revendedor/recargar.php';
 $verifyUrl = function_exists('app_path') ? app_path('/api/verify_player.php') : '/api/verify_player.php';
+// Las imágenes se guardan con ruta RELATIVA (ej. "uploads/x.png"). Esta página vive en /admin/stream/,
+// así que una ruta relativa la busca el navegador en /admin/stream/uploads/... → 404 (icono roto). Se
+// devuelve la ruta ABSOLUTA desde la raíz (igual que la tienda).
+$rcImgSrc = function ($p): string {
+    $p = trim((string) $p);
+    if ($p === '') return '';
+    if (preg_match('#^(https?:)?//#i', $p) || $p[0] === '/') return $p; // ya absoluta
+    return function_exists('app_path') ? app_path('/' . ltrim($p, '/')) : '/' . ltrim($p, '/');
+};
 
 stream_head('Recargas', 'recargas');
 ?>
@@ -63,7 +72,7 @@ stream_head('Recargas', 'recargas');
     <div class="card" style="margin-bottom:14px;padding:0;overflow:hidden">
       <div class="card-hd" style="padding:12px 16px;display:flex;align-items:center;gap:10px">
         <?php if ($jImg !== ''): ?>
-          <img src="<?= h($jImg) ?>" alt="" style="width:34px;height:34px;border-radius:50%;object-fit:cover;background:var(--surface-2);border:1px solid var(--border)">
+          <img src="<?= h($rcImgSrc($jImg)) ?>" alt="" style="width:34px;height:34px;border-radius:50%;object-fit:cover;background:var(--surface-2);border:1px solid var(--border)">
         <?php else: ?>
           <span style="width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-weight:800;color:#fff;background:<?= h($jColor) ?>;flex:0 0 auto"><?= h($jIni) ?></span>
         <?php endif; ?>
@@ -73,8 +82,8 @@ stream_head('Recargas', 'recargas');
         <?php foreach ($paquetes as $p): $pImg = trim((string) ($p['imagen_icono'] ?? '')); ?>
           <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:8px">
             <div style="display:flex;align-items:center;gap:8px">
-              <?php if ($pImg !== ''): ?><img src="<?= h($pImg) ?>" alt="" style="width:26px;height:26px;border-radius:7px;object-fit:cover;background:var(--surface-2);flex:0 0 auto">
-              <?php elseif ($jImg !== ''): ?><img src="<?= h($jImg) ?>" alt="" style="width:26px;height:26px;border-radius:7px;object-fit:cover;background:var(--surface-2);flex:0 0 auto"><?php endif; ?>
+              <?php if ($pImg !== ''): ?><img src="<?= h($rcImgSrc($pImg)) ?>" alt="" style="width:26px;height:26px;border-radius:7px;object-fit:cover;background:var(--surface-2);flex:0 0 auto">
+              <?php elseif ($jImg !== ''): ?><img src="<?= h($rcImgSrc($jImg)) ?>" alt="" style="width:26px;height:26px;border-radius:7px;object-fit:cover;background:var(--surface-2);flex:0 0 auto"><?php endif; ?>
               <div style="font-weight:800;min-width:0;overflow-wrap:anywhere"><?= h($p['nombre']) ?></div>
             </div>
             <div class="muted" style="font-size:12px"><?= h($p['cantidad'] ?: '') ?></div>
