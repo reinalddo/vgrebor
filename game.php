@@ -718,6 +718,27 @@ include __DIR__ . "/includes/header.php";
         $recargasAmericaProductsById = [];
       }
     }
+    // CONEC (coneclatam): igual que RecargasAmérica, catálogo mayorista único. Se trae en vivo SOLO si este
+    // juego tiene algún paquete CONEC, para calcular el precio = costo × margen (que se actualice solo, como
+    // giftven/RA). Sin esto, los paquetes CONEC quedaban con el precio guardado (no se actualizaban).
+    $conecProductsById = [];
+    $usesConecCatalogGame = false;
+    foreach ($paquetes as $pack) {
+      if (trim((string) ($pack['api_provider'] ?? '')) === 'conec') { $usesConecCatalogGame = true; break; }
+    }
+    if ($usesConecCatalogGame) {
+      try {
+        require_once __DIR__ . '/includes/conec_recargas.php';
+        $conecPdoGame = null;
+        try {
+          $tdbG = function_exists('tenant_database_config') ? tenant_database_config() : [];
+          $conecPdoGame = new PDO('mysql:host=' . ($tdbG['host'] ?? 'localhost') . ';dbname=' . ($tdbG['name'] ?? '') . ';charset=' . ($tdbG['charset'] ?? 'utf8mb4'), (string) ($tdbG['user'] ?? 'root'), (string) ($tdbG['password'] ?? ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT]);
+        } catch (Throwable $e) { $conecPdoGame = null; }
+        if ($conecPdoGame && function_exists('conec_enabled') && conec_enabled($conecPdoGame) && function_exists('conec_api_fetch_products')) {
+          foreach (conec_api_fetch_products($conecPdoGame) as $cp) { $conecProductsById[(int) ($cp['id'] ?? 0)] = $cp; }
+        }
+      } catch (Throwable $e) { $conecProductsById = []; }
+    }
     // Un paquete asignado a una categoría desactivada no debe aparecer en la
     // tienda (ni en su tab ni en "Otros"), a diferencia de uno sin categoría.
     $allPackageCategoriesByIdForGame = [];
@@ -743,6 +764,7 @@ include __DIR__ . "/includes/header.php";
     // explícita del cliente).
     $gameMarkupPctGiftven = floatval($game['precio_markup_pct'] ?? 0);
     $gameMarkupPctRecargasamerica = floatval($game['precio_markup_pct_recargasamerica'] ?? 0);
+    $gameMarkupPctConec = floatval($game['precio_markup_pct_conec'] ?? 0);
   ?>
   <?php $priceSyncQueue = []; ?>
   <?php $bsPassStockPackageIds = []; ?>
@@ -801,11 +823,14 @@ include __DIR__ . "/includes/header.php";
         // este chequeo, un paquete de RecargasAmérica con el mismo ID
         // numérico que un producto de GiftVen tomaría el precio equivocado.
         $packPricingProvider = trim((string) ($pack['api_provider'] ?? ''));
-        if (!$packManualOverride && $packApiId > 0 && $packPricingProvider === 'recargasamerica' && isset($recargasAmericaProductsById[$packApiId])) {
+        if (!$packManualOverride && $packApiId > 0 && $packPricingProvider === 'conec' && isset($conecProductsById[$packApiId])) {
+            $packApiRawPrice = floatval($conecProductsById[$packApiId]['price'] ?? 0);
+            $packMarkupPct = $gameMarkupPctConec;
+        } elseif (!$packManualOverride && $packApiId > 0 && $packPricingProvider === 'recargasamerica' && isset($recargasAmericaProductsById[$packApiId])) {
             $packApiRawPrice = floatval($recargasAmericaProductsById[$packApiId]['price'] ?? 0);
             $packMarkupPct = $gameMarkupPctRecargasamerica;
         } else {
-            $packApiRawPrice = (!$packManualOverride && $packApiId > 0 && $packPricingProvider !== 'recargasamerica' && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
+            $packApiRawPrice = (!$packManualOverride && $packApiId > 0 && $packPricingProvider !== 'recargasamerica' && $packPricingProvider !== 'conec' && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
             $packMarkupPct = $gameMarkupPctGiftven;
         }
         $precio_base = ($packApiRawPrice !== null)

@@ -443,17 +443,29 @@ if (!function_exists('sbr_generic_verify_and_credit')) {
                 try { $pdo->prepare("UPDATE movimientos SET checked=0, wallet_recarga_id=NULL WHERE id=? AND wallet_recarga_id=?")->execute([(int) $m['id'], $recId]); } catch (Throwable $e2) {}
                 return ['credited' => false, 'message' => 'No se pudo acreditar el saldo. Intenta de nuevo.'];
             }
-            try { $pdo->prepare("UPDATE wallet_recargas SET estado='aprobado' WHERE id=? AND usuario_id=?")->execute([$recId, $uid]); } catch (Throwable $e) {}
+            try { $pdo->prepare("UPDATE wallet_recargas SET estado='aprobada' WHERE id=? AND usuario_id=?")->execute([$recId, $uid]); } catch (Throwable $e) {}
             return ['credited' => true, 'message' => '✓ Pago verificado. Saldo acreditado al instante.'];
         }
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "referencia LIKE '" . str_replace("'", "''", $prefijo) . "%'")) {
             return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en un pago anterior (una compra en la tienda o otra recarga). No se puede usar dos veces.'];
         }
-        // HOTFIX 2026-09-03 (BUG DE PRODUCCIÓN: "se rechazan TODAS las recargas"): se DESACTIVA el
-        // auto-rechazo (rechazaba pagos REALES cuyo monto coincide con el de otro usuario, o que aún no
-        // sincronizan / el match por dígitos falla). Todo lo no-casado queda PENDIENTE para aprobación
-        // manual (el duplicado/reused SÍ se sigue rechazando arriba). Mejor pendiente que rechazar un pago real.
-        unset($apiRespondio);
+        // RE-ACTIVADO (2026-09-05, pedido del cliente): rechaza la referencia INVENTADA. Seguro porque el
+        // match ya está afinado (dígitos del método + tolerancia + sincronización). Solo rechaza si la API
+        // RESPONDIÓ esta corrida (viva) Y la referencia NO aparece en NINGÚN movimiento reciente del método.
+        // Si la API no respondió → pendiente. NO se rechaza por "mismo monto, otra ref" (causa del incidente 03-09).
+        if ($apiRespondio) {
+            try {
+                $rr = $pdo->prepare("SELECT referencia FROM movimientos
+                      WHERE referencia LIKE ? AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
+                      ORDER BY id DESC LIMIT 400");
+                $rr->execute([$prefijo . '%']);
+                $refAparece = false;
+                foreach ($rr->fetchAll(PDO::FETCH_COLUMN) as $fullRef) { if (sbr_reference_matches((string) $fullRef, $reportedRef, $digits)) { $refAparece = true; break; } }
+                if (!$refAparece) {
+                    return ['credited' => false, 'rejected' => true, 'message' => '✗ Esa referencia no aparece en los pagos recibidos. Revisa que la copiaste bien; si es correcta, espera 1-2 min y reinténtalo.'];
+                }
+            } catch (Throwable $e) {}
+        }
         return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; el admin también puede aprobarlo.'];
     }
 }
@@ -515,7 +527,12 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
         $digits = $pmDigits !== null ? $pmDigits : max(0, min(120, (int) sbr_cfg('bnc_referencia_digitos', '0')));
 
         // Fetch best-effort (INSERT IGNORE por referencia UNIQUE → nunca pisa lo que la tienda sincronizó).
-        $apiRespondio = false;   // ¿el banco devolvió movimientos EN ESTA corrida? (para rechazar seguro)
+        // Guard ESTÁTICO: el fetch trae TODOS los movimientos, así que basta UNA vez por request. Sin esto,
+        // re-verificar varias recargas pendientes en una misma carga haría un fetch (hasta 20s) por cada una.
+        static $bankFetchDone = false;
+        static $bankApiRespondio = false;
+        if (!$bankFetchDone) {
+        $bankFetchDone = true;
         try {
             $c = sbr_bank_config();
             if (function_exists('store_config_build_bank_movements_url')) {
@@ -532,7 +549,7 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
                 if (is_string($body) && $body !== '') {
                     $data = json_decode($body, true);
                     $lista = (is_array($data) && isset($data['movimientos']) && is_array($data['movimientos'])) ? $data['movimientos'] : [];
-                    if (count($lista) > 0) $apiRespondio = true;
+                    if (count($lista) > 0) $bankApiRespondio = true;
                     // Los movimientos del banco se guardan SIN prefijo y moneda VES (igual que la tienda).
                     $ins = $pdo->prepare("INSERT IGNORE INTO movimientos (referencia, descripcion, fecha_raw, fecha_movimiento, tipo, monto, moneda) VALUES (?,?,?,?,?,?, 'VES')");
                     foreach ($lista as $m) {
@@ -553,6 +570,8 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
                 }
             }
         } catch (Throwable $e) {}
+        }
+        $apiRespondio = $bankApiRespondio;
 
         // Match (moneda VES, sin prefijo, contra el monto en Bs) + claim atómico + acreditar (en $).
         // TOLERANCIA ±1 Bs (2026-09-05): el banco/Pago Móvil registra en bolívares ENTEROS (3861.00) pero el
@@ -580,7 +599,7 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
                 try { $pdo->prepare("UPDATE movimientos SET checked=0, wallet_recarga_id=NULL WHERE id=? AND wallet_recarga_id=?")->execute([(int) $m['id'], $recId]); } catch (Throwable $e2) {}
                 return ['credited' => false, 'message' => 'No se pudo acreditar el saldo. Intenta de nuevo.'];
             }
-            try { $pdo->prepare("UPDATE wallet_recargas SET estado='aprobado' WHERE id=? AND usuario_id=?")->execute([$recId, $uid]); } catch (Throwable $e) {}
+            try { $pdo->prepare("UPDATE wallet_recargas SET estado='aprobada' WHERE id=? AND usuario_id=?")->execute([$recId, $uid]); } catch (Throwable $e) {}
             return ['credited' => true, 'message' => '✓ Pago verificado (BNC / Pago Móvil). Saldo acreditado al instante.'];
         }
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "moneda='VES'")) {
@@ -592,13 +611,30 @@ if (!function_exists('sbr_bank_verify_and_credit')) {
             'monto_usd' => $credit, 'monto_buscado_bs' => $match,
             'candidatos_con_ese_monto' => $hayCandidatos ? 'SI' : 'NO',
         ], "moneda='VES'");
-        // HOTFIX 2026-09-03 (BUG DE PRODUCCIÓN: "se rechazan TODAS las recargas"): se DESACTIVA el
-        // auto-rechazo. Rechazaba pagos REALES de Pago Móvil/BNC — con montos que se repiten mucho
-        // ($hayCandidatos casaba contra el pago de OTRO usuario) o que aún no sincronizaban / cuyo match
-        // por dígitos fallaba ($apiRespondio). Ahora TODO lo no-casado queda PENDIENTE para aprobación
-        // manual del admin (el duplicado/reused SÍ se sigue rechazando arriba). Conducta segura: mejor
-        // pendiente que rechazar un pago legítimo. ($hayCandidatos/$apiRespondio se dejan solo para el log.)
-        unset($apiRespondio); // ya no se usa para rechazar
+        // RE-ACTIVADO (2026-09-05, pedido explícito del cliente: "las referencias inventadas deben RECHAZARSE,
+        // no quedar pendientes"). Ahora es SEGURO porque el match ya está bien afinado: se usan los dígitos
+        // CORRECTOS del método (6, no la referencia completa que fallaba en el incidente) + tolerancia de monto
+        // ±1 Bs + el banco sí sincroniza (probado). Un pago REAL casa por referencia y se ACREDITA arriba antes
+        // de llegar aquí; solo cae aquí lo que NO aparece. Se rechaza SOLO si: (a) el banco RESPONDIÓ con
+        // movimientos en ESTA corrida (está vivo → no es una caída) Y (b) la referencia NO aparece en NINGÚN
+        // movimiento reciente = dato inventado o mal copiado. Si el banco no respondió (caída/retraso), queda
+        // PENDIENTE (nunca tumba un pago real por una caída).
+        // Lo que SÍ queda DESACTIVADO a propósito (fue la causa del incidente del 03-09): NO se rechaza por
+        // "hay un movimiento del mismo MONTO con otra referencia" ($hayCandidatos) — con montos fijos que se
+        // repiten, eso casaba contra el pago de OTRA persona y rechazaba pagos legítimos.
+        if ($apiRespondio) {
+            try {
+                $rr = $pdo->prepare("SELECT referencia FROM movimientos
+                      WHERE moneda='VES' AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
+                      ORDER BY id DESC LIMIT 400");
+                $rr->execute();
+                $refAparece = false;
+                foreach ($rr->fetchAll(PDO::FETCH_COLUMN) as $fullRef) { if (sbr_reference_matches((string) $fullRef, $reportedRef, $digits)) { $refAparece = true; break; } }
+                if (!$refAparece) {
+                    return ['credited' => false, 'rejected' => true, 'message' => '✗ Esa referencia no aparece en los pagos recibidos. Revisa que la copiaste bien; si es correcta, espera 1-2 min y reinténtalo.'];
+                }
+            } catch (Throwable $e) {}
+        }
         return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; el admin también puede aprobarlo.'];
     }
 }
@@ -649,7 +685,7 @@ if (!function_exists('sbr_binance_verify_and_credit')) {
                 try { $pdo->prepare("UPDATE movimientos SET checked=0, wallet_recarga_id=NULL WHERE id=? AND wallet_recarga_id=?")->execute([(int) $m['id'], $recId]); } catch (Throwable $e2) {}
                 return ['credited' => false, 'message' => 'No se pudo acreditar el saldo. Intenta de nuevo.'];
             }
-            try { $pdo->prepare("UPDATE wallet_recargas SET estado='aprobado' WHERE id=? AND usuario_id=?")->execute([$recId, $uid]); } catch (Throwable $e) {}
+            try { $pdo->prepare("UPDATE wallet_recargas SET estado='aprobada' WHERE id=? AND usuario_id=?")->execute([$recId, $uid]); } catch (Throwable $e) {}
             return ['credited' => true, 'message' => '✓ Pago de Binance verificado. Saldo acreditado al instante.'];
         }
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "referencia LIKE 'BINANCE:%'")) {
@@ -661,11 +697,23 @@ if (!function_exists('sbr_binance_verify_and_credit')) {
             'monto_buscado' => $amount,
             'candidatos_con_ese_monto' => $hayCandidatos ? 'SI' : 'NO',
         ], "referencia LIKE 'BINANCE:%'");
-        // HOTFIX 2026-09-03 (BUG DE PRODUCCIÓN: "se rechazan TODAS las recargas"): se DESACTIVA el
-        // auto-rechazo (rechazaba pagos REALES cuyo monto coincide con el de otro pago, o que aún no
-        // sincronizan / el match por dígitos falla). Todo lo no-casado queda PENDIENTE para aprobación
-        // manual (el duplicado/reused SÍ se sigue rechazando arriba). Mejor pendiente que rechazar un pago real.
-        unset($apiRespondio);
+        // RE-ACTIVADO (2026-09-05, pedido del cliente): rechaza el ID/referencia INVENTADO. Seguro porque el
+        // match ya está afinado. Solo rechaza si la API de Binance RESPONDIÓ esta corrida (viva) Y la
+        // referencia NO aparece en ningún movimiento BINANCE reciente. Si no respondió → pendiente.
+        // NO se rechaza por "mismo monto, otra ref" (causa del incidente 03-09).
+        if ($apiRespondio) {
+            try {
+                $rr = $pdo->prepare("SELECT referencia FROM movimientos
+                      WHERE referencia LIKE 'BINANCE:%' AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
+                      ORDER BY id DESC LIMIT 400");
+                $rr->execute();
+                $refAparece = false;
+                foreach ($rr->fetchAll(PDO::FETCH_COLUMN) as $fullRef) { if (sbr_reference_matches((string) $fullRef, $reportedRef, $digits)) { $refAparece = true; break; } }
+                if (!$refAparece) {
+                    return ['credited' => false, 'rejected' => true, 'message' => '✗ Ese ID de transacción no aparece en los pagos de Binance recibidos. Verifícalo; si es correcto, espera 1-2 min y reinténtalo.'];
+                }
+            } catch (Throwable $e) {}
+        }
         return ['credited' => false, 'message' => 'No encontramos tu pago todavía. Puede tardar 1-2 min; vuelve a intentar o el admin lo aprueba manual.'];
     }
 }

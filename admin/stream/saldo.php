@@ -108,6 +108,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $flash = (string) ($_GET['msg'] ?? '');
+
+// RE-VERIFICACIÓN al cargar la página: si una recarga quedó PENDIENTE porque el movimiento del banco/Binance
+// aún no había sincronizado cuando se solicitó (demora típica: el revendedor solicita justo después de pagar),
+// aquí se re-verifica contra los movimientos MÁS RECIENTES y se ACREDITA sola — sin esperar al admin. El fetch
+// del banco corre UNA sola vez por carga (guard estático en el verificador). Solo ACREDITA: nunca rechaza en el
+// re-chequeo (un pago real que todavía no sincroniza no debe rechazarse por recargar la página).
+try {
+    require_once __DIR__ . '/../../includes/streaming_recarga_binance.php';
+    if (function_exists('sbr_verify_recarga')) {
+        $pendRe = $pdo->prepare("SELECT id, monto, metodo, referencia FROM wallet_recargas
+            WHERE usuario_id = ? AND estado IN ('pendiente','pending') AND metodo IS NOT NULL AND referencia IS NOT NULL
+              AND creado_en >= (NOW() - INTERVAL 2 DAY) ORDER BY id DESC LIMIT 8");
+        $pendRe->execute([$uid]);
+        foreach ($pendRe->fetchAll(PDO::FETCH_ASSOC) as $prRe) {
+            $mmRe = function_exists('sbr_monto_a_casar') ? sbr_monto_a_casar($pdo, (string) $prRe['metodo'], (float) $prRe['monto']) : null;
+            // sbr_verify_recarga acredita + marca 'aprobado' si casa. Si NO casa (o "rechazada"), se deja
+            // pendiente a propósito (no se toca la BD aquí) para no tumbar un pago que aún puede sincronizar.
+            try { sbr_verify_recarga($pdo, $uid, (int) $prRe['id'], (string) $prRe['referencia'], (float) $prRe['monto'], (string) $prRe['metodo'], $mmRe); } catch (Throwable $e) {}
+        }
+    }
+} catch (Throwable $e) {}
+
 $saldo = wallet_saldo($pdo, $uid);
 
 // Tasa Bs de la tienda (moneda con clave 'BS'): para mostrar el monto a pagar en bolívares.
