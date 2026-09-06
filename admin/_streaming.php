@@ -303,7 +303,7 @@ function st_kpis(PDO $pdo): array {
   // Las ventas del revendedor (incluidas las que el admin le asignó, que ahora nacen con owner=él vía
   // st_rev_entregar) son owner=él → con owner alcanza para sus estadísticas.
   $scope = "owner_id=$o";
-  $k = ['hoy' => 0, 'semana' => 0, 'vencidas' => 0, 'activas' => 0, 'mes' => 0, 'costo_mes' => 0, 'ganancia_mes' => 0, 'deuda' => 0, 'libres' => 0, 'perfiles' => 0, 'cuentas' => 0];
+  $k = ['hoy' => 0, 'semana' => 0, 'vencidas' => 0, 'activas' => 0, 'mes' => 0, 'costo_mes' => 0, 'ganancia_mes' => 0, 'deuda' => 0, 'libres' => 0, 'perfiles' => 0, 'cuentas' => 0, 'recargas' => 0, 'recargas_mes' => 0];
   try {
     $k['hoy']      = (int)$pdo->query("SELECT COUNT(*) FROM streaming_ventas WHERE $scope AND estado='activa' AND fecha_vencimiento='$hoy'")->fetchColumn();
     $k['semana']   = (int)$pdo->query("SELECT COUNT(*) FROM streaming_ventas WHERE $scope AND estado='activa' AND fecha_vencimiento BETWEEN '$hoy' AND DATE_ADD('$hoy', INTERVAL 7 DAY)")->fetchColumn();
@@ -322,6 +322,16 @@ function st_kpis(PDO $pdo): array {
     $invest = (float)$pdo->query("SELECT COALESCE(SUM(costo),0) FROM streaming_cuentas WHERE owner_id=$o AND costo>0")->fetchColumn();
     $k['costo_mes']    = $invest;
     $k['ganancia_mes'] = $income - $invest;
+  } catch (Throwable $e) {}
+  // Recargas de juegos que el revendedor hizo con su saldo también son ventas suyas (petición cliente
+  // 2026-09-06: "que las recargas cuenten en estadísticas de venta"). Son pedidos con cliente_usuario_id=él
+  // y metodo_pago='Saldo revendedor'. Se cuentan aparte y su monto de ESTE MES se suma a "Ventas del mes".
+  // Para el admin (o=0) no hay pedidos con cliente_usuario_id=0 → queda en 0, no afecta su tablero.
+  try {
+    $rcCond = "cliente_usuario_id=$o AND metodo_pago='Saldo revendedor' AND estado NOT IN ('cancelado','cancelada','rechazado','reembolsado')";
+    $k['recargas']     = (int)$pdo->query("SELECT COUNT(*) FROM pedidos WHERE $rcCond AND MONTH(creado_en)=MONTH(NOW()) AND YEAR(creado_en)=YEAR(NOW())")->fetchColumn();
+    $k['recargas_mes'] = (float)$pdo->query("SELECT COALESCE(SUM(precio),0) FROM pedidos WHERE $rcCond AND MONTH(creado_en)=MONTH(NOW()) AND YEAR(creado_en)=YEAR(NOW())")->fetchColumn();
+    $k['mes']         += $k['recargas_mes'];
   } catch (Throwable $e) {}
   // Deuda a proveedores = costo de cuentas activas aún no marcadas como pagadas (columna costo_pagado puede no existir)
   try { $k['deuda'] = (float)$pdo->query("SELECT COALESCE(SUM(costo),0) FROM streaming_cuentas WHERE owner_id=$o AND estado='activa' AND COALESCE(costo_pagado,0)=0 AND costo>0")->fetchColumn(); } catch (Throwable $e) {}

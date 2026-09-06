@@ -16,6 +16,13 @@ $pdo = db();
 // Pero la CONFIGURACIÓN del proveedor (la API key) es SOLO del dueño → se gatea por CONTEXTO
 // (el revendedor nunca está en contexto admin), no por admin_es_admin() que no distingue el contexto.
 $esAdmin = !(function_exists('stream_ctx') && stream_ctx() === 'revendedor');
+// SOLO el dueño: CONEC es SU proveedor mayorista → los revendedores no deben verlo ni entrar (pedido del
+// cliente 2026-09-06). Si un revendedor entra directo por URL, se le redirige (o error si es AJAX).
+if (!$esAdmin) {
+    if (!empty($_GET['ajax'])) { header('Content-Type: application/json'); echo json_encode(['ok' => false, 'error' => 'No disponible.']); exit; }
+    header('Location: recargas.php');
+    exit;
+}
 
 /** Tabla de órdenes CONEC (historial + idempotencia por merchant_ref estable). */
 function conec_ensure_schema(PDO $pdo): void {

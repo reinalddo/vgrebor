@@ -27,8 +27,16 @@ if (($_GET['ajax'] ?? '') === 'stats') {
     $g = static function (string $sql) use ($pdo): float { try { return (float) ($pdo->query($sql)->fetchColumn() ?: 0); } catch (Throwable $e) { return 0.0; } };
     $ingresos  = $g("SELECT COALESCE(SUM(precio),0) FROM streaming_ventas WHERE owner_id=$rid AND estado<>'cancelada' AND ((cliente_nombre IS NOT NULL AND cliente_nombre<>'') OR COALESCE(cliente_id,0)>0)");
     $invertido = $g("SELECT COALESCE(SUM(costo),0) FROM streaming_cuentas WHERE owner_id=$rid AND costo>0");
+    // RECARGAS de juegos que hizo el revendedor (compró con su saldo): CUENTAN como ventas suyas (pedido del
+    // cliente 2026-09-06). Son pedidos con cliente_usuario_id=él y metodo_pago='Saldo revendedor'.
+    $recCond   = "cliente_usuario_id=$rid AND metodo_pago='Saldo revendedor' AND estado NOT IN ('cancelado','cancelada','rechazado','reembolsado')";
+    $recCount  = 0; $recMonto = 0.0;
+    try { $recCount = (int) $g("SELECT COUNT(*) FROM pedidos WHERE $recCond"); $recMonto = $g("SELECT COALESCE(SUM(precio),0) FROM pedidos WHERE $recCond"); } catch (Throwable $e) {}
+    $ventasStreaming = (int) $g("SELECT COUNT(*) FROM streaming_ventas WHERE owner_id=$rid AND estado<>'cancelada'");
     $st = [
-        'ventas'    => (int) $g("SELECT COUNT(*) FROM streaming_ventas WHERE owner_id=$rid AND estado<>'cancelada'"),
+        'ventas'    => $ventasStreaming + $recCount,
+        'recargas'  => $recCount,
+        'recargas_monto' => $recMonto,
         'activas'   => (int) $g("SELECT COUNT(*) FROM streaming_ventas WHERE owner_id=$rid AND estado='activa' AND fecha_vencimiento>=CURDATE()"),
         'vencidas'  => (int) $g("SELECT COUNT(*) FROM streaming_ventas WHERE owner_id=$rid AND (estado='vencida' OR (estado='activa' AND fecha_vencimiento<CURDATE()))"),
         'cuentas'   => (int) $g("SELECT COUNT(*) FROM streaming_cuentas WHERE owner_id=$rid"),
@@ -462,6 +470,7 @@ document.getElementById('mSaldo').addEventListener('click', e => { if (e.target.
         + tile('Ingresos (ventas a cliente)', money(s.ingresos), 'var(--good)')
         + tile('Invertido (costo stock)', money(s.invertido))
         + tile('Ventas totales', s.ventas)
+        + tile('Recargas hechas', (s.recargas||0) + ' · ' + money(s.recargas_monto||0), 'var(--accent)')
         + tile('Activas / Vencidas', s.activas + ' / ' + s.vencidas)
         + tile('Cuentas', s.cuentas)
         + tile('Perfiles libres / vendidos', s.libres + ' / ' + s.vendidos)

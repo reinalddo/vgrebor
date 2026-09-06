@@ -48,9 +48,11 @@ function stream_nav_items(): array {
     $items[] = ['key' => 'revendedores', 'label' => 'Revendedores', 'icon' => 'store', 'href' => 'revendedores.php'];
     $items[] = ['key' => 'precios-recargas', 'label' => 'Precios recargas', 'icon' => 'tags', 'href' => 'precios-recargas.php'];
   }
-  // Proveedor mayorista CONEC (coneclatam): saldo, catálogo y recargas por su API. Lo ven el dueño Y los
-  // revendedores; la CONFIG de la llave dentro de la página es solo del dueño.
-  $items[] = ['key' => 'conec', 'label' => 'Recargas CONEC', 'icon' => 'plug-zap', 'href' => 'conec.php'];
+  // Proveedor mayorista CONEC (coneclatam): SOLO el dueño lo ve. Es el proveedor del dueño → los
+  // revendedores NO deben verlo (no se les revela de dónde surte la tienda). Pedido del cliente 2026-09-06.
+  if (!$esRev) {
+    $items[] = ['key' => 'conec', 'label' => 'Recargas CONEC', 'icon' => 'plug-zap', 'href' => 'conec.php'];
+  }
   if ($esRev) {
     // Lista simple de SUS revendedores (solo el revendedor la ve; el admin tiene su propia gestión aparte).
     $items[] = ['key' => 'mis-revendedores', 'label' => 'Revendedores', 'icon' => 'store', 'href' => 'misrevendedores.php'];
