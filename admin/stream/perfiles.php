@@ -313,6 +313,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $msg = "✓ Cuenta renovada hasta " . date('d/m/Y', strtotime($nueva)) . " · +$meses mes(es).";
       }
     }
+    // ── LOTE: renovar VARIOS perfiles de una vez (mismo cobro por perfil que el botón individual) ──
+    // Pedido cliente 2026-09-07 ("en perfiles no sale para renovar"): faltaba el Renovar en lote que sí
+    // tiene Cuentas. Cada perfil VENDIDO extiende el vencimiento de SU cliente (cobra 1 vez); los perfiles
+    // LIBRES de una misma cuenta renuevan la CUENTA una sola vez (no se cobra ni extiende N veces).
+    elseif (($_POST['accion'] ?? '') === 'renovar_perfiles_masivo') {
+      $ids = array_values(array_unique(array_filter(array_map('intval', explode(',', (string) ($_POST['ids'] ?? ''))))));
+      if (!$ids) throw new Exception('No seleccionaste ningún perfil.');
+      if (count($ids) > 300) throw new Exception('Máximo 300 perfiles por lote (seleccionaste ' . count($ids) . ').');
+      $meses = max(1, min(24, (int) ($_POST['meses'] ?? 1)));
+      $okN = 0; $sinSaldo = 0; $ctaHecha = [];
+      $pdo->beginTransaction();
+      try {
+        foreach ($ids as $pidM) {
+          $row = $pdo->query("SELECT p.venta_id, p.cuenta_id, c.plataforma, c.vencimiento FROM streaming_perfiles p JOIN streaming_cuentas c ON c.id=p.cuenta_id WHERE p.id=" . (int) $pidM . " AND c.owner_id=$OWNER")->fetch(PDO::FETCH_ASSOC);
+          if (!$row) continue;
+          $vid = (int) ($row['venta_id'] ?? 0);
+          $cid = (int) $row['cuenta_id'];
+          // Perfil LIBRE → se renueva la CUENTA (tu stock): solo UNA vez por cuenta en el lote.
+          if ($vid <= 0) { if (isset($ctaHecha[$cid])) continue; $ctaHecha[$cid] = true; }
+          // COBRO AL REVENDEDOR por cada renovación (igual que el botón individual). Si no alcanza, sale del lote.
+          if ($esRevCtx && function_exists('st_cobrar_renov_rev')) {
+            $costoP = 0.0;
+            if (!st_cobrar_renov_rev($pdo, (int) current_user_id(), (string) ($row['plataforma'] ?? ''), $costoP, null, null, $meses)) { $sinSaldo++; continue; }
+          }
+          try { $pdo->prepare("UPDATE streaming_perfiles SET cambios_np=0 WHERE id=?")->execute([(int) $pidM]); } catch (Throwable $e) {}
+          if ($vid > 0) {
+            $base = (string) ($pdo->query("SELECT fecha_vencimiento FROM streaming_ventas WHERE id=$vid")->fetchColumn() ?: '');
+            $from = ($base && strtotime($base) > time()) ? $base : date('Y-m-d');
+            $nueva = date('Y-m-d', strtotime("$from +$meses months"));
+            $pdo->prepare("UPDATE streaming_ventas SET fecha_vencimiento=?, estado='activa' WHERE id=?")->execute([$nueva, $vid]);
+          } else {
+            $base = (string) ($row['vencimiento'] ?? '');
+            $from = ($base && strtotime($base) > time()) ? $base : date('Y-m-d');
+            $nueva = date('Y-m-d', strtotime("$from +$meses months"));
+            $pdo->prepare("UPDATE streaming_cuentas SET vencimiento=? WHERE id=? AND owner_id=$OWNER")->execute([$nueva, $cid]);
+          }
+          $okN++;
+        }
+        $pdo->commit();
+      } catch (Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
+      $msg = "✓ $okN renovación(es) +$meses mes(es)." . ($sinSaldo > 0 ? " ⚠ $sinSaldo NO se renovaron por saldo insuficiente." : '');
+    }
     // ── LOTE desde Perfiles: cambiar precios de las CUENTAS de los perfiles marcados ──
     elseif (($_POST['accion'] ?? '') === 'bulk_precios_p') {
       $pids = array_values(array_unique(array_filter(array_map('intval', explode(',', (string) ($_POST['ids'] ?? ''))))));
@@ -580,6 +622,7 @@ stream_head('Perfiles', 'perfiles');
     <div id="bulkbar" style="display:none;margin-bottom:10px;padding:10px 13px;border-radius:11px;background:rgba(45,226,213,.09);border:1px solid rgba(45,226,213,.35);align-items:center;gap:10px;flex-wrap:wrap">
       <b style="color:var(--acc)"><span id="bulk-n">0</span> seleccionado(s)</b>
       <button type="button" onclick="bulkVender()" class="btn ghost" style="padding:5px 12px;font-size:12.5px;color:var(--good);border-color:rgba(34,197,94,.4)"><i data-lucide="shopping-cart" style="width:14px;height:14px"></i> Vender seleccionados</button>
+      <button type="button" onclick="bulkRenovarP()" class="btn ghost" style="padding:5px 12px;font-size:12.5px;color:var(--accent);border-color:rgba(45,226,213,.4)"><i data-lucide="calendar-check" style="width:14px;height:14px"></i> Renovar</button>
       <button type="button" onclick="bulkPreciosP()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="dollar-sign" style="width:14px;height:14px"></i> Cambiar precios</button>
       <?php if ((int) $OWNER === 0): ?><button type="button" onclick="bulkReasignarP()" class="btn ghost" style="padding:5px 12px;font-size:12.5px"><i data-lucide="user-cog" style="width:14px;height:14px"></i> Cambiar cliente/vendedor</button><?php endif; ?>
       <?php if ($verCostos): ?>
@@ -757,6 +800,18 @@ stream_head('Perfiles', 'perfiles');
     </form>
   </div>
 
+  <!-- LOTE: renovar varios perfiles a la vez -->
+  <div id="m-perf-renovar" class="modal hidden w-full max-w-sm my-8">
+    <div class="modal-hd"><h3><i data-lucide="calendar-check"></i> Renovar seleccionados</h3><button onclick="cerrarModales()" class="modal-x"><i data-lucide="x"></i></button></div>
+    <form method="post" class="p-5 space-y-4"><input type="hidden" name="_csrf" value="<?= h($csrf) ?>"><input type="hidden" name="accion" value="renovar_perfiles_masivo"><input type="hidden" name="ids" id="pr-ids">
+      <p style="color:var(--muted);font-size:13px;margin:0">Renovar <strong id="pr-n" style="color:var(--text)">0</strong> perfil(es). Los <b>vendidos</b> extienden el vencimiento del <b>cliente</b>; los <b>libres</b>, el de la <b>cuenta</b>.<?= $esRevCtx ? ' Se cobra de tu saldo por cada uno.' : '' ?></p>
+      <div class="field"><label class="flbl">Meses</label>
+        <select name="meses" class="input"><?php for ($i = 1; $i <= 12; $i++): ?><option value="<?= $i ?>"><?= $i ?> mes<?= $i > 1 ? 'es' : '' ?></option><?php endfor; ?></select>
+      </div>
+      <button class="btn primary w-full">Renovar</button>
+    </form>
+  </div>
+
   <!-- LOTE desde Perfiles: cambiar precios -->
   <div id="m-perf-precios" class="modal hidden w-full max-w-md my-8">
     <div class="modal-hd"><h3><i data-lucide="dollar-sign"></i> Cambiar precios</h3><button onclick="cerrarModales()" class="modal-x"><i data-lucide="x"></i></button></div>
@@ -915,6 +970,7 @@ stream_head('Perfiles', 'perfiles');
   function vDestino(){ const r=document.querySelector('input[name="destino"]:checked'); const esRev=!!r&&r.value==='revendedor'; const c=document.getElementById('v-cliente'), v=document.getElementById('v-rev'); if(c)c.classList.toggle('hidden',esRev); if(v)v.classList.toggle('hidden',!esRev); }
   // Lote desde Perfiles: cambiar precios / asignar proveedor / eliminar varias.
   function bulkPreciosP(){ const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } document.getElementById('pp-ids').value=i.join(','); document.getElementById('pp-n').textContent=i.length; abrir('m-perf-precios'); }
+  function bulkRenovarP(){ const i=ckIds(); if(!i.length){ alert('Marca al menos un perfil.'); return; } const flat=i.join(','); document.getElementById('pr-ids').value=flat; document.getElementById('pr-n').textContent=flat.split(',').filter(Boolean).length; abrir('m-perf-renovar'); }
   function bulkReasignarP(){ const el=document.getElementById('prz-ids'); if(!el) return; const i=ckIdsEstado('vendido'); if(!i.length){ alert('Marca al menos un perfil VENDIDO (esto cambia el cliente/vendedor de una venta; los libres no tienen venta).'); return; } el.value=i.join(','); document.getElementById('prz-n').textContent=i.length; const s=document.getElementById('prz-cli'); if(s){ s.value=''; przCliSel(s); } const nn=document.getElementById('prz-clinom'), ww=document.getElementById('prz-cliwa'); if(nn) nn.value=''; if(ww) ww.value=''; abrir('m-perf-reasig'); }
   function przCliSel(sel){
     const nom=document.getElementById('prz-clinom'), wa=document.getElementById('prz-cliwa');

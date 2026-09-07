@@ -614,8 +614,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (preg_match('#^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$#', $s, $m)) return sprintf('%04d-%02d-%02d', (int) $m[3], (int) $m[2], (int) $m[1]);
         $t = strtotime($s); return $t ? date('Y-m-d', $t) : null;
       };
-      $cuentas = []; // gkey => ['cid'=>int,'nperf'=>int,'clave'=>string,'venc'=>?string]
-      $nPerf = 0;
+      $cuentas = []; // gkey => ['cid'=>int,'nperf'=>int,'clave'=>string,'venc'=>?string,'existia'=>bool]
+      $nPerf = 0; $nPerfIns = 0; $nDup = 0;   // líneas procesadas / perfiles insertados / omitidos por ya existir
       foreach (preg_split('/\r?\n/', (string) ($_POST['datos'] ?? '')) as $ln) {
         $ln = trim($ln); if ($ln === '') continue;
         $p = preg_split('/\s*[,;\t|]\s*/', $ln);
@@ -662,17 +662,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $gkey = $k . '|' . mb_strtolower($correo);
         if ($correo === '') $gkey .= '|solo' . $nPerf;
         if (!isset($cuentas[$gkey])) {
-          $insCuenta->execute([$platNom, $pid, $provId, $correo ?: null, $clave ?: null, $venc]);
-          $cuentas[$gkey] = ['cid' => (int) $pdo->lastInsertId(), 'nperf' => 0, 'clave' => $clave, 'venc' => $venc, 'provId' => $provId];
+          // ANTI-DUPLICADO (pedido cliente 2026-09-07 "al cargar duplica y triplica"): antes de crear la
+          // cuenta, buscar si YA existe una del mismo dueño + plataforma + correo. Si existe, se REUSA (se le
+          // agregan solo los perfiles que falten) en vez de crear otra fila → reimportar la misma lista, o
+          // subir cuentas que ya están en stock, ya NO las duplica. Sin correo no hay con qué casar → se crea.
+          $cidExist = null;
+          if ($correo !== '') {
+            try {
+              $stFind = $pdo->prepare("SELECT id FROM streaming_cuentas WHERE owner_id=$OWNER AND plataforma_id=? AND correo=? ORDER BY id ASC LIMIT 1");
+              $stFind->execute([$pid, $correo]);
+              $tmpCid = $stFind->fetchColumn();
+              if ($tmpCid !== false) $cidExist = (int) $tmpCid;
+            } catch (Throwable $e) {}
+          }
+          if ($cidExist !== null) {
+            $cuentas[$gkey] = ['cid' => $cidExist, 'nperf' => 0, 'clave' => $clave, 'venc' => $venc, 'provId' => $provId, 'existia' => true];
+          } else {
+            $insCuenta->execute([$platNom, $pid, $provId, $correo ?: null, $clave ?: null, $venc]);
+            $cuentas[$gkey] = ['cid' => (int) $pdo->lastInsertId(), 'nperf' => 0, 'clave' => $clave, 'venc' => $venc, 'provId' => $provId, 'existia' => false];
+          }
+        }
+        // El NOMBRE del perfil (nombre del cliente) se guarda como etiqueta; si viene vacío, P1..Pn.
+        $etiqueta = $nombreP !== '' ? mb_substr($nombreP, 0, 60) : ('P' . ($cuentas[$gkey]['nperf'] + 1));
+        // Si la cuenta YA existía (reimportación), NO recrear un perfil con la MISMA etiqueta → evita
+        // duplicar perfiles y sus ventas al volver a subir la misma lista.
+        if (!empty($cuentas[$gkey]['existia'])) {
+          try {
+            $stPf = $pdo->prepare("SELECT id FROM streaming_perfiles WHERE cuenta_id=? AND etiqueta=? LIMIT 1");
+            $stPf->execute([$cuentas[$gkey]['cid'], $etiqueta]);
+            if ($stPf->fetchColumn() !== false) { $nDup++; continue; }
+          } catch (Throwable $e) {}
         }
         $cuentas[$gkey]['nperf']++;
         if ($cuentas[$gkey]['clave'] === '' && $clave !== '') $cuentas[$gkey]['clave'] = $clave;
         if ($cuentas[$gkey]['venc'] === null && $venc !== null) $cuentas[$gkey]['venc'] = $venc;
         if (($cuentas[$gkey]['provId'] ?? null) === null && $provId !== null) $cuentas[$gkey]['provId'] = $provId;
-        // El NOMBRE del perfil (nombre del cliente) se guarda como etiqueta; si viene vacío, P1..Pn.
-        $etiqueta = $nombreP !== '' ? mb_substr($nombreP, 0, 60) : ('P' . $cuentas[$gkey]['nperf']);
         $insPerf->execute([$cuentas[$gkey]['cid'], $etiqueta, $pin !== '' ? $pin : null]);
         $newPid = (int) $pdo->lastInsertId();
+        $nPerfIns++;
         // Si la línea trae un vendedor válido → se sube ya VENDIDA a ese revendedor; si no, queda stock.
         if ($vendedor !== '' && isset($revMap[$vendedor])) {
           $sVenc = $venc ?: ($cuentas[$gkey]['venc'] ?: date('Y-m-d', strtotime('+30 days')));
@@ -698,15 +725,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (++$nPerf >= 3000) break;
       }
-      // Ajusta el total de perfiles + clave/vencimiento/proveedor de cada cuenta según lo importado.
-      foreach ($cuentas as $c) $updCuenta->execute([$c['nperf'], ($c['clave'] !== '' ? $c['clave'] : null), $c['venc'], ($c['provId'] ?? null), $c['cid']]);
+      // Ajusta cada cuenta. perfiles_total = CONTEO REAL en BD (no solo lo de esta importación) → correcto
+      // para cuentas nuevas Y reimportadas. A las cuentas que YA existían NO se les pisa clave/vencimiento/
+      // proveedor (se respeta lo que ya tenían); solo se corrige el total de perfiles.
+      $stCount  = $pdo->prepare("SELECT COUNT(*) FROM streaming_perfiles WHERE cuenta_id=?");
+      $updTotal = $pdo->prepare("UPDATE streaming_cuentas SET perfiles_total=? WHERE id=?");
+      foreach ($cuentas as $c) {
+        $realN = (int) $c['nperf'];
+        try { $stCount->execute([(int) $c['cid']]); $realN = (int) $stCount->fetchColumn(); } catch (Throwable $e) {}
+        if (!empty($c['existia'])) { try { $updTotal->execute([$realN, (int) $c['cid']]); } catch (Throwable $e) {} }
+        else { $updCuenta->execute([$realN, ($c['clave'] !== '' ? $c['clave'] : null), $c['venc'], ($c['provId'] ?? null), $c['cid']]); }
+      }
       // BOT de códigos: asigna UNA vez el correo de cada cuenta nueva a su revendedor (fuera de transacción).
       if (function_exists('bot_codigos_flush')) { foreach (array_keys($revsTocados) as $rt) { try { bot_codigos_flush($pdo, (int) $rt); } catch (Throwable $e) {} } }
       // Aviso por CORREO de las entregas encoladas durante la importación (mismo criterio que el bot).
       $nMail = 0;
       if (function_exists('stream_email_flush_entregas')) { try { $nMail = stream_email_flush_entregas($pdo); } catch (Throwable $e) {} }
-      $nCta = count($cuentas);
-      $msg = "✓ $nPerf perfil(es) importados en $nCta cuenta(s)" . ($vendMasivo > 0 ? " · $vendMasivo ya vendido(s) a su revendedor" : '') . '.'
+      $nCta = count($cuentas); $nCtaReuso = 0; foreach ($cuentas as $c) if (!empty($c['existia'])) $nCtaReuso++;
+      $msg = "✓ $nPerfIns perfil(es) importados en $nCta cuenta(s)"
+           . ($nCtaReuso > 0 ? " ($nCtaReuso ya existía(n): se reusaron sin duplicar)" : '')
+           . ($nDup > 0 ? " · $nDup perfil(es) ya estaban y se omitieron" : '')
+           . ($vendMasivo > 0 ? " · $vendMasivo ya vendido(s) a su revendedor" : '') . '.'
            . ($nMail ? " ✉ $nMail correo(s) enviado(s)." : '');
     }
   } catch (Throwable $e) { $msg = '⚠ ' . $e->getMessage(); }
