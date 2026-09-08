@@ -116,6 +116,27 @@ if (isset($_GET['ajax'])) {
         foreach (($_POST['field'] ?? []) as $k => $v) { $k = trim((string) $k); $v = trim((string) $v); if ($k !== '' && $v !== '') { $extra[$k] = $v; } }
         if ($variant === '') { echo json_encode(['ok' => false, 'error' => 'Falta el producto (variant_id).']); exit; }
 
+        // VALIDACIÓN ANTES DE GASTAR EL SALDO MAYORISTA (pedido cliente 2026-09-08: una recarga a la que le
+        // faltaba el "ID de servidor" se despachó igual → CONEC cobró sin entregar). Se exige el ID del jugador
+        // (si el producto lo pide) y TODOS los campos marcados `required` del producto. Si falta algo se RECHAZA
+        // aquí: no se crea la orden ni se llama a CONEC → no se gasta saldo en algo que el proveedor rechazará.
+        try {
+            $prodDef = function_exists('conec_api_product_by_id') ? conec_api_product_by_id($pdo, (int) $variant) : null;
+            if (is_array($prodDef)) {
+                if (!empty($prodDef['requires_game_id']) && $gameId === '') {
+                    echo json_encode(['ok' => false, 'error' => 'Falta el ID del jugador para este juego.']); exit;
+                }
+                foreach (($prodDef['fields'] ?? []) as $f) {
+                    if (!is_array($f)) { continue; }
+                    $fk = trim((string) ($f['key'] ?? ''));
+                    if ($fk !== '' && !empty($f['required']) && (!isset($extra[$fk]) || $extra[$fk] === '')) {
+                        $flabel = trim((string) ($f['label'] ?? '')) ?: $fk;
+                        echo json_encode(['ok' => false, 'error' => 'Falta un dato obligatorio: ' . $flabel . '. Complétalo y vuelve a intentar.']); exit;
+                    }
+                }
+            }
+        } catch (Throwable $e) {}
+
         // 1) Crea la orden LOCAL primero → merchant_ref ESTABLE = idempotencia real en reintentos.
         conec_ensure_schema($pdo);
         $uid = (int) (function_exists('current_user_id') ? current_user_id() : 0);
@@ -351,7 +372,7 @@ function cnRecargar(json){
   document.getElementById('cnInfo').textContent=cnSel.vname+' · costo $'+Number(cnSel.price).toFixed(4)+' (se descuenta de tu saldo CONEC).';
   let html='';
   if(cnSel.rid){ html+='<label class="flbl">ID del jugador</label><input id="cnGid" class="input" style="margin-bottom:12px" placeholder="ID del jugador">'; }
-  (cnSel.fields||[]).forEach(f=>{ html+='<label class="flbl">'+cnEsc(f.label||f.key)+(f.required?' *':'')+'</label><input class="input cn-field" data-key="'+cnEsc(f.key)+'" style="margin-bottom:12px" placeholder="'+cnEsc(f.label||f.key)+'">'; });
+  (cnSel.fields||[]).forEach(f=>{ html+='<label class="flbl">'+cnEsc(f.label||f.key)+(f.required?' <span style="color:var(--bad)">*</span>':'')+'</label><input class="input cn-field" data-key="'+cnEsc(f.key)+'"'+(f.required?' data-req="1"':'')+' style="margin-bottom:12px" placeholder="'+cnEsc(f.label||f.key)+(f.required?' (obligatorio)':'')+'">'; });
   document.getElementById('cnFields').innerHTML=html;
   document.getElementById('cnQty').value=1;
   document.getElementById('cnResult').innerHTML='';
@@ -372,7 +393,8 @@ async function cnConfirmar(){
   fd.append('product_name',cnSel.pname); fd.append('variant_name',cnSel.vname); fd.append('price',cnSel.price);
   fd.append('game_id',gid); fd.append('quantity',Math.max(1,parseInt(document.getElementById('cnQty').value||'1')));
   let faltan=false;
-  document.querySelectorAll('#cnFields .cn-field').forEach(i=>{ const k=i.dataset.key,v=i.value.trim(); if(v)fd.append('field['+k+']',v); });
+  document.querySelectorAll('#cnFields .cn-field').forEach(i=>{ const k=i.dataset.key,v=i.value.trim(); if(!v && i.dataset.req){ faltan=true; i.style.borderColor='var(--bad)'; } else { i.style.borderColor=''; } if(v)fd.append('field['+k+']',v); });
+  if(faltan){ res.innerHTML='<span style="color:var(--bad)">Faltan datos obligatorios (los marcados con *), por ejemplo el ID de servidor. Complétalos antes de recargar.</span>'; btn.disabled=false; return; }
   res.innerHTML='Enviando la recarga…';
   try{
     const r=await fetch('?ajax=recharge',{method:'POST',body:fd,headers:{'X-Requested-With':'XMLHttpRequest'}}).then(x=>x.json());

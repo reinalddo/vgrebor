@@ -71,7 +71,9 @@ $diasSem = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'S�
 $cards = [];
 if ($verCostos) $cards[] = ['Ventas del mes',     '$' . number_format((float) $k['mes'], 2),          'dollar-sign',   'acc',  'este mes'];
 if ($verCostos) $cards[] = ['Ganancia del mes',   '$' . number_format((float) $k['ganancia_mes'], 2), 'scale',         'acc',  'costo $' . number_format((float) $k['costo_mes'], 2)];
-if ((int) $k['recargas'] > 0) $cards[] = ['Recargas del mes', (int) $k['recargas'] . ' · $' . number_format((float) $k['recargas_mes'], 2), 'gamepad-2', 'acc', 'ventas por saldo'];
+// Recargas de juegos: SIEMPRE visible para el revendedor (aunque sea 0, para que sepa dónde ve sus stats de
+// recargas — pedido cliente 2026-09-08). Para el dueño (OWNER=0) no aplica (él no compra recargas con saldo).
+if ($OWNER > 0 || (int) $k['recargas'] > 0) $cards[] = ['Recargas del mes', (int) $k['recargas'] . ' · $' . number_format((float) $k['recargas_mes'], 2), 'gamepad-2', 'acc', 'tus recargas de juegos'];
 $cards[] = ['Más vendido (mes)',      $masVendido['plataforma'] . ' (' . (int) $masVendido['n'] . ')', 'star',        '',     'este mes'];
 $cards[] = ['Total clientes',         (string) $totalClientes, 'users',        '',     '+' . $nuevosMes . ' nuevos este mes'];
 $cards[] = ['Total cuentas',          (string) $k['cuentas'],  'monitor',      '',     'en inventario'];

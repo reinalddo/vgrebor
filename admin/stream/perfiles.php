@@ -607,7 +607,7 @@ stream_head('Perfiles', 'perfiles');
       <?php if ($verCostos && !empty($proveedores)): ?>
       <div><label class="flbl">Proveedor</label><select id="f-prov" onchange="filtrar()" class="input"><option value="">Todos</option><?php foreach ($proveedores as $pv): ?><option value="<?= h(mb_strtolower((string) $pv['nombre'])) ?>"><?= h($pv['nombre']) ?></option><?php endforeach; ?></select></div>
       <?php endif; ?>
-      <div><label class="flbl">Ordenar por</label><select id="f-orden" onchange="ordenar()" class="input"><option value="">— Por defecto —</option><option value="plat-asc">Plataforma (A→Z)</option><option value="correo-asc">Correo (A→Z)</option><option value="cli-asc">Cliente (A→Z)</option><option value="rev-asc">Vendedor (A→Z)</option><?php if ($verCostos): ?><option value="prov-asc">Proveedor (A→Z)</option><?php endif; ?><option value="venc-asc">Vence primero</option></select></div>
+      <div><label class="flbl">Ordenar por</label><select id="f-orden" onchange="ordenar()" class="input"><option value="">— Por defecto —</option><option value="plat-asc">Plataforma (A→Z)</option><option value="correo-asc">Correo (A→Z)</option><option value="perfil-asc">Perfil (A→Z)</option><option value="cli-asc">Cliente (A→Z)</option><option value="rev-asc">Vendedor (A→Z)</option><?php if ($verCostos): ?><option value="prov-asc">Proveedor (A→Z)</option><?php endif; ?><option value="venc-asc">Vence primero</option></select></div>
     </div>
   </div>
 </div>
@@ -650,7 +650,7 @@ stream_head('Perfiles', 'perfiles');
         $estadoData = $it['libres'] > 0 ? 'libre' : 'vendido';
         $busca = mb_strtolower(($it['plataforma'] ?? '') . ' ' . ($it['correo'] ?? '') . ' cuenta completa ' . $asignado);
       ?>
-        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($it['plataforma'] ?? '')) ?>" data-estado="<?= h($estadoData) ?>" data-correo="<?= h(mb_strtolower($it['correo'] ?? '')) ?>" data-rev="<?= h(mb_strtolower((string) ($it['rev_nombre'] ?? ''))) ?>" data-prov="<?= h(mb_strtolower((string) ($it['prov_nombre'] ?? ''))) ?>" data-cli="<?= h(mb_strtolower((string) ($it['cliente_nombre'] ?? ''))) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
+        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($it['plataforma'] ?? '')) ?>" data-estado="<?= h($estadoData) ?>" data-correo="<?= h(mb_strtolower($it['correo'] ?? '')) ?>" data-rev="<?= h(mb_strtolower((string) ($it['rev_nombre'] ?? ''))) ?>" data-prov="<?= h(mb_strtolower((string) ($it['prov_nombre'] ?? ''))) ?>" data-cli="<?= h(mb_strtolower((string) ($it['cliente_nombre'] ?? ''))) ?>" data-perfil="" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
           <td><?php $ccVal = $it['libres'] > 0 ? $it['libres_ids'] : $it['vendidos_ids']; if ($ccVal): ?><input type="checkbox" class="ck-row" value="<?= h(implode(',', $ccVal)) ?>" onclick="ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"><?php endif; ?></td>
           <td><b style="color:var(--text)"><?= h($it['plataforma']) ?></b> <span class="tag" style="font-size:10px;color:var(--accent)">Cuenta completa</span></td>
           <td style="color:var(--muted)"><?= h($it['correo'] ?: '—') ?><?php if (!empty($it['clave'])): ?><br><span style="font-size:10px;color:var(--faint)">🔑 <?= h($it['clave']) ?></span><?php endif; ?></td>
@@ -679,7 +679,7 @@ stream_head('Perfiles', 'perfiles');
         $asignado = $vend ? (($p['rev_nombre'] ? 'Rev: ' . $p['rev_nombre'] : ($p['cliente_nombre'] ?: 'Cliente')) . ($p['cliente_wa'] ? ' · ' . $p['cliente_wa'] : '')) : '';
         $busca = mb_strtolower(($p['plataforma'] ?? '') . ' ' . ($p['correo'] ?? '') . ' ' . ($p['etiqueta'] ?? '') . ' ' . $asignado);
       ?>
-        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($p['plataforma'] ?? '')) ?>" data-estado="<?= h($p['estado']) ?>" data-correo="<?= h(mb_strtolower($p['correo'] ?? '')) ?>" data-rev="<?= h(mb_strtolower((string) ($p['rev_nombre'] ?? ''))) ?>" data-prov="<?= h(mb_strtolower((string) ($p['prov_nombre'] ?? ''))) ?>" data-cli="<?= h(mb_strtolower((string) ($p['cliente_nombre'] ?? ''))) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
+        <tr data-b="<?= h($busca) ?>" data-plat="<?= h(mb_strtolower($p['plataforma'] ?? '')) ?>" data-estado="<?= h($p['estado']) ?>" data-correo="<?= h(mb_strtolower($p['correo'] ?? '')) ?>" data-rev="<?= h(mb_strtolower((string) ($p['rev_nombre'] ?? ''))) ?>" data-prov="<?= h(mb_strtolower((string) ($p['prov_nombre'] ?? ''))) ?>" data-cli="<?= h(mb_strtolower((string) ($p['cliente_nombre'] ?? ''))) ?>" data-perfil="<?= h(mb_strtolower((string) ($p['etiqueta'] ?? ''))) ?>" data-venc="<?= $d === null ? 999999 : (int) $d ?>">
           <td><input type="checkbox" class="ck-row" value="<?= (int) $p['id'] ?>" onclick="ckSync()" style="width:15px;height:15px;accent-color:var(--acc)"></td>
           <td><b style="color:var(--text)"><?= h($p['plataforma']) ?></b></td>
           <td style="color:var(--muted)"><?= h($p['correo'] ?: '—') ?><?php if (!empty($p['clave'])): ?><br><span style="font-size:10px;color:var(--faint)">🔑 <?= h($p['clave']) ?></span><?php endif; ?></td>
@@ -928,7 +928,7 @@ stream_head('Perfiles', 'perfiles');
     ckSync();
   }
   function ordenar(){ const v=document.getElementById('f-orden').value; if(!v) return; const tb=document.getElementById('tbody'); const rows=Array.from(tb.querySelectorAll('tr')); const p=v.split('-'), key=p[0], mul=p[1]==='desc'?-1:1;
-    rows.sort((a,b)=>{ if(key==='venc'){ return ((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul; } const map={correo:'correo',rev:'rev',prov:'prov',cli:'cli'}; const ka=map[key]||'plat'; const va=String(a.dataset[ka]||''), vb=String(b.dataset[ka]||''); if(!va&&!vb) return 0; if(!va) return 1; if(!vb) return -1; return va.localeCompare(vb)*mul; });
+    rows.sort((a,b)=>{ if(key==='venc'){ return ((parseInt(a.dataset.venc||'0',10))-(parseInt(b.dataset.venc||'0',10)))*mul; } const map={correo:'correo',rev:'rev',prov:'prov',cli:'cli',perfil:'perfil'}; const ka=map[key]||'plat'; const va=String(a.dataset[ka]||''), vb=String(b.dataset[ka]||''); if(!va&&!vb) return 0; if(!va) return 1; if(!vb) return -1; return va.localeCompare(vb)*mul; });
     rows.forEach(r=>tb.appendChild(r)); }
   function ckTodo(m){ filasVisibles().forEach(tr=>{ const c=tr.querySelector('.ck-row'); if(c) c.checked=m.checked; }); ckSync(); }
   function selTodos(){ ckTodo({checked:true}); }
