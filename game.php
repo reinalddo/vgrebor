@@ -2533,6 +2533,21 @@ include __DIR__ . "/includes/header.php";
       background: transparent;
     }
 
+    /* BUG REAL: cuando SÍ hay foto de hero (el caso normal), el min-height:180px de arriba no tiene
+       relación con la proporción real de la imagen (ej. 1920x480 = 4:1, que a un ancho de celular
+       típico solo necesita ~90-110px de alto). object-fit:contain + height:auto ya centran la imagen
+       a su alto natural DENTRO de esa caja de 180px — el resto queda relleno con el fondo desenfocado
+       (.game-hero-image-backdrop), que es justo el "espacio para rellenar" reportado. En PC no pasa
+       porque .game-hero-card usa clamp(210px, 27vw, 300px) — el alto SÍ escala con el ancho; en móvil
+       era un número fijo que no escala con nada. Con :has() se anula el piso SOLO cuando hay una
+       imagen real (el <img class="game-hero-image">, ver game.php ~línea 512): ahí el alto de la caja
+       pasa a decidirlo por completo la proporción real de la foto — igual que en PC, sin relleno. El
+       piso de 180px se conserva para el caso sin foto (game-hero-fallback, solo gradiente), donde no
+       hay imagen que le dé alto propio al contenedor y haría falta igualmente. */
+    .game-hero-media:has(.game-hero-image) {
+      min-height: 0;
+    }
+
     .game-hero-image-backdrop {
       filter: blur(20px) saturate(1.02);
       transform: scale(1.08);
