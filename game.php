@@ -2375,7 +2375,22 @@ include __DIR__ . "/includes/header.php";
 
   .game-hero-card {
     position: relative;
-    min-height: clamp(210px, 27vw, 300px);
+    /* BUG REAL (2026-09): antes esto era min-height:clamp(210px,27vw,300px) — el "27vw" mide
+       contra el VIEWPORT completo, pero el ancho REAL de esta tarjeta lo limita el .container de
+       Bootstrap, que salta en escalones fijos (540/720/960/1140/1320px) en vez de escalar suave
+       con el viewport. En un celular en "modo escritorio" (fuerza un viewport ancho, ~980px,
+       ignorando la pantalla física real) caemos en el escalón de 720px de .container mientras el
+       27vw calcula sobre 980px → una caja de ~720×265px (relación ~2.7:1) para una imagen de
+       ~4:1 (1920×480, la medida recomendada) → el mismo tipo de "espacio para rellenar" que ya se
+       había corregido para el móvil real, pero en este otro rango de ancho que esa corrección (en
+       su propia media query, <767.98px) no cubre. aspect-ratio mide contra el ANCHO PROPIO de la
+       tarjeta (el que ya resolvió el .container), no contra el viewport — por eso no le importa en
+       qué escalón de .container caiga: la proporción de la caja siempre coincide con la de una
+       imagen 4:1, en cualquier ancho (celular real, PC real, o esta mezcla rara de "viewport ancho
+       en pantalla angosta"). Requiere que .game-hero-content pase de min-height:inherit a
+       height:100% (ver más abajo) — inherit copiaba el valor de min-height del padre, que ya no
+       existe con aspect-ratio como mecanismo de alto. */
+    aspect-ratio: 4 / 1;
     border-radius: 1.75rem;
     overflow: hidden;
     border: 1px solid rgba(34, 211, 238, 0.42);
@@ -2431,7 +2446,12 @@ include __DIR__ . "/includes/header.php";
   .game-hero-content {
     position: relative;
     z-index: 2;
-    min-height: inherit;
+    /* Antes "min-height: inherit" copiaba el min-height de .game-hero-card — con la tarjeta
+       ahora usando aspect-ratio (ver arriba) en vez de min-height, ese inherit copiaría "auto"
+       y el título dejaría de anclarse abajo (justify-content:flex-end no tiene alto real donde
+       empujar). height:100% sí funciona: .game-hero-card ya tiene un alto real resuelto por su
+       aspect-ratio, y 100% lo toma de ahí sin depender de la propiedad min-height del padre. */
+    height: 100%;
     display: flex;
     flex-direction: column;
     align-items: stretch;
