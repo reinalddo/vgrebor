@@ -3209,7 +3209,18 @@ $rechargeNotificationsScript = str_replace('__LIVE_RECHARGE_ENABLED__', $recharg
       // uno — antes solo reconocía #user-menu/#auth-menu, así que el modal de
       // "Mi cuenta > Pedidos realizados" (y los demás de ese mismo grupo)
       // nunca ocultaba la barra de instalar, quedando la barra encima.
-      return !!document.querySelector('.app-overlay-modal.is-visible, .modal.show, #user-menu:not(.d-none), #auth-menu:not(.d-none), div[id$="-modal"].position-fixed:not(.d-none)');
+      //
+      // .fixed-top.w-100.h-100: los paneles de "Editar juego" (admin/juegos.php) y
+      // "Editar paquete" (admin/paquetes.php) NO son modales de Bootstrap ni llevan
+      // id terminado en "-modal" — son un <div> renderizado directo en el HTML cuando
+      // la URL trae ?editar=ID, con esa combinación exacta de clases como overlay de
+      // pantalla completa (position:fixed + ancho y alto 100%). Ninguna de las otras
+      // dos reglas de arriba los reconocía, así que la barra seguía montándose encima
+      // de sus campos — reportado por el cliente. Esa combinación de 3 clases juntas
+      // es exclusiva de estos paneles de edición (comprobado: ningún otro elemento del
+      // sitio la usa), así que es segura para detectar "hay un panel de edición abierto"
+      // sin falsos positivos con una barra de navegación fija normal.
+      return !!document.querySelector('.app-overlay-modal.is-visible, .modal.show, #user-menu:not(.d-none), #auth-menu:not(.d-none), div[id$="-modal"].position-fixed:not(.d-none), .fixed-top.w-100.h-100');
     }
     function _blocked() {
       return _spVisible(_sp) || _anyModalOpen();

@@ -76,6 +76,20 @@ switch ($accion) {
         break;
     }
 
+    // ── Pública: en qué página del listado (sin filtro de estrellas) cae un comentario
+    //    ahora mismo. Respaldo de comentarios_ui.php cuando llega desde una notificación
+    //    con #comentario-N y la página guardada en la URL ya no es exacta (se publicaron
+    //    reseñas nuevas o se destacó/quitó destacado alguna entremedio, lo que corre las
+    //    posiciones) — evita que el enlace quede apuntando a una página vieja para siempre.
+    case 'resolver_pagina': {
+        $comentarioId = (int) ($_GET['comentario_id'] ?? 0);
+        $juegoId = (int) ($_GET['juego_id'] ?? 0);
+        comentarios_api_ok([
+            'pagina' => comentarios_resolver_pagina_publica($mysqli, $comentarioId, $juegoId),
+        ]);
+        break;
+    }
+
     // ── Pedidos del usuario disponibles para comentar (1 por pedido) ──
     case 'mis_pedidos': {
         $uid = comentarios_api_requiere_sesion();

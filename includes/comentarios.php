@@ -80,6 +80,68 @@ if (!function_exists('comentarios_por_pagina')) {
     }
 }
 
+// En qué página del listado público (sin filtro de estrellas, el estado por defecto al
+// llegar desde una notificación) cae un comentario — para poder enlazar directo a ESA
+// página, no siempre a la 1. Replica EXACTO el orden de comentarios_listar_publicos()
+// (`destacado DESC, creado_en DESC`): cuenta cuántos comentarios visibles quedan ANTES
+// que el buscado en ese mismo orden, dentro del mismo juego, y de ahí saca la página.
+//
+// OJO — esto puede quedar desactualizado: la posición de un comentario cambia si se
+// publican otros nuevos o si se destaca/quita destacado, así que un número guardado hace
+// días puede ya no ser exacto. Por eso el front (ver script en comentarios_ui.php) NO
+// confía ciegamente en el número guardado: si al llegar no encuentra el ancla en el DOM,
+// vuelve a pedir la página correcta a esta misma función vía la acción de API
+// "resolver_pagina" antes de rendirse. Esta función es la fuente de verdad única para
+// ambos casos (al crear la notificación, y al recalcular en el navegador).
+if (!function_exists('comentarios_resolver_pagina_publica')) {
+    function comentarios_resolver_pagina_publica(mysqli $mysqli, int $comentarioId, int $juegoId = 0): int {
+        if ($comentarioId <= 0) {
+            return 1;
+        }
+        try {
+            $objetivo = $mysqli->prepare("SELECT destacado, creado_en FROM comentarios_clientes WHERE id = ? AND estado IN ('pendiente','aprobado') LIMIT 1");
+            if (!$objetivo) {
+                return 1;
+            }
+            $objetivo->bind_param('i', $comentarioId);
+            $objetivo->execute();
+            $fila = $objetivo->get_result()->fetch_assoc();
+            $objetivo->close();
+            if (!$fila) {
+                return 1;
+            }
+            $destacado = (int) $fila['destacado'];
+            $creadoEn = (string) $fila['creado_en'];
+
+            $sql = "SELECT COUNT(*) AS total FROM comentarios_clientes c";
+            if ($juegoId > 0) {
+                $sql .= " INNER JOIN pedidos p ON p.id = c.pedido_id";
+            }
+            $sql .= " WHERE c.estado IN ('pendiente','aprobado')
+                       AND (c.destacado > ? OR (c.destacado = ? AND c.creado_en > ?))";
+            $types = 'iis';
+            $params = [$destacado, $destacado, $creadoEn];
+            if ($juegoId > 0) {
+                $sql .= " AND p.juego_id = ?";
+                $types .= 'i';
+                $params[] = $juegoId;
+            }
+            $stmt = $mysqli->prepare($sql);
+            if (!$stmt) {
+                return 1;
+            }
+            $stmt->bind_param($types, ...$params);
+            $stmt->execute();
+            $antes = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
+            $stmt->close();
+
+            return max(1, (int) ceil(($antes + 1) / comentarios_por_pagina()));
+        } catch (Throwable $e) {
+            return 1;
+        }
+    }
+}
+
 // Lista negra de palabras, editable por el admin como texto (una por línea o
 // separadas por coma). Nunca hardcodeada, para que el cliente la ajuste sin
 // pedir cambios de código.
@@ -219,7 +281,7 @@ if (!function_exists('comentarios_ensure_schema')) {
         // referidos_schema_version). Al agregar columnas nuevas hay que
         // SUBIR este número, si no la migración nunca corre en instalaciones
         // que ya tenían la versión anterior.
-        if (trim((string) store_config_get('comentarios_schema_version', '')) === '3') {
+        if (trim((string) store_config_get('comentarios_schema_version', '')) === '4') {
             return;
         }
 
@@ -324,22 +386,27 @@ if (!function_exists('comentarios_ensure_schema')) {
 
         comentarios_reparar_urls_notificaciones($mysqli);
 
-        store_config_upsert('comentarios_schema_version', '3', 'No tocar: marca la versión del esquema del sistema de Comentarios ya aplicada, para no repetir SHOW COLUMNS en cada request.');
+        store_config_upsert('comentarios_schema_version', '4', 'No tocar: marca la versión del esquema del sistema de Comentarios ya aplicada, para no repetir SHOW COLUMNS en cada request.');
     }
 }
 
-// Repara las notificaciones de reseña YA creadas con la URL rota (sin el
-// ancla #comentario-N) — ver el bug en comentarios_resolver_juego_id_pedido().
-// Sin esto, las notificaciones que el admin ya tiene en pantalla seguirían sin
-// botones y apuntando a la configuración, aunque las nuevas salgan bien.
+// Repara las notificaciones de reseña YA creadas: (1) las con URL rota (sin el ancla
+// #comentario-N, ver el bug en comentarios_resolver_juego_id_pedido()) y (2) TODAS las
+// que apuntan a game.php, agregándoles/actualizándoles el número de página
+// (resenas_pagina) — sin eso, el enlace siempre caía en la página 1 y si el comentario
+// ya estaba más adelante, el ancla no existía en el DOM de esa página (bug reportado:
+// "los comentarios aún no dirigen"). Sin esta reparación, las notificaciones que el
+// admin YA tiene en pantalla seguirían llevando a la página 1 aunque las nuevas salgan
+// bien.
 //
-// El emparejamiento NO es adivinado: el mensaje que se guarda es determinista
-// (estrellas + etiqueta del pedido + texto recortado a 80, ver
-// comentarios_notificar_admins_nuevo), así que se reconstruye para cada reseña
-// y se compara EXACTO contra el mensaje almacenado. Si un mismo mensaje casara
-// con varias reseñas (dos idénticas), se usa la más cercana en tiempo a la
-// notificación; si aun así hay empate, se deja como está (nunca se inventa un
-// destino). Idempotente: solo toca filas sin el ancla.
+// Para las que YA tienen el ancla #comentario-N (la mayoría, tras la reparación
+// anterior), el id sale directo del propio ancla — no hace falta adivinar por mensaje.
+// Solo las que de verdad nunca resolvieron el ancla (dataset viejo) usan el
+// emparejamiento por mensaje: el mensaje guardado es determinista (estrellas + etiqueta
+// del pedido + texto recortado a 80, ver comentarios_notificar_admins_nuevo), se
+// reconstruye por cada reseña y se compara EXACTO. Si un mismo mensaje casara con varias
+// reseñas (dos idénticas), se usa la más cercana en tiempo a la notificación; si aun así
+// hay empate, se deja como está (nunca se inventa un destino). Idempotente.
 if (!function_exists('comentarios_reparar_urls_notificaciones')) {
     function comentarios_reparar_urls_notificaciones(mysqli $mysqli): void {
         try {
@@ -348,16 +415,30 @@ if (!function_exists('comentarios_reparar_urls_notificaciones')) {
                 return;
             }
 
-            $rotas = $mysqli->query(
-                "SELECT id, mensaje, creado_en FROM notificaciones
-                  WHERE tipo = 'comentario_nuevo' AND mensaje <> '' AND url NOT LIKE '%#comentario-%'"
+            $todas = $mysqli->query(
+                "SELECT id, mensaje, url, creado_en FROM notificaciones WHERE tipo = 'comentario_nuevo' AND mensaje <> ''"
             );
-            if (!($rotas instanceof mysqli_result) || $rotas->num_rows === 0) {
+            if (!($todas instanceof mysqli_result) || $todas->num_rows === 0) {
                 return;
             }
-            $pendientes = $rotas->fetch_all(MYSQLI_ASSOC);
+            $filas = $todas->fetch_all(MYSQLI_ASSOC);
 
-            // Todas las reseñas con los datos que componen el mensaje.
+            // Separar: las que ya tienen ancla (id directo) vs las rotas (necesitan
+            // emparejar por mensaje para averiguar de cuál reseña se trata).
+            $conAncla = [];
+            $rotas = [];
+            foreach ($filas as $n) {
+                if (preg_match('/#comentario-(\d+)/', (string) $n['url'], $m) === 1) {
+                    $conAncla[] = ['notif' => $n, 'comentario_id' => (int) $m[1]];
+                } else {
+                    $rotas[] = $n;
+                }
+            }
+
+            // Datos de las reseñas que hagan falta: pedido_id (para el juego) siempre;
+            // estrellas/texto/creado_en/juego solo si hay rotas que emparejar por mensaje.
+            $pedidoPorComentario = [];
+            $porMensaje = [];
             $resenas = $mysqli->query(
                 'SELECT c.id, c.estrellas, c.texto, c.creado_en, c.pedido_id,
                         p.juego_nombre, p.paquete_nombre
@@ -367,23 +448,24 @@ if (!function_exists('comentarios_reparar_urls_notificaciones')) {
             if (!($resenas instanceof mysqli_result)) {
                 return;
             }
-
-            $porMensaje = [];
             while ($r = $resenas->fetch_assoc()) {
-                $texto = (string) $r['texto'];
-                $resumen = mb_strlen($texto, 'UTF-8') > 80
-                    ? mb_substr($texto, 0, 80, 'UTF-8') . '…'
-                    : $texto;
-                $etiqueta = comentarios_etiqueta_pedido($r);
-                $mensaje = str_repeat('★', max(0, min(5, (int) $r['estrellas'])))
-                    . ($etiqueta !== '' ? ' — ' . $etiqueta : '')
-                    . ': "' . $resumen . '"';
-                $mensaje = mb_substr(trim($mensaje), 0, 600, 'UTF-8');
-                $porMensaje[$mensaje][] = [
-                    'id' => (int) $r['id'],
-                    'pedido_id' => (int) $r['pedido_id'],
-                    'ts' => strtotime((string) $r['creado_en']) ?: 0,
-                ];
+                $pedidoPorComentario[(int) $r['id']] = (int) $r['pedido_id'];
+                if ($rotas) {
+                    $texto = (string) $r['texto'];
+                    $resumen = mb_strlen($texto, 'UTF-8') > 80
+                        ? mb_substr($texto, 0, 80, 'UTF-8') . '…'
+                        : $texto;
+                    $etiqueta = comentarios_etiqueta_pedido($r);
+                    $mensaje = str_repeat('★', max(0, min(5, (int) $r['estrellas'])))
+                        . ($etiqueta !== '' ? ' — ' . $etiqueta : '')
+                        . ': "' . $resumen . '"';
+                    $mensaje = mb_substr(trim($mensaje), 0, 600, 'UTF-8');
+                    $porMensaje[$mensaje][] = [
+                        'id' => (int) $r['id'],
+                        'pedido_id' => (int) $r['pedido_id'],
+                        'ts' => strtotime((string) $r['creado_en']) ?: 0,
+                    ];
+                }
             }
 
             $juegoPorPedido = [];
@@ -391,7 +473,28 @@ if (!function_exists('comentarios_reparar_urls_notificaciones')) {
             if (!$upd) {
                 return;
             }
-            foreach ($pendientes as $n) {
+
+            $aplicar = function (int $notifId, int $comentarioId, int $pedidoId) use ($mysqli, &$juegoPorPedido, $upd): void {
+                if (!array_key_exists($pedidoId, $juegoPorPedido)) {
+                    $juegoPorPedido[$pedidoId] = comentarios_resolver_juego_id_pedido($mysqli, $pedidoId);
+                }
+                $juegoId = $juegoPorPedido[$pedidoId];
+                $pagina = $juegoId > 0 ? comentarios_resolver_pagina_publica($mysqli, $comentarioId, $juegoId) : 1;
+                $url = comentarios_url_notificacion($comentarioId, $juegoId, $pagina);
+                $upd->bind_param('si', $url, $notifId);
+                $upd->execute();
+            };
+
+            foreach ($conAncla as $item) {
+                $comentarioId = $item['comentario_id'];
+                $pedidoId = $pedidoPorComentario[$comentarioId] ?? 0;
+                if ($pedidoId <= 0) {
+                    continue; // reseña borrada u otro caso raro: no tocar
+                }
+                $aplicar((int) $item['notif']['id'], $comentarioId, $pedidoId);
+            }
+
+            foreach ($rotas as $n) {
                 $candidatos = $porMensaje[(string) $n['mensaje']] ?? [];
                 if (!$candidatos) {
                     continue;
@@ -408,15 +511,9 @@ if (!function_exists('comentarios_reparar_urls_notificaciones')) {
                     }
                 }
                 $elegido = $candidatos[0];
-                $pedidoId = $elegido['pedido_id'];
-                if (!array_key_exists($pedidoId, $juegoPorPedido)) {
-                    $juegoPorPedido[$pedidoId] = comentarios_resolver_juego_id_pedido($mysqli, $pedidoId);
-                }
-                $url = comentarios_url_notificacion($elegido['id'], $juegoPorPedido[$pedidoId]);
-                $notifId = (int) $n['id'];
-                $upd->bind_param('si', $url, $notifId);
-                $upd->execute();
+                $aplicar((int) $n['id'], $elegido['id'], $elegido['pedido_id']);
             }
+
             $upd->close();
         } catch (Throwable $e) {
             error_log('TVG comentarios: no se pudieron reparar las URLs de notificaciones: ' . $e->getMessage());
@@ -1047,10 +1144,20 @@ if (!function_exists('comentarios_resolver_juego_id_pedido')) {
 // moderación del panel de notificaciones, así que perderlo deja la tarjeta
 // sin acciones (ver el bug de arriba). Si no hay juego, al menos lleva a la
 // pantalla de comentarios en vez de a ningún lado.
+//
+// $pagina (opcional, solo aplica con juego): la sección de reseñas de game.php está
+// paginada (comentarios_por_pagina() por página) — sin el número de página en la URL,
+// el enlace siempre caía en la página 1, y si el comentario estaba más adelante (ej.
+// página 2) el ancla #comentario-N no existía en el DOM de esa página y no llevaba a
+// ningún lado visible. /admin/comentarios no pagina (lista los 200 más recientes de
+// una vez), por eso solo se agrega en el caso de game.php.
 if (!function_exists('comentarios_url_notificacion')) {
-    function comentarios_url_notificacion(int $comentarioId, int $juegoId): string {
-        $base = $juegoId > 0 ? ('/game.php?id=' . $juegoId) : '/admin/comentarios';
-        return $base . '#comentario-' . $comentarioId;
+    function comentarios_url_notificacion(int $comentarioId, int $juegoId, int $pagina = 1): string {
+        if ($juegoId > 0) {
+            $qs = $pagina > 1 ? ('&resenas_pagina=' . $pagina) : '';
+            return '/game.php?id=' . $juegoId . $qs . '#comentario-' . $comentarioId;
+        }
+        return '/admin/comentarios#comentario-' . $comentarioId;
     }
 }
 
@@ -1072,7 +1179,12 @@ if (!function_exists('comentarios_notificar_admins_nuevo')) {
         // Link directo al comentario en la ficha del juego (mismo ancla #comentario-{id} que ya usa
         // el slider de destacados del home). El ancla va SIEMPRE, aunque no se resuelva el juego:
         // el panel de notificaciones saca de ahí el id para pintar los botones de moderación.
-        $url = comentarios_url_notificacion($comentarioId, $juegoId);
+        // La página se calcula AL MOMENTO (ver comentarios_resolver_pagina_publica) — es el mejor
+        // valor disponible ahora mismo; si para cuando el admin haga clic ya no es exacto (otros
+        // comentarios se publicaron o se destacaron/quitaron destacado entremedio), el script de
+        // comentarios_ui.php lo recalcula solo al no encontrar el ancla.
+        $pagina = $juegoId > 0 ? comentarios_resolver_pagina_publica($mysqli, $comentarioId, $juegoId) : 1;
+        $url = comentarios_url_notificacion($comentarioId, $juegoId, $pagina);
         while ($fila = $admins->fetch_assoc()) {
             $adminId = (int) $fila['id'];
             if ($adminId <= 0 || $adminId === $autorId) {

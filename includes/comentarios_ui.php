@@ -347,19 +347,48 @@ if (!function_exists('comentarios_render_seccion')) {
         </style>
         <script>
         (function () {
-          // Si se llega con #comentario-123 (clic en una tarjeta del slider
-          // del home), el navegador ya hace scroll ahí solo (es un id real
-          // en el DOM) — esto solo agrega un resaltado momentáneo para que
-          // quede claro CUÁL reseña es, ya que puede no ser la primera de
-          // la lista.
+          // Si se llega con #comentario-123 (clic en una notificación o en una tarjeta
+          // del slider del home) y el comentario SÍ está en esta página, el navegador ya
+          // hace scroll solo (es un id real en el DOM) — esto solo agrega un resaltado
+          // momentáneo para que quede claro CUÁL reseña es, ya que puede no ser la
+          // primera de la lista.
           var m = window.location.hash.match(/^#comentario-(\d+)$/);
           if (!m) return;
-          var el = document.getElementById('comentario-' + m[1]);
-          if (!el) return;
-          window.setTimeout(function () {
-            el.classList.add('resaltado');
-            window.setTimeout(function () { el.classList.remove('resaltado'); }, 2600);
-          }, 300);
+          var comentarioId = m[1];
+          var el = document.getElementById('comentario-' + comentarioId);
+          if (el) {
+            window.setTimeout(function () {
+              el.classList.add('resaltado');
+              window.setTimeout(function () { el.classList.remove('resaltado'); }, 2600);
+            }, 300);
+            return;
+          }
+
+          // No está en ESTA página: la lista está paginada y el número de página que
+          // trae la notificación (resenas_pagina) se calculó al crearla — si desde
+          // entonces se publicaron reseñas nuevas o se destacó/quitó destacado alguna
+          // (eso corre las posiciones), puede haber quedado desactualizado y el
+          // comentario ya no vive ahí. Se pregunta la página CORRECTA ahora mismo
+          // (misma función que arma el enlace al crear la notificación, ver
+          // comentarios_resolver_pagina_publica en includes/comentarios.php) y se
+          // recarga ahí — sin esto, el enlace quedaría muerto para siempre en cuanto
+          // pasara suficiente tiempo. Sin juego no hay a dónde repaginar.
+          var juegoId = <?= (int) $juegoId ?>;
+          if (juegoId <= 0) return;
+          fetch(<?= json_encode(app_path('/api/comentarios.php'), JSON_UNESCAPED_SLASHES) ?> + '?action=resolver_pagina&comentario_id=' + encodeURIComponent(comentarioId) + '&juego_id=' + juegoId, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (!d || !d.ok || !d.pagina) return;
+              var params = new URLSearchParams(window.location.search);
+              var actual = parseInt(params.get('resenas_pagina') || '1', 10);
+              // Ya estamos en la página que la API considera correcta y aun así no
+              // apareció (reseña borrada/oculta entremedio, por ejemplo): no
+              // reintentar en bucle, dejarlo tal cual.
+              if (actual === d.pagina) return;
+              params.set('resenas_pagina', d.pagina);
+              window.location.replace(window.location.pathname + '?' + params.toString() + '#comentario-' + comentarioId);
+            })
+            .catch(function () {});
         })();
         </script>
         <?php
