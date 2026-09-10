@@ -306,7 +306,7 @@ function stream_head(string $title, string $active = '', bool $fullBleed = false
   <aside id="sb" class="sb thin">
     <div class="sb-head">
       <div class="logo"><img src="<?= h($storeLogo) ?>" alt="<?= h($storeName) ?>" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;display:block"></div>
-      <div class="sb-brand"><?= h($storeName) ?><small>Gestor de Streaming</small></div>
+      <div class="sb-brand"><?= h($storeName) ?><small>Gestor de Streaming · v2026-09-09</small></div>
     </div>
     <nav class="sb-nav thin">
       <div class="grp-label">Gestión</div>

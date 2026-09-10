@@ -718,27 +718,6 @@ include __DIR__ . "/includes/header.php";
         $recargasAmericaProductsById = [];
       }
     }
-    // CONEC (coneclatam): igual que RecargasAmérica, catálogo mayorista único. Se trae en vivo SOLO si este
-    // juego tiene algún paquete CONEC, para calcular el precio = costo × margen (que se actualice solo, como
-    // giftven/RA). Sin esto, los paquetes CONEC quedaban con el precio guardado (no se actualizaban).
-    $conecProductsById = [];
-    $usesConecCatalogGame = false;
-    foreach ($paquetes as $pack) {
-      if (trim((string) ($pack['api_provider'] ?? '')) === 'conec') { $usesConecCatalogGame = true; break; }
-    }
-    if ($usesConecCatalogGame) {
-      try {
-        require_once __DIR__ . '/includes/conec_recargas.php';
-        $conecPdoGame = null;
-        try {
-          $tdbG = function_exists('tenant_database_config') ? tenant_database_config() : [];
-          $conecPdoGame = new PDO('mysql:host=' . ($tdbG['host'] ?? 'localhost') . ';dbname=' . ($tdbG['name'] ?? '') . ';charset=' . ($tdbG['charset'] ?? 'utf8mb4'), (string) ($tdbG['user'] ?? 'root'), (string) ($tdbG['password'] ?? ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT]);
-        } catch (Throwable $e) { $conecPdoGame = null; }
-        if ($conecPdoGame && function_exists('conec_enabled') && conec_enabled($conecPdoGame) && function_exists('conec_api_fetch_products')) {
-          foreach (conec_api_fetch_products($conecPdoGame) as $cp) { $conecProductsById[(int) ($cp['id'] ?? 0)] = $cp; }
-        }
-      } catch (Throwable $e) { $conecProductsById = []; }
-    }
     // Un paquete asignado a una categoría desactivada no debe aparecer en la
     // tienda (ni en su tab ni en "Otros"), a diferencia de uno sin categoría.
     $allPackageCategoriesByIdForGame = [];
@@ -764,7 +743,6 @@ include __DIR__ . "/includes/header.php";
     // explícita del cliente).
     $gameMarkupPctGiftven = floatval($game['precio_markup_pct'] ?? 0);
     $gameMarkupPctRecargasamerica = floatval($game['precio_markup_pct_recargasamerica'] ?? 0);
-    $gameMarkupPctConec = floatval($game['precio_markup_pct_conec'] ?? 0);
   ?>
   <?php $priceSyncQueue = []; ?>
   <?php $bsPassStockPackageIds = []; ?>
@@ -823,14 +801,11 @@ include __DIR__ . "/includes/header.php";
         // este chequeo, un paquete de RecargasAmérica con el mismo ID
         // numérico que un producto de GiftVen tomaría el precio equivocado.
         $packPricingProvider = trim((string) ($pack['api_provider'] ?? ''));
-        if (!$packManualOverride && $packApiId > 0 && $packPricingProvider === 'conec' && isset($conecProductsById[$packApiId])) {
-            $packApiRawPrice = floatval($conecProductsById[$packApiId]['price'] ?? 0);
-            $packMarkupPct = $gameMarkupPctConec;
-        } elseif (!$packManualOverride && $packApiId > 0 && $packPricingProvider === 'recargasamerica' && isset($recargasAmericaProductsById[$packApiId])) {
+        if (!$packManualOverride && $packApiId > 0 && $packPricingProvider === 'recargasamerica' && isset($recargasAmericaProductsById[$packApiId])) {
             $packApiRawPrice = floatval($recargasAmericaProductsById[$packApiId]['price'] ?? 0);
             $packMarkupPct = $gameMarkupPctRecargasamerica;
         } else {
-            $packApiRawPrice = (!$packManualOverride && $packApiId > 0 && $packPricingProvider !== 'recargasamerica' && $packPricingProvider !== 'conec' && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
+            $packApiRawPrice = (!$packManualOverride && $packApiId > 0 && $packPricingProvider !== 'recargasamerica' && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
             $packMarkupPct = $gameMarkupPctGiftven;
         }
         $precio_base = ($packApiRawPrice !== null)
@@ -914,6 +889,29 @@ include __DIR__ . "/includes/header.php";
             'validationMessage' => 'Ingresa un enlace válido (debe empezar con http:// o https://).',
             'maxLength' => 500,
           ]];
+        } elseif ($packApiProvider === 'conec') {
+          // CONEC (coneclatam): ID del jugador (obligatorio) + Zona/ID de servidor (OPCIONAL). El servidor solo
+          // lo piden algunos juegos (p.ej. Mobile Legends); Free Fire y otros NO lo usan → por eso es opcional y
+          // no bloquea la compra. El motor (api/pedidos.php → conec_dispatch_order) valida contra lo que CONEC
+          // realmente pide: si el juego exige el servidor y no viene, NO cobra. El name 'server_id' reusa el
+          // aliasing de zona ya existente (ZONE_ID_ALIASES) para que el motor resuelva el valor.
+          $apiRequiredFields = [
+            [
+              'name' => 'player_id',
+              'label' => 'ID del jugador',
+              'placeholder' => 'ID del jugador',
+              'inputMode' => 'text',
+              'maxLength' => 150,
+            ],
+            [
+              'name' => 'server_id',
+              'label' => 'Zona / ID de servidor (solo si tu juego lo pide)',
+              'placeholder' => 'Ej: 2001 · déjalo vacío si no aplica',
+              'inputMode' => 'text',
+              'maxLength' => 150,
+              'optional' => true,
+            ],
+          ];
         }
         $packFullimpulsoCustomComments = $packApiProvider === 'fullimpulso' && !empty($pack['fullimpulso_custom_comments']);
         $packFullimpulsoCantidad = (int) ($pack['fullimpulso_cantidad'] ?? 0);
@@ -2375,22 +2373,7 @@ include __DIR__ . "/includes/header.php";
 
   .game-hero-card {
     position: relative;
-    /* BUG REAL (2026-09): antes esto era min-height:clamp(210px,27vw,300px) — el "27vw" mide
-       contra el VIEWPORT completo, pero el ancho REAL de esta tarjeta lo limita el .container de
-       Bootstrap, que salta en escalones fijos (540/720/960/1140/1320px) en vez de escalar suave
-       con el viewport. En un celular en "modo escritorio" (fuerza un viewport ancho, ~980px,
-       ignorando la pantalla física real) caemos en el escalón de 720px de .container mientras el
-       27vw calcula sobre 980px → una caja de ~720×265px (relación ~2.7:1) para una imagen de
-       ~4:1 (1920×480, la medida recomendada) → el mismo tipo de "espacio para rellenar" que ya se
-       había corregido para el móvil real, pero en este otro rango de ancho que esa corrección (en
-       su propia media query, <767.98px) no cubre. aspect-ratio mide contra el ANCHO PROPIO de la
-       tarjeta (el que ya resolvió el .container), no contra el viewport — por eso no le importa en
-       qué escalón de .container caiga: la proporción de la caja siempre coincide con la de una
-       imagen 4:1, en cualquier ancho (celular real, PC real, o esta mezcla rara de "viewport ancho
-       en pantalla angosta"). Requiere que .game-hero-content pase de min-height:inherit a
-       height:100% (ver más abajo) — inherit copiaba el valor de min-height del padre, que ya no
-       existe con aspect-ratio como mecanismo de alto. */
-    aspect-ratio: 4 / 1;
+    min-height: clamp(210px, 27vw, 300px);
     border-radius: 1.75rem;
     overflow: hidden;
     border: 1px solid rgba(34, 211, 238, 0.42);
@@ -2446,12 +2429,7 @@ include __DIR__ . "/includes/header.php";
   .game-hero-content {
     position: relative;
     z-index: 2;
-    /* Antes "min-height: inherit" copiaba el min-height de .game-hero-card — con la tarjeta
-       ahora usando aspect-ratio (ver arriba) en vez de min-height, ese inherit copiaría "auto"
-       y el título dejaría de anclarse abajo (justify-content:flex-end no tiene alto real donde
-       empujar). height:100% sí funciona: .game-hero-card ya tiene un alto real resuelto por su
-       aspect-ratio, y 100% lo toma de ahí sin depender de la propiedad min-height del padre. */
-    height: 100%;
+    min-height: inherit;
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -2551,21 +2529,6 @@ include __DIR__ . "/includes/header.php";
       inset: auto;
       min-height: 180px;
       background: transparent;
-    }
-
-    /* BUG REAL: cuando SÍ hay foto de hero (el caso normal), el min-height:180px de arriba no tiene
-       relación con la proporción real de la imagen (ej. 1920x480 = 4:1, que a un ancho de celular
-       típico solo necesita ~90-110px de alto). object-fit:contain + height:auto ya centran la imagen
-       a su alto natural DENTRO de esa caja de 180px — el resto queda relleno con el fondo desenfocado
-       (.game-hero-image-backdrop), que es justo el "espacio para rellenar" reportado. En PC no pasa
-       porque .game-hero-card usa clamp(210px, 27vw, 300px) — el alto SÍ escala con el ancho; en móvil
-       era un número fijo que no escala con nada. Con :has() se anula el piso SOLO cuando hay una
-       imagen real (el <img class="game-hero-image">, ver game.php ~línea 512): ahí el alto de la caja
-       pasa a decidirlo por completo la proporción real de la foto — igual que en PC, sin relleno. El
-       piso de 180px se conserva para el caso sin foto (game-hero-fallback, solo gradiente), donde no
-       hay imagen que le dé alto propio al contenedor y haría falta igualmente. */
-    .game-hero-media:has(.game-hero-image) {
-      min-height: 0;
     }
 
     .game-hero-image-backdrop {
@@ -9155,7 +9118,9 @@ include __DIR__ . "/includes/header.php";
     control.name = controlName;
     control.dataset.apiField = fieldConfig.name || '';
     control.className = hasOptions ? 'form-select bg-dark text-info border-info' : 'form-control bg-dark text-info border-info';
-    control.required = !window.__gameNoPlayerIdRequired;
+    // Un campo puede declararse OPCIONAL (fieldConfig.optional=true) → no lleva el atributo required, así
+    // `requiredFilled` no lo exige. Lo usa CONEC para el "ID de servidor" (algunos juegos lo piden, otros no).
+    control.required = !window.__gameNoPlayerIdRequired && !(fieldConfig && fieldConfig.optional);
 
     return control;
   }

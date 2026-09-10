@@ -5193,7 +5193,28 @@ function conec_dispatch_order(array $order): array {
     $gameId    = (string) ($order['user_identifier'] ?? '');
     $qty       = function_exists('order_purchase_quantity') ? (int) order_purchase_quantity($order) : 1;
     $savedRef  = trim((string) ($order['recargas_api_pedido_id'] ?? ''));
-    return conec_dispatch_or_recover($pdo, $orderId, $variantId, $gameId, max(1, $qty), [], $savedRef);
+    // CAMPOS EXTRA (ID de servidor/zona, etc.) — FIX 2026-09-09: antes se pasaba [] → los juegos que piden un
+    // dato adicional (p.ej. Mobile Legends: ID de servidor) se quedaban en "Verificado" porque CONEC los
+    // rechazaba por dato faltante. Ahora se arman desde el pedido, resolviendo la LLAVE que pide CONEC por
+    // alias (zone_id/server_id/input2…) para que cuadre con lo que recogió la tienda o el panel del revendedor.
+    $extra = [];
+    $submitted = function_exists('order_player_fields_from_json') ? order_player_fields_from_json((string) ($order['player_fields_json'] ?? '')) : [];
+    if (!empty($submitted)) {
+        $conecProd = null;
+        try { $conecProd = function_exists('conec_api_product_by_id') ? conec_api_product_by_id($pdo, (int) $variantId) : null; } catch (Throwable $e) { $conecProd = null; }
+        if (is_array($conecProd) && !empty($conecProd['fields'])) {
+            foreach ($conecProd['fields'] as $cf) {
+                if (!is_array($cf)) { continue; }
+                $ck = trim((string) ($cf['key'] ?? '')); if ($ck === '') { continue; }
+                $val = function_exists('resolve_player_field_value') ? resolve_player_field_value($submitted, $ck) : trim((string) ($submitted[$ck] ?? ''));
+                if ($val !== '') { $extra[$ck] = $val; }
+            }
+        } else {
+            // Sin metadata del producto: manda lo que haya (mejor intento); la validación dura la hace CONEC.
+            foreach ($submitted as $k => $v) { if ($k !== '' && $v !== '') { $extra[$k] = $v; } }
+        }
+    }
+    return conec_dispatch_or_recover($pdo, $orderId, $variantId, $gameId, max(1, $qty), $extra, $savedRef);
 }
 
 function fetch_game_package(mysqli $mysqli, int $packageId, int $gameId): ?array {
