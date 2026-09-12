@@ -47,27 +47,60 @@ if (!function_exists('movement_reference_matches')) {
 
 $buscado = trim((string) ($_GET['ref'] ?? ''));
 $digitos = max(0, (int) ($_GET['digitos'] ?? 7));
+$monto = trim((string) ($_GET['monto'] ?? ''));
 $filas = [];
+$filasMonto = [];
 $error = '';
 
 if ($buscado !== '') {
     try {
-        // Trae cualquier movimiento cuya referencia CONTENGA los dígitos buscados en cualquier
-        // posición (no solo al final) — así se ve también si quedó con un prefijo/sufijo inesperado.
+        // Trae cualquier movimiento cuya referencia CONTENGA lo buscado en cualquier posición —
+        // pero un simple LIKE '%0020020%' NO encuentra una fila guardada como "20020" (sin los
+        // ceros a la izquierda): esa es justo la hipótesis que se está investigando, así que
+        // buscar SOLO tal cual daría un falso "no existe" incluso si el movimiento sí está y
+        // movement_reference_matches() sí lo reconocería. Por eso se busca también la versión SIN
+        // ceros a la izquierda (ltrim, mismo criterio que normalize_reference_digits) como patrón
+        // adicional — cubre el caso de que la BD lo haya guardado más corto.
         $soloDigitos = preg_replace('/\D+/', '', $buscado) ?: $buscado;
+        $sinCerosIzq = ltrim($soloDigitos, '0');
+        if ($sinCerosIzq === '') $sinCerosIzq = $soloDigitos;
         $stmt = $mysqli->prepare(
             "SELECT id, referencia, monto, moneda, fecha_movimiento, creado_en, COALESCE(checked,0) AS checked, COALESCE(pedido_id,0) AS pedido_id
                FROM movimientos
               WHERE referencia LIKE CONCAT('%', ?, '%')
                  OR referencia LIKE CONCAT('%', ?, '%')
+                 OR referencia LIKE CONCAT('%', ?, '%')
               ORDER BY id DESC LIMIT 50"
         );
-        $stmt->bind_param('ss', $buscado, $soloDigitos);
+        $stmt->bind_param('sss', $buscado, $soloDigitos, $sinCerosIzq);
         $stmt->execute();
         $filas = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         $stmt->close();
     } catch (Throwable $e) {
         $error = $e->getMessage();
+    }
+}
+
+// Respaldo por MONTO: si por referencia no aparece nada, esto es lo que de verdad zanja la duda —
+// si hay un movimiento reciente con el monto exacto del pedido, está ahí sin importar cómo haya
+// quedado su referencia (se ve tal cual, para comparar a simple vista contra lo que escribió el
+// cliente); si NO hay ninguno, es evidencia real de que el banco aún no lo había reportado, y el
+// problema no tiene nada que ver con el cero.
+if ($monto !== '' && is_numeric(str_replace(',', '.', $monto))) {
+    try {
+        $montoNum = (float) str_replace(',', '.', $monto);
+        $stmt2 = $mysqli->prepare(
+            "SELECT id, referencia, monto, moneda, fecha_movimiento, creado_en, COALESCE(checked,0) AS checked, COALESCE(pedido_id,0) AS pedido_id
+               FROM movimientos
+              WHERE ABS(monto - ?) < 0.01
+              ORDER BY id DESC LIMIT 50"
+        );
+        $stmt2->bind_param('d', $montoNum);
+        $stmt2->execute();
+        $filasMonto = $stmt2->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt2->close();
+    } catch (Throwable $e) {
+        $error = $error !== '' ? $error : $e->getMessage();
     }
 }
 
@@ -108,6 +141,10 @@ function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8')
     <label for="digitos">Dígitos configurados para ese método</label>
     <input type="number" id="digitos" name="digitos" min="0" max="120" value="<?= (int) $digitos ?>" style="width:6rem">
   </div>
+  <div>
+    <label for="monto">Monto del RECIBO/pago (opcional — Bs para Pago Móvil/BNC, USDT para Binance; respaldo si por referencia no sale nada)</label>
+    <input type="text" id="monto" name="monto" value="<?= h($monto) ?>" placeholder="Ej: 7519.00" style="width:9rem">
+  </div>
   <button type="submit">Buscar</button>
 </form>
 
@@ -120,7 +157,7 @@ function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8')
     · <?= count($filas) ?> resultado(s) en movimientos.
   </p>
   <?php if (!$filas): ?>
-    <p class="no">No se encontró ningún movimiento cuya referencia contenga esos caracteres, ni siquiera parcialmente. Si el pago es reciente, puede que aún no se haya sincronizado desde el banco — no es un problema del cero, es que el movimiento todavía no llegó.</p>
+    <p class="no">No se encontró ningún movimiento cuya referencia contenga esos caracteres (probado tal cual y también sin ceros a la izquierda). Si el pago es reciente, puede que aún no se haya sincronizado desde el banco.</p>
   <?php else: ?>
   <div class="overflow-x-auto">
   <table>
@@ -146,6 +183,45 @@ function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8')
         <td><?= (int) $f['checked'] ?></td>
         <td><?= (int) $f['pedido_id'] ?></td>
         <td class="<?= $coincide ? 'ok' : 'no' ?>"><?= $coincide ? '✓ SÍ coincide' : '✗ No coincide' ?></td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+  </div>
+  <?php endif; ?>
+<?php endif; ?>
+
+<?php if ($monto !== ''): ?>
+  <hr style="border-color:#22344d;margin:1.5rem 0;">
+  <h2 style="color:#00fff7;font-size:1.05rem;">Respaldo por monto (<?= h($monto) ?>)</h2>
+  <p class="muted">Esto es lo que de verdad zanja la duda: si aquí aparece un movimiento con el monto exacto, EXISTE sin importar cómo haya quedado su referencia — se compara a simple vista contra lo que escribió el cliente. Si no aparece ninguno, es que el banco todavía no lo había reportado (nada que ver con el cero).</p>
+  <?php if (!$filasMonto): ?>
+    <p class="no">Ningún movimiento en la tabla tiene ese monto exacto. Esto confirma que, al momento de esta búsqueda, el banco aún no había reportado ese pago — el sistema no tenía con qué compararlo, sin importar cómo estuviera escrita la referencia.</p>
+  <?php else: ?>
+  <div class="overflow-x-auto">
+  <table>
+    <thead><tr>
+      <th>ID</th><th>Referencia guardada</th><th>Largo (bytes)</th><th>Monto</th><th>Moneda</th>
+      <th>Fecha mov.</th><th>Creado</th><th>checked</th><th>pedido_id</th>
+      <?php if ($buscado !== ''): ?><th>¿Coincide con "<?= h($buscado) ?>" a <?= (int) $digitos ?> dígitos?</th><?php endif; ?>
+    </tr></thead>
+    <tbody>
+    <?php foreach ($filasMonto as $f):
+        $ref = (string) $f['referencia'];
+    ?>
+      <tr>
+        <td><?= (int) $f['id'] ?></td>
+        <td class="mono"><?= h($ref) ?></td>
+        <td><?= strlen($ref) ?></td>
+        <td class="mono"><?= h(number_format((float) $f['monto'], 2)) ?></td>
+        <td><?= h((string) $f['moneda']) ?></td>
+        <td><?= h((string) ($f['fecha_movimiento'] ?? '—')) ?></td>
+        <td><?= h((string) $f['creado_en']) ?></td>
+        <td><?= (int) $f['checked'] ?></td>
+        <td><?= (int) $f['pedido_id'] ?></td>
+        <?php if ($buscado !== ''): $coincide = movement_reference_matches($ref, $buscado, $digitos); ?>
+        <td class="<?= $coincide ? 'ok' : 'no' ?>"><?= $coincide ? '✓ SÍ coincide' : '✗ No coincide' ?></td>
+        <?php endif; ?>
       </tr>
     <?php endforeach; ?>
     </tbody>
