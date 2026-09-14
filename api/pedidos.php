@@ -5217,6 +5217,41 @@ function conec_dispatch_order(array $order): array {
     return conec_dispatch_or_recover($pdo, $orderId, $variantId, $gameId, max(1, $qty), $extra, $savedRef);
 }
 
+// Rechaza (cancela) un pedido CONEC cuando el fallo es DURO: CONEC lo rechazó de plano (sin saldo mayorista,
+// sin stock, dato inválido/faltante…), es decir SEGURO NO entregó (error_code no vacío en conec_dispatch_or_recover).
+// Pedido cliente 2026-09-13: "al no tener saldo tú o yo, que RECHACE y no quede en espera" — si queda en espera,
+// el cliente pide varias veces (no le llega) y luego, al recargar saldo, se disparan TODAS con un solo pago.
+// Reembolsa el saldo si es pedido de REVENDEDOR (metodo_pago='Saldo revendedor'). IDEMPOTENTE: solo actúa en la
+// transición pagado→cancelado (claim atómico) → nunca reembolsa dos veces. NO se usa en fallos INCIERTOS
+// (error_code vacío = pudo haberse entregado) → esos siguen en revisión manual (no se tocan).
+function conec_reject_hard_order(mysqli $mysqli, array $order): array {
+    $orderId = (int) ($order['id'] ?? 0);
+    if ($orderId <= 0) { return ['rejected' => false, 'refunded' => false]; }
+    $claim = $mysqli->prepare("UPDATE pedidos SET estado='cancelado' WHERE id=? AND estado='pagado'");
+    if (!$claim) { return ['rejected' => false, 'refunded' => false]; }
+    $claim->bind_param('i', $orderId);
+    $claim->execute();
+    $claimed = ($claim->affected_rows === 1);
+    $claim->close();
+    if (!$claimed) { return ['rejected' => false, 'refunded' => false]; }
+    $refunded = false;
+    if (strtolower(trim((string) ($order['metodo_pago'] ?? ''))) === 'saldo revendedor') {
+        $uid   = (int) ($order['cliente_usuario_id'] ?? 0);
+        $monto = (float) ($order['precio'] ?? 0);
+        if ($uid > 0 && $monto > 0) {
+            try {
+                if (!function_exists('wallet_acreditar') && is_file(__DIR__ . '/wallet/_helpers.php')) { require_once __DIR__ . '/wallet/_helpers.php'; }
+                $pdoW = function_exists('conec_pdo') ? conec_pdo() : null;
+                if ($pdoW instanceof PDO && function_exists('wallet_acreditar')) {
+                    wallet_acreditar($pdoW, $uid, $monto, 'reverso_recarga', 'Reverso: recarga CONEC rechazada (sin saldo o dato inválido) · pedido #' . $orderId);
+                    $refunded = true;
+                }
+            } catch (Throwable $e) { error_log('conec reject refund #' . $orderId . ': ' . $e->getMessage()); }
+        }
+    }
+    return ['rejected' => true, 'refunded' => $refunded];
+}
+
 function fetch_game_package(mysqli $mysqli, int $packageId, int $gameId): ?array {
     if ($packageId <= 0 || $gameId <= 0) {
         return null;
@@ -10680,6 +10715,21 @@ if ($action === 'submit_payment') {
                 }
 
                 if (!empty($cnResSingle['needs_manual_review'])) {
+                    // Fallo DURO (CONEC rechazó: sin saldo mayorista, sin stock, dato inválido/faltante → seguro
+                    // NO entregó) → RECHAZAR el pedido (no dejarlo "en espera" para que no se acumule).
+                    if (trim((string) ($cnResSingle['error_code'] ?? '')) !== '') {
+                        conec_reject_hard_order($mysqli, $updatedOrder);
+                        json_response(append_payment_difference_response([
+                            'ok' => false,
+                            'message' => 'La recarga no se pudo completar (' . ($cnMsgSingle ?: 'sin saldo o dato inválido') . '). El pedido fue RECHAZADO; no se dejó pendiente.',
+                            'order_id' => $orderId,
+                            'estado' => 'cancelado',
+                            'verified' => true,
+                            'rejected' => true,
+                            'provider_message' => $cnMsgSingle,
+                        ], fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder, $overpaymentAmount));
+                    }
+                    // Fallo INCIERTO (error_code vacío = pudo haberse entregado) → revisión manual (no se rechaza).
                     json_response(append_payment_difference_response([
                         'ok' => true,
                         'message' => 'Pago verificado. ' . ($cnMsgSingle ?: 'No se pudo confirmar automáticamente el estado de esta recarga.') . ' Un administrador la revisará y completará manualmente si hace falta.',
@@ -13987,6 +14037,13 @@ if ($action === 'batch_fulfill_item') {
         }
 
         if (!empty($cnRes['needs_manual_review'])) {
+            // Fallo DURO (sin saldo/stock/dato → seguro NO entregó) → RECHAZAR + reembolsar si es revendedor,
+            // en vez de dejarlo pendiente (evita acumulación y que luego se disparen varias con un pago).
+            if (trim((string) ($cnRes['error_code'] ?? '')) !== '') {
+                $cnRej = conec_reject_hard_order($mysqli, $order);
+                json_response(['ok' => false, 'estado' => 'cancelado', 'order_id' => $orderId, 'message' => ($cnMsg ?: 'Sin saldo o dato inválido') . ' — el pedido fue rechazado' . (!empty($cnRej['refunded']) ? ' y se te devolvió el saldo' : '') . '.', 'rejected' => true, 'provider_message' => $cnMsg]);
+            }
+            // Fallo INCIERTO (error_code vacío = pudo haberse entregado) → revisión manual (no se rechaza).
             json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $cnMsg ?: 'No se pudo confirmar automáticamente el estado de esta recarga. Un administrador la revisará.', 'pending_review' => true, 'provider_message' => $cnMsg]);
         }
 
