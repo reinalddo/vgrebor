@@ -87,15 +87,31 @@ if (!$pkg) {
 // pasar sin ID un juego que sí lo pide (evita debitar saldo por una recarga que el proveedor rechazará).
 $rr_needsId = true;
 $rr_prov = trim((string) ($pkg['api_provider'] ?? ''));
+$rr_apiId = (int) ($pkg['paquete_api'] ?? 0);
 if (trim((string) ($pkg['monto_ff'] ?? '')) !== '') {
     $rr_needsId = true;                       // Free Fire por monto: siempre pide ID.
 } elseif ($rr_prov === 'conec') {
-    // CONEC: el catálogo dice requires_game_id por producto (las gift cards vienen en false).
-    $rr_needsId = true;
+    // CONEC: el catálogo dice requires_game_id por producto (las gift cards vienen en false). Si el lookup
+    // FALLA (API lenta/caída), NO bloqueamos: las gift cards son el caso común; si fuera un juego sin ID el
+    // proveedor lo rechaza y se reembolsa. Evita el falso "Falta el ID del jugador" en gift cards.
+    $rr_needsId = false;
     try {
         require_once __DIR__ . '/../../includes/conec_recargas.php';
-        $rr_cp = function_exists('conec_api_product_by_id') ? conec_api_product_by_id($pdo, (int) ($pkg['paquete_api'] ?? 0)) : null;
+        $rr_cp = function_exists('conec_api_product_by_id') ? conec_api_product_by_id($pdo, $rr_apiId) : null;
         if (is_array($rr_cp)) { $rr_needsId = !empty($rr_cp['requires_game_id']); }
+    } catch (Throwable $e) {}
+} elseif ($rr_apiId > 0) {
+    // GiftVen (y cualquier paquete de catálogo por paquete_api): pide ID SOLO si el producto tiene campos
+    // requeridos. Las GIFT CARDS no tienen → NO piden ID (igual que la tienda oculta el paso del ID para gift
+    // cards). Antes caía al default `true` y bloqueaba las gift cards con "Falta el ID del jugador" (pedido
+    // cliente 2026-09-18: "sigue pidiendo id las gifcard"). Si el lookup falla, NO bloqueamos.
+    $rr_needsId = false;
+    try {
+        require_once __DIR__ . '/../../includes/recargas_api.php';
+        if (function_exists('recargas_api_fetch_product_by_id') && function_exists('recargas_api_describe_required_fields')) {
+            $rr_gp = recargas_api_fetch_product_by_id($rr_apiId);
+            if (is_array($rr_gp)) { $rr_needsId = !empty(recargas_api_describe_required_fields($rr_gp)); }
+        }
     } catch (Throwable $e) {}
 }
 if ($rr_needsId && $userIdentifier === '') {
