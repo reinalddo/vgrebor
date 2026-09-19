@@ -73,8 +73,11 @@ function verificar_catalogo_recargasamerica(mysqli $mysqli): array {
         return ['error' => 'La API KEY de RecargasAmérica no está configurada.', 'rows' => []];
     }
 
+    // Catálogo Unificado (paquetes con marca catalog_*) y catálogo VIEJO
+    // (marca pin/recharge; módulo dado de baja el 2026-09-20): los IDs de uno
+    // y otro son espacios distintos, cada paquete se verifica contra el suyo.
     try {
-        $liveProducts = recargasamerica_api_fetch_products_pins();
+        $liveProducts = recargasamerica_api_fetch_catalog();
     } catch (Throwable $e) {
         return ['error' => 'No se pudo consultar el catálogo en vivo de RecargasAmérica: ' . $e->getMessage(), 'rows' => []];
     }
@@ -86,9 +89,23 @@ function verificar_catalogo_recargasamerica(mysqli $mysqli): array {
         }
     }
 
+    $legacyById = [];
+    try {
+        foreach (recargasamerica_api_fetch_products_pins() as $product) {
+            if (is_array($product)) {
+                $legacyById[(int) ($product['id'] ?? 0)] = $product;
+            }
+        }
+    } catch (Throwable $e) {
+        // Módulo viejo ya dado de baja: los paquetes sin migrar saldrán como "no encontrado".
+    }
+
+    $tipoColRes = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'recargasamerica_tipo'");
+    $tipoColumn = ($tipoColRes instanceof mysqli_result && $tipoColRes->num_rows > 0) ? 'jp.recargasamerica_tipo' : "'' AS recargasamerica_tipo";
+
     $rows = [];
     $res = $mysqli->query(
-        "SELECT jp.id, jp.nombre AS paquete_nombre, jp.paquete_api, jp.precio, j.id AS juego_id, j.nombre AS juego_nombre
+        "SELECT jp.id, jp.nombre AS paquete_nombre, jp.paquete_api, jp.precio, {$tipoColumn}, j.id AS juego_id, j.nombre AS juego_nombre
          FROM juego_paquetes jp
          JOIN juegos j ON j.id = jp.juego_id
          WHERE jp.api_provider = 'recargasamerica' AND jp.paquete_api > 0
@@ -96,7 +113,9 @@ function verificar_catalogo_recargasamerica(mysqli $mysqli): array {
     );
     while ($row = $res->fetch_assoc()) {
         $productId = (int) $row['paquete_api'];
-        $liveProduct = $liveById[$productId] ?? null;
+        $liveProduct = recargasamerica_tipo_is_catalog($row['recargasamerica_tipo'] ?? '')
+            ? ($liveById[$productId] ?? null)
+            : ($legacyById[$productId] ?? null);
         $rows[] = [
             'paquete_id' => (int) $row['id'],
             'paquete_nombre' => (string) $row['paquete_nombre'],
@@ -110,7 +129,10 @@ function verificar_catalogo_recargasamerica(mysqli $mysqli): array {
         ];
     }
 
-    return ['error' => null, 'rows' => $rows, 'live_by_id' => $liveById];
+    // 'live_by_id' lo usa verificar_paquetes_ambiguos() (paquetes SIN proveedor
+    // guardado, de la época previa al Catálogo Unificado): su ID solo pudo
+    // venir del catálogo viejo.
+    return ['error' => null, 'rows' => $rows, 'live_by_id' => $legacyById];
 }
 
 // Paquetes con paquete_api guardado pero SIN proveedor explícito: el resto

@@ -742,7 +742,7 @@ $adminPackageMarkupPctConec = floatval($juego['precio_markup_pct_conec'] ?? 0);
 // mirar los catálogos (IDs de GiftVen y RecargasAmérica son de sistemas
 // independientes y pueden coincidir por coincidencia), y cada proveedor usa
 // su propio margen de ganancia (no pueden compartir el mismo %).
-function admin_package_raw_price_and_markup(array $package, array $apiProductsById, array $recargasAmericaProductsById, float $markupGiftven, float $markupRecargasamerica, array $conecProductsById = [], float $markupConec = 0.0): array {
+function admin_package_raw_price_and_markup(array $package, array $apiProductsById, array $recargasAmericaProductsById, float $markupGiftven, float $markupRecargasamerica, array $conecProductsById = [], float $markupConec = 0.0, array $recargasAmericaLegacyProductsById = []): array {
     $apiId = (int) ($package['paquete_api'] ?? 0);
     $provider = trim((string) ($package['api_provider'] ?? ''));
 
@@ -750,8 +750,16 @@ function admin_package_raw_price_and_markup(array $package, array $apiProductsBy
         return [floatval($conecProductsById[$apiId]['price'] ?? 0), $markupConec];
     }
 
-    if ($apiId > 0 && $provider === 'recargasamerica' && isset($recargasAmericaProductsById[$apiId])) {
-        return [floatval($recargasAmericaProductsById[$apiId]['price'] ?? 0), $markupRecargasamerica];
+    // Los IDs del Catálogo Unificado y del catálogo viejo de RecargasAmérica
+    // son espacios distintos: el precio se busca en el catálogo que indica la
+    // marca del paquete (recargasamerica_tipo), nunca en el otro.
+    if ($apiId > 0 && $provider === 'recargasamerica') {
+        $raPriceMap = recargasamerica_tipo_is_catalog($package['recargasamerica_tipo'] ?? '')
+            ? $recargasAmericaProductsById
+            : $recargasAmericaLegacyProductsById;
+        if (isset($raPriceMap[$apiId])) {
+            return [floatval($raPriceMap[$apiId]['price'] ?? 0), $markupRecargasamerica];
+        }
     }
 
     if ($apiId > 0 && $provider !== 'recargasamerica' && $provider !== 'conec' && isset($apiProductsById[$apiId])) {
@@ -921,6 +929,7 @@ if ($discordCatalogJson !== '') {
 $discordCatalogNotice = trim((string) ($_GET['discord_catalog_notice'] ?? ''));
 $discordCatalogError  = trim((string) ($_GET['discord_catalog_error'] ?? ''));
 $packageError         = trim((string) ($_GET['package_error'] ?? ''));
+$raMigrationNotice    = trim((string) ($_GET['ra_migration_notice'] ?? ''));
 
 if ($hasGiftVenCatalog) {
     try {
@@ -963,13 +972,114 @@ $recargasAmericaProductsById = [];
 $recargasAmericaProductsError = null;
 if ($recargasAmericaAvailable) {
     try {
-        $recargasAmericaProducts = recargasamerica_api_fetch_products_pins();
+        // Catálogo Unificado: el módulo viejo "PINes & Recargas" se da de baja
+        // el 2026-09-20. Sus IDs son un espacio distinto (ver
+        // includes/recargasamerica_api.php).
+        $recargasAmericaProducts = recargasamerica_api_fetch_catalog();
         foreach ($recargasAmericaProducts as $raProduct) {
             $recargasAmericaProductsById[(int) ($raProduct['id'] ?? 0)] = $raProduct;
         }
     } catch (Throwable $e) {
         $recargasAmericaProductsError = $e->getMessage();
     }
+}
+
+// Paquetes de ESTE juego que todavía apuntan al catálogo viejo (marca 'pin' /
+// 'recharge' o vacía): hay que emparejarlos con su producto del Catálogo
+// Unificado. Ver el asistente de migración más abajo.
+$recargasAmericaLegacyPackages = [];
+if ($recargasAmericaAvailable) {
+    $raLegacyStmt = $mysqli->prepare("SELECT id, nombre, cantidad, paquete_api, recargasamerica_tipo, precio, activo FROM juego_paquetes WHERE juego_id = ? AND api_provider = 'recargasamerica' AND (recargasamerica_tipo IS NULL OR recargasamerica_tipo IN ('', 'pin', 'recharge')) ORDER BY orden, id");
+    if ($raLegacyStmt) {
+        $raLegacyStmt->bind_param('i', $juego_id);
+        $raLegacyStmt->execute();
+        $raLegacyRes = $raLegacyStmt->get_result();
+        while ($raLegacyRes && ($raLegacyRow = $raLegacyRes->fetch_assoc())) {
+            $recargasAmericaLegacyPackages[] = $raLegacyRow;
+        }
+        $raLegacyStmt->close();
+    }
+}
+
+// Catálogo VIEJO de RecargasAmérica (solo si hay paquetes sin migrar): sirve
+// para saber qué producto era cada paquete y para mostrar su precio. Si el
+// módulo ya fue dado de baja responde 404 ENDPOINT_DISABLED → se usa una copia
+// de respaldo con los productos que el módulo tenía (id → nombre/tipo/precio).
+function admin_ra_legacy_fallback_catalog(): array {
+    $rows = [
+        [1, 'pin', 'Pin Free fire - 1.060 Diamantes + 10% Bono', 6.4493],
+        [2, 'pin', 'Pin Free Fire - 2.180 Diamantes + 10% Bono', 12.8087],
+        [3, 'pin', 'Pin Free Fire - 310 Diamantes + 10% Bono', 2.0597],
+        [4, 'pin', 'Pin Free Fire - 5.600 Diamantes + 10% Bono', 32.6067],
+        [5, 'pin', 'Pin Free Fire 100 Diamantes + 10% Bono', 0.6899],
+        [6, 'pin', 'Pin Free Fire - 520 Diamantes + 10% Bono', 3.4796],
+        [340, 'recharge', 'Recarga Free Fire - 100 Diamantes + 10% Bono', 0.6899],
+        [341, 'recharge', 'Recarga Free Fire - 1060 Diamantes + 10% Bono', 6.4493],
+        [342, 'recharge', 'Recarga Free Fire - 2.180 Diamantes + 10% Bono', 12.8087],
+        [343, 'recharge', 'Recarga Free Fire - 310 Diamantes + 10% Bono', 2.0597],
+        [344, 'recharge', 'Recarga Free Fire - 5.600 Diamantes + 10% Bono', 32.6067],
+        [345, 'recharge', 'Recarga Free Fire - 520 Diamantes + 10% Bono', 3.4796],
+    ];
+    $byId = [];
+    foreach ($rows as [$id, $type, $name, $price]) {
+        $byId[$id] = ['id' => $id, 'type' => $type, 'name' => $name, 'price' => $price];
+    }
+    return $byId;
+}
+
+$recargasAmericaLegacyProductsById = [];
+$recargasAmericaLegacyIsFallback = false;
+$recargasAmericaLegacyError = null;
+if (!empty($recargasAmericaLegacyPackages)) {
+    try {
+        foreach (recargasamerica_api_fetch_products_pins() as $raLegacyProduct) {
+            $recargasAmericaLegacyProductsById[(int) ($raLegacyProduct['id'] ?? 0)] = $raLegacyProduct;
+        }
+    } catch (Throwable $e) {
+        $recargasAmericaLegacyError = $e->getMessage();
+    }
+    if (empty($recargasAmericaLegacyProductsById)) {
+        $recargasAmericaLegacyProductsById = admin_ra_legacy_fallback_catalog();
+        $recargasAmericaLegacyIsFallback = true;
+    }
+}
+
+// Clave para emparejar un producto viejo con su equivalente nuevo: tipo +
+// cantidad de diamantes ("1.060" y "1060" son lo mismo); si el nombre no trae
+// diamantes, el nombre normalizado.
+function admin_ra_match_key(string $name, string $type): string {
+    $normalized = mb_strtolower(trim($name), 'UTF-8');
+    $normalized = preg_replace('/(?<=\d)[.,](?=\d{3}(?!\d))/', '', $normalized) ?? $normalized;
+    if (preg_match('/(\d+)\s*diamantes/u', $normalized, $m) === 1) {
+        return $type . '|' . (int) $m[1];
+    }
+    return $type . '|' . (preg_replace('/[^a-z0-9]+/', '', $normalized) ?? '');
+}
+
+// Propuesta de emparejamiento para cada paquete sin migrar:
+// ['package', 'legacy' => producto viejo|null, 'proposal' => producto nuevo|null,
+//  'confidence' => 'exact'|'price_differs'|'none'].
+$recargasAmericaMigrationRows = [];
+foreach ($recargasAmericaLegacyPackages as $raLegacyPkg) {
+    $legacyProduct = $recargasAmericaLegacyProductsById[(int) ($raLegacyPkg['paquete_api'] ?? 0)] ?? null;
+    $proposal = null;
+    $confidence = 'none';
+    $raLegacyMarker = trim((string) ($raLegacyPkg['recargasamerica_tipo'] ?? ''));
+    $legacyType = $legacyProduct !== null ? recargasamerica_tipo_base((string) ($legacyProduct['type'] ?? '')) : '';
+    // Si la marca del paquete no coincide con el tipo del producto viejo, algo
+    // no cuadra: no se propone nada automáticamente.
+    if ($legacyProduct !== null && ($raLegacyMarker === '' || recargasamerica_tipo_base($raLegacyMarker) === $legacyType)) {
+        $legacyKey = admin_ra_match_key((string) ($legacyProduct['name'] ?? ''), $legacyType);
+        foreach ($recargasAmericaProducts as $candidate) {
+            if (recargasamerica_catalog_product_type($candidate) === $legacyType
+                && admin_ra_match_key((string) ($candidate['name'] ?? ''), $legacyType) === $legacyKey) {
+                $proposal = $candidate;
+                $confidence = abs((float) ($candidate['price'] ?? 0) - (float) ($legacyProduct['price'] ?? 0)) < 0.00005 ? 'exact' : 'price_differs';
+                break;
+            }
+        }
+    }
+    $recargasAmericaMigrationRows[] = ['package' => $raLegacyPkg, 'legacy' => $legacyProduct, 'proposal' => $proposal, 'confidence' => $confidence];
 }
 
 // Catálogo pre-filtrado por palabra clave, uno por cada slot activo del
@@ -1233,6 +1343,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_price_adjust']))
     admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['discord_catalog_notice' => 'Precios actualizados: ' . $sign . number_format($pct, 1, '.', '') . '% aplicado a todos los paquetes.']);
 }
 
+// Migración de paquetes de RecargasAmérica al Catálogo Unificado (asistente
+// de emparejamiento): cambia paquete_api Y la marca recargasamerica_tipo a la
+// vez — los IDs de ambos catálogos son espacios distintos, nunca se debe
+// cambiar solo uno de los dos. Solo toca paquetes de ESTE juego que sigan con
+// marca vieja, y solo a un producto que exista en el catálogo nuevo con el
+// mismo tipo (pin→pin, recarga→recarga).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ra_migrate_catalog'])) {
+    $raMap = is_array($_POST['ra_map'] ?? null) ? $_POST['ra_map'] : [];
+    try {
+        $raCatalogNowById = [];
+        foreach (recargasamerica_api_fetch_catalog() as $raNowProduct) {
+            $raCatalogNowById[(int) ($raNowProduct['id'] ?? 0)] = $raNowProduct;
+        }
+    } catch (Throwable $e) {
+        admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'No se pudo consultar el Catálogo Unificado de RecargasAmérica: ' . $e->getMessage()]);
+    }
+
+    $raMigrated = 0;
+    $raSkipped = [];
+    foreach ($raMap as $raPkgIdRaw => $raNewIdRaw) {
+        $raPkgId = (int) $raPkgIdRaw;
+        $raNewId = (int) $raNewIdRaw;
+        if ($raPkgId <= 0 || $raNewId <= 0) {
+            continue;
+        }
+
+        $raPkgStmt = $mysqli->prepare("SELECT nombre, recargasamerica_tipo FROM juego_paquetes WHERE id = ? AND juego_id = ? AND api_provider = 'recargasamerica' LIMIT 1");
+        if (!$raPkgStmt) {
+            continue;
+        }
+        $raPkgStmt->bind_param('ii', $raPkgId, $juego_id);
+        $raPkgStmt->execute();
+        $raPkgRow = $raPkgStmt->get_result()->fetch_assoc();
+        $raPkgStmt->close();
+        if (!$raPkgRow) {
+            continue;
+        }
+
+        $raPkgName = trim((string) ($raPkgRow['nombre'] ?? ('#' . $raPkgId)));
+        $raOldMarker = trim((string) ($raPkgRow['recargasamerica_tipo'] ?? ''));
+        if ($raOldMarker !== '' && recargasamerica_tipo_is_catalog($raOldMarker)) {
+            $raSkipped[] = $raPkgName . ' (ya estaba migrado)';
+            continue;
+        }
+
+        $raNewProduct = $raCatalogNowById[$raNewId] ?? null;
+        $raNewTipo = $raNewProduct ? recargasamerica_catalog_tipo_for_product($raNewProduct) : '';
+        if ($raNewTipo === '') {
+            $raSkipped[] = $raPkgName . ' (el producto ' . $raNewId . ' no existe en el Catálogo Unificado)';
+            continue;
+        }
+        if ($raOldMarker !== '' && recargasamerica_tipo_base($raOldMarker) !== recargasamerica_tipo_base($raNewTipo)) {
+            $raSkipped[] = $raPkgName . ' (el tipo no coincide: era ' . recargasamerica_tipo_base($raOldMarker) . ' y el producto elegido es ' . recargasamerica_tipo_base($raNewTipo) . ')';
+            continue;
+        }
+
+        $raNewIdStr = (string) $raNewId;
+        $raUpdStmt = $mysqli->prepare("UPDATE juego_paquetes SET paquete_api = ?, recargasamerica_tipo = ? WHERE id = ? AND juego_id = ? AND api_provider = 'recargasamerica'");
+        if ($raUpdStmt) {
+            $raUpdStmt->bind_param('ssii', $raNewIdStr, $raNewTipo, $raPkgId, $juego_id);
+            $raUpdStmt->execute();
+            if ($raUpdStmt->affected_rows > 0) {
+                $raMigrated++;
+            }
+            $raUpdStmt->close();
+        }
+    }
+
+    $raNotice = $raMigrated . ' paquete(s) migrado(s) al Catálogo Unificado.';
+    if (!empty($raSkipped)) {
+        $raNotice .= ' No se cambiaron: ' . implode('; ', $raSkipped) . '.';
+    }
+    admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['ra_migration_notice' => $raNotice]);
+}
+
 // Procesar eliminación de paquete (antes de cualquier salida)
 if (isset($_GET['eliminar'])) {
     $del_id = intval($_GET['eliminar']);
@@ -1274,7 +1459,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $edit_recargasamerica_tipo = '';
     if ($edit_provider === 'recargasamerica' && $edit_paquete_api !== '') {
         $raEditSelectedProduct = $recargasAmericaProductsById[(int) $edit_paquete_api] ?? null;
-        $edit_recargasamerica_tipo = $raEditSelectedProduct ? recargasamerica_api_product_type($raEditSelectedProduct) : '';
+        $edit_recargasamerica_tipo = $raEditSelectedProduct ? recargasamerica_catalog_tipo_for_product($raEditSelectedProduct) : '';
     }
     $edit_vender_cuenta = $accountSaleFeatureEnabled && isset($_POST['edit_vender_cuenta']) ? 1 : 0;
     $edit_cuenta_texto = $accountSaleFeatureEnabled
@@ -1418,7 +1603,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $recargasamerica_tipo = '';
     if ($provider === 'recargasamerica' && $paquete_api !== '') {
         $raSelectedProduct = $recargasAmericaProductsById[(int) $paquete_api] ?? null;
-        $recargasamerica_tipo = $raSelectedProduct ? recargasamerica_api_product_type($raSelectedProduct) : '';
+        $recargasamerica_tipo = $raSelectedProduct ? recargasamerica_catalog_tipo_for_product($raSelectedProduct) : '';
     }
     $vender_cuenta = $accountSaleFeatureEnabled && isset($_POST['vender_cuenta']) ? 1 : 0;
     $cuenta_texto = $accountSaleFeatureEnabled
@@ -1863,7 +2048,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <select name="paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
                     <option value="">Selecciona un producto</option>
                     <?php foreach ($recargasAmericaProducts1 as $raProduct): ?>
-                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_catalog_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
                 <div class="form-text mt-2" style="color:#8be9fd;">Filtrado por: "<?= htmlspecialchars($juegoCategoriaApiRecargasAmerica, ENT_QUOTES, 'UTF-8') ?>" (<?= count($recargasAmericaProducts1) ?> productos).</div>
@@ -1875,7 +2060,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <select name="paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
                     <option value="">Selecciona un producto</option>
                     <?php foreach ($recargasAmericaProducts2 as $raProduct): ?>
-                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_catalog_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
                 <div class="form-text mt-2" style="color:#8be9fd;">Filtrado por: "<?= htmlspecialchars($juegoCategoriaApiRecargasAmerica2, ENT_QUOTES, 'UTF-8') ?>" (<?= count($recargasAmericaProducts2) ?> productos).</div>
@@ -1887,7 +2072,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <select name="paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
                     <option value="">Selecciona un producto</option>
                     <?php foreach ($recargasAmericaProducts3 as $raProduct): ?>
-                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_catalog_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
                 <div class="form-text mt-2" style="color:#8be9fd;">Filtrado por: "<?= htmlspecialchars($juegoCategoriaApiRecargasAmerica3, ENT_QUOTES, 'UTF-8') ?>" (<?= count($recargasAmericaProducts3) ?> productos).</div>
@@ -1899,7 +2084,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <select name="paquete_api" <?= $packageSourceSelectionEnabled ? 'data-package-source-required="1"' : 'required' ?> class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
                     <option value="">Selecciona un producto</option>
                     <?php foreach ($recargasAmericaProducts1 as $raProduct): ?>
-                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>"><?= htmlspecialchars(recargasamerica_catalog_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
                 <?php if ($recargasAmericaProductsError !== null): ?>
@@ -2308,6 +2493,92 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
     <?php if ($packageError !== ''): ?>
         <div class="alert alert-danger mb-4"><?= htmlspecialchars($packageError, ENT_QUOTES, 'UTF-8') ?></div>
     <?php endif; ?>
+    <?php if ($raMigrationNotice !== ''): ?>
+        <div class="alert alert-success mb-4"><?= htmlspecialchars($raMigrationNotice, ENT_QUOTES, 'UTF-8') ?></div>
+    <?php endif; ?>
+    <?php if (!empty($recargasAmericaMigrationRows)): ?>
+        <?php
+        $raMigrationExactCount = 0;
+        foreach ($recargasAmericaMigrationRows as $raMigRowCount) {
+            if ($raMigRowCount['confidence'] === 'exact') {
+                $raMigrationExactCount++;
+            }
+        }
+        ?>
+        <form method="post" class="mb-4 rounded-4 p-3" style="background:#101826;border:1px solid #f59e0b;">
+            <input type="hidden" name="ra_migrate_catalog" value="1">
+            <div class="fw-semibold mb-1" style="color:#fbbf24;">Migrar paquetes de RecargasAmérica al Catálogo Unificado</div>
+            <div class="small mb-3" style="color:#cbd5e1;">
+                RecargasAmérica da de baja el módulo "PINes &amp; Recargas" el <strong>20 de septiembre de 2026</strong>. Estos <?= count($recargasAmericaMigrationRows) ?> paquete(s) todavía apuntan a ese módulo y dejarán de venderse. Revisa el producto equivalente propuesto para cada uno (el emparejamiento es por tipo y cantidad de diamantes) y pulsa <em>Migrar</em>. Al migrar se cambian el producto y el tipo a la vez; los precios no se modifican.
+                <?php if ($recargasAmericaLegacyIsFallback): ?>
+                    <div class="mt-2" style="color:#fbbf24;">El módulo viejo ya no responde<?= $recargasAmericaLegacyError !== null ? ' (' . htmlspecialchars($recargasAmericaLegacyError, ENT_QUOTES, 'UTF-8') . ')' : '' ?>: los nombres de los productos actuales salen de una copia de respaldo. Verifica cada fila antes de migrar.</div>
+                <?php endif; ?>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-3" style="color:#e2e8f0;">
+                    <thead>
+                        <tr style="color:#8be9fd;">
+                            <th>Paquete de la tienda</th>
+                            <th>Producto actual (catálogo viejo)</th>
+                            <th style="min-width:280px;">Producto del Catálogo Unificado</th>
+                            <th>Coincidencia</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($recargasAmericaMigrationRows as $raMigRow): ?>
+                        <?php
+                        $raMigPkg = $raMigRow['package'];
+                        $raMigLegacy = $raMigRow['legacy'];
+                        $raMigProposal = $raMigRow['proposal'];
+                        $raMigLegacyType = $raMigLegacy !== null ? recargasamerica_tipo_base((string) ($raMigLegacy['type'] ?? '')) : '';
+                        $raMigProposalId = $raMigProposal !== null ? (int) ($raMigProposal['id'] ?? 0) : 0;
+                        ?>
+                        <tr>
+                            <td>
+                                <?= htmlspecialchars((string) ($raMigPkg['nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
+                                <?php if (empty($raMigPkg['activo'])): ?><span class="badge text-bg-secondary ms-1">inactivo</span><?php endif; ?>
+                            </td>
+                            <td class="small">
+                                <?php if ($raMigLegacy !== null): ?>
+                                    <?= htmlspecialchars(recargasamerica_api_product_label($raMigLegacy), ENT_QUOTES, 'UTF-8') ?>
+                                <?php else: ?>
+                                    <span style="color:#f87171;">ID <?= (int) ($raMigPkg['paquete_api'] ?? 0) ?> (no se reconoce en el catálogo viejo)</span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <select name="ra_map[<?= (int) ($raMigPkg['id'] ?? 0) ?>]" class="form-select form-select-sm" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                                    <option value="">— No cambiar todavía —</option>
+                                    <?php foreach ($recargasAmericaProducts as $raMigCandidate): ?>
+                                        <?php
+                                        $raMigCandidateId = (int) ($raMigCandidate['id'] ?? 0);
+                                        // Solo del mismo tipo que el producto actual (pin→pin, recarga→recarga).
+                                        if ($raMigLegacyType !== '' && recargasamerica_catalog_product_type($raMigCandidate) !== $raMigLegacyType) {
+                                            continue;
+                                        }
+                                        ?>
+                                        <option value="<?= $raMigCandidateId ?>" <?= $raMigCandidateId === $raMigProposalId && $raMigRow['confidence'] === 'exact' ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_catalog_product_label($raMigCandidate), ENT_QUOTES, 'UTF-8') ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                            <td class="small">
+                                <?php if ($raMigRow['confidence'] === 'exact'): ?>
+                                    <span class="badge text-bg-success">Nombre y precio iguales</span>
+                                <?php elseif ($raMigRow['confidence'] === 'price_differs'): ?>
+                                    <span class="badge text-bg-warning">Mismo producto, precio distinto (<?= htmlspecialchars(number_format((float) ($raMigLegacy['price'] ?? 0), 4, '.', ''), ENT_QUOTES, 'UTF-8') ?> → <?= htmlspecialchars(number_format((float) ($raMigProposal['price'] ?? 0), 4, '.', ''), ENT_QUOTES, 'UTF-8') ?>)</span>
+                                    <div style="color:#fbbf24;">Elígelo a mano si lo confirmas.</div>
+                                <?php else: ?>
+                                    <span class="badge text-bg-danger">Sin equivalente automático</span>
+                                    <div style="color:#fbbf24;">Elige el producto a mano.</div>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <button type="submit" class="btn btn-warning btn-sm" onclick="return confirm('¿Migrar los paquetes seleccionados al Catálogo Unificado? Se cambiará el producto y el tipo de cada uno.')">Migrar seleccionados (<?= (int) $raMigrationExactCount ?> con coincidencia exacta)</button>
+        </form>
+    <?php endif; ?>
     <?php if ($hasGiftVenCatalog && $apiProductsError !== null): ?>
         <div class="alert alert-warning mb-4">No se pudieron cargar los productos de la categoría API: <?= htmlspecialchars($apiProductsError, ENT_QUOTES, 'UTF-8') ?></div>
     <?php elseif ($hasGiftVenCatalog && empty($apiProducts)): ?>
@@ -2456,7 +2727,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                     </td>
                     <td class="text-neon" style="background:#181f2a; color:#22d3ee;">
                         <?php
-                        [$pAdminApiRaw, $pAdminMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec);
+                        [$pAdminApiRaw, $pAdminMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec, $recargasAmericaLegacyProductsById);
                         $pAdminManualOverride = !empty($p['precio_manual_override']);
                         $pAdminDisplayPrice = (!$pAdminManualOverride && $pAdminApiRaw !== null)
                             ? max(0.0, round($pAdminApiRaw * (1 + $pAdminMarkupPct / 100), 2))
@@ -2548,7 +2819,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                         <div style="color:#fff;"><span class="fw-semibold">Monto FF:</span> <?= htmlspecialchars($packageProviderReference, ENT_QUOTES, 'UTF-8') ?></div>
                     <?php endif; ?>
                     <?php
-                    [$pCardApiRaw, $pCardMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec);
+                    [$pCardApiRaw, $pCardMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec, $recargasAmericaLegacyProductsById);
                     $pCardManualOverride = !empty($p['precio_manual_override']);
                     $pCardDisplayPrice = (!$pCardManualOverride && $pCardApiRaw !== null)
                         ? max(0.0, round($pCardApiRaw * (1 + $pCardMarkupPct / 100), 2))
@@ -2612,6 +2883,10 @@ if (isset($_GET['editar'])) {
     $paqEditGallery = package_account_sales_fetch_gallery($mysqli, $edit_id);
     $paqEditProvider = $paq_edit ? admin_package_resolve_provider($paq_edit, $juego, $discordApiEnabled) : '';
     $paqEditApiSourceKey = trim((string) ($paq_edit['api_source_key'] ?? ''));
+    // Un paquete con marca vieja (pin/recharge) guarda un ID del catálogo VIEJO
+    // de RecargasAmérica: el selector NO debe preseleccionarlo (el mismo número
+    // en el Catálogo Unificado es otro producto).
+    $paqEditRaIsCatalog = recargasamerica_tipo_is_catalog($paq_edit['recargasamerica_tipo'] ?? '');
     $paqEditSelectedSource = '';
     if ($paqEditProvider === 'giftven') {
         if ($giftVenActiveSlots > 1) {
@@ -2727,7 +3002,7 @@ if (isset($_GET['editar'])) {
                 <select name="edit_paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
                     <option value="">Selecciona un producto</option>
                     <?php foreach ($recargasAmericaProducts1 as $raProduct): ?>
-                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= ($paqEditSelectedSource === 'recargasamerica_1' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0)) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= ($paqEditRaIsCatalog && $paqEditSelectedSource === 'recargasamerica_1' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0)) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_catalog_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
@@ -2738,7 +3013,7 @@ if (isset($_GET['editar'])) {
                 <select name="edit_paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
                     <option value="">Selecciona un producto</option>
                     <?php foreach ($recargasAmericaProducts2 as $raProduct): ?>
-                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= ($paqEditSelectedSource === 'recargasamerica_2' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0)) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= ($paqEditRaIsCatalog && $paqEditSelectedSource === 'recargasamerica_2' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0)) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_catalog_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
@@ -2749,7 +3024,7 @@ if (isset($_GET['editar'])) {
                 <select name="edit_paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
                     <option value="">Selecciona un producto</option>
                     <?php foreach ($recargasAmericaProducts3 as $raProduct): ?>
-                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= ($paqEditSelectedSource === 'recargasamerica_3' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0)) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= ($paqEditRaIsCatalog && $paqEditSelectedSource === 'recargasamerica_3' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0)) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_catalog_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
@@ -2760,7 +3035,7 @@ if (isset($_GET['editar'])) {
                 <select name="edit_paquete_api" <?= $packageSourceSelectionEnabled ? 'data-package-source-required="1"' : 'required' ?> class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
                     <option value="">Selecciona un producto</option>
                     <?php foreach ($recargasAmericaProducts1 as $raProduct): ?>
-                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_api_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
+                        <option value="<?= (int) ($raProduct['id'] ?? 0) ?>" <?= $paqEditRaIsCatalog && (int) ($paq_edit['paquete_api'] ?? 0) === (int) ($raProduct['id'] ?? 0) ? 'selected' : '' ?>><?= htmlspecialchars(recargasamerica_catalog_product_label($raProduct), ENT_QUOTES, 'UTF-8') ?></option>
                     <?php endforeach; ?>
                 </select>
                 <?php if ($recargasAmericaProductsError !== null): ?>
@@ -2897,7 +3172,7 @@ if (isset($_GET['editar'])) {
             <input type="number" step="0.01" name="edit_precio" value="<?= htmlspecialchars($paq_edit['precio']) ?>" required class="form-control" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;" data-discord-catalog-field="price">
             <?php if ($paqEditProvider === 'giftven' || $paqEditProvider === 'recargasamerica'): ?>
                 <?php
-                [$paqEditApiRaw, $paqEditMarkupPct] = admin_package_raw_price_and_markup($paq_edit, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec);
+                [$paqEditApiRaw, $paqEditMarkupPct] = admin_package_raw_price_and_markup($paq_edit, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec, $recargasAmericaLegacyProductsById);
                 $paqEditComputedPrice = $paqEditApiRaw !== null ? max(0.0, round($paqEditApiRaw * (1 + $paqEditMarkupPct / 100), 2)) : null;
                 $paqEditManualOverride = !empty($paq_edit['precio_manual_override']);
                 $paqEditProviderLabel = admin_package_provider_label($paqEditProvider);

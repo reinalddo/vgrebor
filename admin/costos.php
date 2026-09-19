@@ -166,6 +166,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recal
     }
 }
 
+// La marca recargasamerica_tipo se agregó después que las tablas: en una BD que
+// aún no la tiene se usa un valor vacío (= catálogo viejo) en vez de romper la página.
+function costos_column_exists(mysqli $mysqli, string $table, string $column): bool {
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (!isset($cache[$key])) {
+        $res = $mysqli->query('SHOW COLUMNS FROM `' . $table . "` LIKE '" . $mysqli->real_escape_string($column) . "'");
+        $cache[$key] = $res instanceof mysqli_result && $res->num_rows > 0;
+    }
+    return $cache[$key];
+}
+
 // ── Acción: recalcular históricos de RecargasAmérica ─────────────────────
 // Mismo mecanismo que el bloque de arriba (giftven) — hacía falta este
 // backfill porque resolve_order_unit_cost_base() (api/pedidos.php) recién
@@ -174,7 +186,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recal
 // por eso no aparecían en las estadísticas de ganancia.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recalcular_recargasamerica') {
     $pendingRaStmt = $mysqli->query(
-        "SELECT DISTINCT paquete_api FROM pedidos
+        "SELECT DISTINCT paquete_api, " . (costos_column_exists($mysqli, 'pedidos', 'recargasamerica_tipo') ? "COALESCE(recargasamerica_tipo, '')" : "''") . " AS ra_tipo FROM pedidos
          WHERE estado IN ('enviado','pagado') AND api_provider = 'recargasamerica'
            AND paquete_api IS NOT NULL AND paquete_api > 0 AND costo_unitario_base IS NULL"
     );
@@ -183,8 +195,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recal
     if ($pendingRaStmt instanceof mysqli_result) {
         while ($row = $pendingRaStmt->fetch_assoc()) {
             $apiId = (int) $row['paquete_api'];
+            $raTipoRow = (string) ($row['ra_tipo'] ?? '');
             try {
-                $product = recargasamerica_api_fetch_product_by_id($apiId);
+                // Los IDs del catálogo viejo y del Catálogo Unificado son
+                // espacios distintos: se busca según la marca del pedido.
+                $product = recargasamerica_api_fetch_product_for_tipo($apiId, $raTipoRow);
             } catch (Throwable $e) {
                 $product = null;
             }
@@ -199,9 +214,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recal
                  SET p.costo_unitario_base = ?,
                      p.precio_venta_unitario_base = ROUND(p.precio / NULLIF(m.tasa, 0) / GREATEST(p.cantidad_compra, 1), 4),
                      p.costo_fuente = 'recargasamerica_api'
-                 WHERE p.paquete_api = ? AND p.api_provider = 'recargasamerica' AND p.estado IN ('enviado','pagado') AND p.costo_unitario_base IS NULL"
+                 WHERE p.paquete_api = ? AND p.api_provider = 'recargasamerica' AND " . (costos_column_exists($mysqli, 'pedidos', 'recargasamerica_tipo') ? "COALESCE(p.recargasamerica_tipo, '')" : "''") . " = ? AND p.estado IN ('enviado','pagado') AND p.costo_unitario_base IS NULL"
             );
-            $updStmt->bind_param('di', $cost, $apiId);
+            $updStmt->bind_param('dis', $cost, $apiId, $raTipoRow);
             $updStmt->execute();
             $totalAppliedRa += $updStmt->affected_rows;
             $updStmt->close();
@@ -229,16 +244,29 @@ if (recargas_api_is_configured()) {
 }
 
 // ── Catálogo RecargasAmérica en vivo (misma idea que giftven arriba) ─────
+// Dos catálogos con IDs distintos: el Catálogo Unificado ($recargasamericaCostById,
+// paquetes con marca catalog_*) y el módulo viejo ($recargasamericaLegacyCostById,
+// dado de baja el 2026-09-20; si ya no responde, sus paquetes salen sin costo).
 $recargasamericaCostById = [];
+$recargasamericaLegacyCostById = [];
 if (recargasamerica_api_is_configured()) {
     try {
-        foreach (recargasamerica_api_fetch_products_pins() as $product) {
+        foreach (recargasamerica_api_fetch_catalog() as $product) {
             if (is_array($product) && isset($product['id'])) {
                 $recargasamericaCostById[(int) $product['id']] = (float) ($product['price'] ?? 0);
             }
         }
     } catch (Throwable $e) {
         // Sin conexión con la API: los paquetes recargasamerica se mostrarán sin costo disponible.
+    }
+    try {
+        foreach (recargasamerica_api_fetch_products_pins() as $product) {
+            if (is_array($product) && isset($product['id'])) {
+                $recargasamericaLegacyCostById[(int) $product['id']] = (float) ($product['price'] ?? 0);
+            }
+        }
+    } catch (Throwable $e) {
+        // Módulo viejo ya dado de baja: los paquetes sin migrar se mostrarán sin costo disponible.
     }
 }
 
@@ -272,7 +300,7 @@ if ($historyRes instanceof mysqli_result) {
 // ── Listado de paquetes activos ──────────────────────────────────────────
 $packages = [];
 $pkgRes = $mysqli->query(
-    "SELECT jp.id, jp.nombre AS paquete_nombre, jp.paquete_api, jp.api_provider, jp.monto_ff,
+    "SELECT jp.id, jp.nombre AS paquete_nombre, jp.paquete_api, jp.api_provider, jp.monto_ff, " . (costos_column_exists($mysqli, 'juego_paquetes', 'recargasamerica_tipo') ? 'jp.recargasamerica_tipo' : 'NULL AS recargasamerica_tipo') . ",
             j.id AS juego_id, j.nombre AS juego_nombre
      FROM juego_paquetes jp
      INNER JOIN juegos j ON j.id = jp.juego_id
@@ -290,7 +318,9 @@ if ($pkgRes instanceof mysqli_result) {
             $currentCost = $giftvenCostById[$apiId] ?? null;
         } elseif ($provider === 'recargasamerica') {
             $apiId = (int) ($row['paquete_api'] ?? 0);
-            $currentCost = $recargasamericaCostById[$apiId] ?? null;
+            $currentCost = recargasamerica_tipo_is_catalog($row['recargasamerica_tipo'] ?? '')
+                ? ($recargasamericaCostById[$apiId] ?? null)
+                : ($recargasamericaLegacyCostById[$apiId] ?? null);
         } else {
             $currentCost = $manualCostByPackage[$packageId]['costo'] ?? null;
         }

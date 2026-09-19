@@ -701,21 +701,43 @@ include __DIR__ . "/includes/header.php";
     // ese proveedor — RecargasAmérica no filtra por categoría, así que su
     // catálogo es el completo (todos los juegos mezclados) y no vale la
     // pena pedirlo si este juego no lo usa.
+    // Los IDs del Catálogo Unificado y del catálogo viejo (PINes & Recargas,
+    // dado de baja el 2026-09-20) son espacios DISTINTOS: cada paquete se
+    // busca en el catálogo que indica su marca (recargasamerica_tipo), y solo
+    // se consulta cada catálogo si algún paquete lo usa.
     $recargasAmericaProductsById = [];
+    $recargasAmericaLegacyProductsById = [];
     $usesRecargasAmericaCatalogGame = false;
+    $usesRecargasAmericaNewCatalog = false;
+    $usesRecargasAmericaLegacyCatalog = false;
     foreach ($paquetes as $pack) {
       if (trim((string) ($pack['api_provider'] ?? '')) === 'recargasamerica') {
         $usesRecargasAmericaCatalogGame = true;
-        break;
+        if (recargasamerica_tipo_is_catalog($pack['recargasamerica_tipo'] ?? '')) {
+          $usesRecargasAmericaNewCatalog = true;
+        } else {
+          $usesRecargasAmericaLegacyCatalog = true;
+        }
       }
     }
     if ($usesRecargasAmericaCatalogGame && recargasamerica_api_is_configured()) {
-      try {
-        foreach (recargasamerica_api_fetch_products_pins() as $raProduct) {
-          $recargasAmericaProductsById[(int) ($raProduct['id'] ?? 0)] = $raProduct;
+      if ($usesRecargasAmericaNewCatalog) {
+        try {
+          foreach (recargasamerica_api_fetch_catalog() as $raProduct) {
+            $recargasAmericaProductsById[(int) ($raProduct['id'] ?? 0)] = $raProduct;
+          }
+        } catch (Throwable $e) {
+          $recargasAmericaProductsById = [];
         }
-      } catch (Throwable $e) {
-        $recargasAmericaProductsById = [];
+      }
+      if ($usesRecargasAmericaLegacyCatalog) {
+        try {
+          foreach (recargasamerica_api_fetch_products_pins() as $raProduct) {
+            $recargasAmericaLegacyProductsById[(int) ($raProduct['id'] ?? 0)] = $raProduct;
+          }
+        } catch (Throwable $e) {
+          $recargasAmericaLegacyProductsById = [];
+        }
       }
     }
     // Un paquete asignado a una categoría desactivada no debe aparecer en la
@@ -801,8 +823,9 @@ include __DIR__ . "/includes/header.php";
         // este chequeo, un paquete de RecargasAmérica con el mismo ID
         // numérico que un producto de GiftVen tomaría el precio equivocado.
         $packPricingProvider = trim((string) ($pack['api_provider'] ?? ''));
-        if (!$packManualOverride && $packApiId > 0 && $packPricingProvider === 'recargasamerica' && isset($recargasAmericaProductsById[$packApiId])) {
-            $packApiRawPrice = floatval($recargasAmericaProductsById[$packApiId]['price'] ?? 0);
+        $packRaPriceMap = recargasamerica_tipo_is_catalog($pack['recargasamerica_tipo'] ?? '') ? $recargasAmericaProductsById : $recargasAmericaLegacyProductsById;
+        if (!$packManualOverride && $packApiId > 0 && $packPricingProvider === 'recargasamerica' && isset($packRaPriceMap[$packApiId])) {
+            $packApiRawPrice = floatval($packRaPriceMap[$packApiId]['price'] ?? 0);
             $packMarkupPct = $gameMarkupPctRecargasamerica;
         } else {
             $packApiRawPrice = (!$packManualOverride && $packApiId > 0 && $packPricingProvider !== 'recargasamerica' && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
