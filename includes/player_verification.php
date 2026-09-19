@@ -297,7 +297,8 @@ function player_verification_verify(array $game, string $userIdentifier, array $
     // validar).
     $packageProvider = strtolower(trim((string) ($package['api_provider'] ?? '')));
     $packageTipo = strtolower(trim((string) ($package['recargasamerica_tipo'] ?? '')));
-    if ($packageProvider === 'recargasamerica' && $packageTipo === 'recharge') {
+    $packageIsCatalog = $packageTipo !== '' && recargasamerica_tipo_is_catalog($packageTipo);
+    if ($packageProvider === 'recargasamerica' && ($packageTipo === 'recharge' || ($packageIsCatalog && recargasamerica_tipo_base($packageTipo) === 'recharge'))) {
         if ($userIdentifier === '') {
             return player_verification_result(false, 'invalid', 'Debes ingresar el ID del jugador.', ['http_status' => 422]);
         }
@@ -308,7 +309,18 @@ function player_verification_verify(array $game, string $userIdentifier, array $
         }
 
         try {
-            $raValidation = recargasamerica_api_validate_recharge_account($raProductId, $userIdentifier);
+            if ($packageIsCatalog) {
+                $raValidation = recargasamerica_api_validate_catalog_account($raProductId, $userIdentifier);
+                // El precheck del Catálogo Unificado es solo informativo:
+                // supported=false significa "este proveedor no sabe validar",
+                // no que el ID sea inválido → no bloquea la compra (mismo
+                // criterio que 'unavailable': el proveedor no dio dato).
+                if (empty($raValidation['supported'])) {
+                    return player_verification_result(false, 'unavailable', 'RecargasAmérica no puede verificar este ID de antemano.', ['http_status' => 502]);
+                }
+            } else {
+                $raValidation = recargasamerica_api_validate_recharge_account($raProductId, $userIdentifier);
+            }
         } catch (Throwable $e) {
             return player_verification_result(false, 'unavailable', 'No se pudo verificar el jugador: ' . $e->getMessage(), ['http_status' => 502]);
         }

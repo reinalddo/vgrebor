@@ -410,8 +410,10 @@ function admin_package_provider_reference_text(string $provider, array $package,
         if ($apiProductId <= 0) {
             return '—';
         }
-        $tipo = trim((string) ($package['recargasamerica_tipo'] ?? '')) === 'pin' ? 'PIN' : 'Recarga';
-        return 'ID ' . $apiProductId . ' · ' . $tipo;
+        $rawTipo = trim((string) ($package['recargasamerica_tipo'] ?? ''));
+        $tipoLabels = ['pin' => 'PIN', 'recharge' => 'Recarga', 'game' => 'Juego', 'streaming' => 'Streaming'];
+        $tipo = $tipoLabels[$rawTipo !== '' ? recargasamerica_tipo_base($rawTipo) : 'recharge'] ?? 'Recarga';
+        return 'ID ' . $apiProductId . ' · ' . $tipo . (recargasamerica_tipo_is_catalog($rawTipo) ? ' (Catálogo Unificado)' : '');
     }
 
     if ($provider === 'conec') {
