@@ -1351,6 +1351,21 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
     <div class="position-absolute bottom-0 end-0 rounded-circle" style="height:16rem;width:16rem;background:rgba(var(--theme-success-rgb),0.10);filter:blur(48px);pointer-events:none;"></div>
 
     <div class="container-lg store-shell position-relative pb-5 pt-4" data-tenant="<?php echo htmlspecialchars($tenantSlugAttr, ENT_QUOTES, "UTF-8"); ?>">
+      <?php
+      // Aviso global (solo admin/root, en las páginas del admin): paquetes de
+      // RecargasAmérica que siguen en el módulo viejo dado de baja el 2026-09-20.
+      // Se omite en la página de paquetes, que ya muestra el asistente completo.
+      $raNoticeRole = trim((string) (($authUser['rol'] ?? '') ?: ($_SESSION['auth_user']['rol'] ?? '')));
+      if ($isAdminInterface && in_array($raNoticeRole, ['admin', 'root'], true)
+          && preg_match('#/admin/paquetes(?:\.php|/|\?|$)#i', $requestUri) !== 1) {
+        require_once __DIR__ . '/recargasamerica_migration_notice.php';
+        echo recargasamerica_migration_notice_html(
+          recargasamerica_migration_pending_summary(store_config_db()),
+          recargasamerica_migration_days_left(),
+          static fn (int $gameId): string => app_path('/admin/paquetes/' . $gameId)
+        );
+      }
+      ?>
       <header class="site-header<?php echo $topBarEnabled ? ' d-flex flex-column site-header-topbar' : ' d-flex align-items-center justify-content-between gap-3'; ?>"<?php echo $topBarEnabled ? ' data-site-topbar="1"' : ''; ?>>
         <?php if ($topBarEnabled): ?><div class="site-header-main-row"><?php endif; ?>
         <?php if ($showMenuToggle): ?>
