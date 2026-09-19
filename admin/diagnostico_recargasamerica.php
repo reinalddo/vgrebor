@@ -88,10 +88,27 @@ $curlRa = ra_diag_curl('https://' . RA_DIAG_HOST . '/api/v1/wallet');
 $curlRaV4 = ra_diag_curl('https://' . RA_DIAG_HOST . '/api/v1/wallet', true);
 
 // 4) Sitio de control + IP pública de salida del servidor
+// RecargasAmérica solo tiene IPv4: la IP que ella ve es la de salida por IPv4
+// (puede ser distinta de la IPv6 que el servidor use por defecto hacia otros sitios).
 $control = ra_diag_curl('https://www.cloudflare.com/cdn-cgi/trace');
-$outboundIp = '';
+$controlV4 = ra_diag_curl('https://www.cloudflare.com/cdn-cgi/trace', true);
+$outboundIpDefault = '';
 if ($control['ok'] && preg_match('/^ip=(.+)$/m', $control['body'], $m)) {
+    $outboundIpDefault = trim($m[1]);
+}
+$outboundIp = '';
+if ($controlV4['ok'] && preg_match('/^ip=(.+)$/m', $controlV4['body'], $m)) {
     $outboundIp = trim($m[1]);
+}
+$outboundIpIsV6 = $outboundIpDefault !== '' && strpos($outboundIpDefault, ':') !== false;
+// Milisegundos de la conexión rechazada: ~0-5 ms = lo rechaza el propio servidor/hosting;
+// decenas de ms = el rechazo viene desde el otro extremo (RecargasAmérica o su red).
+$refusedMs = null;
+foreach ($tcpResults as $tcp) {
+    if (!$tcp['ok']) {
+        $refusedMs = (int) $tcp['ms'];
+        break;
+    }
 }
 
 // 5) Con la clave guardada (solo responde / no responde)
@@ -127,7 +144,10 @@ if (empty($dnsIps)) {
 } elseif (!$control['ok']) {
     $verdict = ['bad', 'El servidor no puede salir a internet por HTTPS (ni siquiera a un sitio de control).', 'Es un bloqueo del hosting: pídele a Hostinger que permita las conexiones salientes por el puerto 443.'];
 } elseif (!$tcpAnyOk) {
-    $verdict = ['bad', 'El servidor sí sale a internet, pero la conexión al puerto 443 de RecargasAmérica es rechazada al instante.', 'Es un bloqueo específico hacia RecargasAmérica: o el firewall del hosting, o RecargasAmérica bloqueó la IP de salida de este servidor (' . ($outboundIp !== '' ? $outboundIp : 'ver abajo') . '). Escribe a ambos con los datos de esta página.'];
+    $originHint = ($refusedMs !== null && $refusedMs >= 20)
+        ? 'El rechazo tardó ' . $refusedMs . ' ms (ida y vuelta hasta el otro extremo): lo más probable es que RecargasAmérica (o su red) esté rechazando la IP de este servidor.'
+        : 'El rechazo fue casi inmediato: lo más probable es un firewall del propio hosting.';
+    $verdict = ['bad', 'El servidor sí sale a internet, pero la conexión al puerto 443 de RecargasAmérica es rechazada al instante.', $originHint . ' La IP (IPv4) con la que este servidor sale hacia RecargasAmérica es ' . ($outboundIp !== '' ? $outboundIp : '(no se pudo obtener: pídesela al hosting)') . '. Escribe a ambos con los datos de esta página.'];
 } else {
     $verdict = ['warn', 'La conexión TCP funciona pero falla el HTTPS.', 'Puede ser un problema de certificados (SSL) del servidor. Copia los datos de esta página y envíalos al hosting.'];
 }
@@ -169,9 +189,10 @@ $curlVersion = function_exists('curl_version') ? (curl_version()['version'] ?? '
 
   <h2>IP pública de salida de este servidor</h2>
   <table>
-    <tr><th>IP que ve RecargasAmérica</th><td><?= $outboundIp !== '' ? '<strong>' . ra_diag_e($outboundIp) . '</strong>' : '<span class="fail">no se pudo obtener</span>' ?></td></tr>
+    <tr><th>IPv4 (la que ve RecargasAmérica)</th><td><?= $outboundIp !== '' ? '<strong>' . ra_diag_e($outboundIp) . '</strong>' : '<span class="fail">no se pudo obtener</span>' ?></td></tr>
+    <tr><th>IP por defecto del servidor</th><td><?= $outboundIpDefault !== '' ? ra_diag_e($outboundIpDefault) . ($outboundIpIsV6 ? ' <span style="color:#94a3b8;">(IPv6: RecargasAmérica solo usa IPv4, esta no sirve para pedirles un desbloqueo)</span>' : '') : '<span class="fail">no se pudo obtener</span>' ?></td></tr>
   </table>
-  <p class="note">Si RecargasAmérica tiene una lista de IPs permitidas o bloqueó una IP, es esta.</p>
+  <p class="note">Si RecargasAmérica bloqueó una IP o tiene una lista de IPs permitidas, es la IPv4 de arriba.</p>
 
   <h2>1. Nombre (DNS)</h2>
   <table>
@@ -210,6 +231,7 @@ $curlVersion = function_exists('curl_version') ? (curl_version()['version'] ?? '
   <h2>4. Sitio de control (¿el servidor sale a internet?)</h2>
   <table>
     <tr><th>www.cloudflare.com</th><td><?= $control['ok'] ? '<span class="ok">responde</span> (HTTP ' . (int) $control['http'] . ')' : '<span class="fail">falló</span>: ' . ra_diag_e($control['error']) ?></td></tr>
+    <tr><th>www.cloudflare.com (solo IPv4)</th><td><?= $controlV4['ok'] ? '<span class="ok">responde</span> (HTTP ' . (int) $controlV4['http'] . ')' : '<span class="fail">falló</span>: ' . ra_diag_e($controlV4['error']) ?></td></tr>
   </table>
 
   <h2>5. Con la API KEY guardada</h2>
@@ -227,7 +249,9 @@ $curlVersion = function_exists('curl_version') ? (curl_version()['version'] ?? '
 
   <h2>Resumen para copiar y enviar al hosting / a RecargasAmérica</h2>
 <pre>Fecha: <?= ra_diag_e(date('Y-m-d H:i:s')) ?> (<?= ra_diag_e(date_default_timezone_get()) ?>)
-IP de salida del servidor: <?= ra_diag_e($outboundIp !== '' ? $outboundIp : 'no disponible') ?>
+IP de salida IPv4 (la que ve RecargasAmerica): <?= ra_diag_e($outboundIp !== '' ? $outboundIp : 'no disponible') ?>
+
+IP de salida por defecto: <?= ra_diag_e($outboundIpDefault !== '' ? $outboundIpDefault : 'no disponible') ?>
 
 DNS <?= ra_diag_e(RA_DIAG_HOST) ?>: <?= ra_diag_e(!empty($dnsIps) ? implode(', ', $dnsIps) : 'no resuelve') ?>
 
@@ -237,7 +261,7 @@ cURL normal: <?= $curlRa['ok'] ? 'HTTP ' . (int) $curlRa['http'] : 'FALLA (' . (
 
 cURL IPv4: <?= $curlRaV4['ok'] ? 'HTTP ' . (int) $curlRaV4['http'] : 'FALLA (' . (int) $curlRaV4['errno'] . ': ' . $curlRaV4['error'] . ')' ?>
 
-Sitio de control (cloudflare): <?= $control['ok'] ? 'responde' : 'FALLA (' . $control['error'] . ')' ?>
+Sitio de control (cloudflare): <?= $control['ok'] ? 'responde' : 'FALLA (' . $control['error'] . ')' ?> · solo IPv4: <?= $controlV4['ok'] ? 'responde' : 'FALLA (' . $controlV4['error'] . ')' ?>
 
 Software: PHP <?= ra_diag_e(PHP_VERSION) ?> · cURL <?= ra_diag_e($curlVersion) ?>
 </pre>
