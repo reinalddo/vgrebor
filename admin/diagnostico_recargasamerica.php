@@ -98,9 +98,23 @@ foreach ($dnsIps as $ip) {
     }
 }
 
-// 3) HTTPS con cURL en modo "solo conectar": no se envía ninguna solicitud a la API
-$curlRa = ra_diag_curl('https://' . RA_DIAG_HOST . '/', false, true);
-$curlRaV4 = ra_diag_curl('https://' . RA_DIAG_HOST . '/', true, true);
+// 3) HTTPS con cURL en modo "solo conectar": no se envía ninguna solicitud a la API.
+// Si la conexión directa del paso 2 ya fue rechazada, NO se insiste (cada intento extra
+// hacia una IP bloqueada solo genera más ruido del lado de RecargasAmérica).
+$tcpAnyOkEarly = false;
+foreach ($tcpResults as $tcpEarly) {
+    if ($tcpEarly['ok']) {
+        $tcpAnyOkEarly = true;
+    }
+}
+$skippedTls = ['ok' => false, 'skipped' => true, 'errno' => 0, 'error' => 'no se probó: la conexión directa (paso 2) ya fue rechazada', 'http' => 0, 'ip' => '', 't_connect' => 0, 't_total' => 0, 'body' => ''];
+if (!empty($tcpResults) && !$tcpAnyOkEarly) {
+    $curlRa = $skippedTls;
+    $curlRaV4 = $skippedTls;
+} else {
+    $curlRa = ra_diag_curl('https://' . RA_DIAG_HOST . '/', false, true);
+    $curlRaV4 = ra_diag_curl('https://' . RA_DIAG_HOST . '/', true, true);
+}
 
 // 4) Sitio de control + IP pública de salida del servidor
 // RecargasAmérica solo tiene IPv4: la IP que ella ve es la de salida por IPv4
@@ -267,6 +281,8 @@ $curlVersion = function_exists('curl_version') ? (curl_version()['version'] ?? '
         <td>
           <?php if ($r['ok']): ?>
             <span class="ok">conexión segura establecida</span> · IP <?= ra_diag_e($r['ip']) ?> · conexión <?= (int) $r['t_connect'] ?> ms · total <?= (int) $r['t_total'] ?> ms
+          <?php elseif (!empty($r['skipped'])): ?>
+            <span style="color:#94a3b8;"><?= ra_diag_e($r['error']) ?></span>
           <?php else: ?>
             <span class="fail">falló</span> (código cURL <?= (int) $r['errno'] ?>): <?= ra_diag_e($r['error']) ?>
           <?php endif; ?>
@@ -311,9 +327,9 @@ DNS <?= ra_diag_e(RA_DIAG_HOST) ?>: <?= ra_diag_e(!empty($dnsIps) ? implode(', '
 
 TCP 443: <?php foreach ($tcpResults as $tcp): ?><?= ra_diag_e($tcp['ip']) ?> => <?= $tcp['ok'] ? 'conecta' : 'FALLA (' . ($tcp['error'] !== '' ? $tcp['error'] : 'sin detalle') . ', codigo ' . (int) $tcp['errno'] . ')' ?> en <?= (int) $tcp['ms'] ?> ms; <?php endforeach; ?>
 
-HTTPS (solo conexion): <?= $curlRa['ok'] ? 'OK' : 'FALLA (' . (int) $curlRa['errno'] . ': ' . $curlRa['error'] . ')' ?>
+HTTPS (solo conexion): <?= $curlRa['ok'] ? 'OK' : (!empty($curlRa['skipped']) ? 'no probado (el TCP ya fue rechazado)' : 'FALLA (' . (int) $curlRa['errno'] . ': ' . $curlRa['error'] . ')') ?>
 
-HTTPS IPv4 (solo conexion): <?= $curlRaV4['ok'] ? 'OK' : 'FALLA (' . (int) $curlRaV4['errno'] . ': ' . $curlRaV4['error'] . ')' ?>
+HTTPS IPv4 (solo conexion): <?= $curlRaV4['ok'] ? 'OK' : (!empty($curlRaV4['skipped']) ? 'no probado (el TCP ya fue rechazado)' : 'FALLA (' . (int) $curlRaV4['errno'] . ': ' . $curlRaV4['error'] . ')') ?>
 
 Sitio de control (cloudflare): <?= $control['ok'] ? 'responde' : 'FALLA (' . $control['error'] . ')' ?> · solo IPv4: <?= $controlV4['ok'] ? 'responde' : 'FALLA (' . $controlV4['error'] . ')' ?>
 
