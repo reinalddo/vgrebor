@@ -85,6 +85,210 @@ class RecargasAmericaProviderException extends RuntimeException {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Corte automático ("circuit breaker") y caché del catálogo.
+//
+// POR QUÉ: RecargasAmérica banea (24 h) la IP del servidor si ve varios
+// intentos seguidos sin credenciales o con credenciales incorrectas — los
+// trata como fuerza bruta. Sin memoria entre solicitudes, cada visita pública a
+// un juego, cada verificación de ID y cada carga del dashboard repetía la
+// llamada fallida (clave borrada, IP bloqueada, endpoint dado de baja…) y
+// podía disparar Y MANTENER el bloqueo.
+//
+// CÓMO: tras un fallo "definitivo" (no se puede conectar, 401, 403, 429,
+// ENDPOINT_DISABLED) se deja de llamar a RecargasAmérica durante un tiempo
+// (con espera creciente hasta 60 min mientras siga fallando); pasado ese
+// tiempo entra UNA sola solicitud de prueba a la vez, y si funciona se cierra
+// el corte. El estado vive en archivos temporales, separado por API KEY: al
+// cambiar la clave en Configuración el corte se reinicia solo. Si el directorio
+// temporal no se puede escribir, todo esto se desactiva (comportamiento anterior).
+// NO se corta por timeouts de lectura ni por errores 4xx/5xx de una compra
+// (422, 409, 502…): son respuestas reales de una orden concreta.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function recargasamerica_state_dir(): string {
+    return sys_get_temp_dir();
+}
+
+function recargasamerica_state_key(): string {
+    return substr(sha1('tvg-ra|' . recargasamerica_api_key()), 0, 16);
+}
+
+function recargasamerica_state_path(string $kind): string {
+    return rtrim(recargasamerica_state_dir(), '/\\') . DIRECTORY_SEPARATOR . 'tvg_ra_' . preg_replace('/[^a-z0-9_]+/i', '', $kind) . '_' . recargasamerica_state_key() . '.json';
+}
+
+function recargasamerica_state_read(string $kind): array {
+    $path = recargasamerica_state_path($kind);
+    if (!is_file($path)) {
+        return [];
+    }
+    $decoded = json_decode((string) @file_get_contents($path), true);
+    return is_array($decoded) ? $decoded : [];
+}
+
+function recargasamerica_state_write(string $kind, array $data): void {
+    @file_put_contents(recargasamerica_state_path($kind), json_encode($data), LOCK_EX);
+}
+
+function recargasamerica_state_delete(string $kind): void {
+    $path = recargasamerica_state_path($kind);
+    if (is_file($path)) {
+        @unlink($path);
+    }
+}
+
+// Ámbito de un endpoint para los cortes por "endpoint dado de baja": los dos
+// primeros tramos del path (products/pins, buy/catalog…); orders/{ref} es uno solo.
+function recargasamerica_breaker_scope(string $path): string {
+    $segments = array_values(array_filter(explode('/', trim($path, '/')), static fn ($p) => $p !== ''));
+    if (($segments[0] ?? '') === 'orders') {
+        return 'orders';
+    }
+    return implode('/', array_slice($segments, 0, 2));
+}
+
+// Lanza RuntimeException (fallo "limpio": no se envió nada) si el corte está
+// abierto. Si el tiempo de espera ya pasó, deja pasar UNA solicitud de prueba.
+function recargasamerica_breaker_check(string $path): void {
+    $state = recargasamerica_state_read('breaker');
+    if (empty($state)) {
+        return;
+    }
+
+    $now = time();
+    $keys = ['global', 'scope:' . recargasamerica_breaker_scope($path)];
+    $changed = false;
+    foreach ($keys as $key) {
+        $entry = $state[$key] ?? null;
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $until = (int) ($entry['until'] ?? 0);
+        $reason = trim((string) ($entry['reason'] ?? 'fallo de conexión'));
+        if ($now < $until) {
+            throw new RuntimeException('RecargasAmérica no está disponible temporalmente (' . $reason . '). Se volverá a intentar automáticamente a las ' . date('H:i', $until) . '.');
+        }
+        if ((int) ($entry['probe_until'] ?? 0) > $now) {
+            throw new RuntimeException('RecargasAmérica no está disponible temporalmente (' . $reason . '): se está comprobando si ya responde.');
+        }
+
+        // Esta solicitud hace de prueba; las demás esperan su resultado.
+        $state[$key]['probe_until'] = $now + 20;
+        $changed = true;
+    }
+
+    if ($changed) {
+        recargasamerica_state_write('breaker', $state);
+    }
+}
+
+// Abre el corte (global si $scope es null). La espera se duplica con cada
+// fallo consecutivo (base, 2×, 4×… hasta 60 min) y se reinicia con un éxito.
+function recargasamerica_breaker_trip(?string $scope, int $baseSeconds, string $reason): void {
+    $state = recargasamerica_state_read('breaker');
+    $key = $scope === null ? 'global' : 'scope:' . $scope;
+    $now = time();
+    $entry = is_array($state[$key] ?? null) ? $state[$key] : [];
+
+    // Solicitudes que ya iban en camino cuando se abrió: no agravan la espera.
+    if ($now < (int) ($entry['until'] ?? 0)) {
+        return;
+    }
+
+    $strikes = (int) ($entry['strikes'] ?? 0) + 1;
+    $duration = min(3600, $baseSeconds * (2 ** min(6, $strikes - 1)));
+    $state[$key] = [
+        'until' => $now + $duration,
+        'strikes' => $strikes,
+        'reason' => $reason,
+        'opened' => $now,
+        'probe_until' => 0,
+    ];
+    recargasamerica_state_write('breaker', $state);
+    error_log('TVG recargasamerica corte automático abierto [' . $key . '] ' . $duration . 's: ' . $reason);
+}
+
+function recargasamerica_breaker_success(string $path): void {
+    $state = recargasamerica_state_read('breaker');
+    if (empty($state)) {
+        return;
+    }
+
+    $scopeKey = 'scope:' . recargasamerica_breaker_scope($path);
+    $changed = false;
+    foreach (['global', $scopeKey] as $key) {
+        if (isset($state[$key])) {
+            unset($state[$key]);
+            $changed = true;
+        }
+    }
+
+    if ($changed) {
+        if (empty($state)) {
+            recargasamerica_state_delete('breaker');
+        } else {
+            recargasamerica_state_write('breaker', $state);
+        }
+    }
+}
+
+// Qué error HTTP de la API justifica dejar de llamar (los demás 4xx/5xx son
+// respuestas normales de una compra/consulta concreta).
+function recargasamerica_breaker_note_http_failure(string $path, int $status, string $code): void {
+    if ($status === 401) {
+        recargasamerica_breaker_trip(null, 1800, 'API KEY inválida, borrada o desactivada (' . ($code !== '' ? $code : '401') . ')');
+    } elseif ($status === 403) {
+        recargasamerica_breaker_trip(null, 900, 'acceso denegado por RecargasAmérica (' . ($code !== '' ? $code : '403') . ')');
+    } elseif ($status === 429) {
+        recargasamerica_breaker_trip(null, 300, 'demasiadas solicitudes (429)');
+    } elseif ($status === 404 && $code === 'ENDPOINT_DISABLED') {
+        recargasamerica_breaker_trip(recargasamerica_breaker_scope($path), 3600, 'este endpoint fue dado de baja por RecargasAmérica');
+    } else {
+        // Un error "normal" de una orden concreta (422, 409, 502…) también prueba
+        // que la conexión y la clave funcionan: cierra un corte previo.
+        recargasamerica_breaker_success($path);
+    }
+}
+
+// Entradas activas del corte, para mostrarlas en el diagnóstico.
+function recargasamerica_breaker_status(): array {
+    $rows = [];
+    $now = time();
+    foreach (recargasamerica_state_read('breaker') as $key => $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+        $rows[] = [
+            'key' => (string) $key,
+            'reason' => (string) ($entry['reason'] ?? ''),
+            'until' => (int) ($entry['until'] ?? 0),
+            'open' => $now < (int) ($entry['until'] ?? 0),
+            'strikes' => (int) ($entry['strikes'] ?? 0),
+        ];
+    }
+    return $rows;
+}
+
+function recargasamerica_breaker_reset(): void {
+    recargasamerica_state_delete('breaker');
+}
+
+// Caché en archivo (5 min frescos; hasta 24 h como "último catálogo bueno"
+// cuando RecargasAmérica no responde).
+function recargasamerica_cache_get(string $name, int $maxAgeSeconds): ?array {
+    $cached = recargasamerica_state_read('cache_' . $name);
+    if (!isset($cached['t'], $cached['data']) || !is_array($cached['data'])) {
+        return null;
+    }
+    return (time() - (int) $cached['t']) <= $maxAgeSeconds ? $cached['data'] : null;
+}
+
+function recargasamerica_cache_put(string $name, array $data): void {
+    recargasamerica_state_write('cache_' . $name, ['t' => time(), 'data' => $data]);
+}
+
 function recargasamerica_api_error_message_from_response(?array $data, int $status): string {
     if (is_array($data)) {
         foreach ([$data['error'] ?? null, $data['message'] ?? null] as $candidate) {
@@ -103,6 +307,10 @@ function recargasamerica_api_request(string $method, string $path, ?array $paylo
     if ($apiKey === '') {
         throw new RuntimeException('Configura primero la API KEY de RecargasAmérica.');
     }
+
+    // Corte automático: si RecargasAmérica está fallando de forma definitiva
+    // (clave inválida, IP bloqueada…), no se insiste — ver arriba.
+    recargasamerica_breaker_check($path);
 
     $url = recargasamerica_api_base_url() . '/' . ltrim($path, '/');
     $connectTimeout = min(recargasamerica_api_connect_timeout_seconds(), max(1, $timeout));
@@ -138,9 +346,15 @@ function recargasamerica_api_request(string $method, string $path, ?array $paylo
         $response = curl_exec($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
+        $curlErrno = curl_errno($ch);
         curl_close($ch);
 
         if ($response === false) {
+            // 6 = no resuelve el nombre, 7 = conexión rechazada/inalcanzable: la
+            // solicitud nunca llegó, y seguir insistiendo solo alarga un bloqueo.
+            if (in_array($curlErrno, [6, 7], true)) {
+                recargasamerica_breaker_trip(null, 300, 'no se puede conectar con RecargasAmérica');
+            }
             throw new RuntimeException('No se pudo consultar la API de RecargasAmérica: ' . $error);
         }
 
@@ -175,6 +389,7 @@ function recargasamerica_api_request(string $method, string $path, ?array $paylo
     }
 
     if (isset($status) && $status >= 400) {
+        recargasamerica_breaker_note_http_failure($path, (int) $status, (string) ($data['code'] ?? ''));
         throw new RecargasAmericaProviderException(
             recargasamerica_api_error_message_from_response($data, $status),
             (string) ($data['code'] ?? ''),
@@ -189,6 +404,9 @@ function recargasamerica_api_request(string $method, string $path, ?array $paylo
             $data
         );
     }
+
+    // Llegó una respuesta buena: se cierra cualquier corte que hubiera.
+    recargasamerica_breaker_success($path);
 
     return $data;
 }
@@ -241,13 +459,28 @@ function recargasamerica_api_fetch_products_pins(): array {
         return $cachedProducts;
     }
 
-    $response = recargasamerica_api_get('products/pins', recargasamerica_api_catalog_timeout_seconds());
-    $products = $response['data'] ?? null;
-    if (!is_array($products)) {
-        throw new RuntimeException('RecargasAmérica no devolvió una lista válida de productos.');
+    $fresh = recargasamerica_cache_get('legacy_pins', 300);
+    if ($fresh !== null) {
+        return $cachedProducts = $fresh;
+    }
+
+    try {
+        $response = recargasamerica_api_get('products/pins', recargasamerica_api_catalog_timeout_seconds());
+        $products = $response['data'] ?? null;
+        if (!is_array($products)) {
+            throw new RuntimeException('RecargasAmérica no devolvió una lista válida de productos.');
+        }
+    } catch (Throwable $e) {
+        // Sin respuesta: se usa el último catálogo bueno (hasta 24 h) en vez de fallar.
+        $stale = recargasamerica_cache_get('legacy_pins', 86400);
+        if ($stale !== null) {
+            return $cachedProducts = $stale;
+        }
+        throw $e;
     }
 
     $cachedProducts = array_values(array_filter($products, 'is_array'));
+    recargasamerica_cache_put('legacy_pins', $cachedProducts);
     return $cachedProducts;
 }
 
@@ -448,13 +681,30 @@ function recargasamerica_api_fetch_catalog(): array {
         return $cachedCatalog;
     }
 
-    $response = recargasamerica_api_get('products/catalog', recargasamerica_api_catalog_timeout_seconds());
-    $products = $response['data'] ?? null;
-    if (!is_array($products)) {
-        throw new RuntimeException('RecargasAmérica no devolvió una lista válida del Catálogo Unificado.');
+    // Catálogo fresco de hasta 5 min: evita una llamada a RecargasAmérica por
+    // cada visita pública a un juego (los precios se sincronizan desde aquí).
+    $fresh = recargasamerica_cache_get('catalog', 300);
+    if ($fresh !== null) {
+        return $cachedCatalog = $fresh;
+    }
+
+    try {
+        $response = recargasamerica_api_get('products/catalog', recargasamerica_api_catalog_timeout_seconds());
+        $products = $response['data'] ?? null;
+        if (!is_array($products)) {
+            throw new RuntimeException('RecargasAmérica no devolvió una lista válida del Catálogo Unificado.');
+        }
+    } catch (Throwable $e) {
+        // Sin respuesta: se usa el último catálogo bueno (hasta 24 h) en vez de fallar.
+        $stale = recargasamerica_cache_get('catalog', 86400);
+        if ($stale !== null) {
+            return $cachedCatalog = $stale;
+        }
+        throw $e;
     }
 
     $cachedCatalog = array_values(array_filter($products, 'is_array'));
+    recargasamerica_cache_put('catalog', $cachedCatalog);
     return $cachedCatalog;
 }
 
