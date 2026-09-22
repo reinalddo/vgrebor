@@ -11541,10 +11541,16 @@ include __DIR__ . "/includes/header.php";
         </div>`;
     }).join('');
 
+    // includeAmount: además de los datos del método (cédula, teléfono, banco…), el botón
+    // "copiar todo" también agrega el monto a pagar — se lee del resumen en el momento de
+    // copiar (no aquí), para que siempre sea el monto vigente aunque cambie después de
+    // pintar este bloque (cantidad, cupón, etc.).
+    const includeAmount = Boolean(options && options.includeAmount);
+
     return `
       <div class="payment-transfer-copy-list">${rowsMarkup}</div>
       <div class="payment-transfer-copy-actions">
-        <button type="button" class="btn btn-info fw-bold w-100 payment-transfer-copy-all-btn" data-payment-copy-text="${escapePaymentHtml(encodePaymentCopyText(normalizedRawText))}">${escapePaymentHtml(copyAllLabel)}</button>
+        <button type="button" class="btn btn-info fw-bold w-100 payment-transfer-copy-all-btn" data-payment-copy-text="${escapePaymentHtml(encodePaymentCopyText(normalizedRawText))}"${includeAmount ? ' data-payment-copy-include-amount="1"' : ''}>${escapePaymentHtml(copyAllLabel)}</button>
       </div>
       ${noteText !== '' ? `<p class="payment-transfer-copy-note mb-0">${escapePaymentHtml(noteText)}</p>` : ''}`;
   }
@@ -11575,7 +11581,15 @@ include __DIR__ . "/includes/header.php";
 
     container.querySelectorAll('[data-payment-copy-text]').forEach((button) => {
       button.addEventListener('click', async () => {
-        const copyValue = decodePaymentCopyText(button.getAttribute('data-payment-copy-text') || '');
+        let copyValue = decodePaymentCopyText(button.getAttribute('data-payment-copy-text') || '');
+        // Se lee el monto EN ESTE MOMENTO (no al pintar el bloque) para que sea
+        // siempre el vigente, incluso si cambió después (cantidad, cupón…).
+        if (button.hasAttribute('data-payment-copy-include-amount')) {
+          const amountText = String((paymentSummaryTotal && paymentSummaryTotal.textContent) || '').trim();
+          if (amountText !== '' && amountText !== '-') {
+            copyValue = `${copyValue}\nMonto a pagar: ${amountText}`;
+          }
+        }
         try {
           const copied = await copyTextToClipboard(copyValue);
           showToast(copied ? 'Dato copiado.' : 'No se pudo copiar el dato.', copied ? 'success' : 'error');
@@ -12321,7 +12335,8 @@ include __DIR__ . "/includes/header.php";
     paymentMethodCurrency.textContent = currencyLabel;
     paymentMethodDetails.classList.add('payment-method-details-rich');
     paymentMethodDetails.innerHTML = buildPaymentTransferCopyMarkup(String(method.datos || ''), {
-      copyAllLabel: 'Copiar todos los datos del método'
+      copyAllLabel: 'Copiar todos los datos del método',
+      includeAmount: true
     });
     bindPaymentTransferCopyButtons(paymentMethodDetails);
     setPaymentMethodQrState(resolvePublicImageUrl(method.qr_image_path || ''), `QR para ${method.nombre || 'el pago'}`);
