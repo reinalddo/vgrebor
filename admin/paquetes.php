@@ -1058,17 +1058,33 @@ function admin_ra_match_key(string $name, string $type): string {
 
 // Propuesta de emparejamiento para cada paquete sin migrar:
 // ['package', 'legacy' => producto viejo|null, 'proposal' => producto nuevo|null,
-//  'confidence' => 'exact'|'price_differs'|'none'].
+//  'type' => 'pin'|'recharge'|'', 'confidence' => 'exact'|'price_differs'|'mismatch'|'none'].
+//
+// FUENTE DE VERDAD DEL TIPO: la marca guardada en el propio paquete
+// (recargasamerica_tipo = 'pin'/'recharge'), NUNCA el catálogo viejo — ese catálogo
+// puede no responder (dado de baja el 20-sep) o nuestra copia de respaldo puede no
+// tener exactamente los mismos IDs que la cuenta real, y sin esta fuente confiable
+// el filtro de tipo se desactivaba por completo: el desplegable mezclaba pines y
+// recargas (nombres y precios casi idénticos) y era fácil elegir el equivocado
+// — causa real reportada: un paquete de "recarga" terminó entregando un PIN.
 $recargasAmericaMigrationRows = [];
 foreach ($recargasAmericaLegacyPackages as $raLegacyPkg) {
     $legacyProduct = $recargasAmericaLegacyProductsById[(int) ($raLegacyPkg['paquete_api'] ?? 0)] ?? null;
     $proposal = null;
     $confidence = 'none';
     $raLegacyMarker = trim((string) ($raLegacyPkg['recargasamerica_tipo'] ?? ''));
-    $legacyType = $legacyProduct !== null ? recargasamerica_tipo_base((string) ($legacyProduct['type'] ?? '')) : '';
-    // Si la marca del paquete no coincide con el tipo del producto viejo, algo
-    // no cuadra: no se propone nada automáticamente.
-    if ($legacyProduct !== null && ($raLegacyMarker === '' || recargasamerica_tipo_base($raLegacyMarker) === $legacyType)) {
+    $legacyProductType = $legacyProduct !== null ? recargasamerica_tipo_base((string) ($legacyProduct['type'] ?? '')) : '';
+    // Si el paquete no tiene marca guardada (solo paquetes muy antiguos), se recurre
+    // al tipo que reporte el producto del catálogo viejo, si se pudo identificar.
+    $legacyType = $raLegacyMarker !== '' ? recargasamerica_tipo_base($raLegacyMarker) : $legacyProductType;
+    // Si AMBAS fuentes existen y no concuerdan, el paquete ya estaba mal configurado
+    // desde antes de esta migración — no se propone nada automático, se marca para
+    // que el admin lo revise a mano en vez de arrastrar el error en silencio.
+    $mismatch = $raLegacyMarker !== '' && $legacyProduct !== null && $legacyProductType !== '' && recargasamerica_tipo_base($raLegacyMarker) !== $legacyProductType;
+
+    if ($mismatch) {
+        $confidence = 'mismatch';
+    } elseif ($legacyType !== '' && $legacyProduct !== null) {
         $legacyKey = admin_ra_match_key((string) ($legacyProduct['name'] ?? ''), $legacyType);
         foreach ($recargasAmericaProducts as $candidate) {
             if (recargasamerica_catalog_product_type($candidate) === $legacyType
@@ -1079,7 +1095,7 @@ foreach ($recargasAmericaLegacyPackages as $raLegacyPkg) {
             }
         }
     }
-    $recargasAmericaMigrationRows[] = ['package' => $raLegacyPkg, 'legacy' => $legacyProduct, 'proposal' => $proposal, 'confidence' => $confidence];
+    $recargasAmericaMigrationRows[] = ['package' => $raLegacyPkg, 'legacy' => $legacyProduct, 'proposal' => $proposal, 'type' => $legacyType, 'confidence' => $confidence];
 }
 
 // Catálogo pre-filtrado por palabra clave, uno por cada slot activo del
@@ -2530,13 +2546,22 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                         $raMigPkg = $raMigRow['package'];
                         $raMigLegacy = $raMigRow['legacy'];
                         $raMigProposal = $raMigRow['proposal'];
-                        $raMigLegacyType = $raMigLegacy !== null ? recargasamerica_tipo_base((string) ($raMigLegacy['type'] ?? '')) : '';
+                        // Misma marca que decidió la fila (nunca el catálogo viejo solo):
+                        // así el filtro del desplegable sigue funcionando aunque ese
+                        // catálogo no responda o no reconozca el ID guardado.
+                        $raMigLegacyType = (string) ($raMigRow['type'] ?? '');
                         $raMigProposalId = $raMigProposal !== null ? (int) ($raMigProposal['id'] ?? 0) : 0;
+                        $raMigTypeLabels = ['pin' => 'PIN', 'recharge' => 'Recarga'];
                         ?>
                         <tr>
                             <td>
                                 <?= htmlspecialchars((string) ($raMigPkg['nombre'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
                                 <?php if (empty($raMigPkg['activo'])): ?><span class="badge text-bg-secondary ms-1">inactivo</span><?php endif; ?>
+                                <?php if ($raMigLegacyType !== ''): ?>
+                                    <div class="small" style="color:#8be9fd;">Este paquete está marcado como <strong><?= htmlspecialchars($raMigTypeLabels[$raMigLegacyType] ?? $raMigLegacyType, ENT_QUOTES, 'UTF-8') ?></strong>. El desplegable solo muestra productos de ese mismo tipo.</div>
+                                <?php else: ?>
+                                    <div class="small" style="color:#f87171;">No se sabe si es PIN o Recarga (paquete sin marca guardada): elige con mucho cuidado.</div>
+                                <?php endif; ?>
                             </td>
                             <td class="small">
                                 <?php if ($raMigLegacy !== null): ?>
@@ -2551,7 +2576,8 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                                     <?php foreach ($recargasAmericaProducts as $raMigCandidate): ?>
                                         <?php
                                         $raMigCandidateId = (int) ($raMigCandidate['id'] ?? 0);
-                                        // Solo del mismo tipo que el producto actual (pin→pin, recarga→recarga).
+                                        // Solo del mismo tipo que el paquete (pin→pin, recarga→recarga). Si no
+                                        // se sabe el tipo (paquete sin marca), no se filtra: se muestra todo.
                                         if ($raMigLegacyType !== '' && recargasamerica_catalog_product_type($raMigCandidate) !== $raMigLegacyType) {
                                             continue;
                                         }
@@ -2561,7 +2587,10 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                                 </select>
                             </td>
                             <td class="small">
-                                <?php if ($raMigRow['confidence'] === 'exact'): ?>
+                                <?php if ($raMigRow['confidence'] === 'mismatch'): ?>
+                                    <span class="badge text-bg-danger">⚠ Este paquete ya estaba mal configurado</span>
+                                    <div style="color:#fbbf24;">Dice ser <?= htmlspecialchars($raMigTypeLabels[recargasamerica_tipo_base((string) ($raMigPkg['recargasamerica_tipo'] ?? ''))] ?? '?', ENT_QUOTES, 'UTF-8') ?>, pero el producto que tiene guardado (ID <?= (int) ($raMigPkg['paquete_api'] ?? 0) ?>) es de tipo <?= htmlspecialchars($raMigTypeLabels[recargasamerica_tipo_base((string) ($raMigLegacy['type'] ?? ''))] ?? '?', ENT_QUOTES, 'UTF-8') ?> en el catálogo viejo. Puede que ya estuviera entregando el producto equivocado antes de esta migración. Elige el correcto a mano.</div>
+                                <?php elseif ($raMigRow['confidence'] === 'exact'): ?>
                                     <span class="badge text-bg-success">Nombre y precio iguales</span>
                                 <?php elseif ($raMigRow['confidence'] === 'price_differs'): ?>
                                     <span class="badge text-bg-warning">Mismo producto, precio distinto (<?= htmlspecialchars(number_format((float) ($raMigLegacy['price'] ?? 0), 4, '.', ''), ENT_QUOTES, 'UTF-8') ?> → <?= htmlspecialchars(number_format((float) ($raMigProposal['price'] ?? 0), 4, '.', ''), ENT_QUOTES, 'UTF-8') ?>)</span>
