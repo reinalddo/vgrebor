@@ -418,3 +418,31 @@ function fullimpulso_api_request_cancel(string $orderId): array {
         'payload' => $data,
     ];
 }
+
+/**
+ * Saldo de la cuenta en FullImpulso (action=balance, API SMM estándar v2 —
+ * documentación pública: {"balance": "100.84292", "currency": "USD"}). Solo lectura.
+ */
+function fullimpulso_api_fetch_balance(int $timeout = 12): array {
+    if (!fullimpulso_is_configured()) {
+        throw new RuntimeException('Falta configurar la API key de FullImpulso.');
+    }
+
+    $result = fullimpulso_api_http_post([
+        'key' => fullimpulso_api_key(),
+        'action' => 'balance',
+    ], $timeout);
+    $data = $result['data'];
+
+    if (isset($data['error'])) {
+        throw new RuntimeException(trim((string) $data['error']) ?: 'FullImpulso no pudo informar el saldo.');
+    }
+    if (!isset($data['balance']) || !is_numeric($data['balance'])) {
+        throw new RuntimeException('FullImpulso no devolvió el saldo esperado.');
+    }
+
+    return [
+        'balance' => (float) $data['balance'],
+        'currency' => trim((string) ($data['currency'] ?? '')) ?: 'USD',
+    ];
+}

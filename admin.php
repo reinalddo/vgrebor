@@ -3852,6 +3852,11 @@ require_once __DIR__ . '/includes/header.php';
             <h1 class="display-4 fw-bold text-info mb-4">Panel de Administración</h1>
             <h2 class="h3 fw-semibold mb-3">Bienvenido al panel de administración</h2>
             <p class="mb-4">Selecciona una sección para comenzar.</p>
+            <?php
+            // Fila común de tarjetas de estado: RecargasAmérica (server-side, abajo) + BNC, Binance,
+            // CONEC, TiendaGiftVen y FullImpulso (las agrega el script al final desde admin/api_gadgets.php).
+            ?>
+            <div id="dash-gadgets-row" class="d-flex flex-wrap justify-content-center gap-3<?= recargasamerica_api_is_configured() ? ' mb-4' : '' ?>">
             <?php if (recargasamerica_api_is_configured()):
                 $raWalletBalance = null;
                 $raWalletCurrency = 'USD';
@@ -3872,7 +3877,7 @@ require_once __DIR__ . '/includes/header.php';
                 $raWalletBad = $raWalletError !== null || $raWalletLow;
                 $raWalletColor = $raWalletBad ? '#ff3b3b' : '#22c55e';
             ?>
-            <div class="d-flex justify-content-center mb-4">
+            <div>
                 <div style="background:#10141a; border:2px solid <?= $raWalletColor ?>; box-shadow:0 0 18px <?= $raWalletColor ?>55; border-radius:14px; padding:0.9rem 1.6rem; display:inline-block;">
                     <div style="font-size:0.8rem; color:#9fb3c8; text-transform:uppercase; letter-spacing:0.05em;">Saldo RecargasAmérica</div>
                     <?php if ($raWalletError !== null): ?>
@@ -3885,6 +3890,107 @@ require_once __DIR__ . '/includes/header.php';
                     <?php endif; ?>
                 </div>
             </div>
+            <?php endif; ?>
+            </div>
+            <?php if (in_array($adminUserRole, ['admin', 'root'], true)): ?>
+            <script>
+            // Tarjetas de estado de las APIs (días de BNC/Binance, saldo de CONEC/TiendaGiftVen/FullImpulso).
+            // Cada una se consulta por separado a admin/api_gadgets.php (con caché de unos minutos en el servidor),
+            // así una API lenta o caída nunca retrasa el dashboard. Verde = bien; rojo = se está acabando
+            // (2 días o menos / saldo bajo) o no se pudo consultar.
+            (function () {
+              var row = document.getElementById('dash-gadgets-row');
+              if (!row || !window.fetch) return;
+              var endpoint = <?= json_encode(app_path('/admin/api_gadgets.php')) ?>;
+              var COLORS = { ok: '#22c55e', low: '#ff3b3b', error: '#ff3b3b', loading: '#475569' };
+              var cards = [];
+
+              function ageText(seconds) {
+                if (seconds < 60) return seconds + ' s';
+                if (seconds < 3600) return Math.floor(seconds / 60) + ' min';
+                if (seconds < 86400) return Math.floor(seconds / 3600) + ' h';
+                return Math.floor(seconds / 86400) + ' d';
+              }
+
+              function makeDiv(css) {
+                var el = document.createElement('div');
+                el.style.cssText = css;
+                return el;
+              }
+
+              function buildCard(gadget) {
+                var box = makeDiv('background:#10141a; border:2px solid ' + COLORS.loading + '; border-radius:14px; padding:0.9rem 1.6rem; display:inline-block; min-width:200px; max-width:320px; text-align:center;');
+                box.setAttribute('data-dash-gadget', gadget.key);
+                var title = makeDiv('font-size:0.8rem; color:#9fb3c8; text-transform:uppercase; letter-spacing:0.05em;');
+                title.textContent = gadget.title;
+                var main = makeDiv('font-size:1.6rem; font-weight:700; color:#9fb3c8;');
+                main.textContent = 'Consultando…';
+                var sub = makeDiv('font-size:0.8rem; font-weight:600; margin-top:0.15rem;');
+                var age = makeDiv('font-size:0.7rem; color:#6b7c93; margin-top:0.25rem;');
+                box.appendChild(title);
+                box.appendChild(main);
+                box.appendChild(sub);
+                box.appendChild(age);
+                var wrap = document.createElement('div');
+                wrap.appendChild(box);
+                row.appendChild(wrap);
+                return { key: gadget.key, box: box, main: main, sub: sub, age: age };
+              }
+
+              function paint(card, data) {
+                var color = COLORS[data.status] || COLORS.loading;
+                card.box.style.borderColor = color;
+                card.box.style.boxShadow = '0 0 18px ' + color + '55';
+                card.main.style.color = color;
+                card.main.style.fontSize = data.status === 'error' ? '1.1rem' : '1.6rem';
+                card.main.textContent = data.main || '';
+                card.sub.style.color = data.status === 'ok' ? '#9fb3c8' : color;
+                card.sub.textContent = data.sub || '';
+                card.age.textContent = typeof data.age === 'number' ? 'Actualizado hace ' + ageText(data.age) : '';
+              }
+
+              function load(card, force) {
+                var url = endpoint + '?g=' + encodeURIComponent(card.key) + (force ? '&forzar=1' : '');
+                fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+                  .then(function (r) { return r.json(); })
+                  .then(function (data) {
+                    if (!data || !data.ok) throw new Error((data && data.error) || 'Error');
+                    paint(card, data);
+                  })
+                  .catch(function (err) {
+                    paint(card, { status: 'error', main: '⚠ No se pudo consultar', sub: String((err && err.message) || ''), age: null });
+                  });
+              }
+
+              fetch(endpoint + '?g=lista', { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                  var list = (data && data.ok && data.gadgets) || [];
+                  if (!list.length) return;
+                  row.classList.add('mb-4');
+                  list.forEach(function (gadget) {
+                    var card = buildCard(gadget);
+                    cards.push(card);
+                    load(card, false);
+                  });
+
+                  var holder = document.createElement('div');
+                  holder.className = 'text-center mb-4';
+                  var button = document.createElement('button');
+                  button.type = 'button';
+                  button.className = 'btn btn-sm btn-outline-secondary';
+                  button.textContent = '↻ Actualizar estado de las APIs';
+                  button.addEventListener('click', function () {
+                    button.disabled = true;
+                    cards.forEach(function (card) { load(card, true); });
+                    setTimeout(function () { button.disabled = false; }, 8000);
+                  });
+                  holder.appendChild(button);
+                  row.parentNode.insertBefore(holder, row.nextSibling);
+                })
+                .catch(function () { /* sin tarjetas extra si el endpoint no responde */ });
+            })();
+            </script>
             <?php endif; ?>
             <div class="d-flex flex-wrap justify-content-center gap-3">
                 <a href="/admin/pedidos" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>📋</span>Pedidos</a>

@@ -1089,6 +1089,34 @@ function recargas_api_fetch_transactions(): array {
     return is_array($items) ? array_values(array_filter($items, 'is_array')) : [];
 }
 
+// Saldo de la cuenta en TiendaGiftVen (GET /api/v1/saldo según su documentación
+// pública: {"ok": true, "saldo": 150.00, "nombre": "..."}). Solo lectura.
+function recargas_api_fetch_balance(int $timeout = 12): array {
+    $apiKey = recargas_api_key();
+    if ($apiKey === '') {
+        throw new RuntimeException('Configura primero la API KEY de recargas.');
+    }
+
+    $response = recargas_api_http_get_json(
+        recargas_api_base_url() . '/saldo',
+        ['X-API-Key: ' . $apiKey],
+        $timeout,
+        true
+    );
+
+    if (isset($response['ok']) && !$response['ok']) {
+        throw new RuntimeException(trim((string) ($response['error'] ?? $response['mensaje'] ?? '')) ?: 'TiendaGiftVen no pudo informar el saldo.');
+    }
+    if (!isset($response['saldo']) || !is_numeric($response['saldo'])) {
+        throw new RuntimeException('TiendaGiftVen no devolvió el saldo esperado.');
+    }
+
+    return [
+        'saldo' => (float) $response['saldo'],
+        'nombre' => trim((string) ($response['nombre'] ?? '')),
+    ];
+}
+
 function recargas_api_get_webhook(): array {
     $apiKey = recargas_api_key();
     if ($apiKey === '') {
