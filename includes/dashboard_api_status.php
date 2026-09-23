@@ -3,8 +3,8 @@
 // TiendaGiftVen, FullImpulso). RecargasAmérica tiene su propia tarjeta en admin.php.
 //
 // Reglas:
-//  · APIs con DÍAS de suscripción (BNC y Binance): verde si quedan MÁS de 2 días, rojo si
-//    quedan 2 o menos (incluido 0).
+//  · APIs con DÍAS de suscripción (BNC y Binance): verde si quedan MÁS de 3 días, rojo si
+//    quedan 3 o menos (incluido 0).
 //  · APIs con SALDO (CONEC, TiendaGiftVen, FullImpulso): rojo si el saldo es menor a
 //    DASH_GADGET_MIN_BALANCE_USD (mismo criterio que la tarjeta de RecargasAmérica).
 //  · Si no se puede consultar: rojo, con el motivo y el último dato conocido.
@@ -22,7 +22,7 @@
 require_once __DIR__ . '/store_config.php';
 
 if (!defined('DASH_GADGET_MIN_DAYS')) {
-    define('DASH_GADGET_MIN_DAYS', 2);            // rojo si quedan 2 días o menos
+    define('DASH_GADGET_MIN_DAYS', 3);            // rojo si quedan 3 días o menos
 }
 if (!defined('DASH_GADGET_MIN_BALANCE_USD')) {
     define('DASH_GADGET_MIN_BALANCE_USD', 10.0);  // rojo si el saldo es menor a esto
@@ -35,6 +35,20 @@ if (!defined('DASH_GADGET_TTL_FAIL')) {
 }
 if (!defined('DASH_GADGET_FORCE_MIN_AGE')) {
     define('DASH_GADGET_FORCE_MIN_AGE', 30);
+}
+
+/**
+ * Tipo de cada tarjeta: 'balance' (saldo en dinero) o 'days' (días de suscripción). El dashboard
+ * pinta primero la fila de saldos y debajo la de días.
+ */
+function dash_gadget_kinds(): array {
+    return [
+        'bnc' => 'days',
+        'binance' => 'days',
+        'conec' => 'balance',
+        'giftven' => 'balance',
+        'fullimpulso' => 'balance',
+    ];
 }
 
 function dash_gadget_titles(): array {
@@ -324,10 +338,11 @@ function dash_api_gadgets_list(): array {
         'fullimpulso' => fullimpulso_is_configured(),
     ];
 
+    $kinds = dash_gadget_kinds();
     $list = [];
     foreach ($titles as $key => $title) {
         if (!empty($available[$key])) {
-            $list[] = ['key' => $key, 'title' => $title];
+            $list[] = ['key' => $key, 'title' => $title, 'kind' => $kinds[$key] ?? 'balance'];
         }
     }
 

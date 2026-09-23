@@ -3853,10 +3853,11 @@ require_once __DIR__ . '/includes/header.php';
             <h2 class="h3 fw-semibold mb-3">Bienvenido al panel de administración</h2>
             <p class="mb-4">Selecciona una sección para comenzar.</p>
             <?php
-            // Fila común de tarjetas de estado: RecargasAmérica (server-side, abajo) + BNC, Binance,
-            // CONEC, TiendaGiftVen y FullImpulso (las agrega el script al final desde admin/api_gadgets.php).
+            // Tarjetas de estado de las APIs, en dos filas: ARRIBA los saldos (RecargasAmérica, server-side,
+            // más CONEC, TiendaGiftVen y FullImpulso) y ABAJO los días de suscripción (BNC y Binance). Las
+            // que no son de RecargasAmérica las agrega el script de abajo desde admin/api_gadgets.php.
             ?>
-            <div id="dash-gadgets-row" class="d-flex flex-wrap justify-content-center gap-3<?= recargasamerica_api_is_configured() ? ' mb-4' : '' ?>">
+            <div id="dash-gadgets-balance-row" class="d-flex flex-wrap justify-content-center gap-3<?= recargasamerica_api_is_configured() ? ' mb-4' : '' ?>">
             <?php if (recargasamerica_api_is_configured()):
                 $raWalletBalance = null;
                 $raWalletCurrency = 'USD';
@@ -3892,15 +3893,19 @@ require_once __DIR__ . '/includes/header.php';
             </div>
             <?php endif; ?>
             </div>
+            <div id="dash-gadgets-days-row" class="d-flex flex-wrap justify-content-center gap-3"></div>
             <?php if (in_array($adminUserRole, ['admin', 'root'], true)): ?>
             <script>
             // Tarjetas de estado de las APIs (días de BNC/Binance, saldo de CONEC/TiendaGiftVen/FullImpulso).
             // Cada una se consulta por separado a admin/api_gadgets.php (con caché de unos minutos en el servidor),
             // así una API lenta o caída nunca retrasa el dashboard. Verde = bien; rojo = se está acabando
-            // (2 días o menos / saldo bajo) o no se pudo consultar.
+            // (3 días o menos / saldo bajo) o no se pudo consultar. Los saldos van arriba y los días abajo.
             (function () {
-              var row = document.getElementById('dash-gadgets-row');
-              if (!row || !window.fetch) return;
+              var rows = {
+                balance: document.getElementById('dash-gadgets-balance-row'),
+                days: document.getElementById('dash-gadgets-days-row')
+              };
+              if (!rows.balance || !rows.days || !window.fetch) return;
               var endpoint = <?= json_encode(app_path('/admin/api_gadgets.php')) ?>;
               var COLORS = { ok: '#22c55e', low: '#ff3b3b', error: '#ff3b3b', loading: '#475569' };
               var cards = [];
@@ -3933,7 +3938,9 @@ require_once __DIR__ . '/includes/header.php';
                 box.appendChild(age);
                 var wrap = document.createElement('div');
                 wrap.appendChild(box);
-                row.appendChild(wrap);
+                var target = rows[gadget.kind] || rows.balance;
+                target.classList.add('mb-4');
+                target.appendChild(wrap);
                 return { key: gadget.key, box: box, main: main, sub: sub, age: age };
               }
 
@@ -3967,7 +3974,6 @@ require_once __DIR__ . '/includes/header.php';
                 .then(function (data) {
                   var list = (data && data.ok && data.gadgets) || [];
                   if (!list.length) return;
-                  row.classList.add('mb-4');
                   list.forEach(function (gadget) {
                     var card = buildCard(gadget);
                     cards.push(card);
@@ -3986,7 +3992,9 @@ require_once __DIR__ . '/includes/header.php';
                     setTimeout(function () { button.disabled = false; }, 8000);
                   });
                   holder.appendChild(button);
-                  row.parentNode.insertBefore(holder, row.nextSibling);
+                  // El botón va debajo de la última fila que tenga tarjetas (días si hay; si no, saldos).
+                  var lastRow = rows.days.children.length ? rows.days : rows.balance;
+                  lastRow.parentNode.insertBefore(holder, lastRow.nextSibling);
                 })
                 .catch(function () { /* sin tarjetas extra si el endpoint no responde */ });
             })();
