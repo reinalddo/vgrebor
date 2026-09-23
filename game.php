@@ -11574,6 +11574,25 @@ include __DIR__ . "/includes/header.php";
       </div>`;
   }
 
+  // Convierte el total que se muestra en pantalla ("BS 1,319" / "BS 1,319.32", formato
+  // en-US: coma de miles, punto decimal — ver formatCurrencyAmount) al número simple que
+  // se pega en la app del banco: sin moneda, sin coma de miles, decimales con punto.
+  //   "BS 1,319"     -> "1319"
+  //   "BS 1,319.32"  -> "1319.32"
+  //   "BS 1,319.00"  -> "1319"   (sin decimales significativos no se imprimen)
+  // Devuelve '' si no hay un monto válido (aún no pintado, "-", o cero).
+  function paymentAmountPlainText(rawText) {
+    const match = String(rawText || '').match(/\d[\d,]*(?:\.\d+)?/);
+    if (!match) {
+      return '';
+    }
+    let plain = match[0].replace(/,/g, '');
+    if (/\.0+$/.test(plain)) {
+      plain = plain.replace(/\.0+$/, '');
+    }
+    return Number(plain) > 0 ? plain : '';
+  }
+
   function bindPaymentTransferCopyButtons(container) {
     if (!container) {
       return;
@@ -11585,9 +11604,9 @@ include __DIR__ . "/includes/header.php";
         // Se lee el monto EN ESTE MOMENTO (no al pintar el bloque) para que sea
         // siempre el vigente, incluso si cambió después (cantidad, cupón…).
         if (button.hasAttribute('data-payment-copy-include-amount')) {
-          const amountText = String((paymentSummaryTotal && paymentSummaryTotal.textContent) || '').trim();
-          if (amountText !== '' && amountText !== '-') {
-            copyValue = `${copyValue}\nMonto a pagar: ${amountText}`;
+          const amountPlain = paymentAmountPlainText(paymentSummaryTotal && paymentSummaryTotal.textContent);
+          if (amountPlain !== '') {
+            copyValue = `${copyValue}\nMonto a pagar: ${amountPlain}`;
           }
         }
         try {
