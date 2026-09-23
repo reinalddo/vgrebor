@@ -355,6 +355,11 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
   </div>
 
   <form method="get" action="<?= htmlspecialchars($baseUrl, ENT_QUOTES, 'UTF-8') ?>" class="row g-2 justify-content-center align-items-end mb-4">
+    <?php if ($preset === 'personalizado'): ?>
+    <?php // Al pulsar ENTER dentro de un campo de fecha el navegador usa el PRIMER botón de envío del formulario
+          // (sería "Hoy"): este botón invisible va primero para que ENTER equivalga a "Aplicar". ?>
+    <button type="submit" name="preset" value="personalizado" tabindex="-1" aria-hidden="true" style="position:absolute; left:-9999px; width:1px; height:1px; opacity:0; overflow:hidden;">Aplicar</button>
+    <?php endif; ?>
     <input type="hidden" name="moneda" value="<?= htmlspecialchars($selectedCurrency, ENT_QUOTES, 'UTF-8') ?>">
     <input type="hidden" name="juego" value="<?= htmlspecialchars($selectedGame, ENT_QUOTES, 'UTF-8') ?>">
     <input type="hidden" name="tab" id="tab-state-input" value="<?= htmlspecialchars($activeTab, ENT_QUOTES, 'UTF-8') ?>">
@@ -373,7 +378,8 @@ $clearGameUrl = stats_build_url($baseUrl, $clearGameParams);
       <input type="date" name="hasta" value="<?= htmlspecialchars($dateToStr, ENT_QUOTES, 'UTF-8') ?>" class="form-control form-control-sm" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;">
     </div>
     <div class="col-auto">
-      <button type="submit" class="btn btn-info btn-sm fw-bold" style="background:#00fff7; color:#181f2a; border:none; box-shadow:0 0 8px #00fff7;">Aplicar</button>
+      <?php // name/value: sin esto el botón no enviaba "preset" y el servidor volvía a "Este mes", descartando las fechas. ?>
+      <button type="submit" name="preset" value="personalizado" class="btn btn-info btn-sm fw-bold" style="background:#00fff7; color:#181f2a; border:none; box-shadow:0 0 8px #00fff7;">Aplicar</button>
     </div>
     <?php endif; ?>
   </form>
