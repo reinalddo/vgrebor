@@ -215,7 +215,52 @@ function dash_fetch_bank_days(): array {
     $days = max(0, (int) $data['dias_disponibles']);
     store_config_upsert('ff_bank_dias_disponibles', (string) $days);
 
-    return ['kind' => 'days', 'value' => $days];
+    // Fecha de corte: si la API la trae (su nombre de campo no está documentado, ver
+    // dash_extract_cutoff) se muestra tal cual; si no, se calcula a partir de los días restantes
+    // y se marca como APROXIMADA (solo fecha: con días enteros no se puede saber la hora exacta).
+    $cutoff = dash_extract_cutoff($data);
+    $entry = ['kind' => 'days', 'value' => $days];
+    if ($cutoff !== '') {
+        $entry['cutoff'] = $cutoff;
+    } elseif ($days > 0) {
+        $entry['cutoff'] = date('Y-m-d', time() + $days * 86400);
+        $entry['cutoff_estimated'] = true;
+    }
+
+    return $entry;
+}
+
+/**
+ * Busca en la respuesta del banco la fecha en que vence la suscripción. El nombre del campo no
+ * está documentado públicamente (Binance usa `fecha_corte`), así que se prueban los nombres
+ * probables, primero en el nivel superior y luego un nivel más adentro (sin recorrer la lista
+ * de movimientos). Solo se acepta un valor con forma de fecha (AAAA-MM-DD…). Devuelve
+ * 'AAAA-MM-DD HH:MM:SS' (sin la fracción ".0" que suelen traer los timestamps de Java) o ''.
+ */
+function dash_extract_cutoff(array $data): string {
+    $keys = ['fecha_corte', 'fecha_vencimiento', 'fecha_vence', 'fecha_expiracion', 'fecha_fin', 'fecha_limite', 'vencimiento', 'vence', 'expira'];
+    $levels = [$data];
+    foreach ($data as $name => $value) {
+        if ($name !== 'movimientos' && is_array($value) && !array_is_list($value)) {
+            $levels[] = $value;
+        }
+    }
+
+    foreach ($levels as $level) {
+        foreach ($keys as $key) {
+            if (!isset($level[$key]) || !is_scalar($level[$key])) {
+                continue;
+            }
+            $candidate = trim((string) $level[$key]);
+            if (preg_match('/^\d{4}-\d{2}-\d{2}/', $candidate) !== 1) {
+                continue;
+            }
+            $candidate = str_replace('T', ' ', $candidate);
+            return preg_replace('/\.\d+$/', '', $candidate) ?? $candidate;
+        }
+    }
+
+    return '';
 }
 
 function dash_binance_token(): string {
@@ -426,7 +471,8 @@ function dash_gadget_present(string $key, array $entry, ?int $now = null): array
         }
         $cutoff = trim((string) ($entry['cutoff'] ?? ''));
         if ($cutoff !== '') {
-            $sub .= ($sub !== '' ? ' · ' : '') . 'Corte: ' . $cutoff;
+            $label = !empty($entry['cutoff_estimated']) ? 'Corte aprox.: ' : 'Corte: ';
+            $sub .= ($sub !== '' ? ' · ' : '') . $label . $cutoff;
         }
 
         return $out + ['status' => $low ? 'low' : 'ok', 'main' => dash_format_days($days), 'sub' => $sub];
