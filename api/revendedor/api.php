@@ -60,15 +60,23 @@ if ($action === 'catalogo') {
     // Recargas de juegos con precio de revendedor.
     $recargas = [];
     try {
+        // Baúl de Giftcards: a diferencia de las demás fuentes, al revendedor SÍ se le muestra el stock
+        // exacto (para que "tome la cantidad justa") porque no recibe entrega parcial — si compra más de
+        // lo que hay, no se le cobra nada (ver bau_dispatch_all_or_nothing en includes/baul_api.php).
         $rows = $pdo->query("SELECT p.id AS package_id, p.juego_id AS game_id, p.nombre, p.cantidad, p.precio_revendedor,
-                j.nombre AS juego
+                j.nombre AS juego, p.api_provider, p.paquete_api,
+                (CASE WHEN p.api_provider = 'baul' THEN
+                    (SELECT COUNT(*) FROM bau_codigos bc WHERE bc.producto_id = p.paquete_api AND bc.estado = 'disponible')
+                 ELSE NULL END) AS baul_stock
             FROM juego_paquetes p JOIN juegos j ON j.id=p.juego_id
             WHERE p.activo=1 AND j.activo=1 AND p.precio_revendedor IS NOT NULL AND p.precio_revendedor>0
             ORDER BY j.nombre, p.id")->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as $r) {
+            $isBaul = strtolower(trim((string) ($r['api_provider'] ?? ''))) === 'baul';
             $recargas[] = ['game_id' => (int) $r['game_id'], 'package_id' => (int) $r['package_id'],
                            'juego' => $r['juego'], 'paquete' => $r['nombre'], 'cantidad' => $r['cantidad'],
-                           'precio' => round((float) $r['precio_revendedor'], 2)];
+                           'precio' => round((float) $r['precio_revendedor'], 2),
+                           'stock' => $isBaul ? (int) $r['baul_stock'] : null];
         }
     } catch (Throwable $e) {}
     api_out(['ok' => true, 'saldo' => round(wallet_saldo($pdo, $uid), 2), 'streaming' => $streaming, 'recargas' => $recargas]);

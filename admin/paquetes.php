@@ -23,6 +23,8 @@ require_once '../includes/levelpass_api.php';
 require_once '../includes/fullimpulso_api.php';
 require_once '../includes/recargasamerica_api.php';
 require_once '../includes/conec_recargas.php';
+require_once '../includes/baul_api.php';
+bau_ensure_schema($mysqli);
 
 // CONEC usa un cliente PDO propio; la tienda es mysqli → creamos un PDO al mismo tenant (solo para CONEC).
 $conecPdo = null;
@@ -339,7 +341,7 @@ function admin_package_save_discord_catalog(mysqli $mysqli, int $gameId, array $
 
 function admin_package_normalize_provider_value($value): string {
     $normalized = strtolower(trim((string) $value));
-    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica', 'conec'], true) ? $normalized : '';
+    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica', 'conec', 'baul'], true) ? $normalized : '';
 }
 
 function admin_package_resolve_provider(array $package, array $game, bool $discordFeatureEnabled): string {
@@ -375,6 +377,7 @@ function admin_package_provider_label(string $provider): string {
         'fullimpulso' => 'FullImpulso (Seguidores)',
         'recargasamerica' => 'RecargasAmérica',
         'conec' => 'CONEC',
+        'baul' => 'Baúl de Giftcards',
         default => 'Manual',
     };
 }
@@ -419,6 +422,16 @@ function admin_package_provider_reference_text(string $provider, array $package,
     if ($provider === 'conec') {
         $apiProductId = (int) ($package['paquete_api'] ?? 0);
         return $apiProductId > 0 ? 'CONEC · ID ' . $apiProductId : '—';
+    }
+
+    if ($provider === 'baul') {
+        global $mysqli;
+        $productId = (int) ($package['paquete_api'] ?? 0);
+        if ($productId <= 0) {
+            return '—';
+        }
+        $product = bau_fetch_product_by_id($mysqli, $productId);
+        return $product ? bau_product_label($product) : 'Producto eliminado (ID ' . $productId . ')';
     }
 
     return '—';
@@ -891,6 +904,16 @@ if ($conecActiveSlots > 1) {
 } elseif ($hasConecCatalog) {
     $packageSourceItems[] = ['value' => 'conec', 'provider' => 'conec', 'source_key' => $juegoCategoriaApiConec, 'label' => admin_package_provider_label('conec')];
 }
+// Baúl de Giftcards: a diferencia de GiftVen/RecargasAmérica/CONEC, NO depende de una categoría
+// configurada por juego — el cliente pidió que cualquier paquete de cualquier juego pueda salir del
+// inventario propio, buscando el producto por nombre libre (ver includes/baul_api.php). Por eso se
+// agrega SIEMPRE, junto con un ítem "Manual" explícito: antes, sin ninguna fuente configurada, este
+// selector ni aparecía y el paquete quedaba en manual implícitamente; ahora que Baúl siempre está
+// disponible, "Manual" necesita ser una opción visible para no perderla.
+// 'provider' => '' (no 'manual' literal): así queda igual que un paquete sin ninguna fuente
+// configurada siempre se guardó en este sistema (api_provider vacío), no un valor nuevo.
+$packageSourceItems[] = ['value' => 'manual', 'provider' => '', 'source_key' => '', 'label' => admin_package_provider_label('manual')];
+$packageSourceItems[] = ['value' => 'baul', 'provider' => 'baul', 'source_key' => '', 'label' => admin_package_provider_label('baul')];
 foreach ($packageSourceItems as $item) {
     $packageSourceValueMap[$item['value']] = ['provider' => $item['provider'], 'source_key' => $item['source_key']];
 }
@@ -901,6 +924,8 @@ $packageDefaultProvider = $packageSourceSelectionEnabled ? '' : ($packageSourceI
 
 $winPointsName = win_points_program_name();
 $defaultWinPointsReward = 0;
+// Baúl: TODOS los productos activos, de cualquier juego (búsqueda libre por nombre, sin categoría).
+$bauProducts = bau_fetch_products($mysqli, '', true);
 $apiProducts  = [];
 $apiProducts2 = [];
 $apiProducts3 = [];
@@ -1471,7 +1496,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     $edit_provider      = $packageSourceValueMap[$rawEditSourceValue]['provider'] ?? admin_package_normalize_provider_value($rawEditSourceValue);
     $edit_api_source_key = $packageSourceValueMap[$rawEditSourceValue]['source_key'] ?? '';
     $edit_monto_ff = $edit_provider === 'free_fire' ? trim((string) ($_POST['edit_monto_ff'] ?? '')) : '';
-    $edit_paquete_api = in_array($edit_provider, ['giftven', 'recargasamerica', 'conec'], true) ? trim((string) ($_POST['edit_paquete_api'] ?? '')) : '';
+    $edit_paquete_api = in_array($edit_provider, ['giftven', 'recargasamerica', 'conec', 'baul'], true) ? trim((string) ($_POST['edit_paquete_api'] ?? '')) : '';
     $edit_recargasamerica_tipo = '';
     if ($edit_provider === 'recargasamerica' && $edit_paquete_api !== '') {
         $raEditSelectedProduct = $recargasAmericaProductsById[(int) $edit_paquete_api] ?? null;
@@ -1529,6 +1554,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     }
     if ($edit_provider === 'free_fire' && $edit_monto_ff === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el monto de Free Fire para este paquete.']);
+    }
+    if ($edit_provider === 'baul' && $edit_paquete_api === '') {
+        admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el producto del Baúl para este paquete.']);
     }
     if ($edit_imagen_icono) {
         $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), recargasamerica_tipo=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, imagen_icono=?, activo=?, destacado=?, descuento_destacado=?, orden_gg=?, precio_manual_override=? WHERE id=?");
@@ -1612,7 +1640,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $provider      = $packageSourceValueMap[$rawSourceValue]['provider'] ?? admin_package_normalize_provider_value($rawSourceValue);
     $api_source_key = $packageSourceValueMap[$rawSourceValue]['source_key'] ?? '';
     $monto_ff = $provider === 'free_fire' ? trim((string) ($_POST['monto_ff'] ?? '')) : '';
-    $paquete_api = in_array($provider, ['giftven', 'recargasamerica', 'conec'], true) ? trim((string) ($_POST['paquete_api'] ?? '')) : '';
+    $paquete_api = in_array($provider, ['giftven', 'recargasamerica', 'conec', 'baul'], true) ? trim((string) ($_POST['paquete_api'] ?? '')) : '';
     // El "tipo" (pin/recharge) NUNCA se confía del formulario — se resuelve
     // en vivo contra el catálogo de RecargasAmérica por el ID elegido, para
     // que no se pueda desincronizar con lo que la API realmente tiene.
@@ -1669,6 +1697,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     }
     if ($provider === 'free_fire' && $monto_ff === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el monto de Free Fire para este paquete.']);
+    }
+    if ($provider === 'baul' && $paquete_api === '') {
+        admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el producto del Baúl para este paquete.']);
     }
     $stmt = $mysqli->prepare("INSERT INTO juego_paquetes (juego_id, nombre, clave, monto_ff, paquete_api, api_provider, api_source_key, recargasamerica_tipo, vender_cuenta, cuenta_texto, cantidad, precio, win_points_reward, imagen_icono, activo, orden, destacado, descuento_destacado, orden_gg, precio_manual_override) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     $stmt->bind_param('isssssssissdisiiiiii', $juego_id, $nombre, $clave, $monto_ff, $paquete_api, $provider, $api_source_key, $recargasamerica_tipo, $vender_cuenta, $cuenta_texto, $cantidad, $precio, $win_points_reward, $imagen_icono, $activo, $orden, $destacado, $descuento_destacado, $orden_gg, $precio_manual_override);
@@ -2231,6 +2262,21 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <?php endif; ?>
             </div>
         <?php endif; ?>
+        <?php /* Baúl de Giftcards: búsqueda libre por nombre, sin restricción de categoría/juego. */ ?>
+        <div class="col-md-6" data-package-source-panel="baul">
+            <label class="form-label text-neon">Producto del Baúl</label>
+            <select name="paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a; color:#22d3ee; border:1px solid #22d3ee;">
+                <option value="">Selecciona un producto del Baúl</option>
+                <?php foreach ($bauProducts as $bp): ?>
+                    <option value="<?= (int) $bp['id'] ?>"><?= htmlspecialchars(bau_product_label($bp), ENT_QUOTES, 'UTF-8') ?></option>
+                <?php endforeach; ?>
+            </select>
+            <?php if (empty($bauProducts)): ?>
+                <div class="form-text mt-2 text-warning">No hay productos del Baúl todavía. Créalos en <a href="<?= htmlspecialchars(app_path('/admin/baul'), ENT_QUOTES, 'UTF-8') ?>" target="_blank" style="color:#facc15;">/admin/baul</a>.</div>
+            <?php else: ?>
+                <div class="form-text mt-2" style="color:#8be9fd;">Inventario propio de la tienda. Administra productos y códigos en <a href="<?= htmlspecialchars(app_path('/admin/baul'), ENT_QUOTES, 'UTF-8') ?>" target="_blank" style="color:#8be9fd;">/admin/baul</a>.</div>
+            <?php endif; ?>
+        </div>
         <?php if ($usesLegacyFreeFire): ?>
             <div class="col-md-6" data-package-source-panel="free_fire">
                 <label class="form-label text-neon">Montos (API)</label>
@@ -2943,6 +2989,10 @@ if (isset($_GET['editar'])) {
         }
     } elseif ($paqEditProvider === 'free_fire') {
         $paqEditSelectedSource = 'free_fire';
+    } elseif ($paqEditProvider === 'baul') {
+        $paqEditSelectedSource = 'baul';
+    } elseif ($paqEditProvider === '') {
+        $paqEditSelectedSource = 'manual';
     }
     if ($paq_edit):
 ?>
@@ -3121,6 +3171,17 @@ if (isset($_GET['editar'])) {
                 <?php endif; ?>
             </div>
         <?php endif; ?>
+        <?php /* Baúl de Giftcards (edición): mismo selector, sin restricción de categoría/juego. */ ?>
+        <div class="mb-3" data-package-source-panel="baul">
+            <label class="form-label text-neon">Producto del Baúl</label>
+            <select name="edit_paquete_api" data-package-source-required="1" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                <option value="">Selecciona un producto del Baúl</option>
+                <?php foreach ($bauProducts as $bp): ?>
+                    <option value="<?= (int) $bp['id'] ?>" <?= ($paqEditSelectedSource === 'baul' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) $bp['id']) ? 'selected' : '' ?>><?= htmlspecialchars(bau_product_label($bp), ENT_QUOTES, 'UTF-8') ?></option>
+                <?php endforeach; ?>
+            </select>
+            <div class="form-text mt-2" style="color:#8be9fd;">Administra productos y códigos en <a href="<?= htmlspecialchars(app_path('/admin/baul'), ENT_QUOTES, 'UTF-8') ?>" target="_blank" style="color:#8be9fd;">/admin/baul</a>.</div>
+        </div>
         <?php if ($discordActiveSlots > 1): ?>
             <?php if ($hasDiscordCatalog): ?>
             <div class="mb-3" data-package-source-panel="discord_1">

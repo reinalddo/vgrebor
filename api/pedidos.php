@@ -35,6 +35,7 @@ require_once __DIR__ . '/../includes/blocked_players.php';
 require_once __DIR__ . '/../includes/fullimpulso_api.php';
 require_once __DIR__ . '/../includes/player_verification.php';
 require_once __DIR__ . '/../includes/conec_recargas.php';
+require_once __DIR__ . '/../includes/baul_api.php';
 
 if (!function_exists('create_app_mysqli_connection')) {
     function create_app_mysqli_connection(): mysqli {
@@ -169,11 +170,15 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         paypal_paid_currency VARCHAR(20) DEFAULT NULL,
         paypal_ultimo_check DATETIME DEFAULT NULL,
         paypal_historial_json LONGTEXT DEFAULT NULL,
+        bau_pedido_origen_id INT DEFAULT NULL,
+        bau_estado VARCHAR(20) DEFAULT NULL,
         estado ENUM('pendiente','pagado','enviado','cancelado') NOT NULL DEFAULT 'pendiente',
         creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         pago_expira_en DATETIME DEFAULT NULL,
         actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_estado (estado),
+        INDEX idx_bau_pedido_origen_id (bau_pedido_origen_id),
+        INDEX idx_bau_estado (bau_estado),
         INDEX idx_email (email),
         INDEX idx_cliente_usuario_id (cliente_usuario_id),
         INDEX idx_api_discord_status (api_discord_status),
@@ -285,6 +290,13 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         'cart_batch_total' => "ALTER TABLE pedidos ADD COLUMN cart_batch_total DECIMAL(12,2) NULL AFTER cart_batch_id",
         'cart_batch_index' => "ALTER TABLE pedidos ADD COLUMN cart_batch_index SMALLINT UNSIGNED NULL AFTER cart_batch_total",
         'cart_batch_size' => "ALTER TABLE pedidos ADD COLUMN cart_batch_size SMALLINT UNSIGNED NULL AFTER cart_batch_index",
+        // Baúl de Giftcards: cuando una entrega solo puede cubrirse a medias, el pedido original se
+        // queda con la cantidad SÍ entregada (pasa a 'enviado') y se crea un pedido "hijo" con la
+        // cantidad pendiente (queda en 'pagado', bau_estado='pendiente_manual', misma fecha de
+        // creación que el original). bau_pedido_origen_id enlaza ese hijo con el pedido del que salió
+        // (ver includes/baul_api.php, bau_dispatch_and_split()).
+        'bau_pedido_origen_id' => "ALTER TABLE pedidos ADD COLUMN bau_pedido_origen_id INT NULL AFTER cart_batch_size",
+        'bau_estado' => "ALTER TABLE pedidos ADD COLUMN bau_estado VARCHAR(20) NULL AFTER bau_pedido_origen_id",
     ];
     $colResult = $mysqli->query("SHOW COLUMNS FROM pedidos");
     $existing = [];
@@ -311,6 +323,8 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         'idx_paypal_order_id' => 'ALTER TABLE pedidos ADD INDEX idx_paypal_order_id (paypal_order_id)',
         'idx_paypal_capture_id' => 'ALTER TABLE pedidos ADD INDEX idx_paypal_capture_id (paypal_capture_id)',
         'idx_paypal_status' => 'ALTER TABLE pedidos ADD INDEX idx_paypal_status (paypal_status)',
+        'idx_bau_pedido_origen_id' => 'ALTER TABLE pedidos ADD INDEX idx_bau_pedido_origen_id (bau_pedido_origen_id)',
+        'idx_bau_estado' => 'ALTER TABLE pedidos ADD INDEX idx_bau_estado (bau_estado)',
     ];
     foreach ($indexes as $indexName => $sql) {
         $indexResult = $mysqli->query("SHOW INDEX FROM pedidos WHERE Key_name = '" . $mysqli->real_escape_string($indexName) . "'");
@@ -5091,7 +5105,10 @@ function game_uses_discord_api(mysqli $mysqli, int $gameId): bool {
 
 function normalize_api_provider_value($value): string {
     $normalized = strtolower(trim((string) $value));
-    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica', 'conec'], true) ? $normalized : '';
+    // 'streaming' NO se agrega aquí a propósito: es un hallazgo aparte (reportado, no pedido) de que
+    // esa marca tampoco está en esta lista — no se toca sin que el cliente lo pida explícitamente
+    // (regla del proyecto: nada de admin/stream/* ni de su flujo sin pedido explícito).
+    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica', 'conec', 'baul'], true) ? $normalized : '';
 }
 
 function package_api_provider_from_row(array $package, array $game = []): string {
@@ -5970,6 +5987,10 @@ function order_provider_flow_from_row(array $order): string {
 
     if (trim((string) ($order['recargas_api_codigo_entregado'] ?? '')) !== '') {
         return 'completed';
+    }
+
+    if (strtolower(trim((string) ($order['bau_estado'] ?? ''))) === 'pendiente_manual') {
+        return 'inventory_shortage';
     }
 
     $providerStatus = strtolower(trim((string) ($order['recargas_api_estado'] ?? '')));
@@ -8017,6 +8038,172 @@ function notify_streaming_delivery(mysqli $mysqli, array $order, array $datos): 
     }
 }
 
+/**
+ * Correo de entrega de un pedido del BAÚL DE GIFTCARDS (api_provider = 'baul'). Muestra el código (y
+ * el serial, si lo hay) tal como se le mostró en pantalla al cliente. Si la entrega fue parcial
+ * ($partialMessage no vacío), se agrega el aviso de que el resto se está gestionando.
+ */
+function notify_baul_delivery(mysqli $mysqli, array $order, string $deliveryText, string $partialMessage = ''): void {
+    $orderId = (int) ($order['id'] ?? 0);
+    if ($orderId <= 0 || trim($deliveryText) === '') {
+        return;
+    }
+
+    $adminEmail = resolve_admin_email($mysqli);
+    $brandingImages = email_branding_embedded_images();
+
+    // Cada línea del texto entregado se muestra tal cual (ya viene formateada por
+    // bau_format_delivery_text: "Código: ..." / "Serial: ..." o una línea plana por código).
+    $codeLines = array_map(
+        static fn (string $line): string => '<p style="margin:0 0 4px;">' . email_escape($line) . '</p>',
+        array_filter(array_map('trim', explode("\n", $deliveryText)), static fn (string $line): bool => $line !== '')
+    );
+    $codeBlock = '<div style="background:#0f172a;border-radius:8px;padding:10px 14px;margin:0 0 12px;">' . implode('', $codeLines) . '</div>';
+    $partialBlock = $partialMessage !== '' ? '<p style="margin:12px 0 0;color:#f59e0b;"><strong>' . email_escape($partialMessage) . '</strong></p>' : '';
+
+    $datosPedido = [
+        'order_id' => $orderId,
+        'game_name' => $order['juego_nombre'] ?? '',
+        'pack_name' => $order['paquete_nombre'] ?? '',
+        'pack_amount' => $order['paquete_cantidad'] ?? '',
+        'currency' => $order['moneda'] ?? '',
+        'price' => number_format((float) ($order['precio'] ?? 0), 2, '.', ','),
+        'user_identifier' => $order['user_identifier'] ?? '',
+        'email' => $order['email'] ?? '',
+        'coupon' => $order['cupon'] ?? null,
+        'payment_method' => trim((string) ($order['metodo_pago'] ?? 'Método de pago')),
+        'reference_number' => trim((string) ($order['numero_referencia'] ?? '')),
+        'phone' => trim((string) ($order['telefono_contacto'] ?? '')),
+        'status' => 'Enviado',
+    ];
+
+    $customerHtml = render_order_email('Tu código está listo', 'Cliente',
+        '<p style="margin:0 0 12px;">Tu pago fue verificado. Este es tu código:</p>'
+        . $codeBlock
+        . $partialBlock,
+        $datosPedido, '#34d399');
+
+    $adminHtml = render_order_email('Código del Baúl entregado', 'Administrador',
+        '<p style="margin:0 0 12px;">Se entregó automáticamente un código del inventario del Baúl.</p>'
+        . $codeBlock
+        . $partialBlock,
+        $datosPedido, '#34d399');
+
+    if (!empty($order['email']) && filter_var($order['email'], FILTER_VALIDATE_EMAIL)) {
+        send_app_mail((string) $order['email'], "Código entregado #{$orderId}", $customerHtml, null, $brandingImages);
+    }
+    if ($adminEmail !== null) {
+        send_app_mail($adminEmail, "Código del Baúl entregado #{$orderId}", $adminHtml, null, $brandingImages);
+    }
+}
+
+/**
+ * Punto único de despacho para pedidos del BAÚL DE GIFTCARDS creados por la TIENDA (no revendedores;
+ * ver bau_dispatch_all_or_nothing en includes/baul_api.php para el flujo de revendedores, que nunca
+ * entrega parcial). Entrega lo que haya, hasta la cantidad pedida:
+ *   - Nada disponible: el pedido se queda 'pagado', marcado bau_estado='pendiente_manual' (sin
+ *     dividir, no hay nada que separar todavía).
+ *   - Alcanza TODO: el pedido pasa a 'enviado' con sus códigos.
+ *   - Alcanza una PARTE: el pedido se DIVIDE — el original se queda con lo entregado y pasa a
+ *     'enviado'; se crea un pedido "hijo" con lo pendiente, en 'pagado', bau_estado='pendiente_manual',
+ *     con la MISMA fecha de creación del original (para que Estadísticas cuente la venta el día real
+ *     cuando se complete), enlazado por bau_pedido_origen_id.
+ * Reintento seguro: antes de reservar código nuevo, revisa qué ya se le asignó a ESTE pedido en un
+ * intento anterior (bau_dispatch_claim) — un reintento nunca duplica ni "pierde" códigos ya entregados.
+ * Misma forma de retorno que recargasamerica_dispatch_or_recover(): success/accepted/
+ * needs_manual_review/message/reference/payload.
+ */
+function bau_dispatch_and_split(mysqli $mysqli, array $order): array {
+    $orderId = (int) ($order['id'] ?? 0);
+    $productId = (int) ($order['paquete_api'] ?? 0);
+    if ($orderId <= 0 || $productId <= 0) {
+        return [
+            'success' => false, 'accepted' => false, 'needs_manual_review' => true,
+            'message' => 'Este paquete no tiene un producto del Baúl configurado.',
+            'reference' => '', 'payload' => [],
+        ];
+    }
+
+    $requested = order_purchase_quantity($order);
+    $claim = bau_dispatch_claim($mysqli, $orderId, $productId, $requested);
+    $deliveredCount = (int) $claim['delivered_count'];
+
+    if ($deliveredCount <= 0) {
+        $stmt = $mysqli->prepare("UPDATE pedidos SET bau_estado = 'pendiente_manual' WHERE id = ? AND estado = 'pagado'");
+        $stmt->bind_param('i', $orderId);
+        $stmt->execute();
+        $stmt->close();
+
+        return [
+            'success' => false, 'accepted' => false, 'needs_manual_review' => true,
+            'message' => 'No hay códigos disponibles en este momento. Tu pedido quedó pendiente y lo completaremos apenas tengamos stock; si quieres, también puedes escribir a soporte.',
+            'reference' => '', 'payload' => ['requested' => $requested, 'delivered_count' => 0],
+        ];
+    }
+
+    $deliveredText = bau_format_delivery_text($claim['delivered']);
+
+    if ($deliveredCount >= $requested) {
+        $stmt = $mysqli->prepare("UPDATE pedidos SET recargas_api_codigo_entregado = ?, bau_estado = NULL, estado = 'enviado' WHERE id = ? AND estado = 'pagado'");
+        $stmt->bind_param('si', $deliveredText, $orderId);
+        $stmt->execute();
+        $stmt->close();
+
+        return [
+            'success' => true, 'accepted' => false, 'needs_manual_review' => false,
+            'message' => 'Compra completada.', 'reference' => (string) $orderId,
+            'payload' => ['requested' => $requested, 'delivered_count' => $deliveredCount, 'delivery_text' => $deliveredText],
+        ];
+    }
+
+    // Entrega PARCIAL: se divide en dos pedidos (ver comentario de la función).
+    $remaining = $requested - $deliveredCount;
+    $totalPrice = (float) ($order['precio'] ?? 0);
+    $unitPrice = $requested > 0 ? $totalPrice / $requested : 0.0;
+    $deliveredPrice = round($unitPrice * $deliveredCount, 2);
+    $remainingPrice = round($totalPrice - $deliveredPrice, 2);
+
+    $stmt = $mysqli->prepare("UPDATE pedidos SET cantidad_compra = ?, precio = ?, recargas_api_codigo_entregado = ?, bau_estado = 'parcial', estado = 'enviado' WHERE id = ? AND estado = 'pagado'");
+    $stmt->bind_param('idsi', $deliveredCount, $deliveredPrice, $deliveredText, $orderId);
+    $stmt->execute();
+    $stmt->close();
+
+    $childData = $order;
+    // 'referencia_activa_lock' es una columna GENERADA (ver ensure_pedidos_table): MySQL rechaza
+    // cualquier INSERT que le pase un valor explícito. 'creado_en_ts' ni siquiera es una columna
+    // real, es el alias UNIX_TIMESTAMP que agrega fetch_order_by_id().
+    unset($childData['id'], $childData['actualizado_en'], $childData['referencia_activa_lock'], $childData['creado_en_ts']);
+    $childData['cantidad_compra'] = $remaining;
+    $childData['precio'] = $remainingPrice;
+    $childData['precio_original'] = $remainingPrice;
+    $childData['precio_sin_drop'] = $remainingPrice;
+    $childData['precio_descuento_metodo_pago_base'] = $remainingPrice;
+    $childData['estado'] = 'pagado';
+    $childData['bau_estado'] = 'pendiente_manual';
+    $childData['bau_pedido_origen_id'] = $orderId;
+    $childData['recargas_api_codigo_entregado'] = null;
+    // El pedido hijo no pertenece al carrito/lote original (ese ya terminó su propio flujo).
+    $childData['cart_batch_id'] = null;
+    $childData['cart_batch_total'] = null;
+    $childData['cart_batch_index'] = null;
+    $childData['cart_batch_size'] = null;
+    // Los puntos de la parte pendiente se otorgan cuando esa parte, a su vez, se complete.
+    $childData['win_points_awarded'] = 0;
+    $childId = pedidos_insert_order($mysqli, $childData);
+
+    $partialMessage = 'Se entregaron ' . $deliveredCount . ' de ' . $requested . '. El restante lo estamos gestionando, por favor escribe a soporte para solicitarlo.';
+
+    return [
+        'success' => true, 'accepted' => false, 'needs_manual_review' => false,
+        'message' => $partialMessage, 'reference' => (string) $orderId,
+        'payload' => [
+            'requested' => $requested, 'delivered_count' => $deliveredCount, 'delivery_text' => $deliveredText,
+            'partial' => true, 'pending_order_id' => $childId, 'remaining_qty' => $remaining,
+        ],
+        'partial_message' => $partialMessage,
+    ];
+}
+
 function render_account_sale_gallery_email_html(array $gallery): string {
     if (empty($gallery)) {
         return '';
@@ -8361,6 +8548,12 @@ function order_recharge_dispatch_is_locked(array $order): bool {
 
     if (trim((string) ($order['recargas_api_pedido_id'] ?? '')) !== '') {
         return false;
+    }
+
+    // Baúl de Giftcards: un pedido marcado 'pendiente_manual' (entrega parcial o sin stock) NUNCA se
+    // reintenta solo — solo se completa desde el botón dedicado en admin/baul.php.
+    if (strtolower(trim((string) ($order['bau_estado'] ?? ''))) === 'pendiente_manual') {
+        return true;
     }
 
     $providerStatus = strtolower(trim((string) ($order['recargas_api_estado'] ?? '')));
@@ -10462,6 +10655,7 @@ if ($action === 'submit_payment') {
     $usesCatalogApi = order_uses_catalog_api_provider($updatedOrder);
     $usesRecargasAmericaApi = order_uses_recargasamerica_api_provider($updatedOrder);
     $usesConecApi = order_uses_conec_api_provider($updatedOrder);
+    $usesBaulApi = strtolower(trim((string) ($updatedOrder['api_provider'] ?? ''))) === 'baul';
 
     if ($usesBankValidation || $usesBinancePagonorteValidation) {
         $matchingMovement = $preselectedMatchingMovement;
@@ -10667,7 +10861,7 @@ if ($action === 'submit_payment') {
                 }
             }
 
-            if (!$usesCatalogApi && !$usesRecargasAmericaApi && !$usesConecApi) {
+            if (!$usesCatalogApi && !$usesRecargasAmericaApi && !$usesConecApi && !$usesBaulApi) {
                 $paidStatus = 'pagado';
                 $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, estado = ? WHERE id = ? AND estado = 'pendiente'");
                 if (!$paidStmt) {
@@ -10918,6 +11112,66 @@ if ($action === 'submit_payment') {
                     'estado' => 'pagado',
                     'verified' => true,
                     'provider_message' => $cnMsgSingle,
+                ], $updatedOrder, $overpaymentAmount));
+            }
+
+            // ── Baúl de Giftcards — ruta "cliente confirma pago" ────────────
+            // Entrega lo que haya; si solo alcanza una parte, el pedido se DIVIDE en dos (ver
+            // bau_dispatch_and_split): este mismo id queda con lo entregado ('enviado'), y se crea
+            // un pedido aparte con lo pendiente ('pagado', bau_estado='pendiente_manual' — nunca se
+            // reintenta solo, solo un admin lo completa desde /admin/baul).
+            if ($usesBaulApi) {
+                $bauClaimStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, estado = 'pagado' WHERE id = ? AND estado = 'pendiente'");
+                if (!$bauClaimStmt) {
+                    json_error('No se pudo iniciar el proceso de entrega.', 500);
+                }
+                $bauClaimStmt->bind_param('ssi', $verifiedReference, $phone, $orderId);
+                $bauClaimStmt->execute();
+                $bauClaimStmt->close();
+                $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+                if (($updatedOrder['estado'] ?? '') !== 'pagado') {
+                    json_error('El pedido ya está siendo procesado o no está disponible.', 409);
+                }
+
+                $bauResSingle = bau_dispatch_and_split($mysqli, $updatedOrder);
+
+                if (!empty($bauResSingle['success'])) {
+                    $bauOrderSingle = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
+                    win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+                    recharge_notifications_emit_for_order($mysqli, $bauOrderSingle);
+                    $bauDeliveryTextSingle = (string) (($bauResSingle['payload'] ?? [])['delivery_text'] ?? '');
+                    $bauPartialMsgSingle = (string) ($bauResSingle['partial_message'] ?? '');
+                    json_response(append_payment_difference_response([
+                        'ok' => true,
+                        'message' => $bauPartialMsgSingle !== '' ? $bauPartialMsgSingle : 'Pago verificado y código entregado correctamente.',
+                        'order_id' => $orderId,
+                        'estado' => 'enviado',
+                        'verified' => true,
+                        'provider_flow' => 'completed',
+                        'provider_code' => $bauDeliveryTextSingle,
+                    ], $bauOrderSingle, $overpaymentAmount), 200, static function () use ($mysqli, $bauOrderSingle, $bauDeliveryTextSingle, $bauPartialMsgSingle): void {
+                        register_influencer_coupon_sale($mysqli, $bauOrderSingle);
+                        notify_baul_delivery($mysqli, $bauOrderSingle, $bauDeliveryTextSingle, $bauPartialMsgSingle);
+                    });
+                }
+
+                if (!empty($bauResSingle['needs_manual_review'])) {
+                    json_response(append_payment_difference_response([
+                        'ok' => true,
+                        'message' => 'Pago verificado. ' . ($bauResSingle['message'] ?? 'Tu código quedó pendiente.'),
+                        'order_id' => $orderId,
+                        'estado' => 'pagado',
+                        'verified' => true,
+                        'pending_review' => true,
+                    ], $updatedOrder, $overpaymentAmount));
+                }
+
+                json_response(append_payment_difference_response([
+                    'ok' => false,
+                    'message' => (string) ($bauResSingle['message'] ?? 'No se pudo procesar la entrega.'),
+                    'order_id' => $orderId,
+                    'estado' => 'pagado',
+                    'verified' => true,
                 ], $updatedOrder, $overpaymentAmount));
             }
 
@@ -12056,6 +12310,13 @@ if ($action === 'admin_retry_recharge') {
         });
     }
 
+    // Baúl de Giftcards: NUNCA se reintenta desde este botón genérico — el cliente pidió
+    // explícitamente que estas entregas sean SIEMPRE manuales, desde una acción dedicada (para no
+    // tener dos mecanismos distintos completando lo mismo). Ver admin/baul.php.
+    if (strtolower(trim((string) ($order['api_provider'] ?? ''))) === 'baul') {
+        json_error('Este pedido es del Baúl de Giftcards. Complétalo desde el panel del Baúl (/admin/baul), no desde este botón.', 409);
+    }
+
     if (trim((string) ($order['recargas_api_pedido_id'] ?? '')) !== '') {
         json_error('Este pedido ya tiene una orden API asociada. Usa Sincronizar API.', 409);
     }
@@ -12499,6 +12760,74 @@ if ($action === 'admin_retry_recharge') {
     }
 
     json_error('Este pedido no tiene una recarga automatica configurable para reintentar.', 409);
+}
+
+// ── Baúl de Giftcards: acciones exclusivas de admin/baul.php ────────────────
+// Deliberadamente SEPARADAS de admin_retry_recharge (bloqueado para pedidos del baúl, ver arriba):
+// el cliente pidió que estas entregas sean SIEMPRE una decisión manual explícita, desde un único
+// botón dedicado, y no algo que un botón genérico de "reenviar" pueda disparar por accidente.
+if ($action === 'admin_baul_complete_pending') {
+    $adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
+    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'root'], true)) {
+        json_error('No autorizado', 403);
+    }
+
+    $orderId = intval($_POST['order_id'] ?? $_GET['order_id'] ?? 0);
+    if ($orderId <= 0) {
+        json_error('Pedido inválido.');
+    }
+
+    $order = fetch_order_by_id($mysqli, $orderId);
+    if (!$order) {
+        json_error('Pedido no encontrado.', 404);
+    }
+    if (strtolower(trim((string) ($order['api_provider'] ?? ''))) !== 'baul'
+        || trim((string) ($order['estado'] ?? '')) !== 'pagado'
+        || strtolower(trim((string) ($order['bau_estado'] ?? ''))) !== 'pendiente_manual'
+    ) {
+        json_error('Este pedido no está en la lista de entregas pendientes del Baúl.', 409);
+    }
+
+    $bauRes = bau_dispatch_and_split($mysqli, $order);
+
+    if (!empty($bauRes['success'])) {
+        $bauOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
+        win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+        recharge_notifications_emit_for_order($mysqli, $bauOrder);
+        $bauDeliveryText = (string) (($bauRes['payload'] ?? [])['delivery_text'] ?? '');
+        $bauPartialMsg = (string) ($bauRes['partial_message'] ?? '');
+        json_response([
+            'ok' => true,
+            'message' => $bauPartialMsg !== '' ? $bauPartialMsg : 'Pedido completado y código entregado.',
+            'order_id' => $orderId,
+            'estado' => 'enviado',
+        ], 200, static function () use ($mysqli, $bauOrder, $bauDeliveryText, $bauPartialMsg): void {
+            register_influencer_coupon_sale($mysqli, $bauOrder);
+            notify_baul_delivery($mysqli, $bauOrder, $bauDeliveryText, $bauPartialMsg);
+        });
+    }
+
+    json_response(['ok' => false, 'order_id' => $orderId, 'message' => (string) ($bauRes['message'] ?? 'Sigue sin haber códigos disponibles para este pedido.')]);
+}
+
+if ($action === 'admin_baul_cancel_pending') {
+    $adminRole = trim((string) ($_SESSION['auth_user']['rol'] ?? ''));
+    if (!isset($_SESSION['auth_user']) || !in_array($adminRole, ['admin', 'root'], true)) {
+        json_error('No autorizado', 403);
+    }
+
+    $orderId = intval($_POST['order_id'] ?? $_GET['order_id'] ?? 0);
+    if ($orderId <= 0) {
+        json_error('Pedido inválido.');
+    }
+
+    // Uso previsto: el admin ya resolvió la devolución fuera del sistema y no va a completar este
+    // pedido. Se cancela (nunca se cuenta como venta) para que deje de aparecer en la lista.
+    if (!bau_cancel_pending_order($mysqli, $orderId)) {
+        json_error('Este pedido no está en la lista de entregas pendientes del Baúl.', 409);
+    }
+
+    json_response(['ok' => true, 'order_id' => $orderId, 'message' => 'Pedido cerrado sin entregar.', 'estado' => 'cancelado']);
 }
 
 if ($action === 'fullimpulso_request_refill') {
@@ -13832,6 +14161,59 @@ if ($action === 'batch_fulfill_item') {
                 trim((string) ($asSentOrder['telefono_contacto'] ?? ''))
             );
         });
+    }
+
+    // ── Baúl de Giftcards: entrega desde el inventario propio ────────────
+    // Los revendedores (metodo_pago='Saldo revendedor (API)') NUNCA reciben entrega parcial: si no
+    // alcanza la cantidad completa, no se reserva nada — el 'ok'=>false con estado!='enviado' hace
+    // que api/revendedor/api.php (comprar_recarga) cancele el pedido y devuelva TODO el saldo solo,
+    // con el mensaje ya incluyendo la cantidad real disponible (mismo mecanismo que ya usa para
+    // otros proveedores, sin nada especial que agregar ahí). Para clientes de la tienda, en cambio,
+    // se entrega lo que haya y una entrega parcial DIVIDE el pedido (ver bau_dispatch_and_split).
+    if ($pkgProvider === 'baul') {
+        $bauProductId = (int) ($order['paquete_api'] ?? 0);
+        $bauIsReseller = trim((string) ($order['metodo_pago'] ?? '')) === 'Saldo revendedor (API)';
+
+        if ($bauIsReseller) {
+            $bauAllRes = bau_dispatch_all_or_nothing($mysqli, $bauProductId, $qty, $orderId);
+            if (empty($bauAllRes['ok'])) {
+                json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId,
+                    'message' => 'No se pudo completar la compra por falta de gift cards disponibles. Consulta la cantidad y vuelve a intentar (disponibles ahora: ' . (int) $bauAllRes['available'] . ').']);
+            }
+            $bauResellerText = bau_format_delivery_text($bauAllRes['delivered']);
+            $bauSentStatus = 'enviado';
+            $updBauR = $mysqli->prepare("UPDATE pedidos SET recargas_api_codigo_entregado=?, estado=? WHERE id=? AND estado='pagado'");
+            $updBauR->bind_param('ssi', $bauResellerText, $bauSentStatus, $orderId);
+            $updBauR->execute();
+            $updBauR->close();
+            $bauResellerOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
+            win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+            recharge_notifications_emit_for_order($mysqli, $bauResellerOrder);
+            json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Entrega completada.', 'provider_code' => $bauResellerText], 200, static function () use ($mysqli, $bauResellerOrder, $bauResellerText): void {
+                notify_baul_delivery($mysqli, $bauResellerOrder, $bauResellerText);
+            });
+        }
+
+        $bauRes = bau_dispatch_and_split($mysqli, $order);
+        if (!empty($bauRes['success'])) {
+            $bauOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
+            win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+            recharge_notifications_emit_for_order($mysqli, $bauOrder);
+            $bauDeliveryText = (string) (($bauRes['payload'] ?? [])['delivery_text'] ?? '');
+            $bauPartialMsg = (string) ($bauRes['partial_message'] ?? '');
+            json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId,
+                'message' => $bauPartialMsg !== '' ? $bauPartialMsg : 'Código entregado.',
+                'provider_code' => $bauDeliveryText], 200, static function () use ($mysqli, $bauOrder, $bauDeliveryText, $bauPartialMsg): void {
+                register_influencer_coupon_sale($mysqli, $bauOrder);
+                notify_baul_delivery($mysqli, $bauOrder, $bauDeliveryText, $bauPartialMsg);
+            });
+        }
+        if (!empty($bauRes['needs_manual_review'])) {
+            json_response(['ok' => true, 'estado' => 'pagado', 'order_id' => $orderId,
+                'message' => (string) ($bauRes['message'] ?? 'Tu código quedó pendiente.'),
+                'provider_flow' => 'inventory_shortage', 'provider_status' => 'inventory_shortage', 'pending_review' => true]);
+        }
+        json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => (string) ($bauRes['message'] ?? 'No se pudo procesar la entrega.')]);
     }
 
     // ── Streaming: asigna un perfil del stock de la tienda y entrega credenciales ──

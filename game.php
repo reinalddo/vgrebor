@@ -23,6 +23,7 @@ require_once __DIR__ . "/includes/levelpass_api.php";
 require_once __DIR__ . "/includes/fullimpulso_api.php";
 require_once __DIR__ . "/includes/package_categories.php";
 require_once __DIR__ . "/includes/referidos.php";
+require_once __DIR__ . "/includes/baul_api.php";
 
 // Presentación del rediseño configurable de "PASO 1/2/3" y del verificador
 // de jugador (includes/paso_estilos.php solo tiene los getters de config —
@@ -866,6 +867,10 @@ include __DIR__ . "/includes/header.php";
             $packApiProvider = 'discord';
           }
         }
+        // Baúl de Giftcards: nunca se muestra la cantidad exacta al cliente de la tienda (el dueño no
+        // quiere revelar existencias desparejas) — solo el binario "Agotado" cuando no queda ningún
+        // código. Ver includes/baul_api.php y CLAUDE.md, sección "Baúl de Giftcards".
+        $packBaulAgotado = $packApiProvider === 'baul' && $packApiId > 0 && bau_product_stock_count($mysqli, $packApiId) <= 0;
         if ($packApiProvider === 'giftven' && $packApiId > 0) {
           $bsPassCategory = trim((string) ($pack['api_source_key'] ?? ''));
           if ($bsPassCategory === '' && isset($apiProductsById[$packApiId])) {
@@ -949,7 +954,8 @@ include __DIR__ . "/includes/header.php";
         }
     ?>
       <div class="col" data-package-category="<?= htmlspecialchars($packCategoryTabId, ENT_QUOTES, 'UTF-8') ?>"<?= $packLevelPassKey !== '' ? ' data-levelpass-key="' . htmlspecialchars($packLevelPassKey, ENT_QUOTES, 'UTF-8') . '"' : '' ?>>
-        <article class="pack-card card border-info bg-dark text-start w-100 h-100 shadow-sm"
+        <article class="pack-card card border-info bg-dark text-start w-100 h-100 shadow-sm<?= $packBaulAgotado ? ' baul-agotado' : '' ?>"
+          <?= $packBaulAgotado ? 'aria-disabled="true" data-lock-label="Agotado"' : '' ?>
           data-package-id="<?= $packId ?>"
           data-package-provider="<?= htmlspecialchars($packApiProvider, ENT_QUOTES, 'UTF-8') ?>"
           data-base="<?= htmlspecialchars($precio_base) ?>"
@@ -4975,20 +4981,23 @@ include __DIR__ . "/includes/header.php";
      la tarjeta completa, la etiqueta de texto (::after) quedaría opacada y
      grisácea junto con la imagen, en vez de verse nítida por encima. */
   .pack-card.bs-pass-blocked,
-  .pack-card.levelpass-locked {
+  .pack-card.levelpass-locked,
+  .pack-card.baul-agotado {
     position: relative;
     cursor: not-allowed;
     pointer-events: none;
   }
 
   .pack-card.bs-pass-blocked > .card-body,
-  .pack-card.levelpass-locked > .card-body {
+  .pack-card.levelpass-locked > .card-body,
+  .pack-card.baul-agotado > .card-body {
     filter: grayscale(0.85);
     opacity: 0.5;
   }
 
   .pack-card.bs-pass-blocked::after,
-  .pack-card.levelpass-locked::after {
+  .pack-card.levelpass-locked::after,
+  .pack-card.baul-agotado::after {
     content: attr(data-lock-label);
     position: absolute;
     inset: 0;
@@ -12783,7 +12792,7 @@ include __DIR__ . "/includes/header.php";
     if (!card) {
       return;
     }
-    if (card.classList.contains('bs-pass-blocked') || card.classList.contains('levelpass-locked')) {
+    if (card.classList.contains('bs-pass-blocked') || card.classList.contains('levelpass-locked') || card.classList.contains('baul-agotado')) {
       return;
     }
 
@@ -14274,7 +14283,7 @@ include __DIR__ . "/includes/header.php";
                   if (!cartMode) return; // normal flow handles it
                   if (e.target.closest('[data-pack-preview-trigger]')) return; // let preview button open gallery modal
                   if (e.target.closest('.pack-info-btn')) return; // let the "i" button open its info modal
-                  if (card.classList.contains('bs-pass-blocked') || card.classList.contains('levelpass-locked')) { e.stopImmediatePropagation(); return; } // pase sin stock / nivel no disponible
+                  if (card.classList.contains('bs-pass-blocked') || card.classList.contains('levelpass-locked') || card.classList.contains('baul-agotado')) { e.stopImmediatePropagation(); return; } // pase sin stock / nivel no disponible / baúl agotado
 
                   e.stopImmediatePropagation(); // prevent original handler
 
