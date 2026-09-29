@@ -766,6 +766,10 @@ include __DIR__ . "/includes/header.php";
     // explícita del cliente).
     $gameMarkupPctGiftven = floatval($game['precio_markup_pct'] ?? 0);
     $gameMarkupPctRecargasamerica = floatval($game['precio_markup_pct_recargasamerica'] ?? 0);
+    // Baúl: mismo concepto que GiftVen/RecargasAmérica, pero el "precio de la API" es el costo del
+    // próximo código a entregar (bau_product_next_cost, FIFO) — pedido explícito del cliente para no
+    // tener que recalcular el precio a mano cada vez que carga un lote con otro costo.
+    $gameMarkupPctBaul = floatval($game['precio_markup_pct_baul'] ?? 0);
   ?>
   <?php $priceSyncQueue = []; ?>
   <?php $bsPassStockPackageIds = []; ?>
@@ -828,8 +832,11 @@ include __DIR__ . "/includes/header.php";
         if (!$packManualOverride && $packApiId > 0 && $packPricingProvider === 'recargasamerica' && isset($packRaPriceMap[$packApiId])) {
             $packApiRawPrice = floatval($packRaPriceMap[$packApiId]['price'] ?? 0);
             $packMarkupPct = $gameMarkupPctRecargasamerica;
+        } elseif (!$packManualOverride && $packApiId > 0 && $packPricingProvider === 'baul') {
+            $packApiRawPrice = bau_product_next_cost($mysqli, $packApiId);
+            $packMarkupPct = $gameMarkupPctBaul;
         } else {
-            $packApiRawPrice = (!$packManualOverride && $packApiId > 0 && $packPricingProvider !== 'recargasamerica' && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
+            $packApiRawPrice = (!$packManualOverride && $packApiId > 0 && $packPricingProvider !== 'recargasamerica' && $packPricingProvider !== 'baul' && isset($apiProductsById[$packApiId])) ? floatval($apiProductsById[$packApiId]['precio']) : null;
             $packMarkupPct = $gameMarkupPctGiftven;
         }
         $precio_base = ($packApiRawPrice !== null)

@@ -308,6 +308,43 @@ function bau_void_code(mysqli $mysqli, int $codeId): bool {
     return $changed;
 }
 
+// Borra un código para siempre (disponible o anulado). Un código 'vendido' NUNCA se borra: es
+// historial de un pedido real y bau_delete_product() depende de que su conteo nunca llegue a
+// cero si hubo ventas.
+function bau_delete_code(mysqli $mysqli, int $codeId): bool {
+    $stmt = $mysqli->prepare("DELETE FROM bau_codigos WHERE id = ? AND estado != 'vendido'");
+    $stmt->bind_param('i', $codeId);
+    $stmt->execute();
+    $changed = $stmt->affected_rows > 0;
+    $stmt->close();
+    return $changed;
+}
+
+// Borra varios códigos de una vez (checkboxes del panel). Protege los vendidos igual que
+// bau_delete_code(): los cuenta aparte y jamás los toca, aunque estén en la selección.
+function bau_delete_codes_bulk(mysqli $mysqli, array $codeIds): array {
+    $codeIds = array_values(array_unique(array_filter(array_map('intval', $codeIds), fn($id) => $id > 0)));
+    if (empty($codeIds)) {
+        return ['eliminados' => 0, 'omitidos_vendidos' => 0];
+    }
+    $placeholders = implode(',', array_fill(0, count($codeIds), '?'));
+    $types = str_repeat('i', count($codeIds));
+
+    $checkStmt = $mysqli->prepare("SELECT COUNT(*) c FROM bau_codigos WHERE id IN ($placeholders) AND estado = 'vendido'");
+    $checkStmt->bind_param($types, ...$codeIds);
+    $checkStmt->execute();
+    $vendidos = (int) ($checkStmt->get_result()->fetch_assoc()['c'] ?? 0);
+    $checkStmt->close();
+
+    $delStmt = $mysqli->prepare("DELETE FROM bau_codigos WHERE id IN ($placeholders) AND estado != 'vendido'");
+    $delStmt->bind_param($types, ...$codeIds);
+    $delStmt->execute();
+    $eliminados = $delStmt->affected_rows;
+    $delStmt->close();
+
+    return ['eliminados' => $eliminados, 'omitidos_vendidos' => $vendidos];
+}
+
 // ── Formato de entrega ───────────────────────────────────────────────────
 
 // Igual que el resto del sistema (ver recargasamerica_catalog_format_delivery): si ningún código

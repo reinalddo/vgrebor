@@ -80,6 +80,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('Ese código ya no está disponible (puede que ya se haya vendido).');
             }
             $flashMessage = 'Código anulado.';
+        } elseif ($action === 'eliminar_codigo') {
+            $codeId = (int) ($_POST['codigo_id'] ?? 0);
+            if (!bau_delete_code($mysqli, $codeId)) {
+                throw new RuntimeException('Ese código no se puede eliminar (ya fue vendido: es historial de un pedido).');
+            }
+            $flashMessage = 'Código eliminado.';
+        } elseif ($action === 'eliminar_codigos_masivo') {
+            $codeIds = $_POST['codigo_ids'] ?? [];
+            if (!is_array($codeIds) || empty($codeIds)) {
+                throw new RuntimeException('Selecciona al menos un código.');
+            }
+            $result = bau_delete_codes_bulk($mysqli, $codeIds);
+            $flashMessage = $result['eliminados'] . ' código(s) eliminado(s).';
+            if ($result['omitidos_vendidos'] > 0) {
+                $flashMessage .= ' ' . $result['omitidos_vendidos'] . ' se omitieron por estar vendidos (son historial de un pedido).';
+            }
         }
     } catch (Throwable $e) {
         $flashMessage = $e->getMessage();
@@ -284,34 +300,53 @@ function baul_money($amount, string $moneda = 'USD'): string {
                 </form>
               </div>
               <div class="col-md-7">
-                <h3 class="h6 text-info">Códigos cargados (últimos 300)</h3>
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                  <h3 class="h6 text-info mb-0">Códigos cargados (últimos 300)</h3>
+                  <button type="button" class="btn btn-sm btn-outline-danger js-baul-delete-selected" data-product-id="<?= $p['id'] ?>" disabled>Eliminar seleccionados (<span class="js-baul-selected-count">0</span>)</button>
+                </div>
                 <div class="baul-codes-list">
                   <table class="table table-sm baul-table mb-0">
                     <thead>
-                      <tr><th>Código</th><th>Serial</th><th>Costo</th><th>Estado</th><th></th></tr>
+                      <tr>
+                        <th><input type="checkbox" class="js-baul-select-all" data-product-id="<?= $p['id'] ?>" title="Seleccionar todos (no incluye vendidos)"></th>
+                        <th>Código</th><th>Serial</th><th>Costo</th><th>Estado</th><th></th>
+                      </tr>
                     </thead>
                     <tbody>
                       <?php foreach (bau_list_codes($mysqli, (int) $p['id']) as $c): ?>
+                      <?php $esVendido = $c['estado'] === 'vendido'; ?>
                       <tr>
+                        <td>
+                          <?php if (!$esVendido): ?>
+                          <input type="checkbox" class="js-baul-code-check" data-product-id="<?= $p['id'] ?>" value="<?= (int) $c['id'] ?>">
+                          <?php endif; ?>
+                        </td>
                         <td><?= htmlspecialchars((string) $c['codigo'], ENT_QUOTES, 'UTF-8') ?></td>
                         <td><?= $c['serial'] !== null ? htmlspecialchars((string) $c['serial'], ENT_QUOTES, 'UTF-8') : '<span class="text-secondary">—</span>' ?></td>
                         <td><?= $c['costo'] !== null ? baul_money($c['costo']) : '<span class="text-secondary">—</span>' ?></td>
                         <td>
                           <?php
                             $estadoLabel = ['disponible' => 'Disponible', 'vendido' => 'Vendido', 'anulado' => 'Anulado'][$c['estado']] ?? $c['estado'];
-                            $estadoClass = $c['estado'] === 'disponible' ? 'baul-pill-stock' : ($c['estado'] === 'vendido' ? 'baul-pill-inactivo' : 'baul-pill-agotado');
+                            $estadoClass = $c['estado'] === 'disponible' ? 'baul-pill-stock' : ($esVendido ? 'baul-pill-inactivo' : 'baul-pill-agotado');
                           ?>
                           <span class="baul-pill <?= $estadoClass ?>"><?= htmlspecialchars($estadoLabel, ENT_QUOTES, 'UTF-8') ?></span>
-                          <?php if ($c['estado'] === 'vendido' && !empty($c['pedido_id'])): ?>
+                          <?php if ($esVendido && !empty($c['pedido_id'])): ?>
                             <span class="text-secondary small">pedido #<?= (int) $c['pedido_id'] ?></span>
                           <?php endif; ?>
                         </td>
-                        <td>
+                        <td class="d-flex gap-1 flex-wrap">
                           <?php if ($c['estado'] === 'disponible'): ?>
-                          <form method="post" class="m-0" onsubmit="return confirm('¿Anular este código? No podrá venderse.');">
+                          <form method="post" class="m-0" onsubmit="return confirm('¿Anular este código? No podrá venderse (pero se conserva en la lista).');">
                             <input type="hidden" name="action" value="anular_codigo">
                             <input type="hidden" name="codigo_id" value="<?= (int) $c['id'] ?>">
-                            <button type="submit" class="btn btn-sm btn-outline-danger">Anular</button>
+                            <button type="submit" class="btn btn-sm btn-outline-secondary">Anular</button>
+                          </form>
+                          <?php endif; ?>
+                          <?php if (!$esVendido): ?>
+                          <form method="post" class="m-0" onsubmit="return confirm('¿Eliminar este código para siempre? No se puede deshacer.');">
+                            <input type="hidden" name="action" value="eliminar_codigo">
+                            <input type="hidden" name="codigo_id" value="<?= (int) $c['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Eliminar</button>
                           </form>
                           <?php endif; ?>
                         </td>
@@ -339,6 +374,50 @@ function baul_money($amount, string $moneda = 'USD'): string {
     btn.addEventListener('click', function () {
       var target = document.getElementById('baul-codes-' + btn.dataset.toggleCodes);
       if (target) target.classList.toggle('is-visible');
+    });
+  });
+
+  function updateBaulBulkButton(productId) {
+    var checked = document.querySelectorAll('.js-baul-code-check[data-product-id="' + productId + '"]:checked');
+    var btn = document.querySelector('.js-baul-delete-selected[data-product-id="' + productId + '"]');
+    if (!btn) return;
+    btn.disabled = checked.length === 0;
+    var countEl = btn.querySelector('.js-baul-selected-count');
+    if (countEl) countEl.textContent = checked.length;
+  }
+  document.querySelectorAll('.js-baul-select-all').forEach(function (cb) {
+    cb.addEventListener('change', function () {
+      var pid = cb.dataset.productId;
+      document.querySelectorAll('.js-baul-code-check[data-product-id="' + pid + '"]').forEach(function (c) { c.checked = cb.checked; });
+      updateBaulBulkButton(pid);
+    });
+  });
+  document.querySelectorAll('.js-baul-code-check').forEach(function (cb) {
+    cb.addEventListener('change', function () { updateBaulBulkButton(cb.dataset.productId); });
+  });
+  document.querySelectorAll('.js-baul-delete-selected').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pid = btn.dataset.productId;
+      var checked = document.querySelectorAll('.js-baul-code-check[data-product-id="' + pid + '"]:checked');
+      if (checked.length === 0) return;
+      if (!window.confirm('¿Eliminar ' + checked.length + ' código(s) para siempre? Los vendidos nunca se tocan aunque estén seleccionados. No se puede deshacer.')) return;
+      var form = document.createElement('form');
+      form.method = 'post';
+      form.style.display = 'none';
+      var actionInput = document.createElement('input');
+      actionInput.type = 'hidden';
+      actionInput.name = 'action';
+      actionInput.value = 'eliminar_codigos_masivo';
+      form.appendChild(actionInput);
+      checked.forEach(function (c) {
+        var inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.name = 'codigo_ids[]';
+        inp.value = c.value;
+        form.appendChild(inp);
+      });
+      document.body.appendChild(form);
+      form.submit();
     });
   });
 

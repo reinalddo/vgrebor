@@ -217,6 +217,15 @@ function ensure_juegos_categoria_api_conec_columns(mysqli $mysqli): void {
     }
 }
 
+// Baúl de Giftcards: a diferencia de GiftVen/RecargasAmérica/CONEC, no necesita categoria_api (los
+// productos del Baúl se buscan libres por nombre, sin filtro por juego) — solo el margen.
+function ensure_juegos_precio_markup_pct_baul_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juegos LIKE 'precio_markup_pct_baul'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juegos ADD COLUMN precio_markup_pct_baul DECIMAL(8,4) NOT NULL DEFAULT 0 AFTER precio_markup_pct_conec");
+    }
+}
+
 function admin_game_normalize_api_selection(array $payload, string $giftVenKey, string $discordKey, bool $allowCombined = false): array {
     $giftVenCategory  = trim((string) ($payload[$giftVenKey] ?? ''));
     $giftVenCategory2 = trim((string) ($payload[$giftVenKey . '_2'] ?? ''));
@@ -317,6 +326,7 @@ ensure_juegos_categoria_api_recargasamerica_3_column($mysqli);
 ensure_juegos_precio_markup_pct_column($mysqli);
 ensure_juegos_precio_markup_pct_recargasamerica_column($mysqli);
 ensure_juegos_categoria_api_conec_columns($mysqli);
+ensure_juegos_precio_markup_pct_baul_column($mysqli);
 ensure_juegos_orden_column($mysqli);
 ensure_juegos_orden_catbar_column($mysqli);
 ensure_juegos_slug_column($mysqli);
@@ -499,6 +509,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
     $edit_categoria_api_conec_2 = substr(trim((string) ($_POST['edit_categoria_api_conec_2'] ?? '')), 0, 120);
     $edit_categoria_api_conec_3 = substr(trim((string) ($_POST['edit_categoria_api_conec_3'] ?? '')), 0, 120);
     $edit_precio_markup_pct_conec = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['edit_precio_markup_pct_conec'] ?? '0'))))));
+    $edit_precio_markup_pct_baul = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['edit_precio_markup_pct_baul'] ?? '0'))))));
     $edit_api_free_fire = $apiSelection['api_free_fire'];
     $edit_activo = isset($_POST['edit_activo']) ? 1 : 0;
     $edit_moneda_fija_id = isset($_POST['edit_moneda_fija_id']) && $_POST['edit_moneda_fija_id'] !== '' ? intval($_POST['edit_moneda_fija_id']) : null;
@@ -594,6 +605,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
         $cs->bind_param('sssdi', $edit_categoria_api_conec, $edit_categoria_api_conec_2, $edit_categoria_api_conec_3, $edit_precio_markup_pct_conec, $edit_id);
         $cs->execute();
     }
+    // Baúl: mismo motivo, UPDATE aparte (solo margen, no tiene categoria_api).
+    if ($bs = $mysqli->prepare("UPDATE juegos SET precio_markup_pct_baul=? WHERE id=?")) {
+        $bs->bind_param('di', $edit_precio_markup_pct_baul, $edit_id);
+        $bs->execute();
+    }
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
     game_set_categories($mysqli, $edit_id, $catIds);
     admin_games_redirect($adminGamesUrl);
@@ -627,6 +643,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $categoria_api_conec_2 = substr(trim((string) ($_POST['categoria_api_conec_2'] ?? '')), 0, 120);
     $categoria_api_conec_3 = substr(trim((string) ($_POST['categoria_api_conec_3'] ?? '')), 0, 120);
     $precio_markup_pct_conec = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['precio_markup_pct_conec'] ?? '0'))))));
+    $precio_markup_pct_baul = max(0.0, min(10000.0, floatval(str_replace(',', '.', trim((string) ($_POST['precio_markup_pct_baul'] ?? '0'))))));
     $activo = isset($_POST['activo']) ? 1 : 0;
     $orden = admin_game_next_order($mysqli);
     $imagen = admin_game_store_upload($_FILES['imagen'] ?? [], 'juego_');
@@ -658,6 +675,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     if ($juego_id && ($cs = $mysqli->prepare("UPDATE juegos SET categoria_api_conec=NULLIF(?, ''), categoria_api_conec_2=NULLIF(?, ''), categoria_api_conec_3=NULLIF(?, ''), precio_markup_pct_conec=? WHERE id=?"))) {
         $cs->bind_param('sssdi', $categoria_api_conec, $categoria_api_conec_2, $categoria_api_conec_3, $precio_markup_pct_conec, $juego_id);
         $cs->execute();
+    }
+    // Baúl: mismo motivo, UPDATE aparte (solo margen).
+    if ($juego_id && ($bs = $mysqli->prepare("UPDATE juegos SET precio_markup_pct_baul=? WHERE id=?"))) {
+        $bs->bind_param('di', $precio_markup_pct_baul, $juego_id);
+        $bs->execute();
     }
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
     game_set_categories($mysqli, (int) $juego_id, $catIds);
@@ -893,6 +915,14 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">%</span>
                 </div>
                 <div class="form-text mt-2" style="color:#8be9fd;">Ganancia sobre el precio de CONEC. Ej: 15 → precio CONEC x1.15.</div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label text-neon">Margen de ganancia Baúl (%)</label>
+                <div class="input-group">
+                    <input type="number" name="edit_precio_markup_pct_baul" step="0.01" min="0" max="10000" value="<?= htmlspecialchars(number_format((float) ($juego_edit['precio_markup_pct_baul'] ?? 0), 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                    <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">%</span>
+                </div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Ganancia sobre el costo del código del Baúl (el del próximo lote a entregar). Ej: 15 → precio = costo x1.15. Se aplica automáticamente en tiempo real cuando cargas códigos con otro costo.</div>
             </div>
             <div class="form-check mb-3">
                 <input type="checkbox" name="edit_activo" class="form-check-input" id="editActivoCheck" <?= !isset($juego_edit['activo']) || !empty($juego_edit['activo']) ? 'checked' : '' ?>>
@@ -1386,6 +1416,14 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 </div>
                 <div class="form-text mt-2" style="color:#8be9fd;">Ganancia sobre el precio de CONEC. 0 = precio directo de la API.</div>
             </div>
+            <div class="mt-3">
+                <label class="form-label" style="color:#00fff7;">Margen de ganancia Baúl (%)</label>
+                <div class="input-group">
+                    <input type="number" name="precio_markup_pct_baul" step="0.01" min="0" max="10000" value="0" class="form-control" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">
+                    <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">%</span>
+                </div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Ganancia sobre el costo del código del Baúl. 0 = precio igual al costo.</div>
+            </div>
             <div class="form-check mt-3">
                 <input type="checkbox" name="activo" class="form-check-input" id="activoCheck" checked>
                 <label class="form-check-label" for="activoCheck" style="color:#00fff7;">Publicar este juego ahora</label>
@@ -1848,6 +1886,12 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 <span class="ml-2 text-slate-300 whitespace-nowrap">%</span>
             </div>
             <div class="text-xs text-slate-400 mb-2">Ganancia sobre el precio de CONEC.</div>
+            <label class="block text-slate-300 font-medium mb-1">Margen de ganancia Baúl (%):</label>
+            <div class="flex items-center mb-2">
+                <input type="number" name="edit_precio_markup_pct_baul" step="0.01" min="0" max="10000" value="<?= htmlspecialchars(number_format((float) ($juego_edit['precio_markup_pct_baul'] ?? 0), 2, '.', ''), ENT_QUOTES, 'UTF-8') ?>" class="w-full rounded-lg px-3 py-2 bg-slate-800 text-white" style="border:1px solid #22d3ee;">
+                <span class="ml-2 text-slate-300 whitespace-nowrap">%</span>
+            </div>
+            <div class="text-xs text-slate-400 mb-2">Ganancia sobre el costo del código del Baúl.</div>
             <label class="block text-slate-300 mb-1">Imagen actual:</label>
             <?php if ($juego_edit['imagen']): ?>
                 <img src="/<?= htmlspecialchars($juego_edit['imagen']) ?>" alt="Imagen actual" class="mb-2 rounded-lg max-h-32">

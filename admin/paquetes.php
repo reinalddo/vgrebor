@@ -923,15 +923,28 @@ $juego = $res_juego->get_result()->fetch_assoc();
 $adminPackageMarkupPct = floatval($juego['precio_markup_pct'] ?? 0);
 $adminPackageMarkupPctRecargasamerica = floatval($juego['precio_markup_pct_recargasamerica'] ?? 0);
 $adminPackageMarkupPctConec = floatval($juego['precio_markup_pct_conec'] ?? 0);
+$adminPackageMarkupPctBaul = floatval($juego['precio_markup_pct_baul'] ?? 0);
 
 // Precio API + margen correcto para un paquete, sin importar el proveedor —
 // mismo criterio que game.php: se distingue por api_provider ANTES de
 // mirar los catálogos (IDs de GiftVen y RecargasAmérica son de sistemas
 // independientes y pueden coincidir por coincidencia), y cada proveedor usa
 // su propio margen de ganancia (no pueden compartir el mismo %).
-function admin_package_raw_price_and_markup(array $package, array $apiProductsById, array $recargasAmericaProductsById, float $markupGiftven, float $markupRecargasamerica, array $conecProductsById = [], float $markupConec = 0.0, array $recargasAmericaLegacyProductsById = []): array {
+function admin_package_raw_price_and_markup(array $package, array $apiProductsById, array $recargasAmericaProductsById, float $markupGiftven, float $markupRecargasamerica, array $conecProductsById = [], float $markupConec = 0.0, array $recargasAmericaLegacyProductsById = [], float $markupBaul = 0.0): array {
     $apiId = (int) ($package['paquete_api'] ?? 0);
     $provider = trim((string) ($package['api_provider'] ?? ''));
+
+    // Baúl: el "precio de la API" es el costo del PRÓXIMO código a entregar (el más antiguo
+    // disponible, FIFO — ver bau_product_next_cost()). Igual que GiftVen/RecargasAmérica, se recalcula
+    // solo (game.php) cada vez que el costo cambia (al cargar un lote nuevo con otro costo).
+    if ($apiId > 0 && $provider === 'baul') {
+        global $mysqli;
+        $baulNextCost = bau_product_next_cost($mysqli, $apiId);
+        if ($baulNextCost !== null) {
+            return [$baulNextCost, $markupBaul];
+        }
+        return [null, 0.0];
+    }
 
     if ($apiId > 0 && $provider === 'conec' && isset($conecProductsById[$apiId])) {
         return [floatval($conecProductsById[$apiId]['price'] ?? 0), $markupConec];
@@ -949,7 +962,7 @@ function admin_package_raw_price_and_markup(array $package, array $apiProductsBy
         }
     }
 
-    if ($apiId > 0 && $provider !== 'recargasamerica' && $provider !== 'conec' && isset($apiProductsById[$apiId])) {
+    if ($apiId > 0 && $provider !== 'recargasamerica' && $provider !== 'conec' && $provider !== 'baul' && isset($apiProductsById[$apiId])) {
         return [floatval($apiProductsById[$apiId]['precio']), $markupGiftven];
     }
 
@@ -3005,7 +3018,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                     </td>
                     <td class="text-neon" style="background:#181f2a; color:#22d3ee;">
                         <?php
-                        [$pAdminApiRaw, $pAdminMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec, $recargasAmericaLegacyProductsById);
+                        [$pAdminApiRaw, $pAdminMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec, $recargasAmericaLegacyProductsById, $adminPackageMarkupPctBaul);
                         $pAdminManualOverride = !empty($p['precio_manual_override']);
                         $pAdminDisplayPrice = (!$pAdminManualOverride && $pAdminApiRaw !== null)
                             ? max(0.0, round($pAdminApiRaw * (1 + $pAdminMarkupPct / 100), 2))
@@ -3097,7 +3110,7 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                         <div style="color:#fff;"><span class="fw-semibold">Monto FF:</span> <?= htmlspecialchars($packageProviderReference, ENT_QUOTES, 'UTF-8') ?></div>
                     <?php endif; ?>
                     <?php
-                    [$pCardApiRaw, $pCardMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec, $recargasAmericaLegacyProductsById);
+                    [$pCardApiRaw, $pCardMarkupPct] = admin_package_raw_price_and_markup($p, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec, $recargasAmericaLegacyProductsById, $adminPackageMarkupPctBaul);
                     $pCardManualOverride = !empty($p['precio_manual_override']);
                     $pCardDisplayPrice = (!$pCardManualOverride && $pCardApiRaw !== null)
                         ? max(0.0, round($pCardApiRaw * (1 + $pCardMarkupPct / 100), 2))
@@ -3468,7 +3481,7 @@ if (isset($_GET['editar'])) {
             <input type="number" step="0.01" name="edit_precio" value="<?= htmlspecialchars($paq_edit['precio']) ?>" required class="form-control" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;" data-discord-catalog-field="price">
             <?php if ($paqEditProvider === 'giftven' || $paqEditProvider === 'recargasamerica'): ?>
                 <?php
-                [$paqEditApiRaw, $paqEditMarkupPct] = admin_package_raw_price_and_markup($paq_edit, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec, $recargasAmericaLegacyProductsById);
+                [$paqEditApiRaw, $paqEditMarkupPct] = admin_package_raw_price_and_markup($paq_edit, $apiProductsById, $recargasAmericaProductsById, $adminPackageMarkupPct, $adminPackageMarkupPctRecargasamerica, $conecProductsById, $adminPackageMarkupPctConec, $recargasAmericaLegacyProductsById, $adminPackageMarkupPctBaul);
                 $paqEditComputedPrice = $paqEditApiRaw !== null ? max(0.0, round($paqEditApiRaw * (1 + $paqEditMarkupPct / 100), 2)) : null;
                 $paqEditManualOverride = !empty($paq_edit['precio_manual_override']);
                 $paqEditProviderLabel = admin_package_provider_label($paqEditProvider);
