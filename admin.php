@@ -4012,7 +4012,7 @@ require_once __DIR__ . '/includes/header.php';
                 <a href="/admin/monedas" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>💵</span>Monedas</a>
                 <a href="/admin/estadisticas" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>📈</span>Estadísticas</a>
                 <a href="/admin/costos" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>💰</span>Registrar Costos</a>
-                <a href="/admin/baul" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🗝️</span>Baúl de Giftcards</a>
+                <a href="/admin/baul.php" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🗝️</span>Baúl de Giftcards</a>
                 <a href="/admin/referidos" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🎁</span>Referidos</a>
                 <a href="/admin/ayuda" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>❔</span>Módulo Ayuda</a>
                 <a href="/admin/diseno-pasos" class="btn btn-outline-info btn-lg d-flex align-items-center gap-2"><span>🎨</span>Diseño de Pasos</a>

@@ -12548,7 +12548,7 @@ if ($action === 'admin_retry_recharge') {
     // explícitamente que estas entregas sean SIEMPRE manuales, desde una acción dedicada (para no
     // tener dos mecanismos distintos completando lo mismo). Ver admin/baul.php.
     if (strtolower(trim((string) ($order['api_provider'] ?? ''))) === 'baul') {
-        json_error('Este pedido es del Baúl de Giftcards. Complétalo desde el panel del Baúl (/admin/baul), no desde este botón.', 409);
+        json_error('Este pedido es del Baúl de Giftcards. Complétalo desde el panel del Baúl (/admin/baul.php), no desde este botón.', 409);
     }
 
     if (trim((string) ($order['recargas_api_pedido_id'] ?? '')) !== '') {

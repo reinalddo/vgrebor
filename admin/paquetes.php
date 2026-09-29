@@ -2469,9 +2469,9 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 <?php endforeach; ?>
             </select>
             <?php if (empty($bauProducts)): ?>
-                <div class="form-text mt-2 text-warning">No hay productos del Baúl todavía. Créalos en <a href="<?= htmlspecialchars(app_path('/admin/baul'), ENT_QUOTES, 'UTF-8') ?>" target="_blank" style="color:#facc15;">/admin/baul</a>.</div>
+                <div class="form-text mt-2 text-warning">No hay productos del Baúl todavía. Créalos en <a href="<?= htmlspecialchars(app_path('/admin/baul.php'), ENT_QUOTES, 'UTF-8') ?>" target="_blank" style="color:#facc15;">/admin/baul</a>.</div>
             <?php else: ?>
-                <div class="form-text mt-2" style="color:#8be9fd;">Inventario propio de la tienda. Administra productos y códigos en <a href="<?= htmlspecialchars(app_path('/admin/baul'), ENT_QUOTES, 'UTF-8') ?>" target="_blank" style="color:#8be9fd;">/admin/baul</a>.</div>
+                <div class="form-text mt-2" style="color:#8be9fd;">Inventario propio de la tienda. Administra productos y códigos en <a href="<?= htmlspecialchars(app_path('/admin/baul.php'), ENT_QUOTES, 'UTF-8') ?>" target="_blank" style="color:#8be9fd;">/admin/baul</a>.</div>
             <?php endif; ?>
         </div>
         <?php /* Fase 2: respaldo automático cuando el Baúl se queda sin NINGÚN código. Reusa el
@@ -3383,7 +3383,7 @@ if (isset($_GET['editar'])) {
                     <option value="<?= (int) $bp['id'] ?>" <?= ($paqEditSelectedSource === 'baul' && (int) ($paq_edit['paquete_api'] ?? 0) === (int) $bp['id']) ? 'selected' : '' ?>><?= htmlspecialchars(bau_product_label($bp), ENT_QUOTES, 'UTF-8') ?></option>
                 <?php endforeach; ?>
             </select>
-            <div class="form-text mt-2" style="color:#8be9fd;">Administra productos y códigos en <a href="<?= htmlspecialchars(app_path('/admin/baul'), ENT_QUOTES, 'UTF-8') ?>" target="_blank" style="color:#8be9fd;">/admin/baul</a>.</div>
+            <div class="form-text mt-2" style="color:#8be9fd;">Administra productos y códigos en <a href="<?= htmlspecialchars(app_path('/admin/baul.php'), ENT_QUOTES, 'UTF-8') ?>" target="_blank" style="color:#8be9fd;">/admin/baul</a>.</div>
         </div>
         <div class="mb-3" data-package-source-panel="baul">
             <?= admin_package_baul_fallback_editor_html('edit_', (int) ($paq_edit['id'] ?? 0), $baulFallbackGiftvenOptions, $baulFallbackRecargasamericaOptions, $baulFallbackConecOptions, $paq_edit) ?>
