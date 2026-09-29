@@ -356,15 +356,27 @@ function ensure_pedidos_table(mysqli $mysqli): void {
     // cada carrito (cart_batch_index = 1) participa del candado — los demás
     // ítems del MISMO carrito comparten a propósito la misma referencia y
     // no deben chocar entre sí.
+    // AJUSTE (pedido explícito del cliente, misma sesión): el candado ahora es DÍA + referencia +
+    // monto, no solo referencia — los bancos venezolanos reciclan números de referencia con el
+    // tiempo, y un pago real de hoy no debe chocar contra un pedido de hace días que por coincidencia
+    // tuvo la misma referencia. DATE(creado_en) es estable (no tiene ON UPDATE, a diferencia de
+    // actualizado_en) — necesario porque una columna generada se recalcula sola si cambia cualquier
+    // columna de la que depende, y no debe "correrse" de fecha si el pedido se toca después por otra
+    // razón. El monto entra con precisión de 2 decimales (CAST a DECIMAL): en la tienda los montos en
+    // Bolívares nunca llevan decimales, pero la fórmula funciona igual para monedas que sí los usan.
+    // Dentro del MISMO día, con el MISMO monto, la protección sigue siendo absoluta — nada cambió ahí.
     $referenceLockExpr =
         "CASE WHEN TRIM(COALESCE(numero_referencia,'')) <> '' " .
         "AND (cart_batch_id IS NULL OR cart_batch_index = 1) " .
-        "THEN TRIM(numero_referencia) ELSE NULL END";
+        "THEN CONCAT(DATE(creado_en), '|', TRIM(numero_referencia), '|', CAST(precio AS DECIMAL(12,2))) ELSE NULL END";
+    // VARCHAR(200): la fórmula ahora concatena fecha (10) + '|' + numero_referencia (hasta 120) + '|'
+    // + precio (hasta 13) — 120 se quedaba corto y truncaba referencias largas, arriesgando que dos
+    // referencias distintas truncaran al mismo valor.
     $hasReferenceLockColumn = $mysqli->query("SHOW COLUMNS FROM pedidos LIKE 'referencia_activa_lock'");
     if (!($hasReferenceLockColumn instanceof mysqli_result) || $hasReferenceLockColumn->num_rows === 0) {
         try {
             $mysqli->query(
-                "ALTER TABLE pedidos ADD COLUMN referencia_activa_lock VARCHAR(120) " .
+                "ALTER TABLE pedidos ADD COLUMN referencia_activa_lock VARCHAR(200) " .
                 "GENERATED ALWAYS AS ({$referenceLockExpr}) STORED"
             );
         } catch (Throwable $e) {
@@ -381,7 +393,10 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         );
         $genExprRow = $genExprResult instanceof mysqli_result ? $genExprResult->fetch_assoc() : null;
         $currentExpr = $genExprRow ? (string) ($genExprRow['GENERATION_EXPRESSION'] ?? '') : '';
-        if ($currentExpr !== '' && stripos($currentExpr, 'estado') !== false) {
+        // 'precio' solo aparece en la fórmula NUEVA (día + referencia + monto) — su ausencia
+        // identifica tanto la fórmula muy vieja (con 'estado') como la que estaba vigente hasta hoy
+        // (solo referencia, sin fecha ni monto); ambas se migran igual.
+        if ($currentExpr !== '' && (stripos($currentExpr, 'estado') !== false || stripos($currentExpr, 'precio') === false)) {
             // Se quita el índice único ANTES de cambiar la fórmula: al
             // ampliar el candado a "sin importar el estado" es normal que
             // aparezcan pedidos viejos (ej. varios 'pendiente' abandonados
@@ -400,7 +415,7 @@ function ensure_pedidos_table(mysqli $mysqli): void {
             }
             try {
                 $mysqli->query(
-                    "ALTER TABLE pedidos MODIFY COLUMN referencia_activa_lock VARCHAR(120) " .
+                    "ALTER TABLE pedidos MODIFY COLUMN referencia_activa_lock VARCHAR(200) " .
                     "GENERATED ALWAYS AS ({$referenceLockExpr}) STORED"
                 );
             } catch (Throwable $e) {
@@ -562,12 +577,20 @@ function resolve_order_unit_cost_base(mysqli $mysqli, int $packageId, int $paque
 }
 
 function ensure_movimientos_table(mysqli $mysqli): void {
+    // dia_negocio: día real del movimiento (o de cuando se sincronizó, si el banco no trae fecha) —
+    // columna generada para que la llave única de abajo pueda exigir "misma referencia + mismo día +
+    // mismo monto" en vez de solo "misma referencia" (ver find_reference_reuse_conflict() y
+    // movement_is_available_for_order(): el banco reutiliza números de referencia con el tiempo, y
+    // antes de este cambio un pago real de hoy con una referencia reciclada de hace días quedaba
+    // bloqueado — o peor, pisaba la fila del movimiento viejo y heredaba su "ya usado". La protección
+    // contra reutilizar el MISMO pago (misma referencia + mismo día + mismo monto) sigue intacta.
     $create = "CREATE TABLE IF NOT EXISTS movimientos (
         id INT AUTO_INCREMENT PRIMARY KEY,
         referencia VARCHAR(120) NOT NULL,
         descripcion VARCHAR(255) DEFAULT NULL,
         fecha_raw VARCHAR(120) DEFAULT NULL,
         fecha_movimiento DATETIME DEFAULT NULL,
+        dia_negocio DATE GENERATED ALWAYS AS (COALESCE(DATE(fecha_movimiento), DATE(creado_en))) STORED,
         tipo VARCHAR(80) DEFAULT NULL,
         monto DECIMAL(14,2) NOT NULL DEFAULT 0,
         moneda VARCHAR(20) NOT NULL DEFAULT 'VES',
@@ -575,10 +598,12 @@ function ensure_movimientos_table(mysqli $mysqli): void {
         payload_json LONGTEXT DEFAULT NULL,
         creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uniq_movimientos_referencia (referencia),
+        UNIQUE KEY uniq_movimientos_ref_dia_monto (referencia, dia_negocio, monto),
+        INDEX idx_movimientos_referencia (referencia),
         INDEX idx_movimientos_pedido_id (pedido_id),
         INDEX idx_movimientos_monto (monto),
-        INDEX idx_movimientos_fecha (fecha_movimiento)
+        INDEX idx_movimientos_fecha (fecha_movimiento),
+        INDEX idx_movimientos_dia (dia_negocio)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
     $mysqli->query($create);
 
@@ -587,7 +612,8 @@ function ensure_movimientos_table(mysqli $mysqli): void {
         'descripcion' => "ALTER TABLE movimientos ADD COLUMN descripcion VARCHAR(255) NULL AFTER referencia",
         'fecha_raw' => "ALTER TABLE movimientos ADD COLUMN fecha_raw VARCHAR(120) NULL AFTER descripcion",
         'fecha_movimiento' => "ALTER TABLE movimientos ADD COLUMN fecha_movimiento DATETIME NULL AFTER fecha_raw",
-        'tipo' => "ALTER TABLE movimientos ADD COLUMN tipo VARCHAR(80) NULL AFTER fecha_movimiento",
+        'dia_negocio' => "ALTER TABLE movimientos ADD COLUMN dia_negocio DATE GENERATED ALWAYS AS (COALESCE(DATE(fecha_movimiento), DATE(creado_en))) STORED AFTER fecha_movimiento",
+        'tipo' => "ALTER TABLE movimientos ADD COLUMN tipo VARCHAR(80) NULL AFTER dia_negocio",
         'monto' => "ALTER TABLE movimientos ADD COLUMN monto DECIMAL(14,2) NOT NULL DEFAULT 0 AFTER tipo",
         'moneda' => "ALTER TABLE movimientos ADD COLUMN moneda VARCHAR(20) NOT NULL DEFAULT 'VES' AFTER monto",
         'pedido_id' => "ALTER TABLE movimientos ADD COLUMN pedido_id INT NULL AFTER moneda",
@@ -610,16 +636,37 @@ function ensure_movimientos_table(mysqli $mysqli): void {
         }
     }
 
+    // Migración: la llave única VIEJA era solo (referencia) — bloqueaba para siempre cualquier
+    // referencia reciclada por el banco en un día distinto, y además la sincronización pisaba la fila
+    // del movimiento viejo (perdiendo su historial y heredando su "ya usado"). Se quita para dejar
+    // paso a la nueva uniq_movimientos_ref_dia_monto (referencia, dia_negocio, monto) del bloque de
+    // abajo — nunca puede haber dos movimientos idénticos en referencia+día+monto, que es la
+    // definición real de "el mismo pago".
+    $oldUniqueIndex = $mysqli->query("SHOW INDEX FROM movimientos WHERE Key_name = 'uniq_movimientos_referencia'");
+    if ($oldUniqueIndex instanceof mysqli_result && $oldUniqueIndex->num_rows > 0) {
+        try {
+            $mysqli->query('ALTER TABLE movimientos DROP INDEX uniq_movimientos_referencia');
+        } catch (Throwable $e) {
+            error_log('TVG no se pudo quitar el índice único viejo uniq_movimientos_referencia: ' . $e->getMessage());
+        }
+    }
+
     $indexes = [
-        'uniq_movimientos_referencia' => 'ALTER TABLE movimientos ADD UNIQUE KEY uniq_movimientos_referencia (referencia)',
+        'uniq_movimientos_ref_dia_monto' => 'ALTER TABLE movimientos ADD UNIQUE KEY uniq_movimientos_ref_dia_monto (referencia, dia_negocio, monto)',
+        'idx_movimientos_referencia' => 'ALTER TABLE movimientos ADD INDEX idx_movimientos_referencia (referencia)',
         'idx_movimientos_pedido_id' => 'ALTER TABLE movimientos ADD INDEX idx_movimientos_pedido_id (pedido_id)',
         'idx_movimientos_monto' => 'ALTER TABLE movimientos ADD INDEX idx_movimientos_monto (monto)',
         'idx_movimientos_fecha' => 'ALTER TABLE movimientos ADD INDEX idx_movimientos_fecha (fecha_movimiento)',
+        'idx_movimientos_dia' => 'ALTER TABLE movimientos ADD INDEX idx_movimientos_dia (dia_negocio)',
     ];
     foreach ($indexes as $indexName => $sql) {
         $indexResult = $mysqli->query("SHOW INDEX FROM movimientos WHERE Key_name = '" . $mysqli->real_escape_string($indexName) . "'");
         if (!($indexResult instanceof mysqli_result) || $indexResult->num_rows === 0) {
-            $mysqli->query($sql);
+            try {
+                $mysqli->query($sql);
+            } catch (Throwable $e) {
+                error_log('TVG no se pudo crear el índice ' . $indexName . ' en movimientos: ' . $e->getMessage());
+            }
         }
     }
 }
@@ -6966,6 +7013,13 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
     // pedido previo realmente no llegó a completarse, se reenvía
     // manualmente desde el admin en vez de arriesgar una recarga real
     // duplicada.
+    // AJUSTE (pedido explícito del cliente): el candado ahora exige fecha + referencia + monto, no
+    // solo referencia — el banco reutiliza números de referencia con el tiempo, y un pago real de HOY
+    // no debe chocar contra un pedido de hace días que por coincidencia tuvo la misma referencia. Se
+    // compara contra DATE(creado_en) (mismo día que usa referencia_activa_lock más abajo, para que las
+    // dos protecciones — la de aplicación y la de base de datos — nunca queden en desacuerdo). Dentro
+    // del MISMO día, la protección sigue siendo absoluta: ni el estado ni el monto (cuando se conoce)
+    // permiten reutilizarla.
     if ($requiredDigits > 0) {
         $stmt = $mysqli->prepare(
             "SELECT id, numero_referencia, estado
@@ -6975,6 +7029,7 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
                AND TRIM(numero_referencia) <> ''
                AND CAST(RIGHT(TRIM(numero_referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
                AND (? = 0 OR ABS(precio - ?) < 0.01)
+               AND DATE(creado_en) = CURDATE()
              ORDER BY id DESC
              LIMIT 1"
         );
@@ -6987,11 +7042,13 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
              FROM pedidos
              WHERE id <> ?
                AND numero_referencia = ?
+               AND (? = 0 OR ABS(precio - ?) < 0.01)
+               AND DATE(creado_en) = CURDATE()
              ORDER BY id DESC
              LIMIT 1"
         );
         if ($stmt) {
-            $stmt->bind_param('is', $orderId, $reportedReference);
+            $stmt->bind_param('isdd', $orderId, $reportedReference, $orderAmount, $orderAmount);
         }
     }
 
@@ -7017,6 +7074,7 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
              LEFT JOIN pedidos p ON p.id = m.pedido_id
              WHERE CAST(RIGHT(TRIM(m.referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
                AND (? = 0 OR ABS(m.monto - ?) < 0.01)
+               AND m.dia_negocio = CURDATE()
              ORDER BY m.id DESC"
         );
         if ($stmt) {
@@ -7028,10 +7086,12 @@ function find_reference_reuse_conflict(mysqli $mysqli, string $reportedReference
              FROM movimientos m
              LEFT JOIN pedidos p ON p.id = m.pedido_id
              WHERE m.referencia = ?
+               AND (? = 0 OR ABS(m.monto - ?) < 0.01)
+               AND m.dia_negocio = CURDATE()
              ORDER BY m.id DESC"
         );
         if ($stmt) {
-            $stmt->bind_param('s', $reportedReference);
+            $stmt->bind_param('sdd', $reportedReference, $orderAmount, $orderAmount);
         }
     }
 
@@ -7096,14 +7156,20 @@ function reference_reuse_conflict_message(array $conflict): string {
     return 'La referencia ingresada ya fue usada en otra recarga y no puede reutilizarse.';
 }
 
-function movement_is_available_for_order(mysqli $mysqli, string $reference, int $orderId): bool {
+// $movementDay ('Y-m-d') y $amount identifican el movimiento EXACTO (referencia + día + monto — el
+// mismo trío que ahora exige la llave única de movimientos, ver ensure_movimientos_table()). Antes
+// esto buscaba solo por referencia: un pago de hoy con una referencia que el banco reutilizó días
+// atrás encontraba la fila VIEJA (ya marcada checked/con pedido_id de otra compra) y se bloqueaba
+// como si fuera el mismo pago. Exigir también día y monto hace que solo choque con el movimiento que
+// de verdad es el mismo pago — la protección contra reusar ESE pago sigue intacta.
+function movement_is_available_for_order(mysqli $mysqli, string $reference, string $movementDay, float $amount, int $orderId): bool {
     $mysqli = ensure_mysqli_connection($mysqli);
 
-    $stmt = $mysqli->prepare('SELECT pedido_id, COALESCE(checked, 0) AS checked FROM movimientos WHERE referencia = ? LIMIT 1');
+    $stmt = $mysqli->prepare('SELECT pedido_id, COALESCE(checked, 0) AS checked FROM movimientos WHERE referencia = ? AND dia_negocio = ? AND ABS(monto - ?) < 0.01 LIMIT 1');
     if (!$stmt) {
         return false;
     }
-    $stmt->bind_param('s', $reference);
+    $stmt->bind_param('ssd', $reference, $movementDay, $amount);
     $stmt->execute();
     $res = $stmt->get_result();
     $row = $res ? $res->fetch_assoc() : null;
@@ -7230,7 +7296,7 @@ function find_matching_bank_movement(mysqli $mysqli, array $movements, string $r
         if (!bank_amount_matches_order_total((float) ($movement['monto'] ?? 0), $orderAmount)) {
             continue;
         }
-        if (!movement_is_available_for_order($mysqli, $reference, $orderId)) {
+        if (!movement_is_available_for_order($mysqli, $reference, date('Y-m-d'), (float) ($movement['monto'] ?? 0), $orderId)) {
             continue;
         }
         return $movement;
@@ -7251,7 +7317,7 @@ function find_bank_movement_by_reference(mysqli $mysqli, array $movements, strin
         if (!bank_movement_is_valid_for_today($movement)) {
             continue;
         }
-        if (!movement_is_available_for_order($mysqli, $reference, $orderId)) {
+        if (!movement_is_available_for_order($mysqli, $reference, date('Y-m-d'), (float) ($movement['monto'] ?? 0), $orderId)) {
             continue;
         }
         return $movement;
