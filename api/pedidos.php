@@ -11927,9 +11927,15 @@ if ($action === 'check_reference_used') {
     // Chequeo en vivo mientras el cliente escribe/pega la referencia en el
     // modal de pago (antes de crear ningún pedido). Consulta SOLO la tabla
     // movimientos. Instrucción explícita del cliente: una referencia SOLO
-    // se puede usar una vez, sin importar el estado del pedido — únicamente
-    // se permite usarla si monto > 0 Y checked = 0 Y pedido_id IS NULL. Se
-    // bloquea si CUALQUIERA de estas señales aplica:
+    // se puede usar una vez EL MISMO DÍA, sin importar el estado del pedido
+    // — únicamente se permite usarla si monto > 0 Y checked = 0 Y pedido_id
+    // IS NULL, dentro de HOY (ver dia_negocio, columna generada de
+    // ensure_movimientos_table() — mismo criterio de "mismo día" que ya usan
+    // movement_is_available_for_order()/find_reference_reuse_conflict(): los
+    // bancos venezolanos reciclan números de referencia con el tiempo, así
+    // que un movimiento de otro día con la misma referencia NUNCA debe
+    // bloquear el chequeo de HOY). Se bloquea si CUALQUIERA de estas señales
+    // aplica sobre un movimiento del día de HOY:
     //  1. pedido_id IS NOT NULL (ya se usó para completar un pedido).
     //  2. checked = 1 (alguien ya le dio clic a "Realizar Compra" con esta
     //     referencia — ver claim_movement_checked_by_reference).
@@ -11944,7 +11950,7 @@ if ($action === 'check_reference_used') {
         json_response(['ok' => true, 'used' => false]);
     }
 
-    $usedConditionSql = '(COALESCE(checked, 0) = 1 OR pedido_id IS NOT NULL OR monto <= 0)';
+    $usedConditionSql = 'dia_negocio = CURDATE() AND (COALESCE(checked, 0) = 1 OR pedido_id IS NOT NULL OR monto <= 0)';
 
     $used = false;
     $usedMovement = null;
