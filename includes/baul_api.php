@@ -84,6 +84,51 @@ function bau_set_product_active(mysqli $mysqli, int $productId, bool $active): v
     $stmt->close();
 }
 
+function bau_rename_product(mysqli $mysqli, int $productId, string $nombre): void {
+    $nombre = bau_e($nombre, 150);
+    if ($nombre === '') {
+        throw new RuntimeException('El nombre del producto no puede estar vacío.');
+    }
+    $stmt = $mysqli->prepare('UPDATE bau_productos SET nombre = ? WHERE id = ?');
+    $stmt->bind_param('si', $nombre, $productId);
+    $stmt->execute();
+    $stmt->close();
+}
+
+/**
+ * Borra un producto del Baúl POR COMPLETO. Solo se permite si nunca se le cargó ningún código (ni
+ * siquiera uno anulado) y si ningún paquete lo tiene como fuente principal — así nunca se pierde
+ * historial de ventas reales ni se rompe un paquete que lo esté usando. Para un producto que YA tuvo
+ * movimiento, la opción correcta es "Desactivar" (bau_set_product_active), no borrarlo.
+ */
+function bau_delete_product(mysqli $mysqli, int $productId): void {
+    if ($productId <= 0) {
+        throw new RuntimeException('Producto inválido.');
+    }
+    $codeStmt = $mysqli->prepare('SELECT COUNT(*) c FROM bau_codigos WHERE producto_id = ?');
+    $codeStmt->bind_param('i', $productId);
+    $codeStmt->execute();
+    $codeCount = (int) ($codeStmt->get_result()->fetch_assoc()['c'] ?? 0);
+    $codeStmt->close();
+    if ($codeCount > 0) {
+        throw new RuntimeException('Este producto ya tiene códigos cargados (aunque estén vendidos o anulados) — no se puede eliminar para no perder el historial. Desactívalo en su lugar.');
+    }
+
+    $pkgStmt = $mysqli->prepare("SELECT COUNT(*) c FROM juego_paquetes WHERE api_provider = 'baul' AND paquete_api = ?");
+    $pkgStmt->bind_param('i', $productId);
+    $pkgStmt->execute();
+    $pkgCount = (int) ($pkgStmt->get_result()->fetch_assoc()['c'] ?? 0);
+    $pkgStmt->close();
+    if ($pkgCount > 0) {
+        throw new RuntimeException('Este producto está vinculado a uno o más paquetes de la tienda — desvincúlalo primero desde /admin/paquetes.');
+    }
+
+    $delStmt = $mysqli->prepare('DELETE FROM bau_productos WHERE id = ?');
+    $delStmt->bind_param('i', $productId);
+    $delStmt->execute();
+    $delStmt->close();
+}
+
 function bau_product_stock_count(mysqli $mysqli, int $productId): int {
     $stmt = $mysqli->prepare("SELECT COUNT(*) c FROM bau_codigos WHERE producto_id = ? AND estado = 'disponible'");
     $stmt->bind_param('i', $productId);

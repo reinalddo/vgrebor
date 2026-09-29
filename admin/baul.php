@@ -41,6 +41,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             bau_set_product_active($mysqli, $productId, $action === 'activar_producto');
             $flashMessage = $action === 'activar_producto' ? 'Producto activado.' : 'Producto desactivado (deja de poder elegirse en Paquetes; lo ya vinculado no se ve afectado).';
+        } elseif ($action === 'renombrar_producto') {
+            $productId = (int) ($_POST['producto_id'] ?? 0);
+            $nuevoNombre = trim((string) ($_POST['nombre'] ?? ''));
+            if ($productId <= 0) {
+                throw new RuntimeException('Producto inválido.');
+            }
+            bau_rename_product($mysqli, $productId, $nuevoNombre);
+            $flashMessage = 'Producto renombrado.';
+        } elseif ($action === 'eliminar_producto') {
+            $productId = (int) ($_POST['producto_id'] ?? 0);
+            bau_delete_product($mysqli, $productId);
+            $flashMessage = 'Producto eliminado.';
         } elseif ($action === 'cargar_codigos') {
             $productId = (int) ($_POST['producto_id'] ?? 0);
             $raw = (string) ($_POST['codigos'] ?? '');
@@ -219,7 +231,17 @@ function baul_money($amount, string $moneda = 'USD'): string {
       <tbody>
         <?php foreach ($products as $p): ?>
         <tr>
-          <td><?= htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8') ?></td>
+          <td>
+            <span id="baul-nombre-<?= $p['id'] ?>"><?= htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
+            <button type="button" class="baul-toggle-btn ms-2" data-toggle-rename="<?= $p['id'] ?>">✎ Editar</button>
+            <form method="post" class="d-none mt-1 d-flex gap-2" id="baul-rename-form-<?= $p['id'] ?>">
+              <input type="hidden" name="action" value="renombrar_producto">
+              <input type="hidden" name="producto_id" value="<?= $p['id'] ?>">
+              <input type="text" name="nombre" class="form-control form-control-sm baul-input" value="<?= htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8') ?>" required>
+              <button type="submit" class="btn btn-sm fw-bold" style="background:#00fff7;color:#181f2a;border:none;">Guardar</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-cancel-rename="<?= $p['id'] ?>">Cancelar</button>
+            </form>
+          </td>
           <td>
             <span class="baul-pill <?= $p['stock'] > 0 ? 'baul-pill-stock' : 'baul-pill-agotado' ?>"><?= $p['stock'] ?> disponible<?= $p['stock'] === 1 ? '' : 's' ?></span>
           </td>
@@ -237,6 +259,11 @@ function baul_money($amount, string $moneda = 'USD'): string {
               <input type="hidden" name="action" value="<?= $p['activo'] ? 'desactivar_producto' : 'activar_producto' ?>">
               <input type="hidden" name="producto_id" value="<?= $p['id'] ?>">
               <button type="submit" class="btn btn-sm btn-outline-secondary"><?= $p['activo'] ? 'Desactivar' : 'Activar' ?></button>
+            </form>
+            <form method="post" class="m-0" onsubmit="return confirm('¿Eliminar este producto? Solo se puede si nunca se le cargó ningún código y no está vinculado a ningún paquete.');">
+              <input type="hidden" name="action" value="eliminar_producto">
+              <input type="hidden" name="producto_id" value="<?= $p['id'] ?>">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Eliminar</button>
             </form>
           </td>
         </tr>
@@ -312,6 +339,19 @@ function baul_money($amount, string $moneda = 'USD'): string {
     btn.addEventListener('click', function () {
       var target = document.getElementById('baul-codes-' + btn.dataset.toggleCodes);
       if (target) target.classList.toggle('is-visible');
+    });
+  });
+
+  document.querySelectorAll('[data-toggle-rename]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var form = document.getElementById('baul-rename-form-' + btn.dataset.toggleRename);
+      if (form) form.classList.toggle('d-none');
+    });
+  });
+  document.querySelectorAll('[data-cancel-rename]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var form = document.getElementById('baul-rename-form-' + btn.dataset.cancelRename);
+      if (form) form.classList.add('d-none');
     });
   });
 
