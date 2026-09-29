@@ -5993,7 +5993,7 @@ function order_provider_flow_from_row(array $order): string {
         return 'completed';
     }
 
-    if (strtolower(trim((string) ($order['bau_estado'] ?? ''))) === 'pendiente_manual') {
+    if (in_array(strtolower(trim((string) ($order['bau_estado'] ?? ''))), ['pendiente_manual', 'respaldo_incierto'], true)) {
         return 'inventory_shortage';
     }
 
@@ -8159,7 +8159,17 @@ function bau_fallback_chain_for_package(mysqli $mysqli, int $packageId): array {
  * el pedido si hubiera nacido con esa fuente (nada de lógica de compra duplicada): GiftVen vía
  * execute_catalog_api_purchase(), RecargasAmérica/CONEC vía sus dispatch_and_recover con una copia del
  * pedido "disfrazada" con los datos de la fuente de respaldo (nunca se toca la fila real en la BD).
- * Normaliza los 3 formatos de respuesta a uno solo: success/delivery_text/reference/message/payload.
+ * Normaliza los 3 formatos de respuesta a uno solo (success/delivery_text/reference/message/payload)
+ * MÁS un 'outcome' de 3 valores — la distinción que pidió el cliente por voz: "si rechaza de una vez
+ * (sin stock/sin saldo/dato inválido) que pruebe la siguiente; si queda EN PROCESO y se vence el
+ * tiempo, que NO pruebe más, quede pendiente para revisar a mano" (evita comprar dos veces en la misma
+ * fuente si en realidad sí iba a entregar):
+ *   - 'delivered': se entregó. Se detiene la cadena.
+ *   - 'rejected': la fuente dijo que NO de forma clara y definitiva (nunca creó nada de su lado) —
+ *     seguro seguir con la siguiente fuente de la cadena.
+ *   - 'uncertain': la fuente aceptó la orden y sigue procesando (o no se pudo confirmar el estado) —
+ *     NO es seguro seguir la cadena (podría estar por entregar). Se detiene aquí y el pedido queda para
+ *     revisión manual, nunca se reintenta solo.
  * CONEC es una recarga directa a la cuenta (no entrega un "código" que mostrar) — delivery_text queda
  * vacío a propósito, el mensaje de éxito ES la confirmación.
  */
@@ -8174,14 +8184,30 @@ function bau_execute_fallback_provider_purchase(array $order, array $fallback): 
         try {
             $result = execute_catalog_api_purchase($productId, $userIdentifier, $playerFields, $qty);
         } catch (Throwable $e) {
-            return ['success' => false, 'delivery_text' => '', 'reference' => '', 'message' => $e->getMessage(), 'payload' => ['exception' => $e->getMessage()]];
+            // Fallo de transporte puro (timeout, DNS, conexión rechazada): el proveedor nunca llegó a
+            // responder, así que no se creó nada de su lado — seguro seguir con la siguiente fuente.
+            return ['outcome' => 'rejected', 'success' => false, 'delivery_text' => '', 'reference' => '', 'message' => $e->getMessage(), 'payload' => ['exception' => $e->getMessage()]];
         }
         $payload = (array) ($result['payload'] ?? []);
+        $message = provider_order_status_message($payload, (string) ($result['message'] ?? ''));
+        $outcome = 'rejected';
+        if (!empty($result['success'])) {
+            $outcome = 'delivered';
+        } else {
+            // 'accepted' = el proveedor aceptó y sigue procesando; productos con procesamiento manual
+            // que además responden con un mensaje de "en cola" también cuentan como en curso; un mensaje
+            // de timeout de transporte (llegó respuesta parcial/ambigua) tampoco es un "no" confiable.
+            $manualProcessing = !empty($result['manual_processing']);
+            $acceptedLike = !empty($result['accepted']) || ($manualProcessing && provider_message_indicates_pending_lookup($message));
+            $trackingFollowUp = provider_message_indicates_transport_timeout($message);
+            $outcome = ($acceptedLike || $trackingFollowUp) ? 'uncertain' : 'rejected';
+        }
         return [
+            'outcome' => $outcome,
             'success' => !empty($result['success']),
             'delivery_text' => provider_delivered_code_text($payload),
             'reference' => (string) ($result['reference'] ?? ''),
-            'message' => provider_order_status_message($payload, (string) ($result['message'] ?? '')),
+            'message' => $message,
             'payload' => $payload,
         ];
     }
@@ -8198,7 +8224,14 @@ function bau_execute_fallback_provider_purchase(array $order, array $fallback): 
     if ($provider === 'recargasamerica') {
         $result = recargasamerica_dispatch_or_recover($shadow);
         $payload = (array) ($result['payload'] ?? []);
+        // 'accepted' (pending/procesando/processing) = en curso, no se sabe aún si entrega — nunca
+        // seguir la cadena en ese caso. Cualquier otro "no éxito" (excepción del proveedor con motivo
+        // estructurado, o fallo de transporte puro) es un rechazo confirmado: en ambos casos el propio
+        // execute_recargasamerica_purchase() deja constancia de que NUNCA se creó una transacción de su
+        // lado, así que es seguro seguir probando la siguiente fuente.
+        $outcome = !empty($result['success']) ? 'delivered' : (!empty($result['accepted']) ? 'uncertain' : 'rejected');
         return [
+            'outcome' => $outcome,
             'success' => !empty($result['success']),
             'delivery_text' => trim((string) ($payload['delivery_text'] ?? '')),
             'reference' => (string) ($result['reference'] ?? ''),
@@ -8209,7 +8242,19 @@ function bau_execute_fallback_provider_purchase(array $order, array $fallback): 
 
     if ($provider === 'conec') {
         $result = conec_dispatch_order($shadow);
+        // CONEC distingue rechazo DURO (error_code no vacío: sin saldo mayorista, sin stock, dato
+        // inválido — nunca entregó) de uno INCIERTO ('en_curso' = accepted, o 'fallido/desconocido' sin
+        // error_code = no se pudo confirmar). Solo el rechazo duro es seguro para seguir la cadena.
+        $outcome = 'rejected';
+        if (!empty($result['success'])) {
+            $outcome = 'delivered';
+        } elseif (!empty($result['accepted'])) {
+            $outcome = 'uncertain';
+        } elseif (!empty($result['needs_manual_review']) && trim((string) ($result['error_code'] ?? '')) === '') {
+            $outcome = 'uncertain';
+        }
         return [
+            'outcome' => $outcome,
             'success' => !empty($result['success']),
             'delivery_text' => '',
             'reference' => (string) ($result['reference'] ?? ''),
@@ -8218,7 +8263,7 @@ function bau_execute_fallback_provider_purchase(array $order, array $fallback): 
         ];
     }
 
-    return ['success' => false, 'delivery_text' => '', 'reference' => '', 'message' => 'Proveedor de respaldo no soportado.', 'payload' => []];
+    return ['outcome' => 'rejected', 'success' => false, 'delivery_text' => '', 'reference' => '', 'message' => 'Proveedor de respaldo no soportado.', 'payload' => []];
 }
 
 /**
@@ -8265,7 +8310,9 @@ function bau_dispatch_and_split(mysqli $mysqli, array $order): array {
         foreach ($fallbackChain as $fallbackConfig) {
             $fallbackResult = bau_execute_fallback_provider_purchase($order, $fallbackConfig);
             $mysqli = ensure_mysqli_connection($mysqli);
-            if (!empty($fallbackResult['success'])) {
+            $fallbackOutcome = (string) ($fallbackResult['outcome'] ?? 'rejected');
+
+            if ($fallbackOutcome === 'delivered') {
                 $fallbackDeliveryText = (string) $fallbackResult['delivery_text'];
                 $fallbackPayloadJson = json_encode((array) $fallbackResult['payload'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                 $fallbackReference = (string) $fallbackResult['reference'];
@@ -8284,7 +8331,33 @@ function bau_dispatch_and_split(mysqli $mysqli, array $order): array {
                     ],
                 ];
             }
-            // Esta fuente no tenía stock/falló: sigue probando la siguiente de la cadena (si hay).
+
+            if ($fallbackOutcome === 'uncertain') {
+                // El cliente fue explícito por voz: si la fuente queda "procesando" y no se puede
+                // confirmar, NUNCA se prueba otra fuente ni se reintenta solo — reintentar a ciegas
+                // podría comprar DOS VECES en esa misma fuente si en realidad sí iba a entregar. Se
+                // guarda la referencia/payload de este intento (si el proveedor tiene recuperación por
+                // referencia, como RecargasAmérica/CONEC, un reintento futuro revisará el estado real en
+                // vez de comprar de nuevo). bau_estado distinto de 'pendiente_manual' a propósito: en
+                // /admin/baul este caso NO ofrece el botón "Completar" (ver bau_fetch_pending_orders()).
+                $fallbackPayloadJson = json_encode((array) $fallbackResult['payload'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                $fallbackReference = (string) $fallbackResult['reference'];
+                $fallbackMessage = (string) $fallbackResult['message'];
+                $stmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_ultimo_check = NOW(), bau_estado = 'respaldo_incierto', bau_fallback_provider_used = ? WHERE id = ? AND estado = 'pagado'");
+                $stmt->bind_param('ssssi', $fallbackReference, $fallbackMessage, $fallbackPayloadJson, $fallbackConfig['provider'], $orderId);
+                $stmt->execute();
+                $stmt->close();
+
+                return [
+                    'success' => false, 'accepted' => true, 'needs_manual_review' => true,
+                    'message' => 'Tu pago fue verificado. La compra quedó en seguimiento con nuestro proveedor; te confirmaremos en cuanto tengamos una respuesta.',
+                    'reference' => $fallbackReference,
+                    'payload' => ['requested' => $requested, 'delivered_count' => 0, 'fallback_provider' => $fallbackConfig['provider'], 'uncertain' => true],
+                ];
+            }
+
+            // 'rejected': esta fuente dijo que no de forma clara (nunca creó nada de su lado) — sigue
+            // probando la siguiente de la cadena (si hay).
         }
 
         $stmt = $mysqli->prepare("UPDATE pedidos SET bau_estado = 'pendiente_manual' WHERE id = ? AND estado = 'pagado'");
@@ -8708,9 +8781,12 @@ function order_recharge_dispatch_is_locked(array $order): bool {
         return false;
     }
 
-    // Baúl de Giftcards: un pedido marcado 'pendiente_manual' (entrega parcial o sin stock) NUNCA se
-    // reintenta solo — solo se completa desde el botón dedicado en admin/baul.php.
-    if (strtolower(trim((string) ($order['bau_estado'] ?? ''))) === 'pendiente_manual') {
+    // Baúl de Giftcards: un pedido marcado 'pendiente_manual' (entrega parcial o sin stock) o
+    // 'respaldo_incierto' (una fuente de respaldo quedó procesando sin confirmar, Fase 2) NUNCA se
+    // reintenta solo — el primero se completa desde el botón dedicado en admin/baul.php; el segundo ni
+    // siquiera con ese botón (podría comprar dos veces en la misma fuente), solo con "Cancelar pedido"
+    // tras verificar con el proveedor.
+    if (in_array(strtolower(trim((string) ($order['bau_estado'] ?? ''))), ['pendiente_manual', 'respaldo_incierto'], true)) {
         return true;
     }
 
@@ -12939,10 +13015,17 @@ if ($action === 'admin_baul_complete_pending') {
     if (!$order) {
         json_error('Pedido no encontrado.', 404);
     }
-    if (strtolower(trim((string) ($order['api_provider'] ?? ''))) !== 'baul'
-        || trim((string) ($order['estado'] ?? '')) !== 'pagado'
-        || strtolower(trim((string) ($order['bau_estado'] ?? ''))) !== 'pendiente_manual'
-    ) {
+    if (strtolower(trim((string) ($order['api_provider'] ?? ''))) !== 'baul' || trim((string) ($order['estado'] ?? '')) !== 'pagado') {
+        json_error('Este pedido no está en la lista de entregas pendientes del Baúl.', 409);
+    }
+    $orderBauEstado = strtolower(trim((string) ($order['bau_estado'] ?? '')));
+    if ($orderBauEstado === 'respaldo_incierto') {
+        // El cliente fue explícito: si una fuente quedó "procesando" sin confirmar, NUNCA se reintenta
+        // solo ni con este botón — podría comprar dos veces en esa misma fuente. Hay que verificar con
+        // el proveedor a mano y luego usar "Cancelar pedido" para cerrarlo (ver bau_cancel_pending_order).
+        json_error('Este pedido quedó en seguimiento con un proveedor de respaldo (' . (string) ($order['bau_fallback_provider_used'] ?? 'desconocido') . ') y no se puede completar con este botón — podría duplicar la compra. Verifica el estado con el proveedor y usa "Cancelar pedido" cuando lo resuelvas.', 409);
+    }
+    if ($orderBauEstado !== 'pendiente_manual') {
         json_error('Este pedido no está en la lista de entregas pendientes del Baúl.', 409);
     }
 

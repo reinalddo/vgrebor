@@ -436,25 +436,34 @@ function bau_dispatch_all_or_nothing(mysqli $mysqli, int $productId, int $reques
     }
 }
 
-// ── Pedidos pendientes (entrega parcial) ─────────────────────────────────
+// ── Pedidos pendientes (entrega parcial / respaldo incierto) ─────────────
 
-/** Pedidos con entrega parcial pendiente (nunca se tocan solos; ver admin/baul.php). */
+/**
+ * Pedidos pendientes del Baúl (nunca se tocan solos; ver admin/baul.php). Incluye dos estados
+ * distintos en bau_estado:
+ *  - 'pendiente_manual': el Baúl (y su respaldo, si tenía) no entregaron nada — es seguro reintentar
+ *    con el botón "Completar" en cuanto haya stock.
+ *  - 'respaldo_incierto': una fuente de respaldo quedó "procesando" (Fase 2) — NO es seguro reintentar
+ *    a ciegas (podría comprar dos veces en esa fuente); el admin debe verificar con el proveedor y
+ *    luego cerrar el pedido a mano (ver bau_cancel_pending_order).
+ */
 function bau_fetch_pending_orders(mysqli $mysqli): array {
     $sql = "SELECT p.id, p.paquete_nombre, p.cantidad_compra, p.precio, p.moneda, p.email, p.user_identifier,
-                   p.creado_en, p.bau_pedido_origen_id, jp.paquete_api AS producto_id, bp.nombre AS producto_nombre,
+                   p.creado_en, p.bau_pedido_origen_id, p.bau_estado, p.bau_fallback_provider_used, p.ff_api_mensaje,
+                   jp.paquete_api AS producto_id, bp.nombre AS producto_nombre,
                    (SELECT COUNT(*) FROM bau_codigos c WHERE c.producto_id = jp.paquete_api AND c.estado = 'disponible') AS stock_actual
             FROM pedidos p
             LEFT JOIN juego_paquetes jp ON jp.id = p.paquete_id
             LEFT JOIN bau_productos bp ON bp.id = jp.paquete_api
-            WHERE p.api_provider = 'baul' AND p.estado = 'pagado' AND p.bau_estado = 'pendiente_manual'
+            WHERE p.api_provider = 'baul' AND p.estado = 'pagado' AND p.bau_estado IN ('pendiente_manual', 'respaldo_incierto')
             ORDER BY p.creado_en ASC";
     $result = $mysqli->query($sql);
     return $result instanceof mysqli_result ? $result->fetch_all(MYSQLI_ASSOC) : [];
 }
 
-/** Cierra un pedido pendiente sin entregarlo (p.ej. el admin ya hizo la devolución manual fuera del sistema). */
+/** Cierra un pedido pendiente sin entregarlo (p.ej. el admin ya resolvió/devolvió fuera del sistema). */
 function bau_cancel_pending_order(mysqli $mysqli, int $orderId): bool {
-    $stmt = $mysqli->prepare("UPDATE pedidos SET estado = 'cancelado' WHERE id = ? AND api_provider = 'baul' AND estado = 'pagado' AND bau_estado = 'pendiente_manual'");
+    $stmt = $mysqli->prepare("UPDATE pedidos SET estado = 'cancelado' WHERE id = ? AND api_provider = 'baul' AND estado = 'pagado' AND bau_estado IN ('pendiente_manual', 'respaldo_incierto')");
     $stmt->bind_param('i', $orderId);
     $stmt->execute();
     $changed = $stmt->affected_rows > 0;

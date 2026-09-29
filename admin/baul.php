@@ -133,7 +133,7 @@ function baul_money($amount, string $moneda = 'USD'): string {
 
 <div class="baul-card">
   <h2 class="h5 text-info mb-2">Entregas pendientes (<?= count($pendingOrders) ?>)</h2>
-  <p class="text-secondary small mb-3">Pedidos con entrega parcial o sin stock en el momento de la compra. Nunca se completan solos: revisa el stock actual y decide.</p>
+  <p class="text-secondary small mb-3">Pedidos con entrega parcial, sin stock, o en seguimiento con un proveedor de respaldo. Nunca se completan solos: revisa y decide.</p>
   <?php if (empty($pendingOrders)): ?>
     <p class="text-secondary text-center mb-0">No hay entregas pendientes.</p>
   <?php else: ?>
@@ -147,12 +147,13 @@ function baul_money($amount, string $moneda = 'USD'): string {
           <th>Monto</th>
           <th>Cliente</th>
           <th>Fecha del pedido</th>
-          <th>Stock actual</th>
+          <th>Estado</th>
           <th>Acciones</th>
         </tr>
       </thead>
       <tbody>
         <?php foreach ($pendingOrders as $po): ?>
+        <?php $esIncierto = (string) ($po['bau_estado'] ?? '') === 'respaldo_incierto'; ?>
         <tr class="baul-pending-row" id="baul-pending-<?= (int) $po['id'] ?>">
           <td>
             #<?= (int) $po['id'] ?>
@@ -166,11 +167,23 @@ function baul_money($amount, string $moneda = 'USD'): string {
           <td><?= htmlspecialchars((string) ($po['email'] ?: $po['user_identifier'] ?: '—'), ENT_QUOTES, 'UTF-8') ?></td>
           <td><?= htmlspecialchars((string) $po['creado_en'], ENT_QUOTES, 'UTF-8') ?></td>
           <td>
-            <?php $stockPend = (int) ($po['stock_actual'] ?? 0); ?>
-            <span class="baul-pill <?= $stockPend > 0 ? 'baul-pill-stock' : 'baul-pill-agotado' ?>"><?= $stockPend ?> disponible<?= $stockPend === 1 ? '' : 's' ?></span>
+            <?php if ($esIncierto): ?>
+              <span class="baul-pill baul-pill-agotado">⏳ En seguimiento con <?= htmlspecialchars(ucfirst((string) ($po['bau_fallback_provider_used'] ?? '?')), ENT_QUOTES, 'UTF-8') ?></span>
+              <?php if (!empty($po['ff_api_mensaje'])): ?>
+                <div class="text-secondary small mt-1"><?= htmlspecialchars((string) $po['ff_api_mensaje'], ENT_QUOTES, 'UTF-8') ?></div>
+              <?php endif; ?>
+            <?php else: ?>
+              <?php $stockPend = (int) ($po['stock_actual'] ?? 0); ?>
+              <span class="baul-pill <?= $stockPend > 0 ? 'baul-pill-stock' : 'baul-pill-agotado' ?>"><?= $stockPend ?> disponible<?= $stockPend === 1 ? '' : 's' ?> en el Baúl</span>
+            <?php endif; ?>
           </td>
           <td class="d-flex gap-2 flex-wrap">
-            <button type="button" class="btn btn-sm fw-bold js-baul-completar" data-order-id="<?= (int) $po['id'] ?>" style="background:#00fff7;color:#181f2a;border:none;" <?= $stockPend <= 0 ? 'disabled title="No hay stock todavía"' : '' ?>>Completar</button>
+            <?php if ($esIncierto): ?>
+              <span class="text-secondary small" style="max-width:220px;">Verifica con el proveedor antes de cerrar — no se puede "Completar" aquí, podría duplicar la compra.</span>
+            <?php else: ?>
+              <?php $stockPend = (int) ($po['stock_actual'] ?? 0); ?>
+              <button type="button" class="btn btn-sm fw-bold js-baul-completar" data-order-id="<?= (int) $po['id'] ?>" style="background:#00fff7;color:#181f2a;border:none;" <?= $stockPend <= 0 ? 'disabled title="No hay stock todavía"' : '' ?>>Completar</button>
+            <?php endif; ?>
             <button type="button" class="btn btn-sm btn-outline-danger js-baul-cancelar" data-order-id="<?= (int) $po['id'] ?>">Cancelar pedido</button>
           </td>
         </tr>
