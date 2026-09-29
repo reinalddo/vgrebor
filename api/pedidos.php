@@ -298,8 +298,8 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         // (ver includes/baul_api.php, bau_dispatch_and_split()).
         'bau_pedido_origen_id' => "ALTER TABLE pedidos ADD COLUMN bau_pedido_origen_id INT NULL AFTER cart_batch_size",
         'bau_estado' => "ALTER TABLE pedidos ADD COLUMN bau_estado VARCHAR(20) NULL AFTER bau_pedido_origen_id",
-        // Fase 2: qué fuente de respaldo entregó realmente (ver bau_fallback_config_for_package()) cuando
-        // el Baúl no tenía ningún código — puramente informativo, para reportes/soporte.
+        // Fase 2: qué fuente de la cadena de respaldo entregó realmente (ver bau_fallback_chain_for_package())
+        // cuando el Baúl no tenía ningún código — puramente informativo, para reportes/soporte.
         'bau_fallback_provider_used' => "ALTER TABLE pedidos ADD COLUMN bau_fallback_provider_used VARCHAR(20) NULL AFTER bau_estado",
     ];
     $colResult = $mysqli->query("SHOW COLUMNS FROM pedidos");
@@ -8110,36 +8110,48 @@ function notify_baul_delivery(mysqli $mysqli, array $order, string $deliveryText
  * tras esta actualización) o el paquete no tiene respaldo configurado, devuelve null — nunca rompe
  * el despacho normal del Baúl.
  */
-function bau_fallback_config_for_package(mysqli $mysqli, int $packageId): ?array {
+function bau_fallback_chain_for_package(mysqli $mysqli, int $packageId): array {
     if ($packageId <= 0) {
-        return null;
+        return [];
     }
     try {
-        $stmt = $mysqli->prepare('SELECT baul_fallback_provider, baul_fallback_paquete_api, baul_fallback_source_key, baul_fallback_recargasamerica_tipo FROM juego_paquetes WHERE id = ? LIMIT 1');
+        $stmt = $mysqli->prepare('SELECT baul_fallback_chain_json FROM juego_paquetes WHERE id = ? LIMIT 1');
         if (!$stmt) {
-            return null;
+            return [];
         }
         $stmt->bind_param('i', $packageId);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
     } catch (Throwable $e) {
-        return null;
+        return [];
     }
-    if (!$row) {
-        return null;
+    $json = trim((string) ($row['baul_fallback_chain_json'] ?? ''));
+    if ($json === '') {
+        return [];
     }
-    $provider = strtolower(trim((string) ($row['baul_fallback_provider'] ?? '')));
-    $productId = (int) ($row['baul_fallback_paquete_api'] ?? 0);
-    if (!in_array($provider, ['giftven', 'recargasamerica', 'conec'], true) || $productId <= 0) {
-        return null;
+    $decoded = json_decode($json, true);
+    if (!is_array($decoded)) {
+        return [];
     }
-    return [
-        'provider' => $provider,
-        'paquete_api' => $productId,
-        'source_key' => (string) ($row['baul_fallback_source_key'] ?? ''),
-        'recargasamerica_tipo' => (string) ($row['baul_fallback_recargasamerica_tipo'] ?? ''),
-    ];
+    $chain = [];
+    foreach ($decoded as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+        $provider = strtolower(trim((string) ($entry['provider'] ?? '')));
+        $productId = (int) ($entry['paquete_api'] ?? 0);
+        if (!in_array($provider, ['giftven', 'recargasamerica', 'conec'], true) || $productId <= 0) {
+            continue;
+        }
+        $chain[] = [
+            'provider' => $provider,
+            'paquete_api' => $productId,
+            'source_key' => (string) ($entry['source_key'] ?? ''),
+            'recargasamerica_tipo' => (string) ($entry['recargasamerica_tipo'] ?? ''),
+        ];
+    }
+    return $chain;
 }
 
 /**
@@ -8220,9 +8232,10 @@ function bau_execute_fallback_provider_purchase(array $order, array $fallback): 
  *     'enviado'; se crea un pedido "hijo" con lo pendiente, en 'pagado', bau_estado='pendiente_manual',
  *     con la MISMA fecha de creación del original (para que Estadísticas cuente la venta el día real
  *     cuando se complete), enlazado por bau_pedido_origen_id.
- * Fase 2: si NO hay nada disponible y el paquete tiene un respaldo configurado, se intenta esa fuente
- * antes de dejarlo pendiente (ver bau_fallback_config_for_package/bau_execute_fallback_provider_purchase
- * arriba). Solo aplica al caso "0 entregados" — la entrega parcial sigue igual que en Fase 1.
+ * Fase 2: si NO hay nada disponible y el paquete tiene una cadena de respaldo configurada, se prueba
+ * cada fuente en orden antes de dejarlo pendiente (ver bau_fallback_chain_for_package/
+ * bau_execute_fallback_provider_purchase arriba). Solo aplica al caso "0 entregados" — la entrega
+ * parcial sigue igual que en Fase 1.
  * Reintento seguro: antes de reservar código nuevo, revisa qué ya se le asignó a ESTE pedido en un
  * intento anterior (bau_dispatch_claim) — un reintento nunca duplica ni "pierde" códigos ya entregados.
  * Misma forma de retorno que recargasamerica_dispatch_or_recover(): success/accepted/
@@ -8244,11 +8257,12 @@ function bau_dispatch_and_split(mysqli $mysqli, array $order): array {
     $deliveredCount = (int) $claim['delivered_count'];
 
     if ($deliveredCount <= 0) {
-        // Fase 2: antes de dejarlo pendiente, si el paquete tiene un respaldo configurado (ver
-        // admin/paquetes.php), se intenta esa fuente UNA vez. Si entrega, el pedido queda enviado como
-        // si hubiera nacido con esa fuente — nunca se combina con códigos del Baúl (aquí no hay ninguno).
-        $fallbackConfig = bau_fallback_config_for_package($mysqli, (int) ($order['paquete_id'] ?? 0));
-        if ($fallbackConfig !== null) {
+        // Fase 2: antes de dejarlo pendiente, si el paquete tiene una CADENA de respaldo configurada
+        // (ver admin/paquetes.php), se prueba cada fuente EN ORDEN — la 1ª, si no entrega la 2ª, si
+        // tampoco la 3ª (tal como lo pidió el cliente). En cuanto una entrega, se detiene ahí; nunca se
+        // combina con códigos del Baúl (aquí no hay ninguno).
+        $fallbackChain = bau_fallback_chain_for_package($mysqli, (int) ($order['paquete_id'] ?? 0));
+        foreach ($fallbackChain as $fallbackConfig) {
             $fallbackResult = bau_execute_fallback_provider_purchase($order, $fallbackConfig);
             $mysqli = ensure_mysqli_connection($mysqli);
             if (!empty($fallbackResult['success'])) {
@@ -8270,7 +8284,7 @@ function bau_dispatch_and_split(mysqli $mysqli, array $order): array {
                     ],
                 ];
             }
-            // El respaldo también falló o no tenía stock: sigue el camino normal de abajo (pendiente_manual).
+            // Esta fuente no tenía stock/falló: sigue probando la siguiente de la cadena (si hay).
         }
 
         $stmt = $mysqli->prepare("UPDATE pedidos SET bau_estado = 'pendiente_manual' WHERE id = ? AND estado = 'pagado'");

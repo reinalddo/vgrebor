@@ -298,21 +298,26 @@ function ensure_juego_paquetes_orden_gg_column(mysqli $mysqli): void {
     }
 }
 
-// Baúl de Giftcards — Fase 2: respaldo automático por paquete cuando el Baúl se queda sin NINGÚN
-// código disponible (ver bau_fallback_config_for_package()/bau_execute_fallback_provider_purchase()
-// en api/pedidos.php). Solo tiene sentido en paquetes cuya fuente principal es 'baul'; en cualquier
-// otro paquete estas columnas quedan vacías.
+// Baúl de Giftcards — Fase 2: CADENA de respaldo por paquete (hasta 3 prioridades) para cuando el
+// Baúl se queda sin NINGÚN código disponible (ver bau_fallback_chain_for_package()/
+// bau_execute_fallback_provider_purchase() en api/pedidos.php). Se prueba la 1ª fuente; si no entrega,
+// la 2ª; si tampoco, la 3ª; si ninguna entrega, el pedido queda pendiente para completar a mano — tal
+// como lo pidió el cliente ("la primera, si no hay la segunda, si no hay la tercera"). Guardado como
+// JSON (baul_fallback_chain_json: [{provider, paquete_api, recargasamerica_tipo}, ...] en orden) en
+// vez de columnas sueltas, para no limitarlo a una sola fuente. Solo tiene efecto en paquetes cuya
+// fuente principal es 'baul'.
 function ensure_juego_paquetes_baul_fallback_columns(mysqli $mysqli): void {
-    $columns = [
-        'baul_fallback_provider' => "ALTER TABLE juego_paquetes ADD COLUMN baul_fallback_provider VARCHAR(20) NULL AFTER orden_gg",
-        'baul_fallback_paquete_api' => "ALTER TABLE juego_paquetes ADD COLUMN baul_fallback_paquete_api INT NULL AFTER baul_fallback_provider",
-        'baul_fallback_source_key' => "ALTER TABLE juego_paquetes ADD COLUMN baul_fallback_source_key VARCHAR(160) NULL AFTER baul_fallback_paquete_api",
-        'baul_fallback_recargasamerica_tipo' => "ALTER TABLE juego_paquetes ADD COLUMN baul_fallback_recargasamerica_tipo VARCHAR(20) NULL AFTER baul_fallback_source_key",
-    ];
-    foreach ($columns as $col => $sql) {
-        $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE '$col'");
-        if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
-            $mysqli->query($sql);
+    $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'baul_fallback_chain_json'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN baul_fallback_chain_json LONGTEXT NULL AFTER orden_gg");
+    }
+    // Limpieza: reemplaza a las 4 columnas de una sola fuente de la primera versión de Fase 2 (nadie
+    // llegó a configurar ninguna todavía — el cliente seguía preguntando cómo funcionaba antes de tocar
+    // el panel). Se eliminan en vez de dejarlas sueltas sin usar.
+    foreach (['baul_fallback_provider', 'baul_fallback_paquete_api', 'baul_fallback_source_key', 'baul_fallback_recargasamerica_tipo'] as $oldCol) {
+        $oldResult = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE '$oldCol'");
+        if ($oldResult instanceof mysqli_result && $oldResult->num_rows > 0) {
+            $mysqli->query("ALTER TABLE juego_paquetes DROP COLUMN $oldCol");
         }
     }
 }
@@ -457,27 +462,21 @@ function admin_package_provider_reference_text(string $provider, array $package,
 }
 
 // Baúl de Giftcards — Fase 2: widget para configurar el respaldo automático de un paquete cuando el
-// Baúl se queda sin NINGÚN código (ver bau_fallback_config_for_package() en api/pedidos.php). Solo
+// Baúl se queda sin NINGÚN código (ver bau_fallback_chain_for_package() en api/pedidos.php). Solo
 // tiene efecto en paquetes cuya fuente PRINCIPAL es 'baul' (por eso vive dentro del mismo panel
 // data-package-source-panel="baul" y se muestra/oculta junto con él). El catálogo de cada proveedor de
 // respaldo es el YA cargado para este juego (mismas variables que arma su panel de fuente principal):
 // si el juego no tiene ese proveedor configurado, esa opción no tiene productos entre los que elegir.
+// 3 prioridades fijas (no una lista dinámica): el cliente pidió "revisa la 1ª, si no hay la 2ª, si no
+// hay la 3ª" — con solo 3 proveedores posibles (GiftVen/RecargasAmérica/CONEC) 3 casillas fijas cubren
+// cualquier orden posible sin necesitar botones de agregar/quitar/reordenar filas.
 function admin_package_baul_fallback_editor_html(string $prefix, int $packageId, array $apiProducts, array $recargasAmericaProducts, array $conecProducts, ?array $paqEdit = null): string {
-    $currentProvider = strtolower(trim((string) ($paqEdit['baul_fallback_provider'] ?? '')));
-    if (!in_array($currentProvider, ['giftven', 'recargasamerica', 'conec'], true)) {
-        $currentProvider = '';
+    $chain = admin_package_baul_fallback_chain_decode((string) ($paqEdit['baul_fallback_chain_json'] ?? ''));
+    // Rellena hasta 3 casillas con lo ya guardado, en el mismo orden (casilla 1 = chain[0], etc.).
+    while (count($chain) < 3) {
+        $chain[] = ['provider' => '', 'paquete_api' => 0];
     }
-    $currentProductId = (int) ($paqEdit['baul_fallback_paquete_api'] ?? 0);
     $uid = 'baulfb_' . ($prefix !== '' ? 'edit' : 'new') . '_' . $packageId . '_' . mt_rand(1000, 9999);
-
-    $opt = static function (array $options, string $selectedValue) use ($currentProvider, $currentProductId): string {
-        $html = '<option value="">Selecciona un producto</option>';
-        foreach ($options as $id => $label) {
-            $selected = ($currentProvider === $selectedValue && $currentProductId === (int) $id) ? ' selected' : '';
-            $html .= '<option value="' . (int) $id . '"' . $selected . '>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</option>';
-        }
-        return $html;
-    };
 
     $giftvenOptions = [];
     foreach ($apiProducts as $ap) {
@@ -491,79 +490,124 @@ function admin_package_baul_fallback_editor_html(string $prefix, int $packageId,
     foreach ($conecProducts as $cp) {
         $conecOptions[(int) ($cp['id'] ?? 0)] = conec_api_product_label($cp);
     }
+    $catalogsByProvider = ['giftven' => $giftvenOptions, 'recargasamerica' => $raOptions, 'conec' => $conecOptions];
+    $providerLabels = ['giftven' => 'TiendaGiftVen', 'recargasamerica' => 'RecargasAmérica', 'conec' => 'CONEC'];
 
-    $noCatalogNote = static function (array $options, string $adminUrl): string {
-        return $options === [] ? '<div class="form-text mt-1 text-warning">Este juego no tiene esa fuente configurada — no hay productos entre los que elegir.</div>' : '';
+    $renderOptions = static function (array $options, int $selectedId): string {
+        $html = '<option value="">Selecciona un producto</option>';
+        foreach ($options as $id => $label) {
+            $selected = ($selectedId === (int) $id) ? ' selected' : '';
+            $html .= '<option value="' . (int) $id . '"' . $selected . '>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</option>';
+        }
+        return $html;
     };
 
     ob_start();
     ?>
     <div class="rounded-4 p-3" id="<?= $uid ?>" style="background:#101826;border:1px solid rgba(250,204,21,0.25);">
         <div class="text-neon fw-semibold" style="color:#facc15;">Respaldo si el Baúl se agota (opcional)</div>
-        <div class="small mt-1 mb-2" style="color:#8be9fd;">Solo se usa cuando el Baúl no tiene NINGÚN código disponible al momento de la compra — nunca reemplaza una entrega parcial.</div>
-        <select name="<?= $prefix ?>baul_fallback_provider" class="form-select mb-2" data-baul-fallback-provider>
-            <option value="">Ninguno — se queda pendiente para completar a mano</option>
-            <option value="giftven" <?= $currentProvider === 'giftven' ? 'selected' : '' ?>>TiendaGiftVen</option>
-            <option value="recargasamerica" <?= $currentProvider === 'recargasamerica' ? 'selected' : '' ?>>RecargasAmérica</option>
-            <option value="conec" <?= $currentProvider === 'conec' ? 'selected' : '' ?>>CONEC</option>
-        </select>
-        <div data-baul-fallback-subpanel="giftven" style="<?= $currentProvider === 'giftven' ? '' : 'display:none;' ?>">
-            <select name="<?= $prefix ?>baul_fallback_paquete_api_giftven" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
-                <?= $opt($giftvenOptions, 'giftven') ?>
+        <div class="small mt-1 mb-3" style="color:#8be9fd;">Solo se usa cuando el Baúl no tiene NINGÚN código disponible al momento de la compra — nunca reemplaza una entrega parcial. Se prueba la 1ª; si no entrega, la 2ª; si tampoco, la 3ª. Si ninguna entrega, el pedido queda pendiente para completar a mano.</div>
+        <?php for ($slot = 0; $slot < 3; $slot++):
+            $slotProvider = (string) ($chain[$slot]['provider'] ?? '');
+            $slotProductId = (int) ($chain[$slot]['paquete_api'] ?? 0);
+        ?>
+        <div class="mb-3 pb-3" style="border-bottom:1px solid rgba(250,204,21,0.15);">
+            <label class="form-label small" style="color:#facc15;"><?= $slot + 1 ?>ª prioridad</label>
+            <select name="<?= $prefix ?>baul_fallback_provider[]" class="form-select mb-2" data-baul-fallback-provider data-slot="<?= $slot ?>">
+                <option value="">Ninguno</option>
+                <?php foreach ($providerLabels as $pv => $label): ?>
+                <option value="<?= $pv ?>" <?= $slotProvider === $pv ? 'selected' : '' ?>><?= $label ?></option>
+                <?php endforeach; ?>
             </select>
-            <?= $noCatalogNote($giftvenOptions, '') ?>
+            <?php foreach ($providerLabels as $pv => $label): ?>
+            <div data-baul-fallback-subpanel="<?= $pv ?>" style="<?= $slotProvider === $pv ? '' : 'display:none;' ?>">
+                <select name="<?= $prefix ?>baul_fallback_paquete_api_<?= $pv ?>[]" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
+                    <?= $renderOptions($catalogsByProvider[$pv], $slotProvider === $pv ? $slotProductId : 0) ?>
+                </select>
+                <?php if ($catalogsByProvider[$pv] === []): ?>
+                <div class="form-text mt-1 text-warning">Este juego no tiene <?= $label ?> configurado — no hay productos entre los que elegir.</div>
+                <?php endif; ?>
+            </div>
+            <?php endforeach; ?>
         </div>
-        <div data-baul-fallback-subpanel="recargasamerica" style="<?= $currentProvider === 'recargasamerica' ? '' : 'display:none;' ?>">
-            <select name="<?= $prefix ?>baul_fallback_paquete_api_recargasamerica" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
-                <?= $opt($raOptions, 'recargasamerica') ?>
-            </select>
-            <?= $noCatalogNote($raOptions, '') ?>
-        </div>
-        <div data-baul-fallback-subpanel="conec" style="<?= $currentProvider === 'conec' ? '' : 'display:none;' ?>">
-            <select name="<?= $prefix ?>baul_fallback_paquete_api_conec" class="form-select" style="background:#222c3a;color:#22d3ee;border:1px solid #22d3ee;">
-                <?= $opt($conecOptions, 'conec') ?>
-            </select>
-            <?= $noCatalogNote($conecOptions, '') ?>
-        </div>
+        <?php endfor; ?>
     </div>
     <script>
     (function () {
         var root = document.getElementById(<?= json_encode($uid) ?>);
         if (!root) { return; }
-        var select = root.querySelector('[data-baul-fallback-provider]');
-        function apply() {
-            var value = select.value;
-            root.querySelectorAll('[data-baul-fallback-subpanel]').forEach(function (panel) {
-                panel.style.display = (panel.dataset.baulFallbackSubpanel === value) ? '' : 'none';
-            });
-        }
-        select.addEventListener('change', apply);
-        apply();
+        root.querySelectorAll('[data-baul-fallback-provider]').forEach(function (select) {
+            var row = select.closest('.mb-3');
+            function apply() {
+                var value = select.value;
+                row.querySelectorAll('[data-baul-fallback-subpanel]').forEach(function (panel) {
+                    panel.style.display = (panel.dataset.baulFallbackSubpanel === value) ? '' : 'none';
+                });
+            }
+            select.addEventListener('change', apply);
+            apply();
+        });
     })();
     </script>
     <?php
     return (string) ob_get_clean();
 }
 
-// Lee del POST la elección de respaldo (ver admin_package_baul_fallback_editor_html) y resuelve el
-// producto elegido SEGÚN el proveedor marcado (cada proveedor tiene su propio campo de producto en el
-// formulario). Nunca lanza: una elección incompleta o inconsistente simplemente se guarda vacía (sin
-// respaldo) — no bloquea guardar el resto del paquete.
-function admin_package_baul_fallback_from_post(string $prefix, array $recargasAmericaProductsById): array {
-    $provider = strtolower(trim((string) ($_POST[$prefix . 'baul_fallback_provider'] ?? '')));
-    if (!in_array($provider, ['giftven', 'recargasamerica', 'conec'], true)) {
-        return ['provider' => '', 'paquete_api' => 0, 'source_key' => '', 'recargasamerica_tipo' => ''];
+/** Decodifica baul_fallback_chain_json a un array simple de ['provider' => ..., 'paquete_api' => ..., 'recargasamerica_tipo' => ...], en orden. Nunca lanza. */
+function admin_package_baul_fallback_chain_decode(string $json): array {
+    $json = trim($json);
+    if ($json === '') {
+        return [];
     }
-    $productId = (int) ($_POST[$prefix . 'baul_fallback_paquete_api_' . $provider] ?? 0);
-    if ($productId <= 0) {
-        return ['provider' => '', 'paquete_api' => 0, 'source_key' => '', 'recargasamerica_tipo' => ''];
+    $decoded = json_decode($json, true);
+    if (!is_array($decoded)) {
+        return [];
     }
-    $tipo = '';
-    if ($provider === 'recargasamerica') {
-        $raProduct = $recargasAmericaProductsById[$productId] ?? null;
-        $tipo = $raProduct ? recargasamerica_catalog_tipo_for_product($raProduct) : '';
+    $chain = [];
+    foreach ($decoded as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+        $provider = strtolower(trim((string) ($entry['provider'] ?? '')));
+        $productId = (int) ($entry['paquete_api'] ?? 0);
+        if (!in_array($provider, ['giftven', 'recargasamerica', 'conec'], true) || $productId <= 0) {
+            continue;
+        }
+        $chain[] = ['provider' => $provider, 'paquete_api' => $productId, 'recargasamerica_tipo' => (string) ($entry['recargasamerica_tipo'] ?? '')];
     }
-    return ['provider' => $provider, 'paquete_api' => $productId, 'source_key' => '', 'recargasamerica_tipo' => $tipo];
+    return $chain;
+}
+
+// Lee del POST las 3 prioridades (ver admin_package_baul_fallback_editor_html) y arma la cadena en
+// orden, DESCARTANDO las casillas en "Ninguno" o sin producto elegido (una casilla vacía en medio no
+// deja un hueco: si la 2ª quedó en "Ninguno" pero la 1ª y la 3ª sí tienen fuente, la cadena queda con
+// solo esas dos, en ese orden). Devuelve el JSON listo para guardar en baul_fallback_chain_json. Nunca
+// lanza: una elección incompleta simplemente no entra en la cadena.
+function admin_package_baul_fallback_chain_from_post(string $prefix, array $recargasAmericaProductsById): string {
+    $providers = (array) ($_POST[$prefix . 'baul_fallback_provider'] ?? []);
+    $productsByProvider = [
+        'giftven' => (array) ($_POST[$prefix . 'baul_fallback_paquete_api_giftven'] ?? []),
+        'recargasamerica' => (array) ($_POST[$prefix . 'baul_fallback_paquete_api_recargasamerica'] ?? []),
+        'conec' => (array) ($_POST[$prefix . 'baul_fallback_paquete_api_conec'] ?? []),
+    ];
+    $chain = [];
+    foreach ($providers as $slot => $rawProvider) {
+        $provider = strtolower(trim((string) $rawProvider));
+        if (!in_array($provider, ['giftven', 'recargasamerica', 'conec'], true)) {
+            continue;
+        }
+        $productId = (int) ($productsByProvider[$provider][$slot] ?? 0);
+        if ($productId <= 0) {
+            continue;
+        }
+        $entry = ['provider' => $provider, 'paquete_api' => $productId];
+        if ($provider === 'recargasamerica') {
+            $raProduct = $recargasAmericaProductsById[$productId] ?? null;
+            $entry['recargasamerica_tipo'] = $raProduct ? recargasamerica_catalog_tipo_for_product($raProduct) : '';
+        }
+        $chain[] = $entry;
+    }
+    return $chain === [] ? '' : json_encode($chain, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }
 
 function admin_package_format_catalog_quantity(array $item): string {
@@ -1641,7 +1685,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
         $raEditSelectedProduct = $recargasAmericaProductsById[(int) $edit_paquete_api] ?? null;
         $edit_recargasamerica_tipo = $raEditSelectedProduct ? recargasamerica_catalog_tipo_for_product($raEditSelectedProduct) : '';
     }
-    $edit_baul_fallback = admin_package_baul_fallback_from_post('edit_', $recargasAmericaProductsById);
+    $edit_baul_fallback_chain_json = admin_package_baul_fallback_chain_from_post('edit_', $recargasAmericaProductsById);
     $edit_vender_cuenta = $accountSaleFeatureEnabled && isset($_POST['edit_vender_cuenta']) ? 1 : 0;
     $edit_cuenta_texto = $accountSaleFeatureEnabled
         ? package_account_sales_normalize_text((string) ($_POST['edit_cuenta_texto'] ?? ''))
@@ -1707,9 +1751,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     }
     $stmt->execute();
     $stmt->close();
-    $stmtBaulFb = $mysqli->prepare("UPDATE juego_paquetes SET baul_fallback_provider=NULLIF(?,''), baul_fallback_paquete_api=NULLIF(?,0), baul_fallback_source_key=NULLIF(?,''), baul_fallback_recargasamerica_tipo=NULLIF(?,'') WHERE id=?");
+    $stmtBaulFb = $mysqli->prepare("UPDATE juego_paquetes SET baul_fallback_chain_json=NULLIF(?,'') WHERE id=?");
     if ($stmtBaulFb) {
-        $stmtBaulFb->bind_param('sissi', $edit_baul_fallback['provider'], $edit_baul_fallback['paquete_api'], $edit_baul_fallback['source_key'], $edit_baul_fallback['recargasamerica_tipo'], $edit_id);
+        $stmtBaulFb->bind_param('si', $edit_baul_fallback_chain_json, $edit_id);
         $stmtBaulFb->execute();
         $stmtBaulFb->close();
     }
@@ -1795,7 +1839,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
         $raSelectedProduct = $recargasAmericaProductsById[(int) $paquete_api] ?? null;
         $recargasamerica_tipo = $raSelectedProduct ? recargasamerica_catalog_tipo_for_product($raSelectedProduct) : '';
     }
-    $baul_fallback = admin_package_baul_fallback_from_post('', $recargasAmericaProductsById);
+    $baul_fallback_chain_json = admin_package_baul_fallback_chain_from_post('', $recargasAmericaProductsById);
     $vender_cuenta = $accountSaleFeatureEnabled && isset($_POST['vender_cuenta']) ? 1 : 0;
     $cuenta_texto = $accountSaleFeatureEnabled
         ? package_account_sales_normalize_text((string) ($_POST['cuenta_texto'] ?? ''))
@@ -1853,9 +1897,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     $stmt->execute();
     $newPackageId = (int) $mysqli->insert_id;
     $stmt->close();
-    $stmtBaulFb = $mysqli->prepare("UPDATE juego_paquetes SET baul_fallback_provider=NULLIF(?,''), baul_fallback_paquete_api=NULLIF(?,0), baul_fallback_source_key=NULLIF(?,''), baul_fallback_recargasamerica_tipo=NULLIF(?,'') WHERE id=?");
+    $stmtBaulFb = $mysqli->prepare("UPDATE juego_paquetes SET baul_fallback_chain_json=NULLIF(?,'') WHERE id=?");
     if ($stmtBaulFb) {
-        $stmtBaulFb->bind_param('sissi', $baul_fallback['provider'], $baul_fallback['paquete_api'], $baul_fallback['source_key'], $baul_fallback['recargasamerica_tipo'], $newPackageId);
+        $stmtBaulFb->bind_param('si', $baul_fallback_chain_json, $newPackageId);
         $stmtBaulFb->execute();
         $stmtBaulFb->close();
     }
