@@ -11934,14 +11934,18 @@ if ($action === 'check_reference_used') {
     // movement_is_available_for_order()/find_reference_reuse_conflict(): los
     // bancos venezolanos reciclan números de referencia con el tiempo, así
     // que un movimiento de otro día con la misma referencia NUNCA debe
-    // bloquear el chequeo de HOY). Se bloquea si CUALQUIERA de estas señales
-    // aplica sobre un movimiento del día de HOY:
-    //  1. pedido_id IS NOT NULL (ya se usó para completar un pedido).
-    //  2. checked = 1 (alguien ya le dio clic a "Realizar Compra" con esta
-    //     referencia — ver claim_movement_checked_by_reference).
-    //  3. monto <= 0 (cero o negativo — nunca un pago entrante real, no
-    //     debe poder usarse como comprobante aunque nadie lo haya
-    //     "reclamado" todavía).
+    // bloquear el chequeo de HOY).
+    //
+    // ⚠️ Una misma referencia/operación de Pago Móvil puede aparecer como
+    // VARIAS filas en movimientos el mismo día: el abono real (monto > 0) Y
+    // una comisión bancaria propia del banco receptor (monto negativo, ej.
+    // "Comisión Pago Movil") con la MISMA referencia y el mismo timestamp
+    // (caso real reportado por el cliente: referencia 1121681795 con un
+    // "Abono Pago Movil BNC" de 814.00 y una "Comisión Pago Movil" de
+    // -12.21, ambas de hoy). Por eso este chequeo NUNCA debe decidir
+    // mirando una sola fila al azar (antes usaba LIMIT 1 sin ORDER BY): hay
+    // que traer TODAS las filas de hoy con esa referencia y solo bloquear
+    // si NINGUNA de ellas sirve como comprobante válido.
     $mysqli = ensure_mysqli_connection($mysqli);
     $checkReference = trim((string) ($_POST['reference'] ?? ''));
     $checkRequiredDigits = max(0, intval($_POST['required_digits'] ?? 0));
@@ -11950,10 +11954,7 @@ if ($action === 'check_reference_used') {
         json_response(['ok' => true, 'used' => false]);
     }
 
-    $usedConditionSql = 'dia_negocio = CURDATE() AND (COALESCE(checked, 0) = 1 OR pedido_id IS NOT NULL OR monto <= 0)';
-
-    $used = false;
-    $usedMovement = null;
+    $movementsToday = [];
     try {
         if ($checkRequiredDigits > 0) {
             $refSuffix = strlen($checkReference) > $checkRequiredDigits
@@ -11963,8 +11964,7 @@ if ($action === 'check_reference_used') {
                 "SELECT id, COALESCE(checked, 0) AS checked, COALESCE(pedido_id, 0) AS pedido_id, monto
                  FROM movimientos
                  WHERE CAST(RIGHT(TRIM(referencia), ?) AS UNSIGNED) = CAST(? AS UNSIGNED)
-                   AND {$usedConditionSql}
-                 LIMIT 1"
+                   AND dia_negocio = CURDATE()"
             );
             if ($stmt) {
                 $stmt->bind_param('is', $checkRequiredDigits, $refSuffix);
@@ -11972,7 +11972,7 @@ if ($action === 'check_reference_used') {
         } else {
             $stmt = $mysqli->prepare(
                 "SELECT id, COALESCE(checked, 0) AS checked, COALESCE(pedido_id, 0) AS pedido_id, monto
-                 FROM movimientos WHERE referencia = ? AND {$usedConditionSql} LIMIT 1"
+                 FROM movimientos WHERE referencia = ? AND dia_negocio = CURDATE()"
             );
             if ($stmt) {
                 $stmt->bind_param('s', $checkReference);
@@ -11981,16 +11981,42 @@ if ($action === 'check_reference_used') {
         if ($stmt) {
             $stmt->execute();
             $result = $stmt->get_result();
-            $usedMovement = $result ? $result->fetch_assoc() : null;
-            $used = $usedMovement !== null;
+            $movementsToday = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
             $stmt->close();
         }
     } catch (Throwable $e) {
         json_response(['ok' => true, 'used' => false]);
     }
 
-    if (!$used) {
+    // Si ALGUNA de las filas de hoy con esta referencia es un comprobante
+    // válido y todavía libre, se deja pasar — sin importar que existan otras
+    // filas (comisión, etc.) con la misma referencia que por sí solas se
+    // verían "inválidas". La validación real (con el monto exacto) la hace
+    // igual movement_is_available_for_order() al crear el pedido.
+    foreach ($movementsToday as $m) {
+        if ((float) ($m['monto'] ?? 0) > 0 && (int) ($m['checked'] ?? 0) === 0 && (int) ($m['pedido_id'] ?? 0) <= 0) {
+            json_response(['ok' => true, 'used' => false]);
+        }
+    }
+
+    if (empty($movementsToday)) {
         json_response(['ok' => true, 'used' => false]);
+    }
+
+    // Ninguna fila de hoy sirve: se arma el mensaje con la fila más
+    // informativa (primero una ligada a un pedido, luego una "checked",
+    // y si no, la razón genérica de "no es un pago válido").
+    $usedMovement = null;
+    foreach ($movementsToday as $m) {
+        if ((int) ($m['pedido_id'] ?? 0) > 0) { $usedMovement = $m; break; }
+    }
+    if ($usedMovement === null) {
+        foreach ($movementsToday as $m) {
+            if ((int) ($m['checked'] ?? 0) === 1) { $usedMovement = $m; break; }
+        }
+    }
+    if ($usedMovement === null) {
+        $usedMovement = $movementsToday[0];
     }
 
     // Mensaje específico según la razón real del bloqueo, para no confundir
@@ -11998,7 +12024,7 @@ if ($action === 'check_reference_used') {
     // recarga sigue procesándose (pedido pedido explícito del cliente).
     $usedMessage = 'Referencia ya usada';
     $linkedOrderId = (int) ($usedMovement['pedido_id'] ?? 0);
-    if ((float) ($usedMovement['monto'] ?? 0) < 0) {
+    if ($linkedOrderId <= 0 && (int) ($usedMovement['checked'] ?? 0) !== 1) {
         $usedMessage = 'Este movimiento no es un pago válido';
     } elseif ($linkedOrderId > 0) {
         $linkedOrder = fetch_order_by_id($mysqli, $linkedOrderId);
