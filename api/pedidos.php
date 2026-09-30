@@ -6860,6 +6860,15 @@ function fetch_binance_pagonorte_movements(array $config): array {
             continue;
         }
 
+        // ⚠️ La API de Binance devuelve movimientos en CUALQUIER moneda/activo que
+        // haya recibido la cuenta (USDT, pero también BTC, DUSK, etc. — visto real
+        // en producción: un movimiento con 'moneda'=>'BTC' en el payload). Antes se
+        // guardaba SIEMPRE como 'USDT' sin mirar este campo, así que un pago real
+        // en otra moneda (que vale mucho menos que su mismo número en USDT) se
+        // aceptaba igual para pagar una recarga en USDT. Se usa el valor real que
+        // manda la API; si no viene, se deja vacío (nunca se asume 'USDT' a
+        // ciegas) para que el filtro de moneda de más abajo lo rechace por
+        // seguridad en vez de aceptarlo por defecto.
         $normalized[] = [
             'referencia' => substr(binance_pagonorte_store_reference($reference), 0, 120),
             'descripcion' => sanitize_str((string) ($movement['descripcion'] ?? ''), 255),
@@ -6867,7 +6876,7 @@ function fetch_binance_pagonorte_movements(array $config): array {
             'fecha_movimiento' => parse_bank_movement_datetime((string) ($movement['fecha'] ?? '')),
             'tipo' => sanitize_str((string) ($movement['tipo'] ?? ''), 80),
             'monto' => normalize_bank_amount($movement['monto'] ?? 0),
-            'moneda' => 'USDT',
+            'moneda' => strtoupper(trim((string) ($movement['moneda'] ?? ''))),
             'payload_json' => json_encode($movement, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ];
     }
@@ -7281,10 +7290,17 @@ function find_expired_bank_movement_by_reference(array $movements, string $repor
     return null;
 }
 
-function find_matching_bank_movement(mysqli $mysqli, array $movements, string $reportedReference, float $orderAmount, int $requiredDigits, int $orderId): ?array {
+// $expectedCurrency: cuando no está vacío (ej. 'USDT' para Binance), rechaza
+// cualquier movimiento cuya 'moneda' real no coincida — ver el porqué en
+// fetch_binance_pagonorte_movements(). Vacío = sin filtro (comportamiento de
+// siempre para el flujo de Bs/VES, que nunca tuvo este problema).
+function find_matching_bank_movement(mysqli $mysqli, array $movements, string $reportedReference, float $orderAmount, int $requiredDigits, int $orderId, string $expectedCurrency = ''): ?array {
     foreach ($movements as $movement) {
         $reference = (string) ($movement['referencia'] ?? '');
         if ($reference === '') {
+            continue;
+        }
+        if ($expectedCurrency !== '' && strtoupper(trim((string) ($movement['moneda'] ?? ''))) !== $expectedCurrency) {
             continue;
         }
         if (!movement_reference_matches($reference, $reportedReference, $requiredDigits)) {
@@ -7305,10 +7321,13 @@ function find_matching_bank_movement(mysqli $mysqli, array $movements, string $r
     return null;
 }
 
-function find_bank_movement_by_reference(mysqli $mysqli, array $movements, string $reportedReference, int $requiredDigits, int $orderId): ?array {
+function find_bank_movement_by_reference(mysqli $mysqli, array $movements, string $reportedReference, int $requiredDigits, int $orderId, string $expectedCurrency = ''): ?array {
     foreach ($movements as $movement) {
         $reference = (string) ($movement['referencia'] ?? '');
         if ($reference === '') {
+            continue;
+        }
+        if ($expectedCurrency !== '' && strtoupper(trim((string) ($movement['moneda'] ?? ''))) !== $expectedCurrency) {
             continue;
         }
         if (!movement_reference_matches($reference, $reportedReference, $requiredDigits)) {
@@ -7454,7 +7473,8 @@ function find_bank_movement_by_reference_binance_with_retry(
             $latestMovements,
             $reportedReference,
             $requiredDigits,
-            $orderId
+            $orderId,
+            'USDT'
         );
 
         if ($match !== null) {
@@ -7505,7 +7525,8 @@ function find_matching_bank_movement_binance_with_retry(
             $reportedReference,
             $orderAmount,
             $requiredDigits,
-            $orderId
+            $orderId,
+            'USDT'
         );
 
         if ($match !== null) {
@@ -10875,7 +10896,8 @@ if ($action === 'submit_payment') {
             $referenceNumber,
             (float) ($order['precio'] ?? 0),
             $referenceMatchDigits,
-            $orderId
+            $orderId,
+            $usesBinancePagonorteValidation ? 'USDT' : ''
         );
     }
 
@@ -11776,7 +11798,7 @@ if ($action === 'submit_payment') {
             });
         }
 
-        $referenceOnlyMatch = find_bank_movement_by_reference($mysqli, $bankMovements, $referenceNumber, $referenceMatchDigits, $orderId);
+        $referenceOnlyMatch = find_bank_movement_by_reference($mysqli, $bankMovements, $referenceNumber, $referenceMatchDigits, $orderId, $usesBinancePagonorteValidation ? 'USDT' : '');
         if ($referenceOnlyMatch !== null) {
             $mismatch = [
                 'reference_match' => true,
@@ -13977,7 +13999,7 @@ if ($action === 'batch_create_and_pay') {
                 json_response(['ok' => false, 'message' => 'Su Pago está en proceso, Espere 1 min y vuelva a intentar', 'api_error' => $batchApiErr, 'admin_error_detail' => $batchAdminErr502], 502);
             }
 
-            $batchMatch = find_matching_bank_movement($mysqli, $batchMovements, $refNumber, $totalBlindado, $batchRefDigits, 0);
+            $batchMatch = find_matching_bank_movement($mysqli, $batchMovements, $refNumber, $totalBlindado, $batchRefDigits, 0, $batchUsesBinanceApi ? 'USDT' : '');
 
             if ($batchMatch === null) {
                 try {
@@ -14043,7 +14065,7 @@ if ($action === 'batch_create_and_pay') {
             }
 
             if ($batchMatch === null) {
-                $batchRefOnly  = find_bank_movement_by_reference($mysqli, $batchMovements, $refNumber, $batchRefDigits, 0);
+                $batchRefOnly  = find_bank_movement_by_reference($mysqli, $batchMovements, $refNumber, $batchRefDigits, 0, $batchUsesBinanceApi ? 'USDT' : '');
                 $batchMismatch = $batchRefOnly !== null
                     ? ['reference_match' => true, 'amount_match' => false, 'failure_type' => 'amount_mismatch',
                        'reasons' => ['La referencia fue encontrada pero el monto no coincide con el total del carrito.']]

@@ -169,8 +169,16 @@ if (!function_exists('sbr_fetch_sync')) {
         if (!is_string($body) || $body === '') return 0;
         $data = json_decode($body, true);
         if (!is_array($data) || !isset($data['movimientos']) || !is_array($data['movimientos'])) return 0;
+        // ⚠️ La cuenta de Binance recibe movimientos en CUALQUIER moneda/activo, no
+        // solo USDT (visto real en producción: un movimiento con 'moneda'=>'BTC').
+        // Antes se guardaba SIEMPRE como 'USDT' sin mirar el campo real de la API,
+        // así que un pago en otra moneda (que vale mucho menos que su mismo número
+        // en USDT — caso reportado por el cliente con DUSK) se aceptaba igual para
+        // acreditar una recarga en USDT. Se guarda el valor real; si no viene, se
+        // deja vacío para que sbr_binance_verify_and_credit() lo rechace por
+        // seguridad en vez de asumir que es válido.
         // INSERT IGNORE → nunca sobrescribe un movimiento existente (no corrompe la data de la tienda).
-        $ins = $pdo->prepare("INSERT IGNORE INTO movimientos (referencia, descripcion, fecha_raw, fecha_movimiento, tipo, monto, moneda, payload_json) VALUES (?,?,?,?,?,?, 'USDT', ?)");
+        $ins = $pdo->prepare("INSERT IGNORE INTO movimientos (referencia, descripcion, fecha_raw, fecha_movimiento, tipo, monto, moneda, payload_json) VALUES (?,?,?,?,?,?,?,?)");
         foreach ($data['movimientos'] as $m) {
             if (!is_array($m)) continue;
             $ref = trim((string) ($m['referencia'] ?? '')); if ($ref === '') continue;
@@ -184,6 +192,7 @@ if (!function_exists('sbr_fetch_sync')) {
                     $fm,
                     substr((string) ($m['tipo'] ?? ''), 0, 80),
                     sbr_norm_amount($m['monto'] ?? 0),
+                    strtoupper(trim((string) ($m['moneda'] ?? ''))),
                     json_encode($m, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ]);
             } catch (Throwable $e) {}
@@ -655,10 +664,13 @@ if (!function_exists('sbr_binance_verify_and_credit')) {
         $credit = round($amount, 2);
         $amount = ($amountMatch !== null && $amountMatch > 0) ? round($amountMatch, 2) : $credit;
         // Candidatos: movimientos de Binance, DISPONIBLES (no usados por un pedido ni otra recarga),
-        // recientes (últimos 3 días) y con monto exacto. La referencia se compara en PHP (últimos N díg).
+        // recientes (últimos 3 días), EN USDT (nunca otra moneda/cripto — ver el
+        // porqué en sbr_fetch_sync()) y con monto exacto. La referencia se compara
+        // en PHP (últimos N díg).
         $q = $pdo->prepare(
             "SELECT id, referencia, monto FROM movimientos
               WHERE referencia LIKE 'BINANCE:%'
+                AND moneda = 'USDT'
                 AND ROUND(monto,2) = ?
                 AND COALESCE(pedido_id,0) = 0
                 AND COALESCE(checked,0) = 0
