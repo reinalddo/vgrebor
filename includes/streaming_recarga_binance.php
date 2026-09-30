@@ -703,6 +703,24 @@ if (!function_exists('sbr_binance_verify_and_credit')) {
         if (sbr_ref_ya_usada($pdo, $reportedRef, $digits, "referencia LIKE 'BINANCE:%'")) {
             return ['credited' => false, 'reused' => true, 'message' => '⚠ Esta referencia YA fue usada en un pago anterior (una compra en la tienda o otra recarga). No se puede usar dos veces.'];
         }
+        // Antes de caer al mensaje genérico de "no encontramos tu pago": si la
+        // referencia SÍ existe entre los movimientos recientes de Binance pero en
+        // una moneda distinta a USDT (caso real reportado: el cliente pagó en
+        // DUSK), avisarlo puntualmente — es mucho más claro que el pago sí llegó,
+        // solo que en la moneda equivocada, en vez de sonar como que nunca llegó.
+        try {
+            $wrongCurrencyStmt = $pdo->prepare("SELECT referencia, moneda FROM movimientos
+                  WHERE referencia LIKE 'BINANCE:%' AND COALESCE(moneda,'') != 'USDT'
+                    AND (fecha_movimiento IS NULL OR fecha_movimiento >= (NOW() - INTERVAL 3 DAY))
+                  ORDER BY id DESC LIMIT 400");
+            $wrongCurrencyStmt->execute();
+            foreach ($wrongCurrencyStmt->fetchAll(PDO::FETCH_ASSOC) as $wc) {
+                if (sbr_reference_matches((string) $wc['referencia'], $reportedRef, $digits)) {
+                    $monedaReal = trim((string) ($wc['moneda'] ?? '')) !== '' ? trim((string) $wc['moneda']) : 'otra moneda';
+                    return ['credited' => false, 'rejected' => true, 'message' => "✗ MONEDA EQUIVOCADA: ese pago llegó en {$monedaReal}, no en USDT. Debes pagar exactamente en USDT (no otra moneda o criptomoneda)."];
+                }
+            }
+        } catch (Throwable $e) {}
         sbr_log_sin_coincidencia($pdo, 'Binance', [
             'recarga' => $recId, 'metodo' => $metodoNombre !== '' ? $metodoNombre : 'Binance',
             'digitos' => $digits, 'ref_escrita' => $reportedRef,

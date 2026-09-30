@@ -7206,7 +7206,16 @@ function bank_amount_matches_order_total(float $movementAmount, float $orderAmou
     return round($movementAmount, 2) === round($orderAmount, 2);
 }
 
-function bank_mismatch_failure_type(bool $referenceMatch, bool $amountMatch): string {
+function bank_mismatch_failure_type(bool $referenceMatch, bool $amountMatch, bool $currencyMatch = true): string {
+    // El caso de moneda equivocada se revisa PRIMERO: cuando la referencia y el
+    // monto numérico coinciden pero la moneda real del movimiento no es la
+    // esperada (ej. pagó en DUSK en vez de USDT), $amountMatch llega en false
+    // (ver explain_bank_movement_mismatch) — sin este chequeo antes, caería en
+    // 'amount_mismatch' y confundiría al cliente con "el monto no coincide"
+    // cuando el monto SÍ era el correcto, la moneda no.
+    if ($referenceMatch && !$currencyMatch) {
+        return 'currency_mismatch';
+    }
     if ($referenceMatch && $amountMatch) {
         return 'server_partial_response';
     }
@@ -7219,10 +7228,11 @@ function bank_mismatch_failure_type(bool $referenceMatch, bool $amountMatch): st
     return 'server_or_data_mismatch';
 }
 
-function bank_mismatch_customer_message(string $failureType): string {
+function bank_mismatch_customer_message(string $failureType, string $expectedCurrency = 'USDT'): string {
     return match ($failureType) {
         'reference_mismatch'      => 'Datos incorrectos o inválidos. El número de referencia ingresado no fue encontrado en el banco.',
         'amount_mismatch'         => 'El monto de la transferencia no coincide con el total del pedido. Verifica los datos e intenta de nuevo.',
+        'currency_mismatch'       => 'MONEDA EQUIVOCADA: encontramos tu pago, pero no llegó en ' . $expectedCurrency . '. Debes pagar exactamente en ' . $expectedCurrency . ' (no otra moneda o criptomoneda). Verifica y vuelve a intentar.',
         'expired_reference'       => 'Esta referencia ya caducó. Los pagos solo son válidos el mismo día en que se realizan.',
         'server_partial_response' => 'Error en la respuesta del banco. Intente de nuevo en unos momentos.',
         default                   => 'Datos incorrectos o inválidos. Verifica la referencia y el monto, e intenta de nuevo.',
@@ -7598,9 +7608,13 @@ function find_bank_movement_by_reference_with_retry(
     ];
 }
 
-function explain_bank_movement_mismatch(array $movements, string $reportedReference, float $orderAmount, int $requiredDigits): array {
+function explain_bank_movement_mismatch(array $movements, string $reportedReference, float $orderAmount, int $requiredDigits, string $expectedCurrency = ''): array {
     $referenceMatch = false;
     $amountMatch = false;
+    // true en cuanto se encuentra un movimiento con referencia+monto correctos
+    // pero en una moneda distinta a la esperada (ver find_matching_bank_movement
+    // — mismo filtro, aquí solo para explicar el motivo real al cliente).
+    $currencyMismatchFound = false;
 
     foreach ($movements as $movement) {
         $reference = (string) ($movement['referencia'] ?? '');
@@ -7610,7 +7624,11 @@ function explain_bank_movement_mismatch(array $movements, string $reportedRefere
         if (movement_reference_matches($reference, $reportedReference, $requiredDigits)) {
             $referenceMatch = true;
             if (bank_amount_matches_order_total((float) ($movement['monto'] ?? 0), $orderAmount)) {
-                $amountMatch = true;
+                if ($expectedCurrency !== '' && strtoupper(trim((string) ($movement['moneda'] ?? ''))) !== $expectedCurrency) {
+                    $currencyMismatchFound = true;
+                } else {
+                    $amountMatch = true;
+                }
             }
         }
     }
@@ -7618,18 +7636,18 @@ function explain_bank_movement_mismatch(array $movements, string $reportedRefere
     $reasons = [];
     if (!$referenceMatch) {
         $reasons[] = 'La referencia ingresada no coincide con ningún movimiento encontrado en la API bancaria.';
-    }
-    if ($referenceMatch && !$amountMatch) {
+    } elseif ($currencyMismatchFound) {
+        $reasons[] = 'La referencia y el monto coinciden, pero el pago llegó en una moneda distinta a ' . $expectedCurrency . '. Debe pagarse exactamente en ' . $expectedCurrency . '.';
+    } elseif (!$amountMatch) {
         $reasons[] = 'La referencia fue encontrada, pero el monto del movimiento bancario no coincide con el total esperado del pedido.';
-    }
-    if ($referenceMatch && $amountMatch) {
+    } else {
         $reasons[] = 'La referencia y el monto coinciden, pero el movimiento no puede asociarse a este pedido (puede estar vinculado a otro pedido).';
     }
 
     return [
         'reference_match' => $referenceMatch,
         'amount_match' => $amountMatch,
-        'failure_type' => bank_mismatch_failure_type($referenceMatch, $amountMatch),
+        'failure_type' => bank_mismatch_failure_type($referenceMatch, $amountMatch, !$currencyMismatchFound),
         'reasons' => $reasons,
     ];
 }
@@ -11807,7 +11825,7 @@ if ($action === 'submit_payment') {
                 'reasons'         => ['La referencia fue encontrada, pero el monto del movimiento bancario no coincide con el total esperado del pedido.'],
             ];
         } else {
-            $mismatch = explain_bank_movement_mismatch($bankMovements, $referenceNumber, (float) ($updatedOrder['precio'] ?? 0), $referenceMatchDigits);
+            $mismatch = explain_bank_movement_mismatch($bankMovements, $referenceNumber, (float) ($updatedOrder['precio'] ?? 0), $referenceMatchDigits, $usesBinancePagonorteValidation ? 'USDT' : '');
         }
         $pendingOrder = fetch_order_by_id($mysqli, $orderId) ?: $updatedOrder;
         $adminDetailMismatch = $isAdminOrRoot ? [
@@ -14069,7 +14087,7 @@ if ($action === 'batch_create_and_pay') {
                 $batchMismatch = $batchRefOnly !== null
                     ? ['reference_match' => true, 'amount_match' => false, 'failure_type' => 'amount_mismatch',
                        'reasons' => ['La referencia fue encontrada pero el monto no coincide con el total del carrito.']]
-                    : explain_bank_movement_mismatch($batchMovements, $refNumber, $totalBlindado, $batchRefDigits);
+                    : explain_bank_movement_mismatch($batchMovements, $refNumber, $totalBlindado, $batchRefDigits, $batchUsesBinanceApi ? 'USDT' : '');
                 $batchAdminMismatch = $isAdminBatch ? [
                     'context'            => 'batch_create_and_pay',
                     'step'               => 'bank_mismatch',
