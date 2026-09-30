@@ -5303,10 +5303,11 @@ include __DIR__ . "/includes/header.php";
     border-top-color: rgba(var(--theme-button-secondary-rgb), 0.48);
   }
 
-  /* ── Tarjetas de paquetes con TAMAÑO FIJO ──────────────────────────
-     Las cards no se estiran según la pantalla: mantienen un ancho fijo
-     (250px desde desktop hasta tablet, 158px en móvil). La caja de la
-     imagen usa la proporción real de las imágenes de paquetes
+  /* ── Tarjetas de paquetes ───────────────────────────────────────────
+     Desktop/tablet (>767.98px): ancho fijo de 250px, tantas por fila como
+     quepan (flex-wrap natural). Móvil (≤767.98px, más abajo): ancho en %
+     para GARANTIZAR siempre 2 por fila — ver el porqué en ese bloque. La
+     caja de la imagen usa la proporción real de las imágenes de paquetes
      (1511 × 704 ≈ 2.146:1) para que se vean SIEMPRE completas, sin
      cortes, en todos los tamaños. Filas alineadas a la izquierda. */
   #pack-grid {
@@ -5382,18 +5383,23 @@ include __DIR__ . "/includes/header.php";
   @media (max-width: 767.98px) {
     #pack-grid {
       gap: 0.5rem;
-      /* Ancho exacto de 2 columnas, centrado: márgenes laterales simétricos
-         y la card impar queda alineada bajo la primera columna. */
-      max-width: calc(158px * 2 + 0.5rem);
-      margin-left: auto;
-      margin-right: auto;
     }
+    /* SIEMPRE 2 por fila en móvil: ancho en % del contenedor (mitad menos la
+       mitad del gap), no un px fijo. Con un px fijo (158px) el presupuesto de
+       ancho es exacto (158+158+gap) y CUALQUIER padding/gutter extra del
+       contenedor que no se haya contado hace que la 2ª card no quepa y caiga
+       a la fila de abajo (reportado por el cliente a partir de ~380px de
+       ancho). Con % del contenedor esto es imposible: cada card mide
+       SIEMPRE la mitad real del espacio disponible, sin importar el padding
+       real que tenga alrededor. La card impar (cantidad non) queda alineada
+       bajo la primera columna igual que antes, por el mismo flex-wrap. */
     #pack-grid > * {
-      width: 158px;
-      max-width: 158px;
+      width: calc(50% - 0.25rem);
+      max-width: calc(50% - 0.25rem);
     }
     #pack-grid .pack-card-media {
-      height: 74px; /* 158px × 704/1511 — misma proporción reducida */
+      height: auto;
+      aspect-ratio: 1511 / 704; /* misma proporción real de las imágenes, ahora relativa al ancho real de la card */
     }
   }
 
