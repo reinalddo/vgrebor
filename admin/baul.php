@@ -257,14 +257,6 @@ function baul_money($amount, string $moneda = 'USD'): string {
         <tr>
           <td>
             <span id="baul-nombre-<?= $p['id'] ?>"><?= htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8') ?></span>
-            <button type="button" class="baul-toggle-btn ms-2" data-toggle-rename="<?= $p['id'] ?>">✎ Editar</button>
-            <form method="post" class="d-none mt-1 d-flex gap-2" id="baul-rename-form-<?= $p['id'] ?>">
-              <input type="hidden" name="action" value="renombrar_producto">
-              <input type="hidden" name="producto_id" value="<?= $p['id'] ?>">
-              <input type="text" name="nombre" class="form-control form-control-sm baul-input" value="<?= htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8') ?>" required>
-              <button type="submit" class="btn btn-sm fw-bold" style="background:#00fff7;color:#181f2a;border:none;">Guardar</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary" data-cancel-rename="<?= $p['id'] ?>">Cancelar</button>
-            </form>
           </td>
           <td>
             <span class="baul-pill <?= $p['stock'] > 0 ? 'baul-pill-stock' : 'baul-pill-agotado' ?>"><?= $p['stock'] ?> disponible<?= $p['stock'] === 1 ? '' : 's' ?></span>
@@ -278,7 +270,7 @@ function baul_money($amount, string $moneda = 'USD'): string {
             <?php endif; ?>
           </td>
           <td class="d-flex gap-2 flex-wrap">
-            <button type="button" class="baul-toggle-btn" data-toggle-codes="<?= $p['id'] ?>">Cargar / ver códigos</button>
+            <button type="button" class="baul-toggle-btn" data-toggle-codes="<?= $p['id'] ?>">✎ Editar (nombre, costos y códigos)</button>
             <form method="post" class="m-0">
               <input type="hidden" name="action" value="<?= $p['activo'] ? 'desactivar_producto' : 'activar_producto' ?>">
               <input type="hidden" name="producto_id" value="<?= $p['id'] ?>">
@@ -294,6 +286,15 @@ function baul_money($amount, string $moneda = 'USD'): string {
         <tr class="baul-codes-row" id="baul-codes-<?= $p['id'] ?>">
           <td colspan="5" style="background:#0f1a28;">
             <div class="row g-4">
+              <div class="col-12">
+                <h3 class="h6 text-info">Nombre del producto</h3>
+                <form method="post" class="d-flex gap-2 flex-wrap mb-2" style="max-width:480px;">
+                  <input type="hidden" name="action" value="renombrar_producto">
+                  <input type="hidden" name="producto_id" value="<?= $p['id'] ?>">
+                  <input type="text" name="nombre" class="form-control form-control-sm baul-input" value="<?= htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8') ?>" required>
+                  <button type="submit" class="btn btn-sm fw-bold" style="background:#00fff7;color:#181f2a;border:none;">Guardar nombre</button>
+                </form>
+              </div>
               <div class="col-md-5">
                 <h3 class="h6 text-info">Cargar códigos</h3>
                 <form method="post">
@@ -482,18 +483,6 @@ function baul_money($amount, string $moneda = 'USD'): string {
     });
   });
 
-  document.querySelectorAll('[data-toggle-rename]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var form = document.getElementById('baul-rename-form-' + btn.dataset.toggleRename);
-      if (form) form.classList.toggle('d-none');
-    });
-  });
-  document.querySelectorAll('[data-cancel-rename]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var form = document.getElementById('baul-rename-form-' + btn.dataset.cancelRename);
-      if (form) form.classList.add('d-none');
-    });
-  });
 
   function postPending(action, orderId, confirmMsg) {
     if (confirmMsg && !window.confirm(confirmMsg)) {

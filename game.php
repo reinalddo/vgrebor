@@ -6083,6 +6083,11 @@ include __DIR__ . "/includes/header.php";
     if (packCards2.length === 0) return;
     const allNoId = packCards2.every(function(card) {
       if (card.dataset.accountSale === '1') return true;
+      // Baúl: siempre se entrega un código/serial de texto, nunca se liga a una
+      // cuenta ni se valida ningún ID (ver includes/baul_api.php) — por eso
+      // nunca debería pedir "ID de usuario", sea un giftcard o un juego tipo
+      // recarga (ej. Free Fire) vendido también desde el Baúl.
+      if (card.dataset.packageProvider === 'baul') return true;
       try {
         const fields = JSON.parse(card.dataset.requiredFields || '[]');
         return card.dataset.packageProvider === 'giftven' && fields.length === 0;
