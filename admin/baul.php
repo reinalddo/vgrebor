@@ -74,6 +74,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($costo === null) {
                 $flashMessage .= ' ⚠ No indicaste costo: quedó en blanco, revisa Estadísticas.';
             }
+        } elseif ($action === 'editar_codigo') {
+            $codeId = (int) ($_POST['codigo_id'] ?? 0);
+            $codigoVal = (string) ($_POST['codigo'] ?? '');
+            $serialVal = trim((string) ($_POST['serial'] ?? ''));
+            $costoRaw = trim((string) ($_POST['costo'] ?? ''));
+            $costoVal = ($costoRaw !== '' && is_numeric(str_replace(',', '.', $costoRaw))) ? (float) str_replace(',', '.', $costoRaw) : null;
+            bau_update_code($mysqli, $codeId, $codigoVal, $serialVal !== '' ? $serialVal : null, $costoVal);
+            $flashMessage = 'Código actualizado.';
         } elseif ($action === 'anular_codigo') {
             $codeId = (int) ($_POST['codigo_id'] ?? 0);
             if (!bau_void_code($mysqli, $codeId)) {
@@ -305,6 +313,7 @@ function baul_money($amount, string $moneda = 'USD'): string {
                   <button type="button" class="btn btn-sm btn-outline-danger js-baul-delete-selected" data-product-id="<?= $p['id'] ?>" disabled>Eliminar seleccionados (<span class="js-baul-selected-count">0</span>)</button>
                 </div>
                 <div class="baul-codes-list">
+                  <?php $codigosDelProducto = bau_list_codes($mysqli, (int) $p['id']); ?>
                   <table class="table table-sm baul-table mb-0">
                     <thead>
                       <tr>
@@ -313,17 +322,40 @@ function baul_money($amount, string $moneda = 'USD'): string {
                       </tr>
                     </thead>
                     <tbody>
-                      <?php foreach (bau_list_codes($mysqli, (int) $p['id']) as $c): ?>
-                      <?php $esVendido = $c['estado'] === 'vendido'; ?>
+                      <?php foreach ($codigosDelProducto as $c): ?>
+                      <?php
+                        $cid = (int) $c['id'];
+                        $esVendido = $c['estado'] === 'vendido';
+                        $esEditable = $c['estado'] === 'disponible';
+                        $formId = 'baul-edit-form-' . $cid;
+                      ?>
                       <tr>
                         <td>
                           <?php if (!$esVendido): ?>
-                          <input type="checkbox" class="js-baul-code-check" data-product-id="<?= $p['id'] ?>" value="<?= (int) $c['id'] ?>">
+                          <input type="checkbox" class="js-baul-code-check" data-product-id="<?= $p['id'] ?>" value="<?= $cid ?>">
                           <?php endif; ?>
                         </td>
-                        <td><?= htmlspecialchars((string) $c['codigo'], ENT_QUOTES, 'UTF-8') ?></td>
-                        <td><?= $c['serial'] !== null ? htmlspecialchars((string) $c['serial'], ENT_QUOTES, 'UTF-8') : '<span class="text-secondary">—</span>' ?></td>
-                        <td><?= $c['costo'] !== null ? baul_money($c['costo']) : '<span class="text-secondary">—</span>' ?></td>
+                        <td>
+                          <span class="baul-code-view" id="baul-code-view-<?= $cid ?>"><?= htmlspecialchars((string) $c['codigo'], ENT_QUOTES, 'UTF-8') ?></span>
+                          <?php if ($esEditable): ?>
+                          <input type="text" form="<?= $formId ?>" name="codigo" class="form-control form-control-sm baul-input d-none baul-code-edit-field" id="baul-code-input-<?= $cid ?>" value="<?= htmlspecialchars((string) $c['codigo'], ENT_QUOTES, 'UTF-8') ?>" required>
+                          <?php endif; ?>
+                        </td>
+                        <td>
+                          <span class="baul-code-view" id="baul-serial-view-<?= $cid ?>"><?= $c['serial'] !== null ? htmlspecialchars((string) $c['serial'], ENT_QUOTES, 'UTF-8') : '<span class="text-secondary">—</span>' ?></span>
+                          <?php if ($esEditable): ?>
+                          <input type="text" form="<?= $formId ?>" name="serial" class="form-control form-control-sm baul-input d-none baul-code-edit-field" id="baul-serial-input-<?= $cid ?>" value="<?= htmlspecialchars((string) ($c['serial'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="(sin serial)">
+                          <?php endif; ?>
+                        </td>
+                        <td>
+                          <span class="baul-code-view" id="baul-costo-view-<?= $cid ?>"><?= $c['costo'] !== null ? baul_money($c['costo']) : '<span class="text-secondary">—</span>' ?></span>
+                          <?php if ($esEditable): ?>
+                          <div class="input-group input-group-sm d-none baul-code-edit-field" id="baul-costo-group-<?= $cid ?>" style="max-width:140px;">
+                            <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">$</span>
+                            <input type="text" form="<?= $formId ?>" name="costo" class="form-control baul-input" id="baul-costo-input-<?= $cid ?>" value="<?= $c['costo'] !== null ? htmlspecialchars(number_format((float) $c['costo'], 4, '.', ''), ENT_QUOTES, 'UTF-8') : '' ?>" placeholder="0.00">
+                          </div>
+                          <?php endif; ?>
+                        </td>
                         <td>
                           <?php
                             $estadoLabel = ['disponible' => 'Disponible', 'vendido' => 'Vendido', 'anulado' => 'Anulado'][$c['estado']] ?? $c['estado'];
@@ -335,17 +367,22 @@ function baul_money($amount, string $moneda = 'USD'): string {
                           <?php endif; ?>
                         </td>
                         <td class="d-flex gap-1 flex-wrap">
+                          <?php if ($esEditable): ?>
+                          <button type="button" class="baul-toggle-btn js-baul-code-edit-toggle" data-code-id="<?= $cid ?>">✎ Editar</button>
+                          <button type="submit" form="<?= $formId ?>" class="btn btn-sm fw-bold d-none baul-code-edit-field" id="baul-code-save-<?= $cid ?>" style="background:#00fff7;color:#181f2a;border:none;">Guardar</button>
+                          <button type="button" class="btn btn-sm btn-outline-secondary d-none baul-code-edit-field js-baul-code-edit-cancel" id="baul-code-cancel-<?= $cid ?>" data-code-id="<?= $cid ?>">Cancelar</button>
+                          <?php endif; ?>
                           <?php if ($c['estado'] === 'disponible'): ?>
                           <form method="post" class="m-0" onsubmit="return confirm('¿Anular este código? No podrá venderse (pero se conserva en la lista).');">
                             <input type="hidden" name="action" value="anular_codigo">
-                            <input type="hidden" name="codigo_id" value="<?= (int) $c['id'] ?>">
+                            <input type="hidden" name="codigo_id" value="<?= $cid ?>">
                             <button type="submit" class="btn btn-sm btn-outline-secondary">Anular</button>
                           </form>
                           <?php endif; ?>
                           <?php if (!$esVendido): ?>
                           <form method="post" class="m-0" onsubmit="return confirm('¿Eliminar este código para siempre? No se puede deshacer.');">
                             <input type="hidden" name="action" value="eliminar_codigo">
-                            <input type="hidden" name="codigo_id" value="<?= (int) $c['id'] ?>">
+                            <input type="hidden" name="codigo_id" value="<?= $cid ?>">
                             <button type="submit" class="btn btn-sm btn-outline-danger">Eliminar</button>
                           </form>
                           <?php endif; ?>
@@ -354,6 +391,12 @@ function baul_money($amount, string $moneda = 'USD'): string {
                       <?php endforeach; ?>
                     </tbody>
                   </table>
+                  <?php foreach ($codigosDelProducto as $c): if ($c['estado'] !== 'disponible') continue; ?>
+                  <form method="post" id="baul-edit-form-<?= (int) $c['id'] ?>" class="d-none">
+                    <input type="hidden" name="action" value="editar_codigo">
+                    <input type="hidden" name="codigo_id" value="<?= (int) $c['id'] ?>">
+                  </form>
+                  <?php endforeach; ?>
                 </div>
               </div>
             </div>
@@ -375,6 +418,24 @@ function baul_money($amount, string $moneda = 'USD'): string {
       var target = document.getElementById('baul-codes-' + btn.dataset.toggleCodes);
       if (target) target.classList.toggle('is-visible');
     });
+  });
+
+  function setBaulCodeEditMode(codeId, editing) {
+    document.querySelectorAll(
+      '#baul-code-view-' + codeId + ', #baul-serial-view-' + codeId + ', #baul-costo-view-' + codeId
+    ).forEach(function (el) { el.classList.toggle('d-none', editing); });
+    document.querySelectorAll(
+      '#baul-code-input-' + codeId + ', #baul-serial-input-' + codeId + ', #baul-costo-group-' + codeId
+      + ', #baul-code-save-' + codeId + ', #baul-code-cancel-' + codeId
+    ).forEach(function (el) { el.classList.toggle('d-none', !editing); });
+    var editBtn = document.querySelector('.js-baul-code-edit-toggle[data-code-id="' + codeId + '"]');
+    if (editBtn) editBtn.classList.toggle('d-none', editing);
+  }
+  document.querySelectorAll('.js-baul-code-edit-toggle').forEach(function (btn) {
+    btn.addEventListener('click', function () { setBaulCodeEditMode(btn.dataset.codeId, true); });
+  });
+  document.querySelectorAll('.js-baul-code-edit-cancel').forEach(function (btn) {
+    btn.addEventListener('click', function () { setBaulCodeEditMode(btn.dataset.codeId, false); });
   });
 
   function updateBaulBulkButton(productId) {

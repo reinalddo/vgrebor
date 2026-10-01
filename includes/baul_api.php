@@ -308,6 +308,50 @@ function bau_void_code(mysqli $mysqli, int $codeId): bool {
     return $changed;
 }
 
+// Edita un código TODAVÍA disponible (código, serial y costo) — p.ej. se cargó sin costo o con un
+// costo equivocado, o el texto del código/serial tenía un error de tipeo. Nunca se puede editar uno
+// 'vendido' (es historial real de un pedido) ni uno 'anulado' (si se anuló por error, hay que
+// eliminarlo y volver a cargarlo — editarlo y dejarlo anulado no serviría de nada).
+function bau_update_code(mysqli $mysqli, int $codeId, string $codigo, ?string $serial, ?float $costo): void {
+    $codigo = bau_e($codigo, 255);
+    if ($codigo === '') {
+        throw new RuntimeException('El código no puede quedar vacío.');
+    }
+    $serial = $serial !== null ? bau_e($serial, 255) : null;
+    if ($serial === '') {
+        $serial = null;
+    }
+
+    try {
+        $stmt = $mysqli->prepare("UPDATE bau_codigos SET codigo = ?, serial = ?, costo = ? WHERE id = ? AND estado = 'disponible'");
+        $stmt->bind_param('ssdi', $codigo, $serial, $costo, $codeId);
+        $stmt->execute();
+        $changed = $stmt->affected_rows > 0;
+        $stmt->close();
+    } catch (mysqli_sql_exception $e) {
+        if ((int) $e->getCode() === 1062) {
+            throw new RuntimeException('Ese código ya existe en este producto — no se puede repetir.');
+        }
+        throw $e;
+    }
+
+    if (!$changed) {
+        // affected_rows=0 puede ser "no se pudo" (ya no está disponible) o "no cambió nada" (los
+        // valores ya eran idénticos) — se distingue para no mostrar un error cuando no lo hay.
+        $check = $mysqli->prepare('SELECT estado FROM bau_codigos WHERE id = ?');
+        $check->bind_param('i', $codeId);
+        $check->execute();
+        $row = $check->get_result()->fetch_assoc();
+        $check->close();
+        if (!$row) {
+            throw new RuntimeException('Ese código ya no existe.');
+        }
+        if ($row['estado'] !== 'disponible') {
+            throw new RuntimeException('Ese código ya no se puede editar (vendido o anulado).');
+        }
+    }
+}
+
 // Borra un código para siempre (disponible o anulado). Un código 'vendido' NUNCA se borra: es
 // historial de un pedido real y bau_delete_product() depende de que su conteo nunca llegue a
 // cero si hubo ventas.
