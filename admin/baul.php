@@ -104,6 +104,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($result['omitidos_vendidos'] > 0) {
                 $flashMessage .= ' ' . $result['omitidos_vendidos'] . ' se omitieron por estar vendidos (son historial de un pedido).';
             }
+        } elseif ($action === 'editar_costo_codigos_masivo') {
+            $codeIds = $_POST['codigo_ids'] ?? [];
+            if (!is_array($codeIds) || empty($codeIds)) {
+                throw new RuntimeException('Selecciona al menos un código.');
+            }
+            $costoRaw = trim((string) ($_POST['costo'] ?? ''));
+            $costoVal = ($costoRaw !== '' && is_numeric(str_replace(',', '.', $costoRaw))) ? (float) str_replace(',', '.', $costoRaw) : null;
+            $result = bau_update_codes_cost_bulk($mysqli, $codeIds, $costoVal);
+            $flashMessage = 'Costo actualizado en ' . $result['actualizados'] . ' código(s).';
+            if ($result['omitidos_no_disponibles'] > 0) {
+                $flashMessage .= ' ' . $result['omitidos_no_disponibles'] . ' se omitieron por no estar disponibles (vendidos o anulados).';
+            }
         }
     } catch (Throwable $e) {
         $flashMessage = $e->getMessage();
@@ -311,7 +323,14 @@ function baul_money($amount, string $moneda = 'USD'): string {
               <div class="col-md-7">
                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
                   <h3 class="h6 text-info mb-0">Códigos cargados (últimos 300)</h3>
-                  <button type="button" class="btn btn-sm btn-outline-danger js-baul-delete-selected" data-product-id="<?= $p['id'] ?>" disabled>Eliminar seleccionados (<span class="js-baul-selected-count">0</span>)</button>
+                  <div class="d-flex align-items-center flex-wrap gap-2">
+                    <div class="input-group input-group-sm" style="max-width:170px;">
+                      <span class="input-group-text" style="background:#222c3a;color:#00fff7;border:1px solid #00fff7;">Costo $</span>
+                      <input type="text" class="form-control baul-input js-baul-bulk-costo-input" data-product-id="<?= $p['id'] ?>" placeholder="0.00">
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-info js-baul-apply-cost-selected" data-product-id="<?= $p['id'] ?>" disabled>Aplicar costo a seleccionados (<span class="js-baul-selected-count">0</span>)</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger js-baul-delete-selected" data-product-id="<?= $p['id'] ?>" disabled>Eliminar seleccionados (<span class="js-baul-selected-count">0</span>)</button>
+                  </div>
                 </div>
                 <div class="baul-codes-list">
                   <?php $codigosDelProducto = bau_list_codes($mysqli, (int) $p['id']); ?>
@@ -441,11 +460,13 @@ function baul_money($amount, string $moneda = 'USD'): string {
 
   function updateBaulBulkButton(productId) {
     var checked = document.querySelectorAll('.js-baul-code-check[data-product-id="' + productId + '"]:checked');
-    var btn = document.querySelector('.js-baul-delete-selected[data-product-id="' + productId + '"]');
-    if (!btn) return;
-    btn.disabled = checked.length === 0;
-    var countEl = btn.querySelector('.js-baul-selected-count');
-    if (countEl) countEl.textContent = checked.length;
+    ['.js-baul-delete-selected', '.js-baul-apply-cost-selected'].forEach(function (sel) {
+      var btn = document.querySelector(sel + '[data-product-id="' + productId + '"]');
+      if (!btn) return;
+      btn.disabled = checked.length === 0;
+      var countEl = btn.querySelector('.js-baul-selected-count');
+      if (countEl) countEl.textContent = checked.length;
+    });
   }
   document.querySelectorAll('.js-baul-select-all').forEach(function (cb) {
     cb.addEventListener('change', function () {
@@ -471,6 +492,41 @@ function baul_money($amount, string $moneda = 'USD'): string {
       actionInput.name = 'action';
       actionInput.value = 'eliminar_codigos_masivo';
       form.appendChild(actionInput);
+      checked.forEach(function (c) {
+        var inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.name = 'codigo_ids[]';
+        inp.value = c.value;
+        form.appendChild(inp);
+      });
+      document.body.appendChild(form);
+      form.submit();
+    });
+  });
+  document.querySelectorAll('.js-baul-apply-cost-selected').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pid = btn.dataset.productId;
+      var checked = document.querySelectorAll('.js-baul-code-check[data-product-id="' + pid + '"]:checked');
+      if (checked.length === 0) return;
+      var costoInput = document.querySelector('.js-baul-bulk-costo-input[data-product-id="' + pid + '"]');
+      var costoVal = costoInput ? costoInput.value.trim() : '';
+      var msg = costoVal === ''
+        ? '¿Dejar en BLANCO el costo de ' + checked.length + ' código(s)? Los vendidos/anulados nunca se tocan aunque estén seleccionados.'
+        : '¿Poner el costo en $' + costoVal + ' para ' + checked.length + ' código(s)? Los vendidos/anulados nunca se tocan aunque estén seleccionados.';
+      if (!window.confirm(msg)) return;
+      var form = document.createElement('form');
+      form.method = 'post';
+      form.style.display = 'none';
+      var actionInput = document.createElement('input');
+      actionInput.type = 'hidden';
+      actionInput.name = 'action';
+      actionInput.value = 'editar_costo_codigos_masivo';
+      form.appendChild(actionInput);
+      var costoHidden = document.createElement('input');
+      costoHidden.type = 'hidden';
+      costoHidden.name = 'costo';
+      costoHidden.value = costoVal;
+      form.appendChild(costoHidden);
       checked.forEach(function (c) {
         var inp = document.createElement('input');
         inp.type = 'hidden';

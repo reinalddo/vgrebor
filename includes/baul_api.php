@@ -364,6 +364,35 @@ function bau_delete_code(mysqli $mysqli, int $codeId): bool {
     return $changed;
 }
 
+// Cambia el costo de varios códigos de una vez (checkboxes del panel) — para cuando se subió un lote
+// entero sin costo o con un costo equivocado y hay que corregirlos todos de un tirón, en vez de
+// entrar código por código. Solo toca los 'disponible' (mismo criterio que bau_update_code(): un
+// código 'vendido' es historial real, uno 'anulado' ya no se usa). $costo en null limpia el costo
+// (lo deja en blanco) para los seleccionados.
+function bau_update_codes_cost_bulk(mysqli $mysqli, array $codeIds, ?float $costo): array {
+    $codeIds = array_values(array_unique(array_filter(array_map('intval', $codeIds), fn($id) => $id > 0)));
+    if (empty($codeIds)) {
+        return ['actualizados' => 0, 'omitidos_no_disponibles' => 0];
+    }
+    $placeholders = implode(',', array_fill(0, count($codeIds), '?'));
+
+    $checkTypes = str_repeat('i', count($codeIds));
+    $checkStmt = $mysqli->prepare("SELECT COUNT(*) c FROM bau_codigos WHERE id IN ($placeholders) AND estado != 'disponible'");
+    $checkStmt->bind_param($checkTypes, ...$codeIds);
+    $checkStmt->execute();
+    $noDisponibles = (int) ($checkStmt->get_result()->fetch_assoc()['c'] ?? 0);
+    $checkStmt->close();
+
+    $updStmt = $mysqli->prepare("UPDATE bau_codigos SET costo = ? WHERE id IN ($placeholders) AND estado = 'disponible'");
+    $updTypes = 'd' . str_repeat('i', count($codeIds));
+    $updStmt->bind_param($updTypes, $costo, ...$codeIds);
+    $updStmt->execute();
+    $actualizados = $updStmt->affected_rows;
+    $updStmt->close();
+
+    return ['actualizados' => $actualizados, 'omitidos_no_disponibles' => $noDisponibles];
+}
+
 // Borra varios códigos de una vez (checkboxes del panel). Protege los vendidos igual que
 // bau_delete_code(): los cuenta aparte y jamás los toca, aunque estén en la selección.
 function bau_delete_codes_bulk(mysqli $mysqli, array $codeIds): array {
