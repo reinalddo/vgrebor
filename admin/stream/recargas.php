@@ -122,6 +122,21 @@ const RC_URL = <?= json_encode($recargarUrl) ?>;
 const VERIFY_URL = <?= json_encode($verifyUrl) ?>;
 let rcSel = null;
 function rcEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// Oculta los nombres de los proveedores mayoristas en los mensajes que ve el REVENDEDOR (pedido cliente
+// 2026-10-01: "que diga el inconveniente pero que no salga el nombre de mis proveedores de recarga").
+// Se reemplazan por "el proveedor" y se limpian los paréntesis tipo "(este endpoint fue dado de baja por…)".
+// Límites de palabra para NO romper palabras como "conectar". Solo afecta lo que se MUESTRA aquí; el admin
+// sigue viendo el detalle real del proveedor en su panel.
+function rcHideProv(s){
+  s = String(s==null?'':s);
+  s = s.replace(/recargas\s*am[ée]rica/gi, 'el proveedor');
+  s = s.replace(/\btienda\s*giftven\b/gi, 'el proveedor').replace(/\bgiftven\b/gi, 'el proveedor');
+  s = s.replace(/\bconeclatam\b/gi, 'el proveedor').replace(/\bconec\b/gi, 'el proveedor');
+  s = s.replace(/\bfull\s*impulso\b/gi, 'el proveedor');
+  s = s.replace(/\s*\([^()]*\bel proveedor\b[^()]*\)/gi, '');   // quita "(... el proveedor ...)"
+  s = s.replace(/(\bel proveedor\b)(\s+\1)+/gi, '$1');          // colapsa "el proveedor el proveedor"
+  return s;
+}
 // Muestra el CÓDIGO entregado por el proveedor (gift cards / PIN), si el motor lo devolvió, con botón de copiar.
 function rcCodeHtml(d2){
   var code = d2 && (d2.provider_code || d2.codigo || d2.code || d2.pin);
@@ -177,7 +192,7 @@ async function rcConfirmar(){
       //  comprar igual, como hace la tienda pública. Antes bloqueaba TODO juego sin verificación.)
       const vstatus = (dv && dv.status ? String(dv.status) : '').toLowerCase();
       if (dv && dv.ok === false && (vstatus === 'not_found' || vstatus === 'invalid')){
-        res.innerHTML = '<span style="color:var(--bad)">✗ '+(dv.message||'El ID del jugador no es válido. Revísalo.')+'</span>';
+        res.innerHTML = '<span style="color:var(--bad)">✗ '+rcHideProv(dv.message||'El ID del jugador no es válido. Revísalo.')+'</span>';
         btn.disabled = false; return;
       }
       verifiedName = (dv && dv.player_name) ? String(dv.player_name) : '';
@@ -213,7 +228,7 @@ async function rcConfirmar(){
         const rr = await fetch(RC_URL, {method:'POST', body:fdr, headers:{'X-Requested-With':'XMLHttpRequest'}});
         let dr = {}; try { dr = await rr.json(); } catch(e){}
         if (dr && dr.ok){
-          res.innerHTML = '<span style="color:var(--warn)">La recarga no se pudo entregar'+(d2.message?(': '+d2.message):'')+'. Se te devolvió el saldo (queda $'+(Number(dr.saldo)||0).toFixed(2)+').</span>';
+          res.innerHTML = '<span style="color:var(--warn)">La recarga no se pudo entregar'+(d2.message?(': '+rcHideProv(d2.message)):'')+'. Se te devolvió el saldo (queda $'+(Number(dr.saldo)||0).toFixed(2)+').</span>';
         } else {
           res.innerHTML = '<span style="color:var(--warn)">Pago hecho, la recarga quedó pendiente. Saldo: $'+(d1.saldo).toFixed(2)+'. Avísale al admin.</span>';
         }
