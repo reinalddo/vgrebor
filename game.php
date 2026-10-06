@@ -24,6 +24,7 @@ require_once __DIR__ . "/includes/fullimpulso_api.php";
 require_once __DIR__ . "/includes/package_categories.php";
 require_once __DIR__ . "/includes/referidos.php";
 require_once __DIR__ . "/includes/baul_api.php";
+require_once __DIR__ . "/includes/barra_promo_juego.php";
 
 // Presentación del rediseño configurable de "PASO 1/2/3" y del verificador
 // de jugador (includes/paso_estilos.php solo tiene los getters de config —
@@ -15451,6 +15452,8 @@ include __DIR__ . "/includes/header.php";
 require_once __DIR__ . "/includes/comentarios_ui.php";
 comentarios_render_seccion($mysqli, (int) ($game['id'] ?? 0));
 
+// Barra promocional del juego (solo si está activa para este juego).
+echo barra_promo_juego_render(barra_promo_juego_from_row($game ?? []));
 include __DIR__ . "/includes/footer.php";
 ?>
 <button type="button" id="float-cart-fab" class="floating-social-button float-cart-fab-btn" aria-label="Ver carrito" style="display:none;">

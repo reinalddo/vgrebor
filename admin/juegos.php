@@ -19,6 +19,7 @@ require_once '../includes/slugify.php';
 require_once '../includes/game_categories.php';
 require_once '../includes/package_features.php';
 require_once '../includes/game_sticker.php';
+require_once '../includes/barra_promo_juego.php';
 
 function admin_games_is_ajax_request(): bool {
     if (isset($_REQUEST['ajax']) && (string) $_REQUEST['ajax'] === '1') {
@@ -333,6 +334,7 @@ ensure_juegos_slug_column($mysqli);
 ensure_juegos_imagen_hero_column($mysqli);
 ensure_juegos_imagen_catbar_column($mysqli);
 game_sticker_ensure_schema($mysqli);
+barra_promo_juego_ensure_schema($mysqli);
 game_badge2_ensure_schema($mysqli);
 
 $adminGamesUrl = app_path('/admin/juegos');
@@ -473,6 +475,10 @@ if (isset($_GET['eliminar'])) {
 // Procesar edición de cabecera de juego (antes de cualquier salida)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], $_POST['edit_juego_id'], $_POST['edit_nombre'], $_POST['edit_descripcion'])) {
     $edit_id = intval($_POST['edit_juego_id']);
+    $barraEdit = barra_promo_juego_datos_desde_post($_POST, $_FILES['edit_barra_promo_imagen'] ?? [], 'edit_', barra_promo_juego_imagen_actual($mysqli, $edit_id), isset($_POST['edit_barra_promo_quitar_imagen']));
+    if (!$barraEdit['ok']) {
+        admin_games_redirect($adminGamesUrl, ['editar' => $edit_id, 'error' => $barraEdit['error']]);
+    }
     $currentGame = null;
     if ($edit_id > 0) {
         $currentGameStmt = $mysqli->prepare("SELECT categoria_api_discord, imagen, imagen_paquete, imagen_hero, imagen_catbar, sticker_imagen, badge2_imagen FROM juegos WHERE id = ? LIMIT 1");
@@ -611,6 +617,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_juego_submit'], 
         $bs->execute();
     }
     $catIds = isset($_POST['cat_ids']) && is_array($_POST['cat_ids']) ? $_POST['cat_ids'] : [];
+    $barraSql = $mysqli->prepare("UPDATE juegos SET barra_promo_activa=?, barra_promo_titulo=?, barra_promo_enlace=?, barra_promo_imagen=? WHERE id=?");
+    if ($barraSql) {
+        $barraActiva = (int) $barraEdit['activa'];
+        $barraTitulo = $barraEdit['titulo'];
+        $barraEnlace = $barraEdit['enlace'];
+        $barraImagen = $barraEdit['imagen'];
+        $barraSql->bind_param('isssi', $barraActiva, $barraTitulo, $barraEnlace, $barraImagen, $edit_id);
+        $barraSql->execute();
+        $barraSql->close();
+    }
+    if ($barraEdit['imagen_anterior'] !== '' && $barraEdit['imagen_anterior'] !== $barraEdit['imagen']) {
+        barra_promo_juego_delete_image($barraEdit['imagen_anterior']);
+    }
     game_set_categories($mysqli, $edit_id, $catIds);
     admin_games_redirect($adminGamesUrl);
 }
@@ -620,6 +639,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $nombre = trim($_POST['nombre']);
     $descripcion = trim($_POST['descripcion']);
     $slug = slugify($nombre);
+    $barraNueva = barra_promo_juego_datos_desde_post($_POST, $_FILES['barra_promo_imagen'] ?? [], '', '', false);
+    if (!$barraNueva['ok']) {
+        admin_games_redirect($adminGamesUrl, ['error' => $barraNueva['error']]);
+    }
     $moneda_fija_id = !empty($_POST['moneda_fija_id']) ? intval($_POST['moneda_fija_id']) : null;
     $popular = isset($_POST['popular']) ? 1 : 0;
     $apiSelection = admin_game_normalize_api_selection($_POST, 'categoria_api_tiendagiftven', 'categoria_api_discord', $mixedApiUnionEnabled);
@@ -671,6 +694,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['des
     $stmt->bind_param('sssssss'.'iii'.'ssssss'.'sss'.'ii'.'ssss'.'ssss'.'dd', $nombre, $imagen, $imagen_hero, $imagen_paquete, $imagen_catbar, $descripcion, $slug, $moneda_fija_id, $popular, $api_free_fire, $categoria_api, $categoria_api_2, $categoria_api_3, $categoria_api_discord, $categoria_api_discord_2, $categoria_api_discord_3, $categoria_api_recargasamerica, $categoria_api_recargasamerica_2, $categoria_api_recargasamerica_3, $activo, $orden, $sticker_texto, $sticker_icono, $sticker_color_fondo, $sticker_imagen, $badge2_texto, $badge2_icono, $badge2_color_fondo, $badge2_imagen, $precio_markup_pct, $precio_markup_pct_recargasamerica);
     $stmt->execute();
     $juego_id = $mysqli->insert_id;
+    if ($juego_id) {
+        $barraCrear = $mysqli->prepare("UPDATE juegos SET barra_promo_activa=?, barra_promo_titulo=?, barra_promo_enlace=?, barra_promo_imagen=? WHERE id=?");
+        if ($barraCrear) {
+            $barraActivaN = (int) $barraNueva['activa'];
+            $barraTituloN = $barraNueva['titulo'];
+            $barraEnlaceN = $barraNueva['enlace'];
+            $barraImagenN = $barraNueva['imagen'];
+            $barraJuegoId = (int) $juego_id;
+            $barraCrear->bind_param('isssi', $barraActivaN, $barraTituloN, $barraEnlaceN, $barraImagenN, $barraJuegoId);
+            $barraCrear->execute();
+            $barraCrear->close();
+        }
+    }
     // CONEC: UPDATE aparte (mismo motivo que en edición: no arriesgar el INSERT grande del juego).
     if ($juego_id && ($cs = $mysqli->prepare("UPDATE juegos SET categoria_api_conec=NULLIF(?, ''), categoria_api_conec_2=NULLIF(?, ''), categoria_api_conec_3=NULLIF(?, ''), precio_markup_pct_conec=? WHERE id=?"))) {
         $cs->bind_param('sssdi', $categoria_api_conec, $categoria_api_conec_2, $categoria_api_conec_3, $precio_markup_pct_conec, $juego_id);
@@ -970,6 +1006,43 @@ if ($gcatAssignResult instanceof mysqli_result) {
                     <label class="form-check-label text-neon" for="removeEditCatbarImage">Usar la imagen principal en la barra</label>
                 </div>
                 <?php endif; ?>
+            </div>
+            <!-- BARRA PROMOCIONAL -->
+            <?php
+            $editBarraActiva = (int) ($juego_edit['barra_promo_activa'] ?? 0) === 1;
+            $editBarraTitulo = (string) ($juego_edit['barra_promo_titulo'] ?? '');
+            $editBarraEnlace = (string) ($juego_edit['barra_promo_enlace'] ?? '');
+            $editBarraImagen = (string) ($juego_edit['barra_promo_imagen'] ?? '');
+            ?>
+            <div class="mb-3 p-3" style="border:1px solid #00e5ff;border-radius:8px;background:#06202a;">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                    <div class="fw-bold" style="color:#00e5ff;font-size:0.9rem;letter-spacing:0.04em;">BARRA PROMOCIONAL</div>
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="checkbox" id="edit_barra_promo_activa" name="edit_barra_promo_activa" value="1" style="width:1.25rem;height:1.25rem;accent-color:#00e5ff;cursor:pointer;" <?= $editBarraActiva ? 'checked' : '' ?>>
+                        <label class="mb-0" for="edit_barra_promo_activa" style="color:#9ff3ff;font-size:0.85rem;">Mostrar en la página del juego</label>
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label" style="color:#9ff3ff;font-size:0.85rem;">Título</label>
+                    <input type="text" name="edit_barra_promo_titulo" class="form-control" maxlength="160" value="<?= htmlspecialchars($editBarraTitulo, ENT_QUOTES, 'UTF-8') ?>" placeholder="Canjea tus Roblox giftcards acá" style="background:#041318;color:#9ff3ff;border:1px solid #00e5ff;">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label" style="color:#9ff3ff;font-size:0.85rem;">Enlace <span style="color:#8be9fd;font-weight:400;">(se abre en una pestaña nueva)</span></label>
+                    <input type="url" name="edit_barra_promo_enlace" class="form-control" value="<?= htmlspecialchars($editBarraEnlace, ENT_QUOTES, 'UTF-8') ?>" placeholder="https://www.roblox.com/redeem" style="background:#041318;color:#9ff3ff;border:1px solid #00e5ff;">
+                </div>
+                <div>
+                    <label class="form-label" style="color:#9ff3ff;font-size:0.85rem;">Imagen <span style="color:#8be9fd;font-weight:400;">opcional · JPG, PNG, WEBP o GIF · max 2 MB</span></label>
+                    <?php if ($editBarraImagen !== ''): ?>
+                    <div class="mb-2 d-flex align-items-center gap-3">
+                        <img src="/<?= htmlspecialchars(ltrim($editBarraImagen, '/'), ENT_QUOTES, 'UTF-8') ?>" alt="Imagen actual de la barra" style="max-width:60px;max-height:60px;border:1px solid #00e5ff;border-radius:6px;background:#041318;object-fit:contain;">
+                        <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;color:#ff6b6b;font-size:0.85rem;">
+                            <input type="checkbox" name="edit_barra_promo_quitar_imagen" style="accent-color:#ff6b6b;width:1rem;height:1rem;">
+                            Quitar imagen de la barra
+                        </label>
+                    </div>
+                    <?php endif; ?>
+                    <input type="file" name="edit_barra_promo_imagen" accept="image/*" class="form-control" style="background:#041318;color:#9ff3ff;border:1px solid #00e5ff;">
+                </div>
             </div>
             <!-- STICKER / BADGE -->
             <?php
@@ -1487,6 +1560,30 @@ if ($gcatAssignResult instanceof mysqli_result) {
                 <input type="text" name="caracteristicas[]" placeholder="Nueva característica" class="form-control mb-2" style="background:#222c3a; color:#00fff7; border:1px solid #00fff7;">
             </div>
             <button type="button" onclick="addCarField()" class="btn btn-outline-info btn-sm" style="border-color:#00fff7; color:#00fff7;">Agregar nueva característica</button>
+        </div>
+        <!-- BARRA PROMOCIONAL -->
+        <div class="col-12">
+            <div class="p-3" style="border:1px solid #00e5ff;border-radius:8px;background:#06202a;">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                    <div class="fw-bold" style="color:#00e5ff;font-size:0.9rem;letter-spacing:0.04em;">BARRA PROMOCIONAL</div>
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="checkbox" id="barra_promo_activa" name="barra_promo_activa" value="1" style="width:1.25rem;height:1.25rem;accent-color:#00e5ff;cursor:pointer;">
+                        <label class="mb-0" for="barra_promo_activa" style="color:#9ff3ff;font-size:0.85rem;">Mostrar en la página del juego</label>
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label" style="color:#9ff3ff;font-size:0.85rem;">Título</label>
+                    <input type="text" name="barra_promo_titulo" class="form-control" maxlength="160" placeholder="Canjea tus Roblox giftcards acá" style="background:#041318;color:#9ff3ff;border:1px solid #00e5ff;">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label" style="color:#9ff3ff;font-size:0.85rem;">Enlace <span style="color:#8be9fd;font-weight:400;">(se abre en una pestaña nueva)</span></label>
+                    <input type="url" name="barra_promo_enlace" class="form-control" placeholder="https://www.roblox.com/redeem" style="background:#041318;color:#9ff3ff;border:1px solid #00e5ff;">
+                </div>
+                <div>
+                    <label class="form-label" style="color:#9ff3ff;font-size:0.85rem;">Imagen <span style="color:#8be9fd;font-weight:400;">opcional · JPG, PNG, WEBP o GIF · max 2 MB</span></label>
+                    <input type="file" name="barra_promo_imagen" accept="image/*" class="form-control" style="background:#041318;color:#9ff3ff;border:1px solid #00e5ff;">
+                </div>
+            </div>
         </div>
         <!-- STICKER / BADGE -->
         <div class="col-12">

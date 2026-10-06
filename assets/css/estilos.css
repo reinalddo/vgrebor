@@ -798,3 +798,77 @@ body.modal-open .floating-social-stack {
     font-size: 0.84rem;
   }
 }
+
+/* ── Barra promocional por juego (includes/barra_promo_juego.php) ───────── */
+.barra-promo-juego {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  z-index: 1040;
+  width: min(440px, calc(100% - 32px));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 12px;
+  background: #0b1424;
+  color: #fff;
+  border: 1px solid rgba(0, 229, 255, 0.45);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 18px rgba(0, 229, 255, 0.15);
+  transform: translateX(-50%);
+  animation: barra-promo-juego-subir 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes barra-promo-juego-subir {
+  from { transform: translate(-50%, calc(100% + 40px)); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+.barra-promo-juego .barra-promo-juego-img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 10px;
+  flex: none;
+}
+.barra-promo-juego .barra-promo-juego-cuerpo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.barra-promo-juego .barra-promo-juego-titulo {
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1.3;
+  color: #fff;
+  overflow-wrap: anywhere;
+}
+.barra-promo-juego .barra-promo-juego-link {
+  color: #fff;
+  font-size: 0.9rem;
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+.barra-promo-juego .barra-promo-juego-link:hover { color: #9ff3ff; }
+.barra-promo-juego .barra-promo-juego-cerrar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #00e5ff;
+  font-size: 1.5rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.barra-promo-juego .barra-promo-juego-cerrar:hover { background: rgba(0, 229, 255, 0.12); }
+.barra-promo-juego .barra-promo-juego-cerrar:focus-visible { outline: 2px solid #00e5ff; outline-offset: 2px; }
+@media (max-width: 576px) {
+  .barra-promo-juego { width: calc(100% - 96px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .barra-promo-juego { animation: none; }
+}
