@@ -852,22 +852,30 @@ body.modal-open .floating-social-stack {
 .barra-promo-juego .barra-promo-juego-link:hover { color: #9ff3ff; }
 .barra-promo-juego .barra-promo-juego-cerrar {
   flex: none;
-  width: 32px;
-  height: 32px;
-  border: 0;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 2px solid #00e5ff;
   border-radius: 50%;
-  background: transparent;
-  color: #00e5ff;
-  font-size: 1.5rem;
+  background: #0b1424;
+  color: #fff;
+  font-size: 1.35rem;
+  font-weight: 700;
   line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.35);
+  cursor: pointer;
 }
-.barra-promo-juego .barra-promo-juego-cerrar:hover { background: rgba(0, 229, 255, 0.12); }
-.barra-promo-juego .barra-promo-juego-cerrar:focus-visible { outline: 2px solid #00e5ff; outline-offset: 2px; }
+.barra-promo-juego .barra-promo-juego-cerrar:hover { background: rgba(0, 229, 255, 0.18); }
+.barra-promo-juego .barra-promo-juego-cerrar:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* Móvil: la barra sube por encima de los botones de carrito y ayuda y queda delante de ellos. */
 @media (max-width: 576px) {
-  .barra-promo-juego { width: calc(100% - 96px); }
+  .barra-promo-juego {
+    bottom: 132px;
+    z-index: 2147483000;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .barra-promo-juego { animation: none; }
