@@ -4258,6 +4258,17 @@ function sync_local_order_with_binance_payload(mysqli $mysqli, array $order, arr
         }
     }
 
+    if (order_uses_centralone_api_provider($updatedOrder)) {
+        // Mismo gate que arriba: solo se llega aqui con el pago ya
+        // verificado por este medio de pago.
+        $finalOrder = centralone_auto_dispatch_after_payment_verified($mysqli, $orderId, $verifiedReference, $phone, $paymentMethodName);
+        return [
+            'order' => $finalOrder,
+            'local_status' => trim((string) ($finalOrder['estado'] ?? 'pagado')),
+            'provider_flow' => order_provider_flow_from_row($finalOrder),
+        ];
+    }
+
     if (!$usesCatalogApi) {
         $paidStatus = 'pagado';
         $stmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, estado = ? WHERE id = ? AND estado = 'pendiente' LIMIT 1");
@@ -4692,6 +4703,17 @@ function sync_local_order_with_paypal_payload(mysqli $mysqli, array $order, arra
                 'provider_flow' => order_provider_flow_from_row($paidOrder),
             ];
         }
+    }
+
+    if (order_uses_centralone_api_provider($updatedOrder)) {
+        // Mismo gate que arriba: solo se llega aqui con el pago ya
+        // verificado por este medio de pago.
+        $finalOrder = centralone_auto_dispatch_after_payment_verified($mysqli, $orderId, $verifiedReference, $phone, $paymentMethodName);
+        return [
+            'order' => $finalOrder,
+            'local_status' => trim((string) ($finalOrder['estado'] ?? 'pagado')),
+            'provider_flow' => order_provider_flow_from_row($finalOrder),
+        ];
     }
 
     if (!$usesCatalogApi) {
@@ -5276,7 +5298,13 @@ function centralone_sync_and_persist(mysqli $mysqli, array $order, string $event
     $mysqli = ensure_mysqli_connection($mysqli);
 
     $data = (array) ($res['payload'] ?? []);
-    $ref = (string) ($res['reference'] ?? '');
+    $ref = (string) ($res['reference'] ?? ''); // reference_code (lo que identifica el webhook)
+    // El id real de Central One (lo que piden GET /orders/{id} y .../codes) viaja
+    // en el payload, NUNCA en 'reference' — confundirlos aquí rompería silenciosamente
+    // cualquier sondeo/recuperación posterior (recargas_api_pedido_id quedaría con el
+    // reference_code, y centralone_api_get_order() recibiría un valor que la API real
+    // rechaza con 400, ver nota en includes/centralone_api.php sobre esto).
+    $realOrderId = trim((string) ($data['id'] ?? ''));
     $msg = (string) ($res['message'] ?? 'Sin mensaje de Central One.');
     $deliveryText = trim((string) ($data['delivery_text'] ?? ''));
     $payloadJson = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -5286,7 +5314,7 @@ function centralone_sync_and_persist(mysqli $mysqli, array $order, string $event
     $localStatus = !empty($res['success']) ? 'enviado' : (!empty($res['needs_manual_review']) ? 'revision_manual' : 'procesando');
     $historyJson = append_provider_history(
         $order['recargas_api_historial_json'] ?? null,
-        build_provider_history_entry($eventPrefix . '_centralone', '', $localStatus, $msg, $ref, $ref, $deliveryText)
+        build_provider_history_entry($eventPrefix . '_centralone', '', $localStatus, $msg, $ref, $realOrderId !== '' ? $realOrderId : $ref, $deliveryText)
     );
 
     // Si fue un fallo de transporte puro (sin 'exception' no se llega aquí:
@@ -5295,7 +5323,7 @@ function centralone_sync_and_persist(mysqli $mysqli, array $order, string $event
     if (!isset($data['exception'])) {
         $stmt = $mysqli->prepare(
             "UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, " .
-            "recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_historial_json = ?, " .
+            "recargas_api_pedido_id = COALESCE(NULLIF(?, ''), recargas_api_pedido_id), recargas_api_estado = ?, recargas_api_historial_json = ?, " .
             "recargas_api_ultimo_check = NOW()" .
             ($deliveryText !== '' ? ", recargas_api_codigo_entregado = COALESCE(NULLIF(recargas_api_codigo_entregado, ''), ?)" : '') .
             " WHERE id = ? AND estado = 'pagado'"
@@ -5303,9 +5331,9 @@ function centralone_sync_and_persist(mysqli $mysqli, array $order, string $event
         if ($stmt) {
             $estadoCentralOne = (string) ($data['status'] ?? '');
             if ($deliveryText !== '') {
-                $stmt->bind_param('sssssssi', $ref, $msg, $payloadJson, $ref, $estadoCentralOne, $historyJson, $deliveryText, $orderId);
+                $stmt->bind_param('sssssssi', $ref, $msg, $payloadJson, $realOrderId, $estadoCentralOne, $historyJson, $deliveryText, $orderId);
             } else {
-                $stmt->bind_param('ssssssi', $ref, $msg, $payloadJson, $ref, $estadoCentralOne, $historyJson, $orderId);
+                $stmt->bind_param('ssssssi', $ref, $msg, $payloadJson, $realOrderId, $estadoCentralOne, $historyJson, $orderId);
             }
             $stmt->execute();
             $stmt->close();
@@ -5337,6 +5365,73 @@ function centralone_sync_and_persist(mysqli $mysqli, array $order, string $event
     }
 
     return ['order' => $updatedOrder, 'result' => $res];
+}
+
+// Despacho automático de Central One, pero SOLO cuando el pago ya quedó
+// verificado por el propio medio de pago (referencia bancaria encontrada,
+// webhook de Binance/PayPal confirmando, canje con puntos, billetera) — pedido
+// explícito del cliente: "automático solo cuando el pago esté verificado y
+// confirmado; si el pago no está confirmado correctamente debe enviarse
+// manual". El gate real ya lo hacen los call sites (nunca llaman a esto si el
+// pedido sigue 'pendiente' sin una verificación automática) — esta función
+// solo se asegura de no disparar dos compras en paralelo si el aviso del
+// medio de pago llega duplicado, reutilizando el mismo candado con nombre que
+// ya usa GiftVen (acquire_order_provider_dispatch_lock).
+function centralone_auto_dispatch_after_payment_verified(mysqli $mysqli, int $orderId, string $verifiedReference, string $phone, string $paymentMethodName): array {
+    if ($orderId <= 0) {
+        return [];
+    }
+
+    // Reclama el pedido (pendiente -> pagado) igual que hacen los demás
+    // proveedores en este mismo punto — no pisa datos ya guardados.
+    $claimStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = COALESCE(NULLIF(numero_referencia, ''), ?), telefono_contacto = COALESCE(NULLIF(telefono_contacto, ''), ?), estado = 'pagado' WHERE id = ? AND estado = 'pendiente' LIMIT 1");
+    if ($claimStmt) {
+        $claimStmt->bind_param('ssi', $verifiedReference, $phone, $orderId);
+        $claimStmt->execute();
+        $claimStmt->close();
+    }
+
+    $order = fetch_order_by_id($mysqli, $orderId);
+    if (!$order || trim((string) ($order['estado'] ?? '')) !== 'pagado') {
+        return $order ?? [];
+    }
+    // Ya rechazado por falta de stock/saldo, o ya tiene un order_id/referencia
+    // guardados (otro hilo ya lo procesó o lo está procesando): no insistir
+    // aquí, que lo recoja el sondeo normal o el botón "Reintentar".
+    if (order_recharge_dispatch_is_locked($order)
+        || trim((string) ($order['recargas_api_pedido_id'] ?? '')) !== ''
+        || trim((string) ($order['ff_api_referencia'] ?? '')) !== ''
+    ) {
+        return $order;
+    }
+
+    if (!acquire_order_provider_dispatch_lock($mysqli, $orderId, 0)) {
+        return fetch_order_by_id($mysqli, $orderId) ?: $order;
+    }
+
+    try {
+        $order = fetch_order_by_id($mysqli, $orderId) ?: $order;
+        if (trim((string) ($order['estado'] ?? '')) !== 'pagado' || trim((string) ($order['recargas_api_pedido_id'] ?? '')) !== '') {
+            return $order;
+        }
+
+        $sync = centralone_sync_and_persist($mysqli, $order, 'auto_pago_verificado');
+        $updatedOrder = $sync['order'];
+
+        // Si no se completó solo (sigue en curso o necesita revisión), igual
+        // se avisa al cliente que su PAGO sí quedó verificado — mismo mensaje
+        // que ya usan los demás proveedores en este caso.
+        if (trim((string) ($updatedOrder['estado'] ?? '')) !== 'enviado') {
+            notify_bank_payment_verified_paid($mysqli, $updatedOrder, $paymentMethodName, $verifiedReference, $phone);
+        }
+
+        return $updatedOrder;
+    } catch (Throwable $e) {
+        error_log('TVG centralone_auto_dispatch_after_payment_verified #' . $orderId . ': ' . $e->getMessage());
+        return fetch_order_by_id($mysqli, $orderId) ?: $order;
+    } finally {
+        release_order_provider_dispatch_lock($mysqli, $orderId);
+    }
 }
 
 // ── CONEC (coneclatam) ────────────────────────────────────────────────────
@@ -10569,6 +10664,28 @@ if ($action === 'submit_payment') {
             }
         }
 
+        if (order_uses_centralone_api_provider($updatedOrder)) {
+            // El pago con puntos ya está verificado desde que se crea el pedido
+            // (se descuentan al momento) — mismo criterio que GiftVen aquí arriba.
+            $coPointsOrder = centralone_auto_dispatch_after_payment_verified($mysqli, $orderId, '', '', 'Canje por premios');
+            $coPointsSent = trim((string) ($coPointsOrder['estado'] ?? '')) === 'enviado';
+            json_response([
+                'ok' => true,
+                'message' => $coPointsSent
+                    ? ('Canje realizado y recarga procesada correctamente para ' . order_purchase_quantity_text(order_purchase_quantity($coPointsOrder)) . '.')
+                    : ('Canje realizado. Tu pedido quedó pagado y pendiente de entrega para ' . order_purchase_quantity_text(order_purchase_quantity($coPointsOrder)) . '.'),
+                'order_id' => $orderId,
+                'estado' => trim((string) ($coPointsOrder['estado'] ?? 'pagado')),
+                'verified' => true,
+                'payment_mode' => 'points',
+                'provider_flow' => $coPointsSent ? 'completed' : 'pending_retry',
+                'provider_code' => trim((string) ($coPointsOrder['recargas_api_codigo_entregado'] ?? '')),
+                'win_points' => win_points_response_payload($mysqli, $sessionUserId, [
+                    'spent' => $requiredPoints,
+                ]),
+            ]);
+        }
+
         if (!$usesCatalogApi) {
             $paidStatus = 'pagado';
             $paidStmt = $mysqli->prepare("UPDATE pedidos SET estado = ? WHERE id = ? AND estado = 'pendiente'");
@@ -11139,6 +11256,7 @@ if ($action === 'submit_payment') {
     $usesRecargasAmericaApi = order_uses_recargasamerica_api_provider($updatedOrder);
     $usesConecApi = order_uses_conec_api_provider($updatedOrder);
     $usesBaulApi = strtolower(trim((string) ($updatedOrder['api_provider'] ?? ''))) === 'baul';
+    $usesCentralOneApi = order_uses_centralone_api_provider($updatedOrder);
 
     if ($usesBankValidation || $usesBinancePagonorteValidation) {
         $matchingMovement = $preselectedMatchingMovement;
@@ -11344,7 +11462,7 @@ if ($action === 'submit_payment') {
                 }
             }
 
-            if (!$usesCatalogApi && !$usesRecargasAmericaApi && !$usesConecApi && !$usesBaulApi) {
+            if (!$usesCatalogApi && !$usesRecargasAmericaApi && !$usesConecApi && !$usesBaulApi && !$usesCentralOneApi) {
                 $paidStatus = 'pagado';
                 $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, estado = ? WHERE id = ? AND estado = 'pendiente'");
                 if (!$paidStmt) {
@@ -11656,6 +11774,45 @@ if ($action === 'submit_payment') {
                     'estado' => 'pagado',
                     'verified' => true,
                 ], $updatedOrder, $overpaymentAmount));
+            }
+
+            // ── Central One — ruta "cliente confirma pago" (espejo de RecargasAmérica/CONEC) ──
+            if ($usesCentralOneApi) {
+                $coSyncSingle = centralone_sync_and_persist($mysqli, $updatedOrder, 'bank_reference_verificada');
+                $coOrderSingle = $coSyncSingle['order'];
+                $coResSingle = $coSyncSingle['result'];
+                $coMsgSingle = (string) ($coResSingle['message'] ?? '');
+                $coRefSingle = (string) ($coResSingle['reference'] ?? '');
+
+                if (trim((string) ($coOrderSingle['estado'] ?? '')) === 'enviado') {
+                    json_response(append_payment_difference_response([
+                        'ok' => true,
+                        'message' => 'Recarga completada.',
+                        'order_id' => $orderId,
+                        'estado' => 'enviado',
+                        'verified' => true,
+                        'provider_reference' => $coRefSingle,
+                        'provider_code' => trim((string) ($coOrderSingle['recargas_api_codigo_entregado'] ?? '')),
+                    ], $coOrderSingle, $overpaymentAmount));
+                }
+                if (!empty($coResSingle['accepted'])) {
+                    json_response(append_payment_difference_response([
+                        'ok' => true,
+                        'message' => 'Pago verificado. Tu pedido quedó procesándose con Central One.',
+                        'order_id' => $orderId,
+                        'estado' => 'pagado',
+                        'verified' => true,
+                        'processing' => true,
+                    ], $coOrderSingle, $overpaymentAmount));
+                }
+                json_response(append_payment_difference_response([
+                    'ok' => !empty($coResSingle['needs_manual_review']) ? true : false,
+                    'message' => 'Pago verificado. ' . ($coMsgSingle ?: 'Tu pedido quedó pendiente de revisión.'),
+                    'order_id' => $orderId,
+                    'estado' => 'pagado',
+                    'verified' => true,
+                    'pending_review' => true,
+                ], $coOrderSingle, $overpaymentAmount));
             }
 
             $packageApiId = (int) ($updatedOrder['paquete_api'] ?? 0);
@@ -15223,6 +15380,31 @@ if ($action === 'batch_fulfill_item') {
         }
 
         json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $cnMsg ?: 'La recarga no fue procesada por CONEC.', 'provider_message' => $cnMsg]);
+    }
+
+    // ── Central One ───────────────────────────────────────────────────
+    // Al llegar aquí el pago YA está verificado (el gate de 'pendiente' más
+    // arriba exige puntos u otro pago ya confirmado) — exactamente la regla
+    // pedida por el cliente: automático solo si el pago se confirmó solo,
+    // manual si no. centralone_sync_and_persist() reutiliza el mismo
+    // despachador que "Sincronizar"/"Reintentar" del admin.
+    if ($pkgProvider === 'centralone') {
+        $coSync = centralone_sync_and_persist($mysqli, $order, 'cart_batch_pago_verificado');
+        $coOrder = $coSync['order'];
+        $coRes = $coSync['result'];
+        $coMsg = (string) ($coRes['message'] ?? '');
+        $coRef = (string) ($coRes['reference'] ?? '');
+
+        if (trim((string) ($coOrder['estado'] ?? '')) === 'enviado') {
+            json_response(['ok' => true, 'estado' => 'enviado', 'order_id' => $orderId, 'message' => 'Recarga completada.', 'provider_reference' => $coRef, 'provider_code' => trim((string) ($coOrder['recargas_api_codigo_entregado'] ?? ''))]);
+        }
+        if (!empty($coRes['accepted'])) {
+            json_response(['ok' => true, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => 'Pedido recibido y procesándose.', 'provider_reference' => $coRef, 'processing' => true]);
+        }
+        if (!empty($coRes['needs_manual_review'])) {
+            json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $coMsg ?: 'No se pudo confirmar automáticamente el estado de este pedido. Un administrador lo revisará.', 'pending_review' => true, 'provider_message' => $coMsg]);
+        }
+        json_response(['ok' => false, 'estado' => 'pagado', 'order_id' => $orderId, 'message' => $coMsg ?: 'El pedido no pudo completarse automáticamente con Central One.', 'provider_message' => $coMsg]);
     }
 
     // ── Discord API ──────────────────────────────────────────────────
