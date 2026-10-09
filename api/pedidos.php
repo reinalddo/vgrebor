@@ -14591,6 +14591,7 @@ if ($action === 'batch_create_and_pay') {
                 'fullimpulso_comments'               => $fiComments,
                 'api_provider'                       => $pkgProvider !== '' ? $pkgProvider : null,
                 'recargasamerica_tipo'                => trim((string) ($pkg['recargasamerica_tipo'] ?? '')) !== '' ? trim((string) $pkg['recargasamerica_tipo']) : null,
+                'centralone_product_id'              => trim((string) ($pkg['centralone_product_id'] ?? '')) !== '' ? trim((string) $pkg['centralone_product_id']) : null,
                 'moneda'                             => $itemMoneda,
                 'precio'                             => $itemPrice,
                 'precio_descuento_metodo_pago_base'  => $itemPrice,
