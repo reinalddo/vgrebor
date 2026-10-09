@@ -1,9 +1,10 @@
 <?php
-// Estado de las APIs (BNC, Binance, CONEC, TiendaGiftVen, FullImpulso) para las tarjetas del
-// dashboard. Devuelve JSON. SOLO LECTURA y solo admin/root (son datos de cuentas de proveedores).
+// Estado de las APIs (BNC, Binance, CONEC, TiendaGiftVen, FullImpulso, Central One) para las
+// tarjetas del dashboard. Devuelve JSON. SOLO LECTURA y solo admin/root (son datos de cuentas de
+// proveedores).
 //
 //   ?g=lista                       → tarjetas que aplican a esta tienda: [{key, title}]
-//   ?g=<bnc|binance|conec|giftven|fullimpulso>[&forzar=1]
+//   ?g=<bnc|binance|conec|giftven|fullimpulso|centralone>[&forzar=1]
 //                                  → estado de esa tarjeta (usa la caché salvo que se fuerce; ver
 //                                    includes/dashboard_api_status.php)
 //

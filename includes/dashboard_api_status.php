@@ -1,12 +1,12 @@
 <?php
 // Tarjetas de estado de las APIs para el dashboard del admin (BNC, Binance, CONEC,
-// TiendaGiftVen, FullImpulso). RecargasAmérica tiene su propia tarjeta en admin.php.
+// TiendaGiftVen, FullImpulso, Central One). RecargasAmérica tiene su propia tarjeta en admin.php.
 //
 // Reglas:
 //  · APIs con DÍAS de suscripción (BNC y Binance): verde si quedan MÁS de 3 días, rojo si
 //    quedan 3 o menos (incluido 0).
-//  · APIs con SALDO (CONEC, TiendaGiftVen, FullImpulso): rojo si el saldo es menor a
-//    DASH_GADGET_MIN_BALANCE_USD (mismo criterio que la tarjeta de RecargasAmérica).
+//  · APIs con SALDO (CONEC, TiendaGiftVen, FullImpulso, Central One): rojo si el saldo es
+//    menor a DASH_GADGET_MIN_BALANCE_USD (mismo criterio que la tarjeta de RecargasAmérica).
 //  · Si no se puede consultar: rojo, con el motivo y el último dato conocido.
 //
 // Diseño para no dañar nada (lección del bloqueo de RecargasAmérica: repetir consultas fallidas
@@ -48,6 +48,7 @@ function dash_gadget_kinds(): array {
         'conec' => 'balance',
         'giftven' => 'balance',
         'fullimpulso' => 'balance',
+        'centralone' => 'balance',
     ];
 }
 
@@ -58,6 +59,7 @@ function dash_gadget_titles(): array {
         'conec' => 'Saldo CONEC',
         'giftven' => 'Saldo TiendaGiftVen',
         'fullimpulso' => 'Saldo FullImpulso',
+        'centralone' => 'Saldo Central One',
     ];
 }
 
@@ -363,6 +365,14 @@ function dash_fetch_fullimpulso_balance(): array {
     return ['kind' => 'balance', 'value' => (float) $r['balance'], 'currency' => (string) $r['currency']];
 }
 
+function dash_fetch_centralone_balance(): array {
+    if (!function_exists('centralone_api_fetch_balance')) {
+        require_once __DIR__ . '/centralone_api.php';
+    }
+    $r = centralone_api_fetch_balance();
+    return ['kind' => 'balance', 'value' => (float) $r['available_balance'], 'currency' => (string) $r['currency']];
+}
+
 // ── Qué tarjetas mostrar y cómo se ven ──────────────────────────────────────
 
 /** Tarjetas que aplican a esta tienda (solo las APIs que están configuradas), en orden. */
@@ -373,6 +383,9 @@ function dash_api_gadgets_list(): array {
     if (!function_exists('fullimpulso_is_configured')) {
         require_once __DIR__ . '/fullimpulso_api.php';
     }
+    if (!function_exists('centralone_api_is_configured')) {
+        require_once __DIR__ . '/centralone_api.php';
+    }
 
     $titles = dash_gadget_titles();
     $available = [
@@ -381,6 +394,7 @@ function dash_api_gadgets_list(): array {
         'conec' => dash_conec_is_configured(),
         'giftven' => recargas_api_is_configured(),
         'fullimpulso' => fullimpulso_is_configured(),
+        'centralone' => centralone_api_is_configured(),
     ];
 
     $kinds = dash_gadget_kinds();
@@ -408,6 +422,8 @@ function dash_gadget_fingerprint(string $key): string {
             return (string) store_config_get('fullimpulso_api_key', '');
         case 'conec':
             return (string) store_config_get('conec_api_key', '') . '|' . (string) store_config_get('conec_base_url', '');
+        case 'centralone':
+            return (string) store_config_get('centralone_api_key', '');
     }
 
     return '';
@@ -420,6 +436,7 @@ function dash_gadget_fetcher(string $key): ?callable {
         'conec' => 'dash_fetch_conec_balance',
         'giftven' => 'dash_fetch_giftven_balance',
         'fullimpulso' => 'dash_fetch_fullimpulso_balance',
+        'centralone' => 'dash_fetch_centralone_balance',
     ];
 
     return isset($map[$key]) ? $map[$key] : null;
