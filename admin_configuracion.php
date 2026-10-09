@@ -1657,6 +1657,16 @@ $paypalCancelUrl = rtrim($currentPublicUrl, '/') . '/api/pedidos.php?action=payp
                     <input type="text" name="recargasamerica_api_key" value="<?= htmlspecialchars($cfg['recargasamerica_api_key'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control" placeholder="Pega aquí tu API KEY de RecargasAmérica (ra_...)">
                     <div class="form-text mt-2">Segundo proveedor de recargas de juegos (PINs y recargas directas), en paralelo a la API de recargas de arriba. Configúrala en los paquetes marcados como "RecargasAmérica" en <strong>Paquetes</strong>. Déjalo vacío para desactivar esta función.</div>
                   </div>
+                  <div class="col-12">
+                    <label class="form-label">API KEY Central One</label>
+                    <input type="text" name="centralone_api_key" value="<?= htmlspecialchars($cfg['centralone_api_key'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control" placeholder="Pega aquí tu API KEY de Central One (co_live_...)">
+                    <div class="form-text mt-2">Tercer proveedor: gift cards, PIN y recargas de juego (portal.centraloneglobal.com). Todavía no hay paquetes conectados a Central One (fase pendiente de aprobación); por ahora esta llave solo habilita las pruebas internas. Déjalo vacío para desactivar.</div>
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label">Secreto del webhook Central One</label>
+                    <input type="text" name="centralone_webhook_secret" value="<?= htmlspecialchars($cfg['centralone_webhook_secret'] ?? '', ENT_QUOTES, 'UTF-8') ?>" class="form-control" placeholder="El portal lo muestra una sola vez al registrar la URL del webhook">
+                    <div class="form-text mt-2">Se usa para comprobar que un aviso de Central One es auténtico. Pégalo aquí apenas lo veas en el portal: no se puede volver a mostrar después.</div>
+                  </div>
                 </div>
               </div>
 
