@@ -32,6 +32,11 @@ bau_ensure_schema($mysqli);
 // HTML para que sea una llamada AJAX limpia.
 if (isset($_GET['buscar_centralone'])) {
     header('Content-Type: application/json; charset=utf-8');
+    // La primera búsqueda (sin caché todavía) descarga el catálogo completo
+    // (~5-8 MB) desde Central One — puede tardar más que el límite normal de
+    // ejecución de PHP en hosting compartido. Las búsquedas siguientes son
+    // casi instantáneas (caché de 10 min, ver centralone_api_fetch_catalog()).
+    @set_time_limit(45);
     try {
         $centralOneResultados = centralone_catalog_buscar((string) ($_GET['q'] ?? ''), 20);
     } catch (Throwable $e) {
@@ -4832,7 +4837,9 @@ if (typeof window.bindCentralOnePickers !== 'function') {
                     activeRequest = controller;
                     resultsBox.innerHTML = '<div class="list-group-item" style="background:#1a2231;color:#8be9fd;border-color:#2d3b52;">Buscando…</div>';
                     fetch('?buscar_centralone=1&q=' + encodeURIComponent(q), { signal: controller.signal })
-                        .then((r) => r.json())
+                        .then((r) => r.json().catch(() => {
+                            throw new Error('El servidor respondió algo que no se pudo leer (HTTP ' + r.status + ').');
+                        }))
                         .then((data) => {
                             if (!data.ok) {
                                 resultsBox.innerHTML = '<div class="list-group-item text-danger" style="background:#1a2231;border-color:#2d3b52;">' + (data.message || 'Error al buscar.') + '</div>';
@@ -4840,7 +4847,12 @@ if (typeof window.bindCentralOnePickers !== 'function') {
                             }
                             renderResults(data.items || []);
                         })
-                        .catch(() => {});
+                        .catch((err) => {
+                            if (err && err.name === 'AbortError') {
+                                return;
+                            }
+                            resultsBox.innerHTML = '<div class="list-group-item text-danger" style="background:#1a2231;border-color:#2d3b52;">No se pudo buscar: ' + (err && err.message ? err.message : 'sin conexión o el servidor tardó demasiado') + '. Vuelve a escribir para intentar de nuevo.</div>';
+                        });
                 }, 350);
             });
         });
