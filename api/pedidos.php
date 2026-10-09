@@ -35,6 +35,7 @@ require_once __DIR__ . '/../includes/blocked_players.php';
 require_once __DIR__ . '/../includes/fullimpulso_api.php';
 require_once __DIR__ . '/../includes/player_verification.php';
 require_once __DIR__ . '/../includes/conec_recargas.php';
+require_once __DIR__ . '/../includes/centralone_api.php';
 require_once __DIR__ . '/../includes/baul_api.php';
 
 if (!function_exists('create_app_mysqli_connection')) {
@@ -301,6 +302,12 @@ function ensure_pedidos_table(mysqli $mysqli): void {
         // Fase 2: qué fuente de la cadena de respaldo entregó realmente (ver bau_fallback_chain_for_package())
         // cuando el Baúl no tenía ningún código — puramente informativo, para reportes/soporte.
         'bau_fallback_provider_used' => "ALTER TABLE pedidos ADD COLUMN bau_fallback_provider_used VARCHAR(20) NULL AFTER bau_estado",
+        // Central One (includes/centralone_api.php): snapshot del product_id (UUID) del catálogo que
+        // se compró para ESTE pedido — paquete_api es INT y no puede guardar un UUID. El id de pedido
+        // de Central One, su estado y el código entregado se guardan en las columnas genéricas
+        // recargas_api_pedido_id/recargas_api_estado/recargas_api_codigo_entregado, que GiftVen y el
+        // respaldo del Baúl ya reutilizan igual (el nombre es historia, no son exclusivas de RecargasAmérica).
+        'centralone_product_id' => "ALTER TABLE pedidos ADD COLUMN centralone_product_id VARCHAR(64) NULL AFTER recargasamerica_tipo",
     ];
     $colResult = $mysqli->query("SHOW COLUMNS FROM pedidos");
     $existing = [];
@@ -565,6 +572,28 @@ function resolve_order_unit_cost_base(mysqli $mysqli, int $packageId, int $paque
         $manualCostCN = costos_manuales_get_current($mysqli, $packageId);
         if ($manualCostCN !== null) {
             return [$manualCostCN, 'manual'];
+        }
+        return [null, null];
+    }
+
+    // Central One: costo base = reseller_price del catálogo en vivo (para las
+    // estadísticas de ganancia). $paqueteApiId no se usa aquí: el producto se
+    // identifica por centralone_product_id (UUID), no por un id numérico.
+    if ($provider === 'centralone') {
+        $centralOneProductId = trim((string) ($catalogProduct['product_id'] ?? ''));
+        if ($centralOneProductId !== '') {
+            try {
+                $cnProducto = centralone_api_fetch_catalog_product($centralOneProductId);
+                if ($cnProducto !== null && isset($cnProducto['reseller_price'])) {
+                    return [(float) $cnProducto['reseller_price'], 'centralone_api'];
+                }
+            } catch (Throwable $e) {
+                // sin red: cae al costo manual de abajo.
+            }
+        }
+        $manualCostCO = costos_manuales_get_current($mysqli, $packageId);
+        if ($manualCostCO !== null) {
+            return [$manualCostCO, 'manual'];
         }
         return [null, null];
     }
@@ -5159,7 +5188,7 @@ function normalize_api_provider_value($value): string {
     // 'streaming' NO se agrega aquí a propósito: es un hallazgo aparte (reportado, no pedido) de que
     // esa marca tampoco está en esta lista — no se toca sin que el cliente lo pida explícitamente
     // (regla del proyecto: nada de admin/stream/* ni de su flujo sin pedido explícito).
-    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica', 'conec', 'baul'], true) ? $normalized : '';
+    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica', 'conec', 'baul', 'centralone'], true) ? $normalized : '';
 }
 
 function package_api_provider_from_row(array $package, array $game = []): string {
@@ -5226,6 +5255,88 @@ function order_uses_fullimpulso_api_provider(array $order): bool {
 
 function order_uses_recargasamerica_api_provider(array $order): bool {
     return order_api_provider($order) === 'recargasamerica';
+}
+
+function order_uses_centralone_api_provider(array $order): bool {
+    return order_api_provider($order) === 'centralone';
+}
+
+// Único punto donde se guarda el resultado de centralone_dispatch_or_recover()
+// en `pedidos` — evita repetir el mismo UPDATE+notificación en los 3 lugares
+// que pueden disparar/reconsultar un pedido de Central One (sondeo del
+// cliente, "Sincronizar" del admin, "Reintentar" del admin, y el webhook).
+// $eventPrefix identifica el origen en el historial (ej. 'customer_poll',
+// 'admin_sync', 'admin_retry', 'webhook'). Devuelve ['order'=>fila
+// actualizada, 'result'=>resultado crudo de centralone_dispatch_or_recover()].
+function centralone_sync_and_persist(mysqli $mysqli, array $order, string $eventPrefix): array {
+    $orderId = (int) ($order['id'] ?? 0);
+    $prevStatus = trim((string) ($order['estado'] ?? ''));
+
+    $res = centralone_dispatch_or_recover($order);
+    $mysqli = ensure_mysqli_connection($mysqli);
+
+    $data = (array) ($res['payload'] ?? []);
+    $ref = (string) ($res['reference'] ?? '');
+    $msg = (string) ($res['message'] ?? 'Sin mensaje de Central One.');
+    $deliveryText = trim((string) ($data['delivery_text'] ?? ''));
+    $payloadJson = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($payloadJson)) {
+        $payloadJson = '{}';
+    }
+    $localStatus = !empty($res['success']) ? 'enviado' : (!empty($res['needs_manual_review']) ? 'revision_manual' : 'procesando');
+    $historyJson = append_provider_history(
+        $order['recargas_api_historial_json'] ?? null,
+        build_provider_history_entry($eventPrefix . '_centralone', '', $localStatus, $msg, $ref, $ref, $deliveryText)
+    );
+
+    // Si fue un fallo de transporte puro (sin 'exception' no se llega aquí:
+    // esto SOLO salta cuando centralone_recover() atrapó un Throwable de red),
+    // no se pisa el order_id/estado ya guardados con un intento sin respuesta real.
+    if (!isset($data['exception'])) {
+        $stmt = $mysqli->prepare(
+            "UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, " .
+            "recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_historial_json = ?, " .
+            "recargas_api_ultimo_check = NOW()" .
+            ($deliveryText !== '' ? ", recargas_api_codigo_entregado = COALESCE(NULLIF(recargas_api_codigo_entregado, ''), ?)" : '') .
+            " WHERE id = ? AND estado = 'pagado'"
+        );
+        if ($stmt) {
+            $estadoCentralOne = (string) ($data['status'] ?? '');
+            if ($deliveryText !== '') {
+                $stmt->bind_param('sssssssi', $ref, $msg, $payloadJson, $ref, $estadoCentralOne, $historyJson, $deliveryText, $orderId);
+            } else {
+                $stmt->bind_param('ssssssi', $ref, $msg, $payloadJson, $ref, $estadoCentralOne, $historyJson, $orderId);
+            }
+            $stmt->execute();
+            $stmt->close();
+        }
+    }
+
+    if (!empty($res['success'])) {
+        $sentStmt = $mysqli->prepare("UPDATE pedidos SET estado = 'enviado' WHERE id = ? AND estado = 'pagado'");
+        if ($sentStmt) {
+            $sentStmt->bind_param('i', $orderId);
+            $sentStmt->execute();
+            $sentStmt->close();
+        }
+    }
+
+    $updatedOrder = fetch_order_by_id($mysqli, $orderId) ?: $order;
+    if ($prevStatus !== 'enviado' && trim((string) ($updatedOrder['estado'] ?? '')) === 'enviado') {
+        win_points_handle_order_status_change($mysqli, $orderId, 'enviado');
+        recharge_notifications_emit_for_order($mysqli, $updatedOrder);
+        notify_free_fire_recharge_success(
+            $mysqli,
+            $updatedOrder,
+            trim((string) ($updatedOrder['metodo_pago'] ?? 'Método de pago')),
+            trim((string) ($updatedOrder['numero_referencia'] ?? '')),
+            trim((string) ($updatedOrder['telefono_contacto'] ?? '')),
+            $ref,
+            $msg !== '' ? $msg : 'Pedido completado por Central One.'
+        );
+    }
+
+    return ['order' => $updatedOrder, 'result' => $res];
 }
 
 // ── CONEC (coneclatam) ────────────────────────────────────────────────────
@@ -9624,6 +9735,7 @@ if ($action === 'create') {
             $usesFreeFireApi = $packageApiProvider === 'free_fire';
             $usesFullImpulsoApi = $packageApiProvider === 'fullimpulso';
             $usesRecargasAmericaApi = $packageApiProvider === 'recargasamerica';
+            $usesCentralOneApi = $packageApiProvider === 'centralone';
             if ($usesDiscordApi) {
                 $packApiSourceKey = trim((string) ($selectedPackage['api_source_key'] ?? ''));
                 $discordCommandKey = $packApiSourceKey !== '' ? $packApiSourceKey : game_discord_api_command($mysqli, (int) $game_id);
@@ -9773,6 +9885,36 @@ if ($action === 'create') {
             }
             $catalogProduct = $raCatalogProduct;
         }
+    }
+
+    // Central One: se valida ANTES de cobrar que el producto siga activo y en
+    // stock, y que estén todos los target_fields que exige (el mismo criterio
+    // que RecargasAmérica arriba) — mejor rechazar aquí que descubrirlo
+    // después de que el cliente ya pagó. Un fallo de red al consultar el
+    // catálogo NO bloquea la venta (el despacho la reintenta después).
+    $centralOneProductIdSnapshot = null;
+    if (!$selectedPackageIsAccountSale && $usesCentralOneApi) {
+        $cnProductId = trim((string) ($selectedPackage['centralone_product_id'] ?? ''));
+        if ($cnProductId === '') {
+            json_error('Este paquete no tiene un producto de Central One configurado. Contacta al administrador.');
+        }
+        try {
+            $cnProduct = centralone_api_fetch_catalog_product($cnProductId);
+        } catch (Throwable $e) {
+            json_error($e->getMessage());
+        }
+        if ($cnProduct === null || (string) ($cnProduct['status'] ?? '') !== 'active') {
+            json_error('Este producto ya no está disponible en Central One.');
+        }
+        if (empty($cnProduct['in_stock'])) {
+            json_error('Este producto está agotado en Central One por ahora. Intenta más tarde.');
+        }
+        $cnTargetCheck = centralone_build_target_payload($cnProduct, (string) $user_identifier, $player_fields);
+        if (!$cnTargetCheck['ok']) {
+            json_error('Falta el campo requerido: ' . $cnTargetCheck['falta'] . '.');
+        }
+        $catalogProduct = $cnProduct;
+        $centralOneProductIdSnapshot = $cnProductId;
     }
 
     // Costo/ganancia: snapshot del costo unitario (base/USD) vigente al momento de esta compra.
@@ -9943,6 +10085,7 @@ if ($action === 'create') {
             'fullimpulso_comments' => $fullimpulso_comments,
             'api_provider' => $packageApiProvider !== '' ? $packageApiProvider : null,
             'recargasamerica_tipo' => $recargasamerica_tipo,
+            'centralone_product_id' => $centralOneProductIdSnapshot,
             'moneda' => $currency,
             'precio' => $price,
             'precio_descuento_metodo_pago_base' => $priceBeforeCoupon,
@@ -12384,6 +12527,11 @@ if ($action === 'order_status') {
                     // Catálogo Unificado: try_auto_sync_provider_order() consulta
                     // la API de GiftVen, que no conoce estas referencias.
                     $order = recargasamerica_catalog_sync_order($mysqli, $order);
+                } elseif (order_uses_centralone_api_provider($order)) {
+                    // Mismo motivo que arriba: recargas_api_pedido_id es genérica y
+                    // try_auto_sync_provider_order() consulta GiftVen, que no conoce
+                    // un order_id de Central One.
+                    $order = centralone_sync_and_persist($mysqli, $order, 'customer_poll')['order'];
                 } elseif ($providerOrderId !== '') {
                     $syncResult = try_auto_sync_provider_order($mysqli, $order, 1, 0);
                     $order = is_array($syncResult['order'] ?? null) ? $syncResult['order'] : (fetch_order_by_id($mysqli, $orderId) ?: $order);
@@ -12502,6 +12650,19 @@ if ($action === 'sync_provider_status') {
                     : (!empty($raSyncRes['accepted']) ? 'procesando' : (!empty($raSyncRes['needs_manual_review']) ? 'revision_manual' : 'error')),
                 'provider_reference' => $raSyncRef,
                 'provider_message' => $raSyncMsg,
+            ];
+        } elseif ($providerOrderId !== '' && order_uses_centralone_api_provider($order)) {
+            // Mismo motivo que el comentario de arriba: recargas_api_pedido_id es
+            // genérica, y recargas_api_fetch_order_detail() (abajo) es de GiftVen.
+            $coSync = centralone_sync_and_persist($mysqli, $order, 'admin_sync');
+            $coSyncRes = $coSync['result'];
+            $syncResult = [
+                'order' => $coSync['order'],
+                'provider_status' => !empty($coSyncRes['success'])
+                    ? 'enviado'
+                    : (!empty($coSyncRes['accepted']) ? 'procesando' : (!empty($coSyncRes['needs_manual_review']) ? 'revision_manual' : 'error')),
+                'provider_reference' => (string) ($coSyncRes['reference'] ?? $providerOrderId),
+                'provider_message' => (string) ($coSyncRes['message'] ?? ''),
             ];
         } elseif ($providerOrderId !== '') {
             $providerDetail = recargas_api_fetch_order_detail($providerOrderId);
@@ -13026,6 +13187,44 @@ if ($action === 'admin_retry_recharge') {
         json_error('La recarga no pudo completarse automaticamente: ' . $raMsg, 409);
     }
 
+    // ── Central One: reenvío/primer despacho manual desde el admin ───────
+    // centralone_dispatch_or_recover() compra si el pedido no tiene order_id
+    // todavía (primera vez) o reconsulta si ya lo tiene (reenvío) — mismo
+    // criterio que RecargasAmérica arriba, en un solo botón "Reintentar".
+    if (order_uses_centralone_api_provider($order)) {
+        $coRetry = centralone_sync_and_persist($mysqli, $order, 'admin_retry');
+        $coRes = $coRetry['result'];
+        $coMsg = (string) ($coRes['message'] ?? 'Sin mensaje de Central One.');
+        $coRef = (string) ($coRes['reference'] ?? '');
+
+        if (!empty($coRes['success'])) {
+            $coUpdatedOrder = $coRetry['order'];
+            $coDeliveryText = trim((string) ((array) ($coRes['payload'] ?? []))['delivery_text'] ?? '');
+            json_response([
+                'ok' => true,
+                'message' => 'El pedido de Central One fue procesado correctamente.',
+                'order_id' => $orderId,
+                'estado' => 'enviado',
+                'provider_flow' => 'completed',
+                'provider_reference' => $coRef,
+                'provider_message' => $coMsg,
+                'provider_code' => $coDeliveryText,
+            ], 200, static function () use ($mysqli, $coUpdatedOrder, $paymentMethodName, $verifiedReference, $phone, $coRef, $coMsg): void {
+                notify_free_fire_recharge_success($mysqli, $coUpdatedOrder, $paymentMethodName, $verifiedReference, $phone, $coRef, $coMsg !== '' ? $coMsg : 'Pedido completado por Central One.');
+            });
+        }
+
+        if (!empty($coRes['accepted'])) {
+            json_error('Central One todavía está procesando este pedido. Intenta de nuevo en unos minutos.', 409);
+        }
+
+        if (!empty($coRes['needs_manual_review'])) {
+            json_error('No se pudo confirmar el estado de este pedido con Central One: ' . $coMsg, 409);
+        }
+
+        json_error('El pedido no pudo completarse automáticamente: ' . $coMsg, 409);
+    }
+
     if (order_uses_free_fire_api_provider($order)) {
         $monto = sanitize_str((string) ($order['monto_ff'] ?? ''), 20) ?? '';
         $numero = sanitize_str((string) ($order['user_identifier'] ?? ''), 150) ?? '';
@@ -13403,6 +13602,42 @@ if ($action === 'provider_webhook') {
         'order_id' => (int) ($order['id'] ?? 0),
         'estado' => $syncResult['local_status'],
     ]);
+}
+
+if ($action === 'centralone_webhook') {
+    // La firma ya se verificó en api/centralone_webhook.php (necesita el
+    // cuerpo crudo exacto, antes de cualquier parseo) — aquí solo se busca el
+    // pedido local y se reutiliza el mismo despachador que usan "Sincronizar"
+    // y "Reintentar" del admin.
+    $coEvento = $GLOBALS['centralone_webhook_event'] ?? [];
+    $coReferenceCode = trim((string) (($coEvento['order']['reference_code'] ?? '')));
+    if ($coReferenceCode === '') {
+        json_error('Webhook de Central One sin reference_code.', 422);
+    }
+
+    $coStmt = $mysqli->prepare("SELECT * FROM pedidos WHERE api_provider = 'centralone' AND ff_api_referencia = ? ORDER BY id DESC LIMIT 1");
+    if (!$coStmt) {
+        json_error('No se pudo buscar el pedido.', 500);
+    }
+    $coStmt->bind_param('s', $coReferenceCode);
+    $coStmt->execute();
+    $coOrder = $coStmt->get_result()->fetch_assoc();
+    $coStmt->close();
+
+    if (!$coOrder) {
+        // 200 y no 404: Central One reintenta cualquier respuesta que no sea
+        // 2xx. Un aviso sin pedido local asociado (orden purgada, aviso de
+        // prueba, carrera con la creación) no es un error a reintentar.
+        json_response(['ok' => true, 'message' => 'Sin pedido local asociado a este reference_code.']);
+    }
+
+    try {
+        $coWebhookSync = centralone_sync_and_persist($mysqli, $coOrder, 'webhook');
+    } catch (Throwable $e) {
+        json_error('No se pudo procesar el webhook de Central One: ' . $e->getMessage(), 500);
+    }
+
+    json_response(['ok' => true, 'estado' => (string) ($coWebhookSync['order']['estado'] ?? '')]);
 }
 
 if ($action === 'paypal_webhook') {

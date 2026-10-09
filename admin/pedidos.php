@@ -302,6 +302,7 @@ function order_debug_payload(array $order): array {
     'api_provider' => (string) ($order['api_provider'] ?? ''),
     'paquete_api' => (int) ($order['paquete_api'] ?? 0),
     'recargasamerica_tipo' => (string) ($order['recargasamerica_tipo'] ?? ''),
+    'centralone_product_id' => (string) ($order['centralone_product_id'] ?? ''),
     'juego_nombre' => (string) ($order['juego_nombre'] ?? ''),
     'paquete_nombre' => (string) ($order['paquete_nombre'] ?? ''),
     'user_identifier' => (string) ($order['user_identifier'] ?? ''),

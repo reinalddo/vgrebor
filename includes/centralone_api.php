@@ -365,23 +365,229 @@ function centralone_api_get_order_codes(string $orderId): array {
     return is_array($data['order'] ?? null) ? $data['order'] : [];
 }
 
-// 'completed' | 'failed' | 'other' (processing/confirmed/created/
-// partially_completed no son definitivos: hay que seguir consultando).
-function centralone_order_classify_status(string $status): string {
-    $normalized = strtolower(trim($status));
-    if ($normalized === 'completed') {
-        return 'completed';
-    }
-    if (in_array($normalized, ['failed', 'cancelled'], true)) {
-        return 'failed';
-    }
-    return 'other';
-}
-
 // ── Webhooks ─────────────────────────────────────────────────────────────────
 // Firma: header X-CentralOne-Signature = "sha256=" + HMAC-SHA256(secreto,
 // timestamp + "." + cuerpo crudo), con X-CentralOne-Timestamp en segundos
 // Unix. Se rechazan timestamps de más de 5 minutos (replay).
+// ── Fase 2: despacho real de un pedido de la tienda ─────────────────────────
+// Mismo contrato de retorno que recargasamerica_dispatch_or_recover() /
+// recargasamerica_catalog_purchase() (api/pedidos.php): success/accepted/
+// needs_manual_review/message/reference/payload. $order es la fila de
+// `pedidos` (o una copia en memoria) con, al menos: id, centralone_product_id
+// (snapshot del producto elegido), player_fields_json, user_identifier,
+// cantidad_compra, creado_en, y — en una recuperación — recargas_api_pedido_id
+// (reutilizada como columna genérica de "id de pedido del proveedor", igual
+// que ya hacen GiftVen y el respaldo del Baúl, no solo RecargasAmérica).
+
+function centralone_result(bool $success, bool $accepted, bool $needsReview, string $message, string $reference, array $payload): array {
+    // recargas_api_mensaje es VARCHAR(255) en varias UPDATE: un mensaje más
+    // largo haría fallar el guardado en modo estricto.
+    $message = function_exists('mb_substr') ? mb_substr($message, 0, 240, 'UTF-8') : substr($message, 0, 240);
+
+    return [
+        'success' => $success,
+        'accepted' => $accepted,
+        'needs_manual_review' => $needsReview,
+        'message' => $message,
+        'reference' => $reference,
+        'payload' => $payload,
+    ];
+}
+
+// Junta los códigos de todas las líneas de la respuesta de /codes en un solo
+// texto (uno por línea) — hoy cada pedido de la tienda es una sola línea de
+// Central One, pero esto no asume esa cantidad.
+function centralone_format_delivery_text(array $codesOrder): string {
+    $lineas = [];
+    foreach ((array) ($codesOrder['items'] ?? []) as $item) {
+        foreach ((array) ($item['codes'] ?? []) as $codigo) {
+            $codigo = trim((string) $codigo);
+            if ($codigo !== '') {
+                $lineas[] = $codigo;
+            }
+        }
+    }
+    return implode("\n", $lineas);
+}
+
+// 'completed' | 'partial' | 'failed' | 'pending'. 'partial' es su propio
+// estado (no se mezcla con 'completed' ni se auto-resuelve): la regla del
+// cliente es que un pedido parcial SIEMPRE pasa a revisión manual, igual que
+// uno fallido — nunca hay reembolso automático.
+function centralone_order_classify_status(string $status): string {
+    $normalizado = strtolower(trim($status));
+    if ($normalizado === 'completed') {
+        return 'completed';
+    }
+    if ($normalizado === 'partially_completed') {
+        return 'partial';
+    }
+    if (in_array($normalizado, ['failed', 'cancelled'], true)) {
+        return 'failed';
+    }
+    // created, confirmed, processing: todavía en curso.
+    return 'pending';
+}
+
+// Arma el target_payload a partir de los campos ya guardados del pedido
+// (player_fields_json/user_identifier), validando contra el target_fields
+// REAL del producto en el catálogo vigente — nunca se confía en lo que haya
+// quedado guardado en el pedido si el catálogo cambió. Devuelve
+// ['ok'=>bool, 'payload'=>array, 'falta'=>string] ('falta' solo si ok=false).
+function centralone_build_target_payload(array $producto, string $userIdentifier, array $submittedFields): array {
+    if (empty($producto['requires_target'])) {
+        return ['ok' => true, 'payload' => [], 'falta' => ''];
+    }
+
+    $camposRequeridos = array_values(array_filter(array_map('strval', (array) ($producto['target_fields'] ?? []))));
+    if (empty($camposRequeridos)) {
+        return ['ok' => true, 'payload' => [], 'falta' => ''];
+    }
+
+    $payload = [];
+    foreach ($camposRequeridos as $indice => $campo) {
+        $valor = trim((string) ($submittedFields[$campo] ?? ''));
+        // El primer campo requerido admite el identificador principal del
+        // pedido como respaldo (mismo criterio que
+        // recargasamerica_catalog_build_fields()).
+        if ($valor === '' && $indice === 0) {
+            $valor = trim($userIdentifier);
+        }
+        if ($valor === '') {
+            return ['ok' => false, 'payload' => [], 'falta' => $campo];
+        }
+        $payload[$campo] = $valor;
+    }
+
+    return ['ok' => true, 'payload' => $payload, 'falta' => ''];
+}
+
+// Compra nueva: el pedido todavía no tiene order_id de Central One guardado.
+function centralone_purchase(array $order): array {
+    $productId = trim((string) ($order['centralone_product_id'] ?? ''));
+    if ($productId === '') {
+        return centralone_result(false, false, true, 'Este pedido no tiene un producto de Central One configurado.', '', []);
+    }
+
+    try {
+        $producto = centralone_api_fetch_catalog_product($productId);
+    } catch (Throwable $e) {
+        // Fallo de red al consultar el catálogo: no es un rechazo real, se
+        // puede reintentar (el pedido se queda "pagado" sin marcar revisión).
+        return centralone_result(false, false, false, 'No se pudo consultar el catálogo de Central One: ' . $e->getMessage(), '', ['exception' => $e->getMessage()]);
+    }
+    if ($producto === null || (string) ($producto['status'] ?? '') !== 'active') {
+        return centralone_result(false, false, true, 'Este producto ya no está disponible en Central One.', '', []);
+    }
+
+    $playerFields = function_exists('order_player_fields_from_json')
+        ? order_player_fields_from_json($order['player_fields_json'] ?? null)
+        : [];
+    $targetBuild = centralone_build_target_payload($producto, (string) ($order['user_identifier'] ?? ''), $playerFields);
+    if (!$targetBuild['ok']) {
+        return centralone_result(false, false, true, 'Falta el dato "' . $targetBuild['falta'] . '" que exige este producto.', '', []);
+    }
+
+    $cantidad = max(1, (int) ($order['cantidad_compra'] ?? 1));
+    // Clave estable por pedido: un reintento del MISMO pedido (timeout,
+    // recarga de página) reutiliza la misma llave y Central One devuelve el
+    // mismo pedido sin cobrar dos veces.
+    $idempotencyKey = centralone_idempotency_key(
+        'order',
+        (string) ($order['id'] ?? 0),
+        $productId,
+        (string) ($order['creado_en'] ?? '')
+    );
+
+    try {
+        $creado = centralone_api_create_order(
+            [['catalog_item_id' => $productId, 'quantity' => $cantidad, 'target_payload' => $targetBuild['payload']]],
+            $idempotencyKey,
+            'Pedido tienda #' . (int) ($order['id'] ?? 0)
+        );
+    } catch (CentralOneProviderException $e) {
+        return centralone_result(false, false, true, $e->getMessage(), '', ['error_code' => $e->errorCode, 'request_id' => $e->requestId]);
+    } catch (Throwable $e) {
+        return centralone_result(false, false, false, $e->getMessage(), '', ['exception' => $e->getMessage()]);
+    }
+
+    $orderId = trim((string) ($creado['id'] ?? ''));
+    if ($orderId === '') {
+        return centralone_result(false, false, true, 'Central One no devolvió un id de pedido.', '', $creado);
+    }
+
+    return centralone_recover($orderId, $creado);
+}
+
+// Recuperación/sondeo: el pedido ya tiene (o se acaba de crear) un order_id
+// de Central One — se consulta su estado real, nunca se vuelve a comprar.
+function centralone_recover(string $orderId, ?array $detalleConocido = null): array {
+    try {
+        $detalle = $detalleConocido ?? centralone_api_get_order($orderId);
+    } catch (CentralOneProviderException $e) {
+        // 404/403 reales del proveedor sobre ESTE pedido: hay que revisar a mano.
+        return centralone_result(false, false, true, $e->getMessage(), $orderId, ['error_code' => $e->errorCode]);
+    } catch (Throwable $e) {
+        // Fallo de transporte puro: se reintenta, no es un rechazo.
+        return centralone_result(false, true, false, 'No se pudo consultar el pedido en Central One: ' . $e->getMessage(), $orderId, ['exception' => $e->getMessage()]);
+    }
+
+    $status = (string) ($detalle['status'] ?? '');
+    $clase = centralone_order_classify_status($status);
+    $mensaje = $status !== '' ? ('Central One: ' . $status) : 'Central One no devolvió un estado.';
+    // El webhook identifica el pedido por reference_code, no por id — se
+    // guarda como "reference" (columna genérica ff_api_referencia) para que
+    // api/centralone_webhook.php pueda encontrar la fila; recargas_api_pedido_id
+    // sigue guardando el id real, que es lo que piden GET /orders/{id} y
+    // GET /orders/{id}/codes.
+    $referenceCode = trim((string) ($detalle['reference_code'] ?? '')) !== '' ? (string) $detalle['reference_code'] : $orderId;
+
+    $tieneEntrega = false;
+    foreach ((array) ($detalle['items'] ?? []) as $linea) {
+        if ((int) ($linea['delivered_count'] ?? 0) > 0) {
+            $tieneEntrega = true;
+            break;
+        }
+    }
+
+    $deliveryText = '';
+    if ($tieneEntrega) {
+        try {
+            $deliveryText = centralone_format_delivery_text(centralone_api_get_order_codes($orderId));
+        } catch (Throwable $e) {
+            // Se completó pero los códigos no se pudieron leer todavía (ej.
+            // codes:read sin permiso, fallo transitorio) — se reintenta
+            // después; nunca se pierde el order_id ya guardado.
+            return centralone_result(false, true, true, 'El pedido se completó pero no se pudieron leer los códigos: ' . $e->getMessage(), $referenceCode, $detalle);
+        }
+    }
+
+    $payload = array_merge($detalle, ['delivery_text' => $deliveryText]);
+
+    if ($clase === 'completed') {
+        return centralone_result(true, true, false, $mensaje, $referenceCode, $payload);
+    }
+    if ($clase === 'partial' || $clase === 'failed') {
+        // Nunca reembolso automático: parcial y fallido van IGUAL a revisión
+        // manual (regla confirmada por el cliente). Si algo sí se entregó
+        // ($deliveryText), queda guardado para que el admin lo vea.
+        return centralone_result(false, false, true, $mensaje, $referenceCode, $payload);
+    }
+    // pending: created/confirmed/processing — sigue en curso.
+    return centralone_result(false, true, false, $mensaje, $referenceCode, $payload);
+}
+
+// Punto de entrada único: compra si el pedido no tiene order_id todavía,
+// reconsulta si ya lo tiene. Nunca compra dos veces.
+function centralone_dispatch_or_recover(array $order): array {
+    $existingOrderId = trim((string) ($order['recargas_api_pedido_id'] ?? ''));
+    if ($existingOrderId === '') {
+        return centralone_purchase($order);
+    }
+
+    return centralone_recover($existingOrderId);
+}
+
 function centralone_webhook_verify(string $rawBody, string $timestampHeader, string $signatureHeader, int $toleranciaSegundos = 300): bool {
     $secret = centralone_webhook_secret();
     if ($secret === '') {
@@ -405,4 +611,35 @@ function centralone_webhook_verify(string $rawBody, string $timestampHeader, str
     $expected = hash_hmac('sha256', $timestamp . '.' . $rawBody, $secret);
 
     return hash_equals($expected, $received);
+}
+
+// ── Deduplicación de eventos de webhook ─────────────────────────────────────
+// La doc de Central One es explícita: "la entrega es AL MENOS UNA vez... el
+// mismo event_id puede llegar dos veces: procésalo una sola" (y lo repite
+// reintentando hasta 6 veces con esperas crecientes si el endpoint falla).
+// Como un código entregado es dinero, no basta con la protección natural de
+// los UPDATE ... WHERE estado='pagado' — se guarda explícitamente qué
+// event_id ya se procesó. Vive en la misma caché de disco que el catálogo
+// (sys_get_temp_dir(), por hash de la API KEY); se guardan hasta 500 ids con
+// menos de 48 h (más margen que el último reintento, ~22 h).
+function centralone_webhook_event_already_processed(string $eventId): bool {
+    $eventId = trim($eventId);
+    if ($eventId === '') {
+        return false;
+    }
+    $vistos = centralone_cache_get('webhook_event_ids', 48 * 3600) ?? [];
+    return isset($vistos[$eventId]);
+}
+
+function centralone_webhook_mark_event_processed(string $eventId): void {
+    $eventId = trim($eventId);
+    if ($eventId === '') {
+        return;
+    }
+    $vistos = centralone_cache_get('webhook_event_ids', 48 * 3600) ?? [];
+    $vistos[$eventId] = time();
+    // Más recientes primero, recorta a 500 para que el archivo no crezca sin límite.
+    arsort($vistos);
+    $vistos = array_slice($vistos, 0, 500, true);
+    centralone_cache_put('webhook_event_ids', $vistos);
 }

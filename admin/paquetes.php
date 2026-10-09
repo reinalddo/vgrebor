@@ -23,8 +23,39 @@ require_once '../includes/levelpass_api.php';
 require_once '../includes/fullimpulso_api.php';
 require_once '../includes/recargasamerica_api.php';
 require_once '../includes/conec_recargas.php';
+require_once '../includes/centralone_api.php';
 require_once '../includes/baul_api.php';
 bau_ensure_schema($mysqli);
+
+// Buscador de Central One para el selector "agregar producto" (uno a la vez,
+// nunca por lote — pedido explícito del cliente). Responde antes de cualquier
+// HTML para que sea una llamada AJAX limpia.
+if (isset($_GET['buscar_centralone'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        $centralOneResultados = centralone_catalog_buscar((string) ($_GET['q'] ?? ''), 20);
+    } catch (Throwable $e) {
+        http_response_code(502);
+        echo json_encode(['ok' => false, 'message' => 'No se pudo consultar el catálogo de Central One: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    echo json_encode([
+        'ok' => true,
+        'items' => array_map(static function (array $p): array {
+            return [
+                'product_id' => (string) ($p['product_id'] ?? ''),
+                'name' => (string) ($p['name'] ?? ''),
+                'sku' => (string) ($p['sku'] ?? ''),
+                'family' => (string) ($p['product_family_name'] ?? ''),
+                'price' => (string) ($p['reseller_price'] ?? '0.0000'),
+                'in_stock' => !empty($p['in_stock']),
+                'requires_target' => !empty($p['requires_target']),
+                'target_fields' => array_values((array) ($p['target_fields'] ?? [])),
+            ];
+        }, $centralOneResultados),
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
 // CONEC usa un cliente PDO propio; la tienda es mysqli → creamos un PDO al mismo tenant (solo para CONEC).
 $conecPdo = null;
@@ -242,6 +273,16 @@ function ensure_juego_paquetes_recargasamerica_tipo_column(mysqli $mysqli): void
     }
 }
 
+// Fase 2 de Central One: qué producto del catálogo (UUID) usa este paquete.
+// paquete_api sigue siendo INT (GiftVen/RecargasAmérica) — no puede guardar
+// un UUID, por eso Central One necesita su propia columna.
+function ensure_juego_paquetes_centralone_product_id_column(mysqli $mysqli): void {
+    $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'centralone_product_id'");
+    if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
+        $mysqli->query("ALTER TABLE juego_paquetes ADD COLUMN centralone_product_id VARCHAR(64) NULL AFTER recargasamerica_tipo");
+    }
+}
+
 function ensure_juego_paquetes_info_html_column(mysqli $mysqli): void {
     $result = $mysqli->query("SHOW COLUMNS FROM juego_paquetes LIKE 'info_html'");
     if (!($result instanceof mysqli_result) || $result->num_rows === 0) {
@@ -365,7 +406,7 @@ function admin_package_save_discord_catalog(mysqli $mysqli, int $gameId, array $
 
 function admin_package_normalize_provider_value($value): string {
     $normalized = strtolower(trim((string) $value));
-    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica', 'conec', 'baul'], true) ? $normalized : '';
+    return in_array($normalized, ['giftven', 'discord', 'free_fire', 'fullimpulso', 'recargasamerica', 'conec', 'baul', 'centralone'], true) ? $normalized : '';
 }
 
 function admin_package_resolve_provider(array $package, array $game, bool $discordFeatureEnabled): string {
@@ -393,6 +434,25 @@ function admin_package_resolve_provider(array $package, array $game, bool $disco
     return '';
 }
 
+// Selector "agregar producto de Central One" — buscador con JS (fetch a
+// ?buscar_centralone=1&q=...), nunca un <select> con el catálogo completo
+// (serían ~8000 <option>): el cliente pidió explícitamente que se agregue
+// de a un producto por vez. $fieldName es el nombre del campo oculto
+// ('centralone_product_id' en crear, 'edit_centralone_product_id' en
+// editar). $selectedInfo es el producto ya elegido (o null).
+function admin_package_centralone_picker_html(string $fieldName, string $selectedProductId, ?array $selectedInfo): string {
+    $e = static fn (string $t): string => htmlspecialchars($t, ENT_QUOTES, 'UTF-8');
+    $resumen = $selectedInfo !== null
+        ? ($selectedInfo['name'] ?? $selectedProductId) . ' · ' . number_format((float) ($selectedInfo['reseller_price'] ?? 0), 4) . ' US$'
+            . (empty($selectedInfo['in_stock']) ? ' · SIN STOCK' : '')
+        : ($selectedProductId !== '' ? 'Producto ' . $selectedProductId . ' (no se pudo confirmar contra el catálogo)' : 'Ningún producto seleccionado todavía.');
+
+    return '<input type="hidden" name="' . $e($fieldName) . '" value="' . $e($selectedProductId) . '" data-co-picker-value data-package-source-required="1">'
+        . '<input type="text" class="form-control mb-2" placeholder="Busca por nombre, SKU o plataforma (ej. Free Fire, Netflix, Roblox)…" data-co-picker-search autocomplete="off">'
+        . '<div class="form-text" data-co-picker-selected style="color:#8be9fd;">' . $e($resumen) . '</div>'
+        . '<div class="list-group mt-2" data-co-picker-results style="max-height:280px;overflow:auto;"></div>';
+}
+
 function admin_package_provider_label(string $provider): string {
     return match ($provider) {
         'giftven' => 'TiendaGiftVen',
@@ -402,6 +462,7 @@ function admin_package_provider_label(string $provider): string {
         'recargasamerica' => 'RecargasAmérica',
         'conec' => 'CONEC',
         'baul' => 'Baúl de Giftcards',
+        'centralone' => 'Central One',
         default => 'Manual',
     };
 }
@@ -446,6 +507,21 @@ function admin_package_provider_reference_text(string $provider, array $package,
     if ($provider === 'conec') {
         $apiProductId = (int) ($package['paquete_api'] ?? 0);
         return $apiProductId > 0 ? 'CONEC · ID ' . $apiProductId : '—';
+    }
+
+    if ($provider === 'centralone') {
+        $productId = trim((string) ($package['centralone_product_id'] ?? ''));
+        if ($productId === '') {
+            return '—';
+        }
+        try {
+            $producto = centralone_api_fetch_catalog_product($productId);
+        } catch (Throwable $e) {
+            $producto = null;
+        }
+        return $producto !== null
+            ? ($producto['name'] ?? $productId) . ' · ' . number_format((float) ($producto['reseller_price'] ?? 0), 4) . ' US$'
+            : 'Producto ' . $productId . ' (no se pudo consultar el catálogo)';
     }
 
     if ($provider === 'baul') {
@@ -883,6 +959,7 @@ ensure_juego_paquetes_paquete_api_column($mysqli);
 ensure_juego_paquetes_api_provider_column($mysqli);
 ensure_juego_paquetes_api_source_key_column($mysqli);
 ensure_juego_paquetes_recargasamerica_tipo_column($mysqli);
+ensure_juego_paquetes_centralone_product_id_column($mysqli);
 ensure_juego_paquetes_info_html_column($mysqli);
 ensure_juego_paquetes_cantidad_text_column($mysqli);
 ensure_juego_paquetes_orden_column($mysqli);
@@ -1101,6 +1178,10 @@ if ($conecActiveSlots > 1) {
 // configurada siempre se guardó en este sistema (api_provider vacío), no un valor nuevo.
 $packageSourceItems[] = ['value' => 'manual', 'provider' => '', 'source_key' => '', 'label' => admin_package_provider_label('manual')];
 $packageSourceItems[] = ['value' => 'baul', 'provider' => 'baul', 'source_key' => '', 'label' => admin_package_provider_label('baul')];
+// Central One: mismo criterio que Baúl (siempre disponible, sin depender de
+// una categoría configurada por juego) — búsqueda libre sobre el catálogo
+// completo, de a un producto por vez (pedido explícito del cliente).
+$packageSourceItems[] = ['value' => 'centralone', 'provider' => 'centralone', 'source_key' => '', 'label' => admin_package_provider_label('centralone')];
 foreach ($packageSourceItems as $item) {
     $packageSourceValueMap[$item['value']] = ['provider' => $item['provider'], 'source_key' => $item['source_key']];
 }
@@ -1699,6 +1780,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
         $edit_recargasamerica_tipo = $raEditSelectedProduct ? recargasamerica_catalog_tipo_for_product($raEditSelectedProduct) : '';
     }
     $edit_baul_fallback_chain_json = admin_package_baul_fallback_chain_from_post('edit_', $recargasAmericaProductsById);
+    $edit_centralone_product_id = $edit_provider === 'centralone' ? trim((string) ($_POST['edit_centralone_product_id'] ?? '')) : '';
     $edit_vender_cuenta = $accountSaleFeatureEnabled && isset($_POST['edit_vender_cuenta']) ? 1 : 0;
     $edit_cuenta_texto = $accountSaleFeatureEnabled
         ? package_account_sales_normalize_text((string) ($_POST['edit_cuenta_texto'] ?? ''))
@@ -1755,6 +1837,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
     if ($edit_provider === 'baul' && $edit_paquete_api === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el producto del Baúl para este paquete.']);
     }
+    if ($edit_provider === 'centralone' && $edit_centralone_product_id === '') {
+        admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Busca y selecciona el producto de Central One para este paquete.']);
+    }
     if ($edit_imagen_icono) {
         $stmt = $mysqli->prepare("UPDATE juego_paquetes SET nombre=?, clave=?, monto_ff=NULLIF(?, ''), paquete_api=NULLIF(?, ''), api_provider=?, api_source_key=NULLIF(?, ''), recargasamerica_tipo=NULLIF(?, ''), vender_cuenta=?, cuenta_texto=NULLIF(?, ''), cantidad=?, precio=?, win_points_reward=?, imagen_icono=?, activo=?, destacado=?, descuento_destacado=?, orden_gg=?, precio_manual_override=? WHERE id=?");
         $stmt->bind_param('sssssssissdisiiiiii', $edit_nombre, $edit_clave, $edit_monto_ff, $edit_paquete_api, $edit_provider, $edit_api_source_key, $edit_recargasamerica_tipo, $edit_vender_cuenta, $edit_cuenta_texto, $edit_cantidad, $edit_precio, $edit_win_points_reward, $edit_imagen_icono, $edit_activo, $edit_destacado, $edit_descuento_destacado, $edit_orden_gg, $edit_precio_manual_override, $edit_id);
@@ -1769,6 +1854,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_paquete_id'])) {
         $stmtBaulFb->bind_param('si', $edit_baul_fallback_chain_json, $edit_id);
         $stmtBaulFb->execute();
         $stmtBaulFb->close();
+    }
+    // Central One: columna aparte (paquete_api sigue siendo INT, no puede
+    // guardar el UUID del producto). NULLIF para limpiarla si se cambia de
+    // origen a otro proveedor.
+    $stmtCentralOne = $mysqli->prepare("UPDATE juego_paquetes SET centralone_product_id=NULLIF(?,'') WHERE id=?");
+    if ($stmtCentralOne) {
+        $stmtCentralOne->bind_param('si', $edit_centralone_product_id, $edit_id);
+        $stmtCentralOne->execute();
+        $stmtCentralOne->close();
     }
     package_set_category($mysqli, $edit_id, $edit_categoria_paquete_id);
     levelpass_set_key($mysqli, $edit_id, $edit_levelpass_key);
@@ -1853,6 +1947,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
         $recargasamerica_tipo = $raSelectedProduct ? recargasamerica_catalog_tipo_for_product($raSelectedProduct) : '';
     }
     $baul_fallback_chain_json = admin_package_baul_fallback_chain_from_post('', $recargasAmericaProductsById);
+    $centralone_product_id = $provider === 'centralone' ? trim((string) ($_POST['centralone_product_id'] ?? '')) : '';
     $vender_cuenta = $accountSaleFeatureEnabled && isset($_POST['vender_cuenta']) ? 1 : 0;
     $cuenta_texto = $accountSaleFeatureEnabled
         ? package_account_sales_normalize_text((string) ($_POST['cuenta_texto'] ?? ''))
@@ -1905,11 +2000,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nombre'], $_POST['cla
     if ($provider === 'baul' && $paquete_api === '') {
         admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Selecciona el producto del Baúl para este paquete.']);
     }
+    if ($provider === 'centralone' && $centralone_product_id === '') {
+        admin_packages_redirect($adminPackageBaseUrl . '/' . $juego_id, ['package_error' => 'Busca y selecciona el producto de Central One para este paquete.']);
+    }
     $stmt = $mysqli->prepare("INSERT INTO juego_paquetes (juego_id, nombre, clave, monto_ff, paquete_api, api_provider, api_source_key, recargasamerica_tipo, vender_cuenta, cuenta_texto, cantidad, precio, win_points_reward, imagen_icono, activo, orden, destacado, descuento_destacado, orden_gg, precio_manual_override) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     $stmt->bind_param('isssssssissdisiiiiii', $juego_id, $nombre, $clave, $monto_ff, $paquete_api, $provider, $api_source_key, $recargasamerica_tipo, $vender_cuenta, $cuenta_texto, $cantidad, $precio, $win_points_reward, $imagen_icono, $activo, $orden, $destacado, $descuento_destacado, $orden_gg, $precio_manual_override);
     $stmt->execute();
     $newPackageId = (int) $mysqli->insert_id;
     $stmt->close();
+    $stmtCentralOne = $mysqli->prepare("UPDATE juego_paquetes SET centralone_product_id=NULLIF(?,'') WHERE id=?");
+    if ($stmtCentralOne) {
+        $stmtCentralOne->bind_param('si', $centralone_product_id, $newPackageId);
+        $stmtCentralOne->execute();
+        $stmtCentralOne->close();
+    }
     $stmtBaulFb = $mysqli->prepare("UPDATE juego_paquetes SET baul_fallback_chain_json=NULLIF(?,'') WHERE id=?");
     if ($stmtBaulFb) {
         $stmtBaulFb->bind_param('si', $baul_fallback_chain_json, $newPackageId);
@@ -2492,6 +2596,10 @@ $0.41"><?= htmlspecialchars($discordCatalogRaw, ENT_QUOTES, 'UTF-8') ?></textare
                 proveedor configurado, no hay productos entre los que elegir para esa opción). */ ?>
         <div class="col-12" data-package-source-panel="baul">
             <?= admin_package_baul_fallback_editor_html('', 0, $baulFallbackGiftvenOptions, $baulFallbackRecargasamericaOptions, $baulFallbackConecOptions) ?>
+        </div>
+        <div class="col-12" data-package-source-panel="centralone">
+            <label class="form-label text-neon">Producto de Central One</label>
+            <?= admin_package_centralone_picker_html('centralone_product_id', '', null) ?>
         </div>
         <?php if ($usesLegacyFreeFire): ?>
             <div class="col-md-6" data-package-source-panel="free_fire">
@@ -3400,6 +3508,21 @@ if (isset($_GET['editar'])) {
         </div>
         <div class="mb-3" data-package-source-panel="baul">
             <?= admin_package_baul_fallback_editor_html('edit_', (int) ($paq_edit['id'] ?? 0), $baulFallbackGiftvenOptions, $baulFallbackRecargasamericaOptions, $baulFallbackConecOptions, $paq_edit) ?>
+        </div>
+        <?php
+            $paqEditCentralOneProductId = trim((string) ($paq_edit['centralone_product_id'] ?? ''));
+            $paqEditCentralOneInfo = null;
+            if ($paqEditCentralOneProductId !== '') {
+                try {
+                    $paqEditCentralOneInfo = centralone_api_fetch_catalog_product($paqEditCentralOneProductId);
+                } catch (Throwable $e) {
+                    $paqEditCentralOneInfo = null;
+                }
+            }
+        ?>
+        <div class="mb-3" data-package-source-panel="centralone">
+            <label class="form-label text-neon">Producto de Central One</label>
+            <?= admin_package_centralone_picker_html('edit_centralone_product_id', $paqEditCentralOneProductId, $paqEditCentralOneInfo) ?>
         </div>
         <?php if ($discordActiveSlots > 1): ?>
             <?php if ($hasDiscordCatalog): ?>
@@ -4646,11 +4769,90 @@ if (typeof window.bindPackageSourceForms !== 'function') {
     };
 }
 
+if (typeof window.bindCentralOnePickers !== 'function') {
+    // Buscador "agregar producto de Central One" — de a uno por vez (nunca
+    // una lista con el catálogo completo). Cada panel [data-package-source-panel="centralone"]
+    // trae su propio input de búsqueda + campo oculto + lista de resultados.
+    window.bindCentralOnePickers = function(root = document) {
+        root.querySelectorAll('[data-package-source-panel="centralone"]').forEach((panel) => {
+            const searchInput = panel.querySelector('[data-co-picker-search]');
+            const hiddenInput = panel.querySelector('[data-co-picker-value]');
+            const resultsBox = panel.querySelector('[data-co-picker-results]');
+            const selectedBox = panel.querySelector('[data-co-picker-selected]');
+            if (!searchInput || !hiddenInput || !resultsBox || searchInput.dataset.boundCoPicker === '1') {
+                return;
+            }
+            searchInput.dataset.boundCoPicker = '1';
+
+            let debounceTimer = null;
+            let activeRequest = null;
+
+            function renderResults(items) {
+                resultsBox.innerHTML = '';
+                if (!items.length) {
+                    resultsBox.innerHTML = '<div class="list-group-item" style="background:#1a2231;color:#8be9fd;border-color:#2d3b52;">Sin resultados.</div>';
+                    return;
+                }
+                items.forEach((item) => {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'list-group-item list-group-item-action';
+                    button.style.background = '#1a2231';
+                    button.style.color = '#22d3ee';
+                    button.style.borderColor = '#2d3b52';
+                    const precio = parseFloat(item.price || '0').toFixed(4);
+                    const stockTxt = item.in_stock ? '' : ' · SIN STOCK';
+                    const targetTxt = item.requires_target ? (' · pide: ' + item.target_fields.join(', ')) : '';
+                    button.textContent = item.name + ' (' + item.sku + ') · ' + precio + ' US$' + stockTxt + targetTxt;
+                    button.addEventListener('click', function() {
+                        hiddenInput.value = item.product_id;
+                        if (selectedBox) {
+                            selectedBox.textContent = item.name + ' · ' + precio + ' US$' + stockTxt;
+                        }
+                        resultsBox.innerHTML = '';
+                        searchInput.value = '';
+                        hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    });
+                    resultsBox.appendChild(button);
+                });
+            }
+
+            searchInput.addEventListener('input', function() {
+                const q = searchInput.value.trim();
+                window.clearTimeout(debounceTimer);
+                if (q.length < 2) {
+                    resultsBox.innerHTML = '';
+                    return;
+                }
+                debounceTimer = window.setTimeout(function() {
+                    if (activeRequest) {
+                        activeRequest.abort();
+                    }
+                    const controller = new AbortController();
+                    activeRequest = controller;
+                    resultsBox.innerHTML = '<div class="list-group-item" style="background:#1a2231;color:#8be9fd;border-color:#2d3b52;">Buscando…</div>';
+                    fetch('?buscar_centralone=1&q=' + encodeURIComponent(q), { signal: controller.signal })
+                        .then((r) => r.json())
+                        .then((data) => {
+                            if (!data.ok) {
+                                resultsBox.innerHTML = '<div class="list-group-item text-danger" style="background:#1a2231;border-color:#2d3b52;">' + (data.message || 'Error al buscar.') + '</div>';
+                                return;
+                            }
+                            renderResults(data.items || []);
+                        })
+                        .catch(() => {});
+                }, 350);
+            });
+        });
+    };
+}
+
 window.bindPackageFeatureIconPreview();
 window.bindPackageFeatureApplyButtons();
 window.bindPackageAccountSaleScopes();
 window.bindDiscordCatalogSelects();
 window.bindPackageSourceForms();
+window.bindCentralOnePickers();
 
 const packageFeatureApplyReplaceButton = document.getElementById('package-feature-apply-replace');
 const packageFeatureApplyAddButton = document.getElementById('package-feature-apply-add');
