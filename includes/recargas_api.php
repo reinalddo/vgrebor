@@ -29,6 +29,27 @@ function recargas_api_response_snippet(?string $body, int $limit = 240): string 
     return substr($body, 0, $limit);
 }
 
+/**
+ * Error HTTP (4xx/5xx) de GiftVen que SÍ trae un cuerpo JSON. Conserva ese
+ * cuerpo porque, según su documentación, una respuesta de error puede traer
+ * "pedido_id" y "reembolsado": si GiftVen ya creó el pedido y no devolvió el
+ * saldo, el resultado todavía puede llegar después (caso real: "Connection
+ * aborted / ConnectionResetError(104)" con el pedido entregado igual minutos
+ * más tarde). Antes solo se guardaba el texto del error y se perdía el
+ * pedido_id, así que ni el webhook ni la sincronización podían reconocerlo.
+ * Hereda de RuntimeException: todo lo que ya la atrapaba sigue igual.
+ */
+class RecargasApiHttpException extends RuntimeException {
+    public int $httpStatus;
+    public array $responseData;
+
+    public function __construct(string $message, int $httpStatus, array $responseData) {
+        parent::__construct($message);
+        $this->httpStatus = $httpStatus;
+        $this->responseData = $responseData;
+    }
+}
+
 function recargas_api_invalid_json_exception(string $url, ?int $status, ?string $body): RuntimeException {
     $statusLabel = $status !== null && $status > 0 ? (string) $status : 'n/a';
     $snippet = recargas_api_response_snippet($body);
@@ -248,7 +269,7 @@ function recargas_api_http_post_json(string $url, array $payload, array $headers
     }
 
     if (isset($status) && $status >= 400) {
-        throw new RuntimeException(recargas_api_error_message_from_response($data, $status));
+        throw new RecargasApiHttpException(recargas_api_error_message_from_response($data, $status), (int) $status, $data);
     }
 
     return $data;
@@ -671,7 +692,9 @@ function recargas_api_purchase_is_completed(array $response): bool {
         }
     }
 
-    return false;
+    // Mismo extractor amplio que se usa para mostrar el código (otros nombres
+    // de campo, dentro de "pedido"/"data", etc.).
+    return provider_extract_delivered_codes($response) !== [];
 }
 
 function recargas_api_purchase_is_accepted(array $response): bool {
@@ -696,6 +719,364 @@ function recargas_api_purchase_is_accepted(array $response): bool {
         || str_contains($message, 'en proceso')
         || str_contains($message, 'se confirmara automaticamente')
         || str_contains($message, 'se confirmará automáticamente');
+}
+
+// ── Códigos entregados (gift cards, PIN, seriales) ────────────────────────
+// Vivían en api/pedidos.php; se movieron aquí (mismo arreglo que ya se hizo en
+// virtualgamingdanisa, 2026-10-11/13) para que "Mis pedidos" del cliente, el
+// panel admin y la sincronización oportunista usen el MISMO extractor.
+//
+// Claves de primer nivel donde GiftVen ha entregado códigos. Amplia a
+// propósito: el proveedor ha renombrado estos campos sin aviso (Roblox, por
+// ejemplo, entrega PIN + serial con nombres variables). 'code' y 'clave' NO
+// van en primer nivel porque ahí suelen ser códigos de ERROR (ej.
+// {"ok":false,"code":"SALDO_INSUFICIENTE"}); solo se aceptan dentro de un
+// objeto de código (lista anidada).
+function provider_delivered_code_top_keys(): array {
+    return [
+        'codigos', 'codigos_entregados', 'codigo_entregado',
+        'codigo', 'pin', 'codigo_pin', 'pin_code',
+        'serial', 'numero_serial', 'serial_number', 'codigo_serial',
+        'voucher', 'gift_code', 'giftcard', 'redeem_code', 'codigo_canje',
+    ];
+}
+
+function provider_delivered_code_nested_keys(): array {
+    return array_merge(provider_delivered_code_top_keys(), ['code', 'clave', 'sn']);
+}
+
+// Envoltorios en los que el proveedor puede anidar el detalle del pedido.
+function provider_delivered_code_wrapper_keys(): array {
+    return ['pedido', 'data', 'resultado', 'result', 'respuesta', 'response', 'detalle', 'orden', 'order', 'entrega'];
+}
+
+/** Rol de una clave, para anteponer "PIN:"/"Serial:" cuando llegan ambos. */
+function provider_delivered_code_role_for_key(string $key): string {
+    return match (strtolower(trim($key))) {
+        'pin', 'codigo_pin', 'pin_code' => 'PIN',
+        'serial', 'numero_serial', 'serial_number', 'sn', 'codigo_serial' => 'Serial',
+        default => '',
+    };
+}
+
+function provider_is_sequential_list(array $value): bool {
+    $expectedIndex = 0;
+    foreach (array_keys($value) as $key) {
+        if ($key !== $expectedIndex) {
+            return false;
+        }
+
+        $expectedIndex++;
+    }
+
+    return true;
+}
+
+/** Devuelve pares [valor => rol] a partir de un valor escalar, lista u objeto. */
+function provider_stringify_delivered_code_value_with_role($value, string $roleHint = ''): array {
+    if (is_array($value)) {
+        $codes = [];
+        foreach (provider_delivered_code_nested_keys() as $preferredKey) {
+            if (!array_key_exists($preferredKey, $value)) {
+                continue;
+            }
+
+            $role = provider_delivered_code_role_for_key($preferredKey);
+            foreach (provider_stringify_delivered_code_value_with_role($value[$preferredKey], $role !== '' ? $role : $roleHint) as $candidate => $candidateRole) {
+                $codes[$candidate] = $candidateRole;
+            }
+        }
+
+        if (!empty($codes)) {
+            return $codes;
+        }
+
+        if (!provider_is_sequential_list($value)) {
+            $parts = [];
+            foreach ($value as $key => $item) {
+                if (is_array($item)) {
+                    continue;
+                }
+
+                $normalizedItem = trim((string) $item);
+                if ($normalizedItem === '') {
+                    continue;
+                }
+
+                $label = trim((string) $key);
+                $parts[] = $label !== '' ? $label . ': ' . $normalizedItem : $normalizedItem;
+            }
+
+            if (!empty($parts)) {
+                return [implode(' | ', $parts) => $roleHint];
+            }
+        }
+
+        foreach ($value as $item) {
+            foreach (provider_stringify_delivered_code_value_with_role($item, $roleHint) as $candidate => $candidateRole) {
+                $codes[$candidate] = $candidateRole;
+            }
+        }
+
+        return $codes;
+    }
+
+    if (is_bool($value) || $value === null) {
+        return [];
+    }
+
+    $normalized = trim((string) $value);
+    return $normalized !== '' ? [$normalized => $roleHint] : [];
+}
+
+function provider_stringify_delivered_code_value($value): array {
+    return array_keys(provider_stringify_delivered_code_value_with_role($value));
+}
+
+/**
+ * Pares [valor => rol] de todos los códigos entregados en una respuesta del
+ * proveedor. Busca en primer nivel, dentro de los envoltorios habituales
+ * (pedido, data, ...) y dentro de los intentos de una compra por cantidad.
+ */
+function provider_extract_delivered_codes_with_roles(array $detail, int $depth = 0): array {
+    $codes = [];
+
+    foreach (provider_delivered_code_top_keys() as $key) {
+        if (!array_key_exists($key, $detail)) {
+            continue;
+        }
+
+        foreach (provider_stringify_delivered_code_value_with_role($detail[$key], provider_delivered_code_role_for_key($key)) as $candidate => $role) {
+            $codes[$candidate] = $role;
+        }
+    }
+
+    if ($depth >= 3) {
+        return $codes;
+    }
+
+    foreach (provider_delivered_code_wrapper_keys() as $wrapperKey) {
+        if (isset($detail[$wrapperKey]) && is_array($detail[$wrapperKey]) && !provider_is_sequential_list($detail[$wrapperKey])) {
+            foreach (provider_extract_delivered_codes_with_roles($detail[$wrapperKey], $depth + 1) as $candidate => $role) {
+                $codes[$candidate] = $role;
+            }
+        }
+    }
+
+    if (isset($detail['intentos']) && is_array($detail['intentos'])) {
+        foreach ($detail['intentos'] as $attempt) {
+            if (is_array($attempt) && isset($attempt['payload']) && is_array($attempt['payload'])) {
+                foreach (provider_extract_delivered_codes_with_roles($attempt['payload'], $depth + 1) as $candidate => $role) {
+                    $codes[$candidate] = $role;
+                }
+            }
+        }
+    }
+
+    return $codes;
+}
+
+function provider_extract_delivered_codes(array $detail): array {
+    return array_keys(provider_extract_delivered_codes_with_roles($detail));
+}
+
+function provider_delivered_code_text(array $detail): string {
+    $codesWithRoles = provider_extract_delivered_codes_with_roles($detail);
+    if (empty($codesWithRoles)) {
+        return '';
+    }
+
+    // La etiqueta "PIN:"/"Serial:" solo se agrega cuando hay varios códigos y
+    // alguno tiene rol conocido (Roblox: PIN + serial). Un único código
+    // genérico se guarda tal cual, como siempre.
+    $hasKnownRole = count($codesWithRoles) > 1 && count(array_filter($codesWithRoles, static fn ($role) => $role !== '')) > 0;
+    $lines = [];
+    foreach ($codesWithRoles as $value => $role) {
+        $lines[] = ($hasKnownRole && $role !== '') ? $role . ': ' . $value : (string) $value;
+    }
+
+    return implode("\n", $lines);
+}
+
+/**
+ * Código entregado de un pedido para mostrarlo (cliente, admin, correo).
+ * Primero la columna; si está vacía (pedidos guardados antes de ampliar el
+ * extractor, o una sincronización vieja que la borró), se rescata de la
+ * respuesta guardada del proveedor y, por último, del historial.
+ */
+function recargas_api_order_delivered_code(array $order): string {
+    $stored = trim((string) ($order['recargas_api_codigo_entregado'] ?? ''));
+    if ($stored !== '') {
+        return $stored;
+    }
+
+    $payload = json_decode((string) ($order['ff_api_payload'] ?? ''), true);
+    if (is_array($payload)) {
+        $fromPayload = provider_delivered_code_text($payload);
+        if ($fromPayload !== '') {
+            return $fromPayload;
+        }
+    }
+
+    $history = json_decode((string) ($order['recargas_api_historial_json'] ?? ''), true);
+    if (is_array($history)) {
+        foreach (array_reverse($history) as $entry) {
+            $entryCode = is_array($entry) ? trim((string) ($entry['provider_code'] ?? '')) : '';
+            if ($entryCode !== '') {
+                return $entryCode;
+            }
+        }
+    }
+
+    return '';
+}
+
+/**
+ * Consulta GET /pedido/:id y devuelve el código entregado (texto, un código
+ * por línea) más el detalle. Según la documentación de GiftVen
+ * (tiendagiftven.tech/api/docs) este es el ÚNICO lugar fiable del código
+ * después de la compra: el webhook NO lo trae (solo pedido_id, estado,
+ * referencia) y "codigo_entregado" llega con los códigos separados por "\n".
+ */
+function recargas_api_lookup_delivered_code(string $providerOrderId, int $attempts = 1, int $delaySeconds = 0): array {
+    $providerOrderId = trim($providerOrderId);
+    $result = ['code' => '', 'detail' => null];
+    if ($providerOrderId === '') {
+        return $result;
+    }
+
+    $attempts = max(1, $attempts);
+    for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+        try {
+            $response = recargas_api_fetch_order_detail($providerOrderId);
+            $detail = is_array($response['pedido'] ?? null) ? $response['pedido'] : $response;
+            $result['detail'] = $detail;
+            $code = provider_delivered_code_text($detail);
+            if ($code !== '') {
+                $result['code'] = $code;
+                return $result;
+            }
+            // Cancelado, o completado sin código (una recarga, no una gift
+            // card): reintentar no va a traer ningún código.
+            if (in_array(strtolower(trim((string) ($detail['estado'] ?? ''))), ['cancelado', 'failed', 'rechazado', 'completado', 'completed'], true)) {
+                return $result;
+            }
+        } catch (Throwable $e) {
+            error_log('TVG recargas_api_lookup_delivered_code #' . $providerOrderId . ': ' . $e->getMessage());
+        }
+
+        if ($attempt < $attempts && $delaySeconds > 0) {
+            sleep($delaySeconds);
+        }
+    }
+
+    return $result;
+}
+
+/**
+ * Autorreparación: pedido "enviado" de GiftVen sin código guardado (gift card
+ * cuyo pedido se cerró por webhook, compra anterior a este arreglo, etc.).
+ * Busca el código en GiftVen y lo guarda. Devuelve el pedido actualizado; si
+ * encontró un código nuevo, trae '_code_backfilled' => true.
+ *
+ * Como máximo una consulta cada 2 minutos por pedido (freno en SQL sobre
+ * recargas_api_ultimo_check). Si GiftVen confirma el pedido como completado
+ * SIN código, es una recarga (no una gift card): se anota 'code_lookup' en el
+ * historial y ese pedido no se vuelve a consultar.
+ */
+function recargas_api_order_code_lookup_done(array $order): bool {
+    $history = json_decode((string) ($order['recargas_api_historial_json'] ?? ''), true);
+    if (!is_array($history)) {
+        return false;
+    }
+    foreach ($history as $entry) {
+        if (is_array($entry) && ($entry['source'] ?? '') === 'code_lookup') {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function recargas_api_order_needs_code_backfill(array $order): bool {
+    $provider = strtolower(trim((string) ($order['api_provider'] ?? '')));
+    // Solo GiftVen: recargas_api_pedido_id es una columna genérica que también
+    // usan RecargasAmérica, CONEC y Central One (con otros ids y otras APIs).
+    if ($provider !== '' && $provider !== 'giftven') {
+        return false;
+    }
+
+    return (int) ($order['id'] ?? 0) > 0
+        && trim((string) ($order['recargas_api_pedido_id'] ?? '')) !== ''
+        && (string) ($order['estado'] ?? '') === 'enviado'
+        && (int) ($order['vender_cuenta'] ?? 0) !== 1
+        && recargas_api_order_delivered_code($order) === ''
+        && !recargas_api_order_code_lookup_done($order);
+}
+
+function recargas_api_backfill_delivered_code(mysqli $mysqli, array $order): array {
+    if (!recargas_api_order_needs_code_backfill($order)) {
+        return $order;
+    }
+    $orderId = (int) $order['id'];
+    $providerOrderId = trim((string) $order['recargas_api_pedido_id']);
+
+    // Freno en SQL (no en PHP: NOW() de MySQL y time() de PHP pueden estar en
+    // zonas distintas). Atómico: si dos visitas llegan a la vez, solo una
+    // consulta a GiftVen.
+    $touch = $mysqli->prepare("UPDATE pedidos SET recargas_api_ultimo_check = NOW() WHERE id = ? AND (recargas_api_ultimo_check IS NULL OR recargas_api_ultimo_check < (NOW() - INTERVAL 2 MINUTE)) LIMIT 1");
+    if (!$touch) {
+        return $order;
+    }
+    $touch->bind_param('i', $orderId);
+    $touch->execute();
+    $claimed = $touch->affected_rows > 0;
+    $touch->close();
+    if (!$claimed) {
+        return $order;
+    }
+
+    $lookup = recargas_api_lookup_delivered_code($providerOrderId);
+    $code = $lookup['code'];
+    if ($code === '') {
+        $detailStatus = is_array($lookup['detail']) ? strtolower(trim((string) ($lookup['detail']['estado'] ?? ''))) : '';
+        if (in_array($detailStatus, ['completado', 'completed'], true)) {
+            // Completado sin código = recarga. Se anota para no repetir.
+            $history = json_decode((string) ($order['recargas_api_historial_json'] ?? ''), true);
+            $history = is_array($history) ? array_values(array_filter($history, 'is_array')) : [];
+            $history[] = [
+                'recorded_at' => date('Y-m-d H:i:s'),
+                'source' => 'code_lookup',
+                'provider_status' => $detailStatus,
+                'local_status' => 'enviado',
+                'provider_message' => 'Completado sin código (recarga, no gift card).',
+                'provider_reference' => '',
+            ];
+            $historyJson = json_encode(array_slice($history, -5), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $mark = $mysqli->prepare('UPDATE pedidos SET recargas_api_historial_json = ? WHERE id = ? LIMIT 1');
+            if ($mark && is_string($historyJson)) {
+                $mark->bind_param('si', $historyJson, $orderId);
+                $mark->execute();
+                $mark->close();
+                $order['recargas_api_historial_json'] = $historyJson;
+            }
+        }
+        return $order;
+    }
+
+    $save = $mysqli->prepare("UPDATE pedidos SET recargas_api_codigo_entregado = ? WHERE id = ? AND (recargas_api_codigo_entregado IS NULL OR recargas_api_codigo_entregado = '') LIMIT 1");
+    if ($save) {
+        $save->bind_param('si', $code, $orderId);
+        $save->execute();
+        $saved = $save->affected_rows > 0;
+        $save->close();
+        if ($saved) {
+            $order['recargas_api_codigo_entregado'] = $code;
+            $order['_code_backfilled'] = true;
+        }
+    }
+
+    return $order;
 }
 
 /**
@@ -728,11 +1109,23 @@ function recargas_api_sync_pending_orders(mysqli $mysqli, int $limit = 5): void 
     store_config_upsert($throttleKey, (string) time());
 
     try {
+        // Antes: "ORDER BY id ASC LIMIT 5" — siempre los 5 pendientes MÁS
+        // VIEJOS. Si 5 pedidos viejos se quedaban atascados para siempre (nunca
+        // completados en GiftVen), ocupaban esos 5 lugares en cada pasada y los
+        // pedidos nuevos nunca se revisaban. Ahora: solo de los últimos 7 días
+        // (los anteriores son para revisión manual), solo GiftVen (la columna
+        // es compartida con RecargasAmérica/CONEC/Central One, que tienen su
+        // propio seguimiento), primero los que llevan más tiempo sin revisarse,
+        // y nunca uno revisado hace menos de 1 minuto.
         $stmt = $mysqli->prepare(
             "SELECT id FROM pedidos
              WHERE estado = 'pagado'
                AND recargas_api_pedido_id IS NOT NULL AND recargas_api_pedido_id <> ''
-             ORDER BY id ASC LIMIT ?"
+               AND (api_provider IS NULL OR api_provider = '' OR api_provider = 'giftven')
+               AND creado_en >= (NOW() - INTERVAL 7 DAY)
+               AND (recargas_api_ultimo_check IS NULL OR recargas_api_ultimo_check < (NOW() - INTERVAL 1 MINUTE))
+             ORDER BY (recargas_api_ultimo_check IS NULL) DESC, recargas_api_ultimo_check ASC, id DESC
+             LIMIT ?"
         );
         if (!$stmt) {
             return;
@@ -791,7 +1184,19 @@ function recargas_api_sync_single_pending_order(mysqli $mysqli, int $orderId): v
         $payloadJson = '{}';
     }
 
-    if (!recargas_api_purchase_is_completed($detail)) {
+    // 🐛 Antes se usaba recargas_api_purchase_is_completed($detail), que exige
+    // primero que la respuesta "parezca aceptada" (campo ok, referencia o
+    // pedido_id). Pero GET /pedido/:id devuelve {"ok":true,"pedido":{id,
+    // producto, ..., codigo_entregado, estado, fecha_pedido}} (doc oficial de
+    // GiftVen): dentro de "pedido" no hay ni ok, ni referencia, ni pedido_id.
+    // Resultado: aunque GiftVen dijera "completado", esta sincronización NUNCA
+    // pasaba el pedido a 'enviado' — los pedidos que GiftVen terminaba más
+    // tarde se quedaban en "Verificado" para siempre si el webhook no llegaba.
+    // Ahora se decide por el estado real que informa GiftVen.
+    $isCompleted = provider_status_to_local_status($statusText) === 'enviado'
+        || provider_extract_delivered_codes($detail) !== [];
+
+    if (!$isCompleted) {
         // Todavía no está completo: se actualiza solo el rastro de
         // seguimiento (para saber cuándo se revisó por última vez), sin
         // tocar 'estado'.
@@ -804,17 +1209,12 @@ function recargas_api_sync_single_pending_order(mysqli $mysqli, int $orderId): v
         return;
     }
 
-    $deliveredCode = '';
-    foreach (['codigo_entregado', 'codigo', 'pin', 'serial', 'voucher'] as $key) {
-        $value = trim((string) ($detail[$key] ?? ''));
-        if ($value !== '') {
-            $deliveredCode = $value;
-            break;
-        }
-    }
+    // Extractor completo (listas, PIN + serial, varios códigos por "\n").
+    $deliveredCode = provider_delivered_code_text($detail);
 
     $sentStatus = 'enviado';
-    $stmt2 = $mysqli->prepare("UPDATE pedidos SET recargas_api_estado = ?, recargas_api_codigo_entregado = ?, ff_api_payload = ?, recargas_api_ultimo_check = NOW(), estado = ? WHERE id = ? AND estado = 'pagado'");
+    // COALESCE: un código ya guardado nunca se borra con una consulta que no lo trae.
+    $stmt2 = $mysqli->prepare("UPDATE pedidos SET recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), ff_api_payload = ?, recargas_api_ultimo_check = NOW(), estado = ? WHERE id = ? AND estado = 'pagado'");
     if ($stmt2) {
         $stmt2->bind_param('ssssi', $statusText, $deliveredCode, $payloadJson, $sentStatus, $orderId);
         $stmt2->execute();

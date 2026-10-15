@@ -172,7 +172,9 @@ if ($action === 'orders') {
 
     if ($hasOwnerColumn) {
         $stmt = $mysqli->prepare(
-            "SELECT id, juego_nombre, paquete_nombre, paquete_cantidad, {$purchaseQuantitySelect}, moneda, precio, email, estado, creado_en, user_identifier, recargas_api_estado
+            "SELECT id, juego_nombre, paquete_nombre, paquete_cantidad, {$purchaseQuantitySelect}, moneda, precio, email, estado, creado_en, user_identifier, recargas_api_estado,
+                    api_provider, recargas_api_codigo_entregado, ff_api_payload, recargas_api_historial_json, recargas_api_pedido_id, recargas_api_ultimo_check,
+                    vender_cuenta, cuenta_entrega_texto
              FROM pedidos
              WHERE cliente_usuario_id = ?
                 OR (cliente_usuario_id IS NULL AND email = ?)
@@ -184,7 +186,9 @@ if ($action === 'orders') {
         $stmt->bind_param('is', $authUserId, $authUserEmail);
     } else {
         $stmt = $mysqli->prepare(
-            "SELECT id, juego_nombre, paquete_nombre, paquete_cantidad, {$purchaseQuantitySelect}, moneda, precio, email, estado, creado_en, user_identifier, recargas_api_estado
+            "SELECT id, juego_nombre, paquete_nombre, paquete_cantidad, {$purchaseQuantitySelect}, moneda, precio, email, estado, creado_en, user_identifier, recargas_api_estado,
+                    api_provider, recargas_api_codigo_entregado, ff_api_payload, recargas_api_historial_json, recargas_api_pedido_id, recargas_api_ultimo_check,
+                    vender_cuenta, cuenta_entrega_texto
              FROM pedidos
              WHERE email = ?
              ORDER BY creado_en DESC, id DESC"
@@ -197,8 +201,22 @@ if ($action === 'orders') {
 
     $stmt->execute();
     $result = $stmt->get_result();
+    // Gift cards de GiftVen enviadas sin código guardado: se recuperan de
+    // GiftVen al ver el historial, hasta 3 por carga (cada una con su propio
+    // freno de 2 minutos), para no demorar la página.
+    $codeBackfillBudget = 3;
     if ($result) {
         while ($row = $result->fetch_assoc()) {
+            if ($codeBackfillBudget > 0 && recargas_api_order_needs_code_backfill($row)) {
+                $codeBackfillBudget--;
+                $row = recargas_api_backfill_delivered_code($mysqli, $row);
+            }
+            $estadoPedido = (string) ($row['estado'] ?? 'pendiente');
+            // El código / los datos de la cuenta solo son de fiar una vez el
+            // pedido quedó realmente enviado — antes puede haber datos a medias.
+            $providerCode = $estadoPedido === 'enviado' ? recargas_api_order_delivered_code($row) : '';
+            $isAccountSale = (int) ($row['vender_cuenta'] ?? 0) === 1;
+            $accountText = $estadoPedido === 'enviado' && $isAccountSale ? trim((string) ($row['cuenta_entrega_texto'] ?? '')) : '';
             // "timeout_assumed_enviado" (ver includes/recargas_api.php): el
             // pedido se marcó 'enviado' por el patrón de timeout conocido,
             // no por una confirmación real todavía recibida de GiftVen — se
@@ -217,6 +235,8 @@ if ($action === 'orders') {
                 'creado_en' => (string) ($row['creado_en'] ?? ''),
                 'user_identifier' => (string) ($row['user_identifier'] ?? ''),
                 'timeout_assumed' => $isTimeoutAssumed,
+                'provider_code' => $providerCode,
+                'account_text' => $accountText,
             ];
         }
     }

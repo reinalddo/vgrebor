@@ -51,6 +51,20 @@ require_once __DIR__ . '/includes/db_connect.php';
 referidos_ensure_schema();
 
 $refCodigoInput = isset($data['ref']) ? strtoupper(trim((string) $data['ref'])) : '';
+// ref_field=1 lo manda registro.js cuando el formulario tiene el campo visible
+// "Código de invitación": ahí manda lo que la persona dejó escrito (si lo
+// borró a propósito, no se le vuelve a poner). Sin ese campo (un registro.js
+// viejo en caché del navegador), se usa como respaldo el código que
+// includes/header.php guardó en la sesión al llegar con ?ref=CODIGO — mismo
+// criterio que ya usaba google-callback.php. Antes este registro solo leía el
+// body, y un invitado que había entrado por el link en esta misma sesión
+// quedaba sin referidor si su localStorage estaba vacío.
+$refDesdeCampoVisible = !empty($data['ref_field']);
+if ($refCodigoInput === '' && !$refDesdeCampoVisible) {
+    tenant_start_session();
+    $refCodigoInput = strtoupper(trim((string) ($_SESSION['tvg_referido_codigo'] ?? '')));
+}
+$refCodigoInput = preg_replace('/[^A-Z0-9]/', '', $refCodigoInput) ?? '';
 $referidorUserId = null;
 if ($refCodigoInput !== '') {
     $refStmt = $mysqli->prepare('SELECT id FROM usuarios WHERE referido_codigo = ? LIMIT 1');
@@ -62,6 +76,14 @@ if ($refCodigoInput !== '') {
         if ($refRow) {
             $referidorUserId = (int) $refRow['id'];
         }
+    }
+    // El código ahora es un campo visible y editable del formulario: si no
+    // existe, se avisa para que lo corrija o lo borre, en vez de registrar en
+    // silencio sin referidor (la persona creería que quedó invitada). Solo
+    // cuando vino de ese campo: un código viejo de la sesión que ya no existe
+    // no debe impedir registrarse a quien ni lo ve.
+    if ($referidorUserId === null && $refDesdeCampoVisible) {
+        response(false, 'El código de invitación "' . $refCodigoInput . '" no existe. Revísalo o déjalo vacío para registrarte sin código.');
     }
 }
 

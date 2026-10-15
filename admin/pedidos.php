@@ -212,16 +212,8 @@ function order_provider_detail_lines(array $order): array {
     $lines[] = 'Respuesta API: ' . $providerMessage;
   }
 
-  $providerCode = trim((string) ($order['recargas_api_codigo_entregado'] ?? ''));
-  if ($providerCode !== '') {
-    // Cuando el proveedor entrega varios valores a la vez (ej. PIN + Serial de
-    // Roblox), cada uno queda en su propia línea del historial en vez de
-    // concatenarse en una sola.
-    $codeLines = array_filter(array_map('trim', explode("\n", $providerCode)));
-    foreach ($codeLines as $codeLine) {
-      $lines[] = 'Código entregado: ' . $codeLine;
-    }
-  }
+  // El código entregado ya no va aquí (salía en rojo, como un error): se
+  // muestra en su propio recuadro con order_delivered_code_block_html().
 
   $refundAmount = isset($order['recargas_api_reembolso']) ? (float) $order['recargas_api_reembolso'] : 0.0;
   if ($refundAmount > 0) {
@@ -229,6 +221,32 @@ function order_provider_detail_lines(array $order): array {
   }
 
   return $lines;
+}
+
+/**
+ * Recuadro verde con el código entregado (gift card, PIN + serial, etc.),
+ * con botón Copiar. Incluye el rescate desde la respuesta guardada del
+ * proveedor y el historial para pedidos cuyo código no quedó en la columna.
+ * Mismo diseño que en virtualgamingdanisa.
+ */
+function order_delivered_code_block_html(array $order): string {
+  $code = recargas_api_order_delivered_code($order);
+  if ($code === '') {
+    return '';
+  }
+
+  $lines = array_values(array_filter(array_map('trim', preg_split('/\r?\n/', $code) ?: []), static fn ($line) => $line !== ''));
+  $title = count($lines) > 1 ? 'Códigos entregados' : 'Código entregado';
+  $rows = '';
+  foreach ($lines as $line) {
+    $rows .= '<div style="font-family:Consolas,Menlo,monospace; font-weight:bold; color:#f8fafc; word-break:break-all;">' . htmlspecialchars($line, ENT_QUOTES, 'UTF-8') . '</div>';
+  }
+
+  return '<div style="margin-top:0.4rem; padding:0.45rem 0.6rem; border:1px solid #34d399; border-radius:10px; background:rgba(52,211,153,0.12);">'
+    . '<div style="color:#6ee7b7; font-size:0.8em; font-weight:bold; text-transform:uppercase; letter-spacing:0.05em;">' . $title . '</div>'
+    . $rows
+    . '<button type="button" class="btn btn-sm btn-outline-success mt-1 py-0 js-copy-delivered-code" data-code="' . htmlspecialchars(implode("\n", $lines), ENT_QUOTES, 'UTF-8') . '">Copiar</button>'
+    . '</div>';
 }
 
 function order_provider_history_lines(array $order, int $limit = 3): array {
@@ -900,6 +918,7 @@ function order_search_index(array $order): string {
     order_discord_status_label($order),
     implode(' ', $discordDetailLines),
     implode(' ', order_provider_detail_lines($order)),
+    (string) ($order['recargas_api_codigo_entregado'] ?? ''),
     implode(' ', order_provider_history_lines($order)),
     implode(' ', $binanceDetailLines),
     implode(' ', $binanceHistoryLines),
@@ -1032,6 +1051,25 @@ foreach ($statuses as $statusKey) {
   $statusTypes = $statusFilterParts['types'] . 'ii';
   $statusParams = array_merge($statusFilterParts['params'], [$ordersPerPage, $offset]);
   $ordersByStatus[$statusKey] = orders_admin_fetch_all($mysqli, $statusSql, $statusTypes, $statusParams);
+}
+
+// Gift cards de GiftVen "enviadas" sin código guardado (su webhook no trae el
+// código): se recupera de /pedido/:id para que el admin lo vea. Máximo 5 por
+// carga de página; cada pedido se consulta como mucho cada 2 minutos.
+$codeBackfillBudget = 5;
+foreach (($ordersByStatus['enviado'] ?? []) as $orderIndex => $sentOrder) {
+  if ($codeBackfillBudget <= 0) {
+    break;
+  }
+  if (!recargas_api_order_needs_code_backfill($sentOrder)) {
+    continue;
+  }
+  $codeBackfillBudget--;
+  try {
+    $ordersByStatus['enviado'][$orderIndex] = recargas_api_backfill_delivered_code($mysqli, $sentOrder);
+  } catch (Throwable $e) {
+    error_log('TVG admin backfill code #' . (int) ($sentOrder['id'] ?? 0) . ': ' . $e->getMessage());
+  }
 }
 ?>
 <main class="container-lg mt-5 mb-5 px-2">
@@ -1233,6 +1271,7 @@ foreach ($statuses as $statusKey) {
                     <td style="background:#181f2a; color:#00fff7;">
                       <div style="font-weight:bold;"><?= htmlspecialchars(order_meta_value(order_is_account_sale_admin($order) ? 'Entrega de cuenta' : ($order['user_identifier'] ?? ''))) ?></div>
                       <div style="color:#b2f6ff; margin-top:0.2rem;"><?= htmlspecialchars($order['email']) ?></div>
+                      <?= order_delivered_code_block_html($order) ?>
                       <?php foreach ($playerFieldLines as $playerFieldLine): ?>
                         <div style="color:#7dd3fc; margin-top:0.2rem; font-size:0.9em;"><?= htmlspecialchars($playerFieldLine) ?></div>
                       <?php endforeach; ?>
@@ -1348,6 +1387,7 @@ foreach ($statuses as $statusKey) {
                 </div>
                 <div style="margin-top:0.5em; color:#00fff7; font-size:1em;">Cliente: <span style="color:#b2f6ff; font-weight:bold;"><?= htmlspecialchars(order_meta_value(order_is_account_sale_admin($order) ? 'Entrega de cuenta' : ($order['user_identifier'] ?? ''))) ?></span></div>
                 <div style="color:#b2f6ff; font-size:1em;">Email: <?= htmlspecialchars($order['email']) ?></div>
+                <?= order_delivered_code_block_html($order) ?>
                 <?php foreach ($playerFieldLines as $playerFieldLine): ?>
                   <div style="color:#7dd3fc; font-size:0.95em;"><?= htmlspecialchars($playerFieldLine) ?></div>
                 <?php endforeach; ?>
@@ -2030,6 +2070,31 @@ foreach ($statuses as $statusKey) {
   }
   updateTabCounts();
   bindStatusSelectors();
+
+  // Botón "Copiar" del recuadro de código entregado (gift cards).
+  document.addEventListener('click', async (event) => {
+    const copyButton = event.target.closest('.js-copy-delivered-code');
+    if (!copyButton) {
+      return;
+    }
+    const code = copyButton.dataset.code || '';
+    let copied = false;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(code);
+        copied = true;
+      }
+    } catch (_) {
+      copied = false;
+    }
+    if (!copied) {
+      window.prompt('Copia el código:', code);
+      return;
+    }
+    const originalLabel = copyButton.textContent;
+    copyButton.textContent = 'Copiado';
+    setTimeout(() => { copyButton.textContent = originalLabel; }, 1500);
+  });
 })();
 </script>
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

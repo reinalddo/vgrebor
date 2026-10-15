@@ -2674,6 +2674,13 @@ function resolve_provider_webhook_url(): ?string {
         return null;
     }
 
+    // app_url() arma http:// si la petición que registra el webhook no trae
+    // HTTPS marcado. Con http, el hosting responde 301 hacia https y el POST
+    // del proveedor llega como GET (sin datos): el pedido nunca pasa a enviado.
+    if ($configuredUrl === '') {
+        $candidate = preg_replace('#^http://#i', 'https://', $candidate);
+    }
+
     return rtrim($candidate, '/');
 }
 
@@ -4087,7 +4094,11 @@ function build_order_status_response_payload(array $order, int $orderId): array 
         'provider_status' => $providerStatus,
         'provider_reference' => $providerReference,
         'provider_message' => $providerMessage,
-        'provider_code' => (string) ($order['recargas_api_codigo_entregado'] ?? ''),
+        // Pedido ya enviado: el código se rescata también de la respuesta
+        // guardada del proveedor o del historial si la columna quedó vacía.
+        'provider_code' => (string) ($order['estado'] ?? '') === 'enviado'
+            ? recargas_api_order_delivered_code($order)
+            : (string) ($order['recargas_api_codigo_entregado'] ?? ''),
         'checkout_url' => $checkoutUrl,
         'payment_gateway' => $paymentGateway,
         'remaining_seconds' => max(0, order_expiration_timestamp($order) - time()),
@@ -4387,7 +4398,7 @@ function sync_local_order_with_binance_payload(mysqli $mysqli, array $order, arr
                     $providerCode
                 )
             );
-            $verifyStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+            $verifyStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
             if ($verifyStmt) {
                 $verifyStmt->bind_param('sssssssssi', $verifiedReference, $providerReference, $providerMessage, $providerPayload, $providerOrderId, $providerState, $providerCode, $providerHistoryJson, $verifiedStatus, $orderId);
                 $verifyStmt->execute();
@@ -4466,7 +4477,7 @@ function sync_local_order_with_binance_payload(mysqli $mysqli, array $order, arr
                     $providerCode
                 )
             );
-            $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+            $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
             if ($paidStmt) {
                 $paidStmt->bind_param('sssssssssi', $verifiedReference, $providerReference, $providerMessage, $providerPayload, $providerOrderId, $trackedState, $providerCode, $providerHistoryJson, $paidStatus, $orderId);
                 $paidStmt->execute();
@@ -4516,7 +4527,7 @@ function sync_local_order_with_binance_payload(mysqli $mysqli, array $order, arr
                 $providerCode
             )
         );
-        $cancelStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+        $cancelStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
         if ($cancelStmt) {
             $cancelStmt->bind_param('sssssssssi', $verifiedReference, $providerReference, $providerMessage, $providerPayload, $providerOrderId, $providerState, $providerCode, $failedHistoryJson, $cancelStatus, $orderId);
             $cancelStmt->execute();
@@ -4834,7 +4845,7 @@ function sync_local_order_with_paypal_payload(mysqli $mysqli, array $order, arra
                     $providerCode
                 )
             );
-            $verifyStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+            $verifyStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
             if ($verifyStmt) {
                 $verifyStmt->bind_param('sssssssssi', $verifiedReference, $providerReference, $providerMessage, $providerPayload, $providerOrderId, $providerState, $providerCode, $providerHistoryJson, $verifiedStatus, $orderId);
                 $verifyStmt->execute();
@@ -4913,7 +4924,7 @@ function sync_local_order_with_paypal_payload(mysqli $mysqli, array $order, arra
                     $providerCode
                 )
             );
-            $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+            $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
             if ($paidStmt) {
                 $paidStmt->bind_param('sssssssssi', $verifiedReference, $providerReference, $providerMessage, $providerPayload, $providerOrderId, $trackedState, $providerCode, $providerHistoryJson, $paidStatus, $orderId);
                 $paidStmt->execute();
@@ -4963,7 +4974,7 @@ function sync_local_order_with_paypal_payload(mysqli $mysqli, array $order, arra
                 $providerCode
             )
         );
-        $cancelStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+        $cancelStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
         if ($cancelStmt) {
             $cancelStmt->bind_param('sssssssssi', $verifiedReference, $providerReference, $providerMessage, $providerPayload, $providerOrderId, $providerState, $providerCode, $failedHistoryJson, $cancelStatus, $orderId);
             $cancelStmt->execute();
@@ -5750,208 +5761,12 @@ function primary_player_identifier_from_fields(array $playerFields): ?string {
 // includes/recargas_api.php) para poder reutilizarse desde la
 // sincronización oportunista sin depender de este script.
 
-function provider_is_sequential_list(array $value): bool {
-    $expectedIndex = 0;
-    foreach (array_keys($value) as $key) {
-        if ($key !== $expectedIndex) {
-            return false;
-        }
-
-        $expectedIndex++;
-    }
-
-    return true;
-}
-
-/**
- * Nombres de clave reconocidos para el código/PIN/serial entregado por el proveedor.
- * Se amplía deliberadamente (no solo "pin"/"serial") porque el proveedor ya ha
- * renombrado estos campos sin aviso al cambiar de sistema (ej. Roblox empezó a
- * entregar también un "serial" junto al PIN, con nombres de clave variables).
- */
-function provider_delivered_code_keys(): array {
-    return ['codigo', 'pin', 'codigo_pin', 'pin_code', 'serial', 'numero_serial', 'serial_number', 'sn', 'codigo_serial', 'voucher', 'code', 'clave'];
-}
-
-/** Rol conocido de una clave (para poder anteponer "PIN:"/"Serial:" cuando el proveedor entrega ambos). */
-function provider_delivered_code_role_for_key(string $key): string {
-    $normalized = strtolower(trim($key));
-    return match ($normalized) {
-        'pin', 'codigo_pin', 'pin_code' => 'PIN',
-        'serial', 'numero_serial', 'serial_number', 'sn', 'codigo_serial' => 'Serial',
-        default => '',
-    };
-}
-
-function provider_stringify_delivered_code_value($value): array {
-    if (is_array($value)) {
-        $codes = [];
-        foreach (provider_delivered_code_keys() as $preferredKey) {
-            if (!array_key_exists($preferredKey, $value)) {
-                continue;
-            }
-
-            foreach (provider_stringify_delivered_code_value($value[$preferredKey]) as $candidate) {
-                $codes[$candidate] = true;
-            }
-        }
-
-        if (!empty($codes)) {
-            return array_keys($codes);
-        }
-
-        if (!provider_is_sequential_list($value)) {
-            $parts = [];
-            foreach ($value as $key => $item) {
-                if (is_array($item)) {
-                    continue;
-                }
-
-                $normalizedItem = trim((string) $item);
-                if ($normalizedItem === '') {
-                    continue;
-                }
-
-                $label = trim((string) $key);
-                $parts[] = $label !== '' ? $label . ': ' . $normalizedItem : $normalizedItem;
-            }
-
-            if (!empty($parts)) {
-                return [implode(' | ', $parts)];
-            }
-        }
-
-        foreach ($value as $item) {
-            foreach (provider_stringify_delivered_code_value($item) as $candidate) {
-                $codes[$candidate] = true;
-            }
-        }
-
-        return array_keys($codes);
-    }
-
-    $normalized = trim((string) $value);
-    return $normalized !== '' ? [$normalized] : [];
-}
-
-function provider_extract_delivered_codes(array $detail): array {
-    $codes = [];
-
-    foreach (['codigos', 'codigos_entregados', 'codigo_entregado', ...provider_delivered_code_keys()] as $key) {
-        if (!array_key_exists($key, $detail)) {
-            continue;
-        }
-
-        foreach (provider_stringify_delivered_code_value($detail[$key]) as $candidate) {
-            $codes[$candidate] = true;
-        }
-    }
-
-    return array_keys($codes);
-}
-
-/**
- * Igual que provider_stringify_delivered_code_value(), pero conserva el rol
- * (PIN/Serial/genérico) de cada valor encontrado, como pares [valor => rol].
- */
-function provider_stringify_delivered_code_value_with_role($value, string $roleHint = ''): array {
-    if (is_array($value)) {
-        $codes = [];
-        foreach (provider_delivered_code_keys() as $preferredKey) {
-            if (!array_key_exists($preferredKey, $value)) {
-                continue;
-            }
-
-            foreach (provider_stringify_delivered_code_value_with_role($value[$preferredKey], provider_delivered_code_role_for_key($preferredKey)) as $candidateValue => $candidateRole) {
-                $codes[$candidateValue] = $candidateRole;
-            }
-        }
-
-        if (!empty($codes)) {
-            return $codes;
-        }
-
-        if (!provider_is_sequential_list($value)) {
-            $parts = [];
-            foreach ($value as $key => $item) {
-                if (is_array($item)) {
-                    continue;
-                }
-
-                $normalizedItem = trim((string) $item);
-                if ($normalizedItem === '') {
-                    continue;
-                }
-
-                $label = trim((string) $key);
-                $parts[] = $label !== '' ? $label . ': ' . $normalizedItem : $normalizedItem;
-            }
-
-            if (!empty($parts)) {
-                return [implode(' | ', $parts) => $roleHint];
-            }
-        }
-
-        foreach ($value as $item) {
-            foreach (provider_stringify_delivered_code_value_with_role($item, $roleHint) as $candidateValue => $candidateRole) {
-                $codes[$candidateValue] = $candidateRole;
-            }
-        }
-
-        return $codes;
-    }
-
-    $normalized = trim((string) $value);
-    return $normalized !== '' ? [$normalized => $roleHint] : [];
-}
-
-/** Como provider_extract_delivered_codes() pero devuelve pares [valor => rol ('PIN'|'Serial'|'')]. */
-function provider_extract_delivered_codes_with_roles(array $detail): array {
-    $codes = [];
-
-    foreach (['codigos', 'codigos_entregados', 'codigo_entregado', ...provider_delivered_code_keys()] as $key) {
-        if (!array_key_exists($key, $detail)) {
-            continue;
-        }
-
-        $roleHint = provider_delivered_code_role_for_key($key);
-        foreach (provider_stringify_delivered_code_value_with_role($detail[$key], $roleHint) as $candidateValue => $candidateRole) {
-            $codes[$candidateValue] = $candidateRole;
-        }
-    }
-
-    return $codes;
-}
-
-function provider_delivered_code_text(array $detail): string {
-    $codesWithRoles = provider_extract_delivered_codes_with_roles($detail);
-    if (empty($codesWithRoles)) {
-        return '';
-    }
-
-    // Solo se antepone "PIN:"/"Serial:" cuando hay más de un código Y al menos uno
-    // tiene un rol identificado (ej. Roblox entregando PIN + Serial a la vez). Los
-    // productos que siempre devolvieron un único código genérico (la gran mayoría)
-    // mantienen el mismo formato de salida que antes, sin ninguna etiqueta.
-    $hasKnownRole = false;
-    foreach ($codesWithRoles as $role) {
-        if ($role !== '') {
-            $hasKnownRole = true;
-            break;
-        }
-    }
-
-    if (count($codesWithRoles) <= 1 || !$hasKnownRole) {
-        return implode("\n", array_keys($codesWithRoles));
-    }
-
-    $lines = [];
-    foreach ($codesWithRoles as $value => $role) {
-        $lines[] = $role !== '' ? $role . ': ' . $value : $value;
-    }
-
-    return implode("\n", $lines);
-}
+// provider_is_sequential_list(), los extractores de códigos entregados
+// (provider_extract_delivered_codes*, provider_delivered_code_text, etc.) y
+// recargas_api_order_delivered_code() se movieron a includes/recargas_api.php
+// (con más claves y búsqueda dentro de envoltorios como "pedido"/"data"),
+// para que "Mis pedidos" y el admin usen el mismo extractor. Mismo arreglo
+// que en virtualgamingdanisa.
 
 // provider_status_to_local_status() se movió a
 // includes/recargas_provider_matching.php (ver nota más arriba).
@@ -6499,6 +6314,56 @@ function execute_catalog_api_purchase_once(int $productId, ?string $userIdentifi
             ['X-API-Key: ' . recargas_api_key()],
             recargas_api_purchase_timeout_seconds()
         );
+    } catch (RecargasApiHttpException $e) {
+        // GiftVen respondió con error HTTP PERO con cuerpo JSON. Según su doc,
+        // ese cuerpo puede traer "pedido_id" y "reembolsado". Caso real
+        // reportado (Roblox #10276, BloodStrike): "No fue posible procesar el
+        // pedido con el proveedor: ('Connection aborted.',
+        // ConnectionResetError(104...))" — y GiftVen SÍ entregó minutos
+        // después. Antes se descartaba todo menos el texto, así que el pedido
+        // quedaba sin id de GiftVen y ni el webhook ni la sincronización lo
+        // podían reconocer nunca.
+        //  · pedido_id presente y NO reembolsado → el pedido existe en GiftVen
+        //    y su resultado todavía puede llegar: queda en SEGUIMIENTO
+        //    (accepted), igual que un "procesando". El webhook o la
+        //    sincronización lo cierran (enviado o cancelado con doble chequeo).
+        //  · reembolsado = true, o sin pedido_id → rechazo real, como antes.
+        $errorData = $e->responseData;
+        $errorProviderOrderId = recargas_api_extract_provider_order_id($errorData);
+        $wasRefunded = filter_var($errorData['reembolsado'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $errorMessage = trim((string) $e->getMessage()) !== '' ? trim((string) $e->getMessage()) : 'La API de recargas rechazó la compra.';
+
+        if ($errorProviderOrderId !== '' && !$wasRefunded) {
+            return [
+                'success' => false,
+                'accepted' => true,
+                'manual_processing' => !empty($product['procesamiento_manual']),
+                'message' => 'GiftVen reportó un problema con el proveedor, pero el pedido #' . $errorProviderOrderId . ' quedó registrado allá y se confirmará automáticamente. Detalle: ' . $errorMessage,
+                'reference' => sanitize_str($errorProviderOrderId, 120) ?? '',
+                'payload' => array_merge($errorData, [
+                    'estado' => 'procesando',
+                    'http_status' => $e->httpStatus,
+                    'provider_error' => $errorMessage,
+                    'request_payload' => $payload,
+                ]),
+            ];
+        }
+
+        // Reembolsado o sin pedido_id: rechazo real. MISMA forma de respuesta
+        // que antes (con 'exception'), para que el resto del flujo lo trate
+        // exactamente igual que siempre; solo se agrega el cuerpo de GiftVen
+        // como dato informativo para el admin.
+        return [
+            'success' => false,
+            'accepted' => false,
+            'message' => $errorMessage,
+            'reference' => '',
+            'payload' => [
+                'exception' => $e->getMessage(),
+                'request_payload' => $payload,
+                'provider_error_body' => $errorData,
+            ],
+        ];
     } catch (Throwable $e) {
         return [
             'success' => false,
@@ -6512,6 +6377,32 @@ function execute_catalog_api_purchase_once(int $productId, ?string $userIdentifi
                 'request_payload' => $payload,
             ],
         ];
+    }
+
+    // Gift card (producto sin campos_requeridos, según la doc de GiftVen): los
+    // códigos deberían venir en "codigos". Si la respuesta llegó sin ellos
+    // (pedido todavía "procesando" u otro formato), se buscan en /pedido/:id,
+    // que los trae en "codigo_entregado". Cubre todas las vías de compra que
+    // pasan por aquí (compra individual, carrito, canje con puntos, reenvío
+    // del admin). Mismo arreglo que en virtualgamingdanisa.
+    $isGiftCard = recargas_api_normalize_required_fields($product['campos_requeridos'] ?? []) === [];
+    if (
+        $isGiftCard
+        && is_array($response)
+        && !empty($response['ok'])
+        && provider_extract_delivered_codes($response) === []
+    ) {
+        // Solo vale la pena esperar si el pedido sigue "procesando".
+        $responseStatus = strtolower(trim((string) ($response['estado'] ?? '')));
+        $lookupAttempts = in_array($responseStatus, ['completado', 'completed', 'success', 'enviado'], true) ? 1 : 3;
+        $lookup = recargas_api_lookup_delivered_code(recargas_api_extract_provider_order_id($response), $lookupAttempts, 3);
+        if ($lookup['code'] !== '') {
+            $response['codigo_entregado'] = $lookup['code'];
+            $detailStatus = strtolower(trim((string) (($lookup['detail']['estado'] ?? ''))));
+            if ($detailStatus !== '') {
+                $response['estado'] = $detailStatus;
+            }
+        }
     }
 
     $message = trim((string) ($response['mensaje'] ?? $response['error'] ?? ''));
@@ -8214,6 +8105,78 @@ function notify_payment_validation_failed_cancellation(
     }
 }
 
+/**
+ * Recuadro destacado con el código (gift card, PIN, serial) para los correos.
+ * Varios códigos llegan separados por saltos de línea. Mismo diseño que en
+ * virtualgamingdanisa.
+ */
+function render_delivered_code_email_block(string $code): string {
+    $lines = array_values(array_filter(array_map('trim', preg_split('/\r?\n/', $code) ?: []), static fn ($line) => $line !== ''));
+    if (empty($lines)) {
+        return '';
+    }
+
+    $title = count($lines) > 1 ? 'Tus códigos' : 'Tu código';
+    $rows = '';
+    foreach ($lines as $line) {
+        $rows .= '<div style="font-family:Consolas,Menlo,monospace;font-size:20px;font-weight:700;color:#f8fafc;letter-spacing:1px;word-break:break-all;padding:6px 0;">' . email_escape($line) . '</div>';
+    }
+
+    return '<div style="margin:0 0 16px;padding:16px 18px;background:#052e2b;border:2px solid #34d399;border-radius:14px;">'
+        . '<div style="color:#6ee7b7;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">' . $title . '</div>'
+        . $rows
+        . '<div style="color:#a7f3d0;font-size:12px;margin-top:6px;">Guárdalo tal cual aparece. También lo puedes ver en "Mis pedidos".</div>'
+        . '</div>';
+}
+
+/**
+ * Correo con el código cuando se recuperó DESPUÉS de marcar el pedido como
+ * enviado (el aviso de entrega original salió sin código: gift card que
+ * GiftVen cerró por webhook, que nunca trae el código).
+ */
+function notify_delivered_code_followup(mysqli $mysqli, array $order): void {
+    $orderId = (int) ($order['id'] ?? 0);
+    $codeBlock = render_delivered_code_email_block(recargas_api_order_delivered_code($order));
+    if ($orderId <= 0 || $codeBlock === '') {
+        return;
+    }
+
+    $gameName = trim((string) ($order['juego_nombre'] ?? '')) ?: 'tu compra';
+    $orderData = [
+        'order_id' => $orderId,
+        'game_name' => $order['juego_nombre'] ?? '',
+        'pack_name' => $order['paquete_nombre'] ?? '',
+        'pack_amount' => $order['paquete_cantidad'] ?? '',
+        'currency' => $order['moneda'] ?? '',
+        'price' => number_format((float) ($order['precio'] ?? 0), 2, '.', ','),
+        'user_identifier' => $order['user_identifier'] ?? '',
+        'email' => $order['email'] ?? '',
+        'coupon' => $order['cupon'] ?? null,
+        'reference_number' => $order['numero_referencia'] ?? '',
+        'phone' => $order['telefono_contacto'] ?? '',
+        'status' => 'Enviado',
+    ];
+    $brandingImages = email_branding_embedded_images();
+    $customerHtml = render_order_email('Tu código de ' . $gameName, 'Cliente',
+        '<p style="margin:0 0 10px;">Aquí tienes el código de tu compra de ' . email_escape($gameName) . '.</p>' . $codeBlock,
+        $orderData,
+        '#34d399'
+    );
+
+    if (!empty($order['email']) && filter_var($order['email'], FILTER_VALIDATE_EMAIL)) {
+        send_app_mail((string) $order['email'], "Tu código del pedido #{$orderId}", $customerHtml, null, $brandingImages);
+    }
+    $adminEmail = resolve_admin_email($mysqli);
+    if ($adminEmail !== null) {
+        $adminHtml = render_order_email('Código recuperado del proveedor', 'Administrador',
+            '<p style="margin:0 0 10px;">Se recuperó de GiftVen el código del pedido #' . $orderId . ' y se envió al cliente.</p>' . $codeBlock,
+            $orderData,
+            '#34d399'
+        );
+        send_app_mail($adminEmail, "Código recuperado #{$orderId}", $adminHtml, null, $brandingImages);
+    }
+}
+
 function notify_free_fire_recharge_success(
     mysqli $mysqli,
     array $order,
@@ -8233,9 +8196,19 @@ function notify_free_fire_recharge_success(
     $providerReferenceText = $providerReference !== '' ? '<p style="margin:0 0 10px;">Referencia del proveedor: <strong>' . email_escape($providerReference) . '</strong></p>' : '';
     $providerMessageText = '<p style="margin:0;">Respuesta del proveedor: <strong>' . email_escape($providerMessage) . '</strong></p>';
     $gameName = trim((string) ($order['juego_nombre'] ?? 'tu juego')) ?: 'tu juego';
+    // Gift cards y productos con PIN: el código va en un recuadro destacado,
+    // no perdido dentro de "Respuesta del proveedor" (antes no salía en el
+    // correo). Se relee el pedido por si el código se guardó después de
+    // armar el arreglo que llegó aquí.
+    $orderForCode = $order;
+    if (trim((string) ($orderForCode['recargas_api_codigo_entregado'] ?? '')) === '' && function_exists('fetch_order_by_id')) {
+        $orderForCode = fetch_order_by_id($mysqli, $orderId) ?: $order;
+    }
+    $deliveredCodeBlock = render_delivered_code_email_block(recargas_api_order_delivered_code($orderForCode));
 
     $customerHtml = render_order_email('Pago verificado y recarga enviada', 'Cliente',
         '<p style="margin:0 0 10px;">Tu pago fue validado automáticamente y la recarga de ' . email_escape($gameName) . ' fue procesada con éxito.</p>'
+        . $deliveredCodeBlock
         . $providerReferenceText
         . $providerMessageText,
         [
@@ -8257,6 +8230,7 @@ function notify_free_fire_recharge_success(
     );
     $adminHtml = render_order_email('Recarga automatica enviada', 'Administrador',
         '<p style="margin:0 0 10px;">El pago fue validado automáticamente y la API de recargas respondió exitosamente para ' . email_escape($gameName) . '.</p>'
+        . $deliveredCodeBlock
         . $providerReferenceText
         . $providerMessageText,
         [
@@ -8628,7 +8602,7 @@ function bau_dispatch_and_split(mysqli $mysqli, array $order): array {
                 $fallbackPayloadJson = json_encode((array) $fallbackResult['payload'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                 $fallbackReference = (string) $fallbackResult['reference'];
                 $fallbackMessage = (string) $fallbackResult['message'];
-                $stmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), bau_estado = 'respaldo_api', bau_fallback_provider_used = ?, estado = 'enviado' WHERE id = ? AND estado = 'pagado'");
+                $stmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), bau_estado = 'respaldo_api', bau_fallback_provider_used = ?, estado = 'enviado' WHERE id = ? AND estado = 'pagado'");
                 $stmt->bind_param('sssssi', $fallbackReference, $fallbackMessage, $fallbackPayloadJson, $fallbackDeliveryText, $fallbackConfig['provider'], $orderId);
                 $stmt->execute();
                 $stmt->close();
@@ -9141,7 +9115,7 @@ function mark_order_inventory_shortage_review(
         )
     );
 
-    $stmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = ?");
+    $stmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = ?");
     if (!$stmt) {
         throw new RuntimeException('No se pudo preparar el pedido para revisión por disponibilidad.');
     }
@@ -9373,7 +9347,7 @@ function sync_local_order_with_provider_detail(mysqli $mysqli, array $order, arr
         )
     );
 
-    $stmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_reembolso = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? LIMIT 1");
+    $stmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_reembolso = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? LIMIT 1");
     if (!$stmt) {
         throw new RuntimeException('No se pudo preparar la sincronización del pedido local.');
     }
@@ -10763,7 +10737,7 @@ if ($action === 'submit_payment') {
                     $providerCode
                 )
             );
-            $verifyStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+            $verifyStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
             if (!$verifyStmt) {
                 json_error('No se pudo confirmar la recarga por premios.', 500);
             }
@@ -10895,7 +10869,7 @@ if ($action === 'submit_payment') {
                     $providerCode
                 )
             );
-            $paidStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+            $paidStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
             if (!$paidStmt) {
                 json_error('No se pudo dejar el canje en seguimiento.', 500);
             }
@@ -10998,7 +10972,7 @@ if ($action === 'submit_payment') {
                 $providerCode
             )
         );
-        $cancelStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+        $cancelStmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
         if (!$cancelStmt) {
             json_error('No se pudo cerrar el canje fallido.', 500);
         }
@@ -11867,7 +11841,7 @@ if ($action === 'submit_payment') {
                         $providerCode
                     )
                 );
-                $verifyStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+                $verifyStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
                 if (!$verifyStmt) {
                     json_error('No se pudo confirmar la recarga automáticamente.', 500);
                 }
@@ -11957,7 +11931,7 @@ if ($action === 'submit_payment') {
                         $providerCode
                     )
                 );
-                $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+                $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
                 if (!$paidStmt) {
                     json_error('No se pudo actualizar el pedido tras validar el pago.', 500);
                 }
@@ -12002,7 +11976,7 @@ if ($action === 'submit_payment') {
                         $providerCode
                     )
                 );
-                $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+                $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
                 if (!$paidStmt) {
                     json_error('No se pudo actualizar el pedido tras validar el pago.', 500);
                 }
@@ -12087,7 +12061,7 @@ if ($action === 'submit_payment') {
                     $providerCode
                 )
             );
-            $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_codigo_entregado = ?, recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+            $paidStmt = $mysqli->prepare("UPDATE pedidos SET numero_referencia = ?, telefono_contacto = ?, ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
             if (!$paidStmt) {
                 json_error('No se pudo actualizar el pedido tras validar el pago.', 500);
             }
@@ -12709,6 +12683,17 @@ if ($action === 'order_status') {
         }
     }
 
+    // Gift card de GiftVen "enviada" sin código guardado: se recupera de
+    // GiftVen (GET /pedido/:id) y se manda el código por correo, porque el
+    // aviso de entrega pudo haber salido sin él (el webhook nunca lo trae).
+    $order = recargas_api_backfill_delivered_code($mysqli, $order);
+    if (!empty($order['_code_backfilled'])) {
+        $backfilledOrder = $order;
+        json_response(build_order_status_response_payload($order, $orderId), 200, static function () use ($mysqli, $backfilledOrder): void {
+            notify_delivered_code_followup($mysqli, $backfilledOrder);
+        });
+    }
+
     json_response(build_order_status_response_payload($order, $orderId));
 }
 
@@ -12908,7 +12893,7 @@ if ($action === 'sync_provider_status') {
 
     $resolvedProviderCode = trim((string) ($syncResult['provider_code'] ?? ''));
     if ($resolvedProviderCode === '') {
-        $resolvedProviderCode = trim((string) ($syncedOrder['recargas_api_codigo_entregado'] ?? ''));
+        $resolvedProviderCode = recargas_api_order_delivered_code($syncedOrder);
     }
 
     $resolvedPaymentGateway = $syncGateway === 'binance_pay' ? 'binance_pay' : '';
@@ -13094,18 +13079,25 @@ if ($action === 'admin_retry_recharge') {
         }
         $providerOrderId = recargas_api_extract_provider_order_id((array) ($providerResult['payload'] ?? []));
         $providerState = strtolower(trim((string) (($providerResult['payload']['estado'] ?? ''))));
+        $providerCode = provider_delivered_code_text((array) ($providerResult['payload'] ?? []));
 
         if (!empty($providerResult['success'])) {
             $sentStatus = 'enviado';
             $providerHistoryJson = append_provider_history(
                 $order['recargas_api_historial_json'] ?? null,
-                build_provider_history_entry('admin_retry_purchase', $providerState, $sentStatus, $providerMessage, $providerReference, $providerOrderId)
+                build_provider_history_entry('admin_retry_purchase', $providerState, $sentStatus, $providerMessage, $providerReference, $providerOrderId, $providerCode)
             );
-            $stmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
+            // 🐛 Antes: este UPDATE tenía 8 "?" pero el bind_param 9 tipos
+            // ('ssssssssi') para 8 variables — en PHP 8 eso lanza
+            // ArgumentCountError: un reenvío que SÍ compraba en GiftVen
+            // reventaba al guardar, el pedido seguía "pagado" sin rastro y un
+            // segundo clic compraba otra vez. Además no guardaba el código: una
+            // gift card reenviada desde el panel quedaba sin código visible.
+            $stmt = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia = ?, ff_api_mensaje = ?, ff_api_payload = ?, recargas_api_pedido_id = ?, recargas_api_estado = ?, recargas_api_codigo_entregado = COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check = NOW(), recargas_api_historial_json = ?, estado = ? WHERE id = ? AND estado = 'pagado'");
             if (!$stmt) {
                 json_error('No se pudo actualizar el pedido tras reenviar la recarga.', 500);
             }
-            $stmt->bind_param('ssssssssi', $providerReference, $providerMessage, $providerPayload, $providerOrderId, $providerState, $providerHistoryJson, $sentStatus, $orderId);
+            $stmt->bind_param('ssssssssi', $providerReference, $providerMessage, $providerPayload, $providerOrderId, $providerState, $providerCode, $providerHistoryJson, $sentStatus, $orderId);
             if (!$stmt->execute()) {
                 $stmt->close();
                 json_error('No se pudo guardar el resultado de la recarga.', 500);
@@ -13123,6 +13115,7 @@ if ($action === 'admin_retry_recharge') {
                 'provider_reference' => $providerReference,
                 'provider_status' => $providerState,
                 'provider_message' => $providerMessage,
+                'provider_code' => recargas_api_order_delivered_code($updatedOrder),
             ], 200, static function () use ($mysqli, $updatedOrder, $paymentMethodName, $verifiedReference, $phone, $providerReference, $providerMessage): void {
                 ensure_provider_webhook_registration();
                 notify_free_fire_recharge_success($mysqli, $updatedOrder, $paymentMethodName, $verifiedReference, $phone, $providerReference, $providerMessage);
@@ -13724,7 +13717,9 @@ if ($action === 'provider_webhook') {
     $providerReference = trim((string) ($_POST['referencia'] ?? ''));
     $providerReason = trim((string) ($_POST['razon'] ?? ''));
     $providerName = trim((string) ($_POST['nombre_jugador'] ?? ''));
-    $providerCode = trim((string) ($_POST['codigo_entregado'] ?? ''));
+    // Antes: (string) $_POST['codigo_entregado'], que perdía "codigos" (lista)
+    // y cualquier otro nombre de campo. Ahora se usa el extractor completo.
+    $providerCode = provider_delivered_code_text($_POST);
     $refundAmount = isset($_POST['reembolso']) && is_numeric($_POST['reembolso']) ? (float) $_POST['reembolso'] : null;
 
     if (($providerOrderId === null || $providerOrderId === '') && $providerReference === '') {
@@ -13746,6 +13741,24 @@ if ($action === 'provider_webhook') {
         'codigo_entregado' => $providerCode,
         'reembolso' => $refundAmount,
     ];
+
+    // Doc de GiftVen: el webhook solo trae evento, pedido_id, estado,
+    // referencia (y nombre_jugador) — NUNCA el código. Sin esta consulta, una
+    // gift card que terminaba por webhook quedaba "enviado" sin código y el
+    // correo salía sin él. Se busca en /pedido/:id antes de guardar y avisar.
+    $webhookStatus = strtolower($providerStatus);
+    if ($providerCode === '' && !in_array($webhookStatus, ['cancelado', 'failed', 'rechazado'], true)) {
+        $lookupOrderId = trim((string) $providerDetail['id']);
+        if ($lookupOrderId !== '') {
+            $lookup = recargas_api_lookup_delivered_code($lookupOrderId);
+            if ($lookup['code'] !== '') {
+                $providerDetail['codigo_entregado'] = $lookup['code'];
+            }
+            if ($providerName === '' && is_array($lookup['detail'])) {
+                $providerDetail['nombre_jugador'] = trim((string) ($lookup['detail']['nombre_jugador'] ?? ''));
+            }
+        }
+    }
 
     try {
         $syncResult = sync_local_order_with_provider_detail($mysqli, $order, $providerDetail, true);
@@ -15103,7 +15116,7 @@ if ($action === 'batch_fulfill_item') {
         // respuesta del proveedor, así que no hay nada que verificar —
         // dejarlo "limpio" permite un reintento normal sin demora.
         if (!isset($ppData['exception'])) {
-            $updAlways = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_estado=?, recargas_api_codigo_entregado=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=? WHERE id=? AND estado='pagado'");
+            $updAlways = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_estado=?, recargas_api_codigo_entregado=COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check=NOW(), recargas_api_historial_json=? WHERE id=? AND estado='pagado'");
             if ($updAlways) {
                 $updAlways->bind_param('sssssssi', $ppRef, $ppMsg, $ppPayload, $ppOid, $ppState, $ppCode, $histJson, $orderId);
                 $updAlways->execute();
@@ -15114,7 +15127,7 @@ if ($action === 'batch_fulfill_item') {
 
         if (!empty($res['success'])) {
             $st = 'enviado';
-            $upd = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_estado=?, recargas_api_codigo_entregado=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=?, estado=? WHERE id=? AND estado='pagado'");
+            $upd = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_estado=?, recargas_api_codigo_entregado=COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check=NOW(), recargas_api_historial_json=?, estado=? WHERE id=? AND estado='pagado'");
             if ($upd) {
                 $upd->bind_param('ssssssssi', $ppRef, $ppMsg, $ppPayload, $ppOid, $ppState, $ppCode, $histJson, $st, $orderId);
                 $upd->execute();
@@ -15137,7 +15150,7 @@ if ($action === 'batch_fulfill_item') {
         }
 
         if (!empty($res['accepted'])) {
-            $upd2 = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_estado=?, recargas_api_codigo_entregado=?, recargas_api_ultimo_check=NOW(), recargas_api_historial_json=? WHERE id=? AND estado='pagado'");
+            $upd2 = $mysqli->prepare("UPDATE pedidos SET ff_api_referencia=?, ff_api_mensaje=?, ff_api_payload=?, recargas_api_pedido_id=?, recargas_api_estado=?, recargas_api_codigo_entregado=COALESCE(NULLIF(?, ''), recargas_api_codigo_entregado), recargas_api_ultimo_check=NOW(), recargas_api_historial_json=? WHERE id=? AND estado='pagado'");
             if ($upd2) {
                 $upd2->bind_param('sssssssi', $ppRef, $ppMsg, $ppPayload, $ppOid, $ppState, $ppCode, $histJson, $orderId);
                 $upd2->execute();

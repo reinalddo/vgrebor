@@ -509,6 +509,26 @@ $menuScript = <<<'SCRIPT'
     return `<span class="badge rounded-pill text-bg-dark border border-info-subtle text-info"${title}>${label}</span>`;
   };
 
+  // Gift cards / PIN / venta de cuentas: el código o los datos entregados se
+  // muestran en el propio pedido, con botón para copiarlos (ver
+  // api/account.php, action=orders: provider_code / account_text). Mismo
+  // diseño que en virtualgamingdanisa.
+  const orderDeliveredBlockHtml = (order) => {
+    const value = order.provider_code || order.account_text || "";
+    if (!value) {
+      return "";
+    }
+    const label = order.provider_code ? "Código entregado" : "Datos de la cuenta";
+    return `
+      <div class="mt-2 p-2 rounded-3 border border-info-subtle d-flex align-items-start gap-2" style="background:rgba(34,211,238,0.08);">
+        <div class="flex-grow-1">
+          <div class="small text-info fw-bold mb-1">${label}</div>
+          <pre class="text-light mb-0" style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:0.9rem;">${escapeHtml(value)}</pre>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-info flex-shrink-0" data-copy-value="${escapeHtml(value)}">Copiar</button>
+      </div>`;
+  };
+
   const renderOrderCard = (order) => {
     const amount = order.paquete_cantidad ? ` <span class="text-secondary">(${escapeHtml(order.paquete_cantidad)})</span>` : "";
     const timeoutNoteHtml = order.timeout_assumed
@@ -529,6 +549,7 @@ $menuScript = <<<'SCRIPT'
         <div class="mb-2 text-light"><strong>Correo:</strong> ${escapeHtml(order.email)}</div>
         <div class="fw-bold text-info fs-5">${escapeHtml(order.moneda)} ${escapeHtml(order.precio)}</div>
         ${timeoutNoteHtml}
+        ${orderDeliveredBlockHtml(order)}
       </article>`;
   };
 
@@ -536,6 +557,12 @@ $menuScript = <<<'SCRIPT'
     const amount = order.paquete_cantidad ? ` (${escapeHtml(order.paquete_cantidad)})` : "";
     const timeoutNoteHtml = order.timeout_assumed
       ? `<div class="small mt-1" style="color:#fbbf24;">⚠️ ${escapeHtml(timeoutAssumedNote)}</div>`
+      : "";
+    const deliveredValue = order.provider_code || order.account_text || "";
+    const detailRow = deliveredValue
+      ? `<tr>
+          <td colspan="7" class="bg-transparent border-bottom border-info-subtle pt-0">${orderDeliveredBlockHtml(order)}</td>
+        </tr>`
       : "";
     return `
       <tr>
@@ -546,8 +573,37 @@ $menuScript = <<<'SCRIPT'
         <td class="bg-transparent border-bottom border-info-subtle text-light">${escapeHtml(order.email)}</td>
         <td class="bg-transparent border-bottom border-info-subtle">${orderStatusBadgeHtml(order)}${timeoutNoteHtml}</td>
         <td class="bg-transparent border-bottom border-info-subtle text-info fw-bold text-end">${escapeHtml(order.moneda)} ${escapeHtml(order.precio)}</td>
-      </tr>`;
+      </tr>${detailRow}`;
   };
+
+  // Botón "Copiar" del código entregado (delegado: la lista se vuelve a
+  // pintar cada vez que se abre "Mis pedidos").
+  if (userOrdersList) {
+    userOrdersList.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-copy-value]");
+      if (!button) {
+        return;
+      }
+      const value = button.dataset.copyValue || "";
+      if (!value) {
+        return;
+      }
+      let copied = false;
+      try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+          await navigator.clipboard.writeText(value);
+          copied = true;
+        }
+      } catch (error) {
+        copied = false;
+      }
+      const originalLabel = button.textContent;
+      button.textContent = copied ? "¡Copiado!" : "No se pudo copiar";
+      window.setTimeout(() => {
+        button.textContent = originalLabel;
+      }, 1500);
+    });
+  }
 
   const formatTxDate = (createdAt) => {
     const raw = String(createdAt || "").trim();

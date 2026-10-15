@@ -10,6 +10,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const registerEndpoint = registerScript?.dataset?.registerEndpoint || 'register_user.php';
     const loginUrl = registerScript?.dataset?.loginUrl || 'login.php';
 
+    // Sistema de Referidos: si el campo visible del código viene vacío (la
+    // sesión no lo tenía), se completa con el que guardó includes/footer.php
+    // en localStorage al llegar con ?ref=CODIGO.
+    const refInput = document.getElementById('registro-ref');
+    if (refInput && refInput.value.trim() === '') {
+        try {
+            refInput.value = (localStorage.getItem('tvg_referido_codigo') || '').trim().toUpperCase();
+        } catch (e) {}
+    }
+
     form.addEventListener('submit', async function(e) {
         e.preventDefault();
         const nombre = document.getElementById('nombre').value.trim();
@@ -18,10 +28,16 @@ document.addEventListener('DOMContentLoaded', function() {
         const contrasena = document.getElementById('contrasena').value;
         // Sistema de Referidos: código guardado en includes/footer.php cuando el
         // visitante llegó con ?ref=CODIGO, si nunca llegó con uno queda vacío.
+        // Prioridad: lo que dice el campo visible (la persona pudo escribirlo o
+        // corregirlo); si no existe el campo, lo guardado en localStorage.
         let ref = '';
-        try {
-            ref = localStorage.getItem('tvg_referido_codigo') || '';
-        } catch (e) {}
+        if (refInput) {
+            ref = refInput.value.trim().toUpperCase();
+        } else {
+            try {
+                ref = localStorage.getItem('tvg_referido_codigo') || '';
+            } catch (e) {}
+        }
         // Sistema de Comentarios: si el usuario venía del bloque post-compra
         // ("recargaste, regístrate y comenta"), el formulario trae además una
         // reseña que se publica en el mismo paso que el registro. En un
@@ -41,6 +57,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     nombre, correo, telefono, contrasena, ref,
+                    ref_field: refInput ? 1 : 0,
                     comentario_texto: comentarioTexto,
                     comentario_pedido_id: comentarioPedidoId,
                     comentario_estrellas: comentarioEstrellas

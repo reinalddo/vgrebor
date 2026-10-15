@@ -1879,6 +1879,17 @@ $authModalLoginEmail = trim((string) ($authModalState['email'] ?? ''));
                     </svg>
                   </button>
                 </div>
+                <?php
+                // Sistema de Referidos: el código del link (?ref=) se guarda en la
+                // sesión y en localStorage, pero se pierde si el invitado abre el
+                // link en un navegador y se registra en otro (típico: el link se
+                // abre dentro de WhatsApp/Instagram y después entra a la tienda
+                // desde Chrome/Safari). Por eso el código queda VISIBLE y editable:
+                // pre-llenado si lo traemos, y si no, la persona puede escribirlo.
+                $registroRefPrefill = strtoupper(trim((string) ($_SESSION['tvg_referido_codigo'] ?? '')));
+                ?>
+                <label class="form-label small text-neon" for="registro-ref">Código de invitación <span class="opacity-75">(opcional)</span></label>
+                <input type="text" id="registro-ref" autocomplete="off" maxlength="20" class="form-control rounded-3 bg-dark text-neon border border-info text-uppercase" placeholder="Si un amigo te invitó, escribe su código" value="<?php echo htmlspecialchars($registroRefPrefill, ENT_QUOTES, 'UTF-8'); ?>" />
               </div>
               <?php
               // Sistema de Comentarios: campo extra que SOLO aparece cuando
